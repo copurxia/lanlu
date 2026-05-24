@@ -52,6 +52,7 @@ import {
   markArchiveAsNew,
   deleteArchive,
   deleteTankoubon,
+  fetchArchiveDownloadParts,
   runMetadataPlugin,
   updateArchiveMetadata,
   updateTankoubonMetadata,
@@ -710,11 +711,28 @@ export function HomeScreen() {
     [hasAnySelected, selectedArchiveIds, selectedArchiveCount, batchActionRunning, refresh, clearSelection],
   );
 
-  const handleBatchDownload = useCallback(() => {
+  const handleBatchDownload = useCallback(async () => {
     if (!hasAnySelected || selectedArchiveCount === 0) return;
-    for (const id of selectedArchiveIds) {
-      const url = `/api/archives/${encodeURIComponent(id)}/download`;
-      Alert.alert(t('archive.download'), url);
+    try {
+      const settled = await Promise.allSettled(
+        Array.from(selectedArchiveIds).map(async id => ({
+          id,
+          parts: await fetchArchiveDownloadParts(id),
+        })),
+      );
+      const lines = settled.flatMap(result => {
+        if (result.status === 'rejected') {
+          return [extractApiError(result.reason)];
+        }
+        const {id, parts} = result.value;
+        return parts.map(part => {
+          const label = part.name || id;
+          return parts.length > 1 ? `${label}\n${part.url}` : part.url;
+        });
+      });
+      Alert.alert(t('archive.download'), lines.join('\n\n'));
+    } catch (err) {
+      Alert.alert(t('common.error'), extractApiError(err));
     }
   }, [hasAnySelected, selectedArchiveCount, selectedArchiveIds, t]);
 

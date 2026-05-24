@@ -174,7 +174,7 @@ export function useBaseMediaCardController({
 
   const handleDownload = React.useCallback(() => {
     if (type !== 'archive') return
-    window.open(ArchiveService.getDownloadUrl(id), '_blank')
+    void ArchiveService.downloadArchive(id)
   }, [id, type])
 
   const handleToggleReadStatus = React.useCallback(async () => {

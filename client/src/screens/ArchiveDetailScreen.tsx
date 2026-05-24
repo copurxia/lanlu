@@ -19,11 +19,11 @@ import {
   archiveCoverAsset,
   deleteArchive,
   assetPath,
+  fetchArchiveDownloadParts,
   fetchArchiveFiles,
   fetchArchiveMetadata,
   fetchArchiveRelated,
   fetchTankoubonsForArchive,
-  getArchiveDownloadUrl,
   getPageDefaultSource,
   markArchiveAsNew,
   markArchiveAsRead,
@@ -99,7 +99,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
               if (authThumb?.uri) {
                 thumbnailSource = {uri: authThumb.uri, ...(authThumb.headers ? {headers: authThumb.headers} : {}), cache: "immutable"} as any;
               }
-            } catch (_) {}
+            } catch {}
           }
           sbPages.push({
             pageNumber: idx + 1,
@@ -306,10 +306,16 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
     }
   }
 
-  const handleDownload = useCallback(() => {
-    const url = getArchiveDownloadUrl(merged.arcid);
-    // Open download URL using system browser or alert
-    Alert.alert(t('archive.download'), url);
+  const handleDownload = useCallback(async () => {
+    try {
+      const parts = await fetchArchiveDownloadParts(merged.arcid);
+      const message = parts
+        .map(part => parts.length > 1 && part.name ? `${part.name}\n${part.url}` : part.url)
+        .join('\n\n');
+      Alert.alert(t('archive.download'), message);
+    } catch (err) {
+      setError(extractApiError(err));
+    }
   }, [merged.arcid, t]);
 
   const handleMarkAsRead = useCallback(async () => {

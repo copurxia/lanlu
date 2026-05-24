@@ -695,6 +695,43 @@ export function getArchiveDownloadUrl(archiveId: string): string {
   return `/api/archives/${encodeURIComponent(archiveId)}/download`;
 }
 
+export type ArchiveDownloadPart = {
+  index: number;
+  name: string;
+  size: number;
+  url: string;
+};
+
+type ArchiveDownloadPartsResponse = {
+  success?: number | boolean;
+  multipart?: number | boolean;
+  parts?: ArchiveDownloadPart[];
+  error?: string;
+};
+
+function isSuccessFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === '1';
+}
+
+export async function fetchArchiveDownloadParts(archiveId: string): Promise<ArchiveDownloadPart[]> {
+  const response = await apiClient.get<ArchiveDownloadPartsResponse>(
+    `/api/archives/${encodeURIComponent(archiveId)}/download/parts`,
+  );
+  const payload = response.data;
+  if (!isSuccessFlag(payload?.success)) {
+    throw new Error(payload?.error || 'Failed to get archive download parts');
+  }
+  const fallbackUrl = getArchiveDownloadUrl(archiveId);
+  return Array.isArray(payload.parts) && payload.parts.length > 0
+    ? payload.parts.map((part, index) => ({
+        index: Number.isFinite(Number(part.index)) ? Number(part.index) : index,
+        name: String(part.name || ''),
+        size: Number.isFinite(Number(part.size)) ? Number(part.size) : 0,
+        url: String(part.url || fallbackUrl),
+      }))
+    : [{index: 0, name: '', size: 0, url: fallbackUrl}];
+}
+
 export async function fetchArchiveFiles(id: string): Promise<PageInfo[]> {
   const response = await apiClient.get<ArchiveFilesResponse>(
     `/api/archives/${encodeURIComponent(id)}/files`,

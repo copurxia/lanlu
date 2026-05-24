@@ -35,6 +35,20 @@ export interface DownloadResult {
   error?: string;
 }
 
+export interface ArchiveDownloadPart {
+  index: number;
+  name: string;
+  size: number;
+  url: string;
+}
+
+export interface ArchiveDownloadPartsResponse {
+  success: number | boolean;
+  multipart: number | boolean;
+  parts: ArchiveDownloadPart[];
+  error?: string;
+}
+
 export interface MetadataPluginRunCallbacks {
   onUpdate?: (task: Task) => void;
 }
@@ -526,6 +540,32 @@ export class ArchiveService {
 
   static getDownloadUrl(id: string): string {
     return `/api/archives/${id}/download`;
+  }
+
+  static async getDownloadParts(id: string): Promise<ArchiveDownloadPart[]> {
+    const response = await apiClient.get<ArchiveDownloadPartsResponse>(`/api/archives/${id}/download/parts`);
+    const payload = response.data;
+    if (!isSuccessResponse(payload?.success)) {
+      throw new Error(payload?.error || 'Failed to get download parts');
+    }
+    return Array.isArray(payload.parts) ? payload.parts : [];
+  }
+
+  static async downloadArchive(id: string): Promise<void> {
+    const parts = await this.getDownloadParts(id);
+    if (parts.length === 0) {
+      window.open(this.getDownloadUrl(id), '_blank');
+      return;
+    }
+    for (const part of parts) {
+      const link = document.createElement('a');
+      link.href = this.addTokenToUrl(part.url || this.getDownloadUrl(id));
+      link.download = part.name || '';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   }
 
   /**

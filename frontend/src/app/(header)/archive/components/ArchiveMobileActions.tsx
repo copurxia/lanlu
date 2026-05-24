@@ -117,8 +117,7 @@ export function ArchiveMobileActions({
               variant="outline"
               className="w-full justify-start"
               onClick={() => {
-                const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
-                window.open(downloadUrl, '_blank');
+                void ArchiveService.downloadArchive(metadata.arcid);
                 setOpen(false);
               }}
               disabled={!ready}

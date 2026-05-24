@@ -826,8 +826,7 @@ export function ArchiveDetailContent() {
                             className="h-9 w-9 p-0"
                             title={t('archive.download')}
                             onClick={() => {
-                              const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
-                              window.open(downloadUrl, '_blank');
+                              void ArchiveService.downloadArchive(metadata.arcid);
                             }}
                           >
                             <Download className="w-4 h-4" />

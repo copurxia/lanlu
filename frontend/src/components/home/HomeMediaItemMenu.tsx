@@ -200,7 +200,7 @@ export function HomeMediaItemMenu({
 
   const handleDownload = useCallback(() => {
     if (type !== 'archive') return;
-    window.open(ArchiveService.getDownloadUrl(id), '_blank');
+    void ArchiveService.downloadArchive(id);
   }, [id, type]);
 
   const handleToggleReadStatus = useCallback(async () => {

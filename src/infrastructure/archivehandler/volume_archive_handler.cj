@@ -1,9 +1,11 @@
 package lanlu.infrastructure.archivehandler
 
 import std.fs.*
+import std.collection.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
 import stdx.log.*
+import archive_ffi.Archive
 import lanlu.contexts.system.application.SystemSettingsService
 import lanlu.shared.utils.*
 
@@ -13,8 +15,7 @@ import lanlu.shared.utils.*
  * 对于二进制切片（BinarySlice）和 Split Zip，将分片按顺序拼接成缓存归档文件，
  * 然后委托给底层 ArchiveFileHandler 进行读取。
  *
- * 对于 RAR 分卷（RarVolume），需要外部 volume-aware 工具（7zz/unar/bsdtar），
- * 当前版本返回错误提示。
+ * 对于 RAR 分卷（RarVolume），通过 libarchive 的多文件打开 API 读取，不进行简单字节拼接。
  */
 public class VolumeArchiveHandler <: ArchiveHandler {
     private static let logger = getLogger("volume_archive_handler")
@@ -58,13 +59,6 @@ public class VolumeArchiveHandler <: ArchiveHandler {
             return (true, cachePath)
         }
         if (errorMsg.size > 0) {
-            return (false, errorMsg)
-        }
-
-        // RAR 分卷需要外部工具
-        if (volumePatternEq(pattern, VolumePattern.RarVolume)) {
-            errorMsg = "RAR volumes require an external volume-aware tool (7zz/unar/bsdtar) which is not yet integrated"
-            logger.warn(errorMsg, ("entryPath", entryPath))
             return (false, errorMsg)
         }
 
@@ -176,7 +170,10 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         return filePath == entryPath
     }
 
-    public func listEntries(archivePath: String): Array<String> {
+    public func listEntries(_: String): Array<String> {
+        if (isRarVolume()) {
+            return Archive.listEntriesFromParts(parts)
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             logger.error("volume archive not ready for listEntries", ("error", targetPath))
@@ -190,7 +187,14 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>) {
+    public func extractEntryToStream(_: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        if (isRarVolume()) {
+            let data = Archive.extractEntryFromParts(parts, entryName)
+            if (data.size == 0) {
+                return (1i64, Array<UInt8>(), "Entry not found or empty: ${entryName}".toArray())
+            }
+            return (0i64, data, "success".toArray())
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return (1i64, Array<UInt8>(), targetPath.toArray())
@@ -201,7 +205,14 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+    public func getEntryReader(_: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        if (isRarVolume()) {
+            let data = Archive.extractEntryFromParts(parts, entryName)
+            if (data.size == 0) {
+                return (1i64, None, "Entry not found or empty: ${entryName}")
+            }
+            return (0i64, Some(MemoryEntryReader(data)), "")
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return (1i64, None, targetPath)
@@ -212,7 +223,25 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {
+    public func extractEntryToFile(_: String, entryName: String, outputPath: String): Bool {
+        if (isRarVolume()) {
+            try {
+                let data = Archive.extractEntryFromParts(parts, entryName)
+                if (data.size == 0) {
+                    return false
+                }
+                let outputDir = FileUtils.getParentDirectory(outputPath)
+                if (outputDir.size > 0 && !DirectoryScanner.directoryExists(outputDir)) {
+                    Directory.create(Path(outputDir), recursive: true)
+                }
+                let file = File(Path(outputPath), Write)
+                file.write(data)
+                file.close()
+                return true
+            } catch (_: Exception) {
+                return false
+            }
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return false
@@ -223,7 +252,10 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func getMediaCount(archivePath: String): Int32 {
+    public func getMediaCount(_: String): Int32 {
+        if (isRarVolume()) {
+            return Archive.countMediaEntriesFromParts(parts)
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return 0
@@ -234,7 +266,14 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func getFirstCoverEntry(archivePath: String): (String, String) {
+    public func getFirstCoverEntry(_: String): (String, String) {
+        if (isRarVolume()) {
+            let best = Archive.findFirstCoverEntryFromParts(parts)
+            if (best.size == 0) {
+                return ("", "")
+            }
+            return (best, "")
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return ("", "")
@@ -246,6 +285,13 @@ public class VolumeArchiveHandler <: ArchiveHandler {
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        if (isRarVolume()) {
+            let (entryName, _) = getFirstCoverEntry(archivePath)
+            if (entryName.size == 0) {
+                return (1i64, Array<UInt8>(), "No cover media found".toArray())
+            }
+            return extractEntryToStream(archivePath, entryName)
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return (1i64, Array<UInt8>(), targetPath.toArray())
@@ -256,7 +302,18 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         }
     }
 
-    public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+    public func listEntriesWithTitle(_: String): Array<(String, String)> {
+        if (isRarVolume()) {
+            let entries = Archive.listEntriesFromParts(parts)
+            var result = ArrayList<(String, String)>()
+            for (entry in entries) {
+                if (isMediaFile(entry)) {
+                    result.add((entry, ""))
+                }
+            }
+            NaturalSort.sortTuples(result)
+            return result.toArray()
+        }
         let (ok, targetPath) = ensureCache()
         if (!ok) {
             return []
@@ -268,6 +325,32 @@ public class VolumeArchiveHandler <: ArchiveHandler {
     }
 
     // ========== 缓存管理 ==========
+
+    private func isRarVolume(): Bool {
+        return volumePatternEq(pattern, VolumePattern.RarVolume)
+    }
+
+    private func isMediaFile(filename: String): Bool {
+        return isImageFile(filename) || isVideoFile(filename)
+    }
+
+    private func isImageFile(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let ext = parts[parts.size - 1].toAsciiLower()
+        return ext == "avif" || ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif"
+    }
+
+    private func isVideoFile(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let ext = parts[parts.size - 1].toAsciiLower()
+        return ext == "mp4" || ext == "webm" || ext == "mkv" || ext == "avi" || ext == "mov" || ext == "m4v"
+    }
 
     /**
      * 基于所有分片的路径、大小和修改时间生成指纹。

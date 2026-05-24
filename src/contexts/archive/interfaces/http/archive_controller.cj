@@ -997,9 +997,27 @@ public class ArchiveController {
                             } else {
                                 "${archivePath}/${archive.filename}"
                             }
-                            remove(Path(fullArchivePath))
-                            getLogger("archive_controller").info("Deleted archive file", ("path", fullArchivePath),
-                                ("arcid", id))
+                            let actualDeletePath = FileUtils.resolvePath(fullArchivePath)
+                            var deletedCount: Int64 = 0
+                            match (VolumeArchiveUtils.detectVolume(actualDeletePath)) {
+                                case Some(volumeInfo) =>
+                                    for (part in volumeInfo.parts) {
+                                        try {
+                                            if (exists(Path(part))) {
+                                                remove(Path(part))
+                                                deletedCount++
+                                            }
+                                        } catch (partErr: Exception) {
+                                            getLogger("archive_controller").warn("Failed to delete volume part",
+                                                ("arcid", id), ("path", part), ("error", partErr.message))
+                                        }
+                                    }
+                                case None =>
+                                    remove(Path(actualDeletePath))
+                                    deletedCount = 1
+                            }
+                            getLogger("archive_controller").info("Deleted archive file", ("path", actualDeletePath),
+                                ("arcid", id), ("deleted_count", deletedCount.toString()))
                         } else {
                             getLogger("archive_controller").warn("Archive path is empty, skipping file deletion",
                                 ("arcid", id), ("filename", archive.filename))
@@ -1063,6 +1081,35 @@ public class ArchiveController {
         try {
             // 对于文件访问，需要解析软链接到实际路径
             let actualPath = FileUtils.resolvePath(fullArchivePath)
+            match (VolumeArchiveUtils.detectVolume(actualPath)) {
+                case Some(volumeInfo) =>
+                    if (volumeInfo.isEntry && volumeInfo.parts.size > 1) {
+                        match (ctx.query("part")) {
+                            case Some(partValue) =>
+                                let partIndex = try { Int64.parse(partValue.trimAscii()) } catch (_: Exception) { -1 }
+                                if (partIndex < 0 || partIndex >= volumeInfo.parts.size) {
+                                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                                    ResponseView.json(ctx, "{\"success\":0,\"error\":\"Invalid volume part index\"}")
+                                    return
+                                }
+                                let partPath = FileUtils.resolvePath(volumeInfo.parts[partIndex])
+                                let partFile = File(Path(partPath), Read)
+                                let partInfo = partFile.info
+                                downloadArchiveChunked(ctx, partFile, partInfo.size, ArchiveUtils.getFullFileName(volumeInfo.parts[partIndex]))
+                                return
+                            case None =>
+                                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive is split into multiple volume files; use /download/parts first\"}")
+                                return
+                        }
+                    }
+                case None => ()
+            }
+            if (ctx.query("part").isSome()) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive is not a multi-volume archive\"}")
+                return
+            }
             let filePath = Path(actualPath)
             let file = File(filePath, Read)
             let fileInfo = file.info
@@ -1102,6 +1149,81 @@ public class ArchiveController {
             }
         } finally {
             file.close()
+        }
+    }
+
+    public static func getArchiveDownloadParts(ctx: Ctx): Unit {
+        let id = ctx.paramsOpt("id") ?? ""
+
+        if (id.size == 0) {
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"No archive ID specified.\"}")
+            return
+        }
+
+        let archive = ArchiveModel.getArchiveById(id)
+        if (archive.id.size == 0) {
+            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive not found\"}")
+            return
+        }
+
+        let archivePath = getArchiveBasePath(archive.id)
+        if (archivePath.size == 0) {
+            ctx.status(500)
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
+            return
+        }
+        let fullArchivePath = if (archive.relative_path.size > 0) {
+            "${archivePath}/${archive.relative_path}/${archive.filename}"
+        } else {
+            "${archivePath}/${archive.filename}"
+        }
+
+        try {
+            let actualPath = FileUtils.resolvePath(fullArchivePath)
+            let downloadParts = ArrayList<String>()
+            match (VolumeArchiveUtils.detectVolume(actualPath)) {
+                case Some(volumeInfo) =>
+                    if (volumeInfo.isEntry && volumeInfo.parts.size > 1) {
+                        for (part in volumeInfo.parts) {
+                            downloadParts.add(part)
+                        }
+                    } else {
+                        downloadParts.add(actualPath)
+                    }
+                case None => downloadParts.add(actualPath)
+            }
+
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(1)
+            w.writeName("multipart").writeValue(if (downloadParts.size > 1) { 1 } else { 0 })
+            w.writeName("parts")
+            w.startArray()
+            for (i in 0..downloadParts.size) {
+                let part = downloadParts[i]
+                let info = FileInfo(Path(FileUtils.resolvePath(part)))
+                w.startObject()
+                w.writeName("index").writeValue(i)
+                w.writeName("name").writeValue(ArchiveUtils.getFullFileName(part))
+                w.writeName("size").writeValue(info.size)
+                let url = if (downloadParts.size > 1) {
+                    "/api/archives/${id}/download?part=${i.toString()}"
+                } else {
+                    "/api/archives/${id}/download"
+                }
+                w.writeName("url").writeValue(url)
+                w.endObject()
+            }
+            w.endArray()
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+        } catch (e: Exception) {
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to build download parts: ${e.message}\"}")
         }
     }
 

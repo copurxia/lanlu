@@ -1,7 +1,6 @@
 package archive_ffi
 
 import std.collection.*
-import std.sort.*
 import std.sync.*
 
 foreign func strlen(arg1: CString): UIntNative
@@ -211,6 +210,77 @@ public class Archive {
         return entries
     }
 
+    private static func scanEntriesFromParts(archivePaths: Array<String>): (Array<String>, Int32) {
+        ensureLocaleInitialized()
+        let entries = ArrayList<String>()
+        var mediaCount: Int32 = 0
+        if (archivePaths.size == 0) {
+            return (entries.toArray(), mediaCount)
+        }
+
+        let a = unsafe { archive_read_new() }
+        if (a.isNull()) {
+            return (entries.toArray(), mediaCount)
+        }
+
+        unsafe {
+            archive_read_support_format_all(a)
+            archive_read_support_filter_all(a)
+        }
+
+        let pathPtrs = Array<CString>(archivePaths.size + 1, {_ => CString(CPointer<UInt8>())})
+        for (i in 0..archivePaths.size) {
+            pathPtrs[i] = unsafe { LibC.mallocCString(archivePaths[i]) }
+        }
+        let pathPtrHandle = unsafe { acquireArrayRawData(pathPtrs) }
+
+        try {
+            let openResult = unsafe { archive_read_open_filenames(a, pathPtrHandle.pointer, 10240) }
+            if (openResult != Int32(ARCHIVE_OK)) {
+                unsafe { archive_read_free(a) }
+                return (entries.toArray(), mediaCount)
+            }
+
+            let entry = unsafe { archive_entry_new2(a) }
+            while (true) {
+                let r = unsafe { archive_read_next_header2(a, entry) }
+                if (r == Int32(ARCHIVE_EOF)) {
+                    break
+                }
+                if (r != Int32(ARCHIVE_OK)) {
+                    break
+                }
+
+                let name = getEntryName(entry)
+                if (name.size > 0) {
+                    entries.add(name)
+                    if (isMediaEntryName(name)) {
+                        mediaCount += 1
+                    }
+                }
+            }
+
+            unsafe {
+                archive_entry_free(entry)
+                archive_read_close(a)
+                archive_read_free(a)
+            }
+            return (entries.toArray(), mediaCount)
+        } finally {
+            unsafe { releaseArrayRawData(pathPtrHandle) }
+            for (i in 0..archivePaths.size) {
+                if (!pathPtrs[i].isNull()) {
+                    unsafe { LibC.free(pathPtrs[i]) }
+                }
+            }
+        }
+    }
+
+    public static func listEntriesFromParts(archivePaths: Array<String>): Array<String> {
+        let (entries, _) = scanEntriesFromParts(archivePaths)
+        return entries
+    }
+
     /**
      * Count media entries without allocating the full entry list.
      */
@@ -259,6 +329,11 @@ public class Archive {
             archive_read_free(a)
         }
 
+        return mediaCount
+    }
+
+    public static func countMediaEntriesFromParts(archivePaths: Array<String>): Int32 {
+        let (_, mediaCount) = scanEntriesFromParts(archivePaths)
         return mediaCount
     }
 
@@ -340,6 +415,90 @@ public class Archive {
             return bestImage
         }
         return bestVideo
+    }
+
+    public static func findFirstCoverEntryFromParts(archivePaths: Array<String>): String {
+        ensureLocaleInitialized()
+        if (archivePaths.size == 0) {
+            return ""
+        }
+
+        let a = unsafe { archive_read_new() }
+        if (a.isNull()) {
+            return ""
+        }
+
+        unsafe {
+            archive_read_support_format_all(a)
+            archive_read_support_filter_all(a)
+        }
+
+        let pathPtrs = Array<CString>(archivePaths.size + 1, {_ => CString(CPointer<UInt8>())})
+        for (i in 0..archivePaths.size) {
+            pathPtrs[i] = unsafe { LibC.mallocCString(archivePaths[i]) }
+        }
+        let pathPtrHandle = unsafe { acquireArrayRawData(pathPtrs) }
+
+        try {
+            let openResult = unsafe { archive_read_open_filenames(a, pathPtrHandle.pointer, 10240) }
+            if (openResult != Int32(ARCHIVE_OK)) {
+                unsafe { archive_read_free(a) }
+                return ""
+            }
+
+            let entry = unsafe { archive_entry_new2(a) }
+            var bestImage = ""
+            var bestVideo = ""
+
+            while (true) {
+                let r = unsafe { archive_read_next_header2(a, entry) }
+                if (r == Int32(ARCHIVE_EOF)) {
+                    break
+                }
+                if (r != Int32(ARCHIVE_OK)) {
+                    break
+                }
+
+                let name = getEntryName(entry)
+                if (name.size == 0) {
+                    continue
+                }
+                if (isImageEntryName(name)) {
+                    if (bestImage.size == 0) {
+                        bestImage = name
+                    } else if (naturalCompare(name, bestImage) == Ordering.LT) {
+                        bestImage = name
+                    }
+                    continue
+                }
+                if (!isVideoEntryName(name)) {
+                    continue
+                }
+                if (bestVideo.size == 0) {
+                    bestVideo = name
+                } else if (naturalCompare(name, bestVideo) == Ordering.LT) {
+                    bestVideo = name
+                }
+            }
+
+            unsafe {
+                archive_entry_free(entry)
+                archive_read_close(a)
+                archive_read_free(a)
+            }
+
+            if (bestImage.size > 0) {
+                return bestImage
+            }
+            return bestVideo
+        } finally {
+            unsafe { releaseArrayRawData(pathPtrHandle) }
+            for (i in 0..archivePaths.size) {
+                if (!pathPtrs[i].isNull()) {
+                    unsafe { LibC.free(pathPtrs[i]) }
+                }
+            }
+        }
     }
 
     /**
@@ -432,6 +591,103 @@ public class Archive {
         }
 
         return Array<UInt8>()
+    }
+
+    public static func extractEntryFromParts(archivePaths: Array<String>, entryName: String): Array<UInt8> {
+        ensureLocaleInitialized()
+        if (archivePaths.size == 0) {
+            return Array<UInt8>()
+        }
+
+        let a = unsafe { archive_read_new() }
+        if (a.isNull()) {
+            return Array<UInt8>()
+        }
+
+        unsafe {
+            archive_read_support_format_all(a)
+            archive_read_support_filter_all(a)
+        }
+
+        let pathPtrs = Array<CString>(archivePaths.size + 1, {_ => CString(CPointer<UInt8>())})
+        for (i in 0..archivePaths.size) {
+            pathPtrs[i] = unsafe { LibC.mallocCString(archivePaths[i]) }
+        }
+        let pathPtrHandle = unsafe { acquireArrayRawData(pathPtrs) }
+
+        try {
+            let openResult = unsafe { archive_read_open_filenames(a, pathPtrHandle.pointer, 10240) }
+            if (openResult != Int32(ARCHIVE_OK)) {
+                unsafe { archive_read_free(a) }
+                return Array<UInt8>()
+            }
+
+            let entry = unsafe { archive_entry_new2(a) }
+            while (true) {
+                let r = unsafe { archive_read_next_header2(a, entry) }
+                if (r == Int32(ARCHIVE_EOF)) {
+                    break
+                }
+                if (r != Int32(ARCHIVE_OK)) {
+                    break
+                }
+
+                let name = getEntryName(entry)
+                if (name.size == 0 || name != entryName) {
+                    continue
+                }
+
+                let size = unsafe { archive_entry_size(entry) }
+                if (size <= 0) {
+                    unsafe {
+                        archive_entry_free(entry)
+                        archive_read_close(a)
+                        archive_read_free(a)
+                    }
+                    return Array<UInt8>()
+                }
+
+                let result = ArrayList<UInt8>()
+                let bufSize: Int64 = 8192
+                let buf = unsafe { LibC.malloc<UInt8>(count: bufSize) }
+
+                while (true) {
+                    let readLen = unsafe {
+                        archive_read_data(a, CPointer<Unit>(buf), UIntNative(bufSize))
+                    }
+                    if (readLen <= 0) {
+                        break
+                    }
+                    for (i in 0..Int64(readLen)) {
+                        let byte = unsafe { (buf + i).read() }
+                        result.add(byte)
+                    }
+                }
+
+                unsafe {
+                    LibC.free(buf)
+                    archive_entry_free(entry)
+                    archive_read_close(a)
+                    archive_read_free(a)
+                }
+
+                return result.toArray()
+            }
+
+            unsafe {
+                archive_entry_free(entry)
+                archive_read_close(a)
+                archive_read_free(a)
+            }
+            return Array<UInt8>()
+        } finally {
+            unsafe { releaseArrayRawData(pathPtrHandle) }
+            for (i in 0..archivePaths.size) {
+                if (!pathPtrs[i].isNull()) {
+                    unsafe { LibC.free(pathPtrs[i]) }
+                }
+            }
+        }
     }
 
     // ---- helpers ----

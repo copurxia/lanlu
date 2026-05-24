@@ -1328,9 +1328,7 @@ function TankoubonDetailContent() {
 
   const handleBatchDownload = useCallback(async () => {
     if (!canBatchDownload || batchActionRunning || batchEditApplying || batchRemovingArchives) return;
-    Array.from(selectedArchiveIds).forEach((id) => {
-      window.open(ArchiveService.getDownloadUrl(id), '_blank');
-    });
+    await Promise.all(Array.from(selectedArchiveIds).map((id) => ArchiveService.downloadArchive(id)));
     success(
       t('home.batchDownloadStarted').replace('{count}', String(selectedArchiveIds.size))
     );

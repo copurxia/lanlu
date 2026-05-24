@@ -39,6 +39,9 @@ public class ArchiveRoutes {
         })
 
         // 下载归档
+        archives.get("/:id/download/parts", { ctx =>
+            ArchiveController.getArchiveDownloadParts(ctx)
+        })
         archives.get("/:id/download", { ctx =>
             ArchiveController.downloadArchive(ctx)
         })

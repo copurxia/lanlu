@@ -426,9 +426,7 @@ export function useHomeSelection(
       return;
     }
     const ArchiveService = await loadArchiveService();
-    Array.from(selectedArchiveIds).forEach((id) => {
-      window.open(ArchiveService.getDownloadUrl(id), '_blank');
-    });
+    await Promise.all(Array.from(selectedArchiveIds).map((id) => ArchiveService.downloadArchive(id)));
     showSuccess(
       t('home.batchDownloadStarted').replace('{count}', String(selectedArchiveIds.size))
     );
