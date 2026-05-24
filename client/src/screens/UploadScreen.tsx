@@ -561,7 +561,8 @@ function UploadScreen() {
       results.forEach(r => {
         const name = r.name || 'unknown';
         const extension = getFileExtension(name);
-        if (!extension || !SUPPORTED_ARCHIVE_EXTENSIONS.has(extension)) {
+        const isVolumeSuffix = /^(\d{2,3}|[zr]\d{2})$/.test(extension);
+        if (!extension || (!SUPPORTED_ARCHIVE_EXTENSIONS.has(extension) && !isVolumeSuffix)) {
           unsupported.push(extension || name);
           return;
         }

@@ -55,11 +55,11 @@ public class VolumeArchiveUtils {
 
     // 二进制切片前缀 → 底层格式
     private static let SLICE_PREFIX_FORMATS: Array<(String, String)> = [
-        ("zip.part.", "zip"),
-        ("7z.", "7z"),
-        ("tar.gz.", "tar.gz"),
-        ("tgz.", "tgz"),
-        ("tar.", "tar"),
+        ("zip.part", "zip"),
+        ("7z", "7z"),
+        ("tar.gz", "tar.gz"),
+        ("tgz", "tgz"),
+        ("tar", "tar"),
     ]
 
     // ========== 公共接口 ==========
@@ -98,10 +98,7 @@ public class VolumeArchiveUtils {
             }
             return true
         }
-        if (lower.endsWith(".z02") || lower.endsWith(".z03") ||
-            lower.endsWith(".z04") || lower.endsWith(".z05") ||
-            lower.endsWith(".z06") || lower.endsWith(".z07") ||
-            lower.endsWith(".z08") || lower.endsWith(".z09")) {
+        if (isSplitZipFollower(lower)) {
             return true
         }
         if (isRarVolumeFollower(lower)) {
@@ -293,7 +290,8 @@ public class VolumeArchiveUtils {
             let suffix = lower[lowerBase.size..lower.size]
 
             if (suffix == ".zip") {
-                indexedParts.add((FileUtils.joinPath(dirPath, entry), 0))
+                // Split zip 的中央目录在最终 .zip，拼接时必须排在 .zNN 之后。
+                indexedParts.add((FileUtils.joinPath(dirPath, entry), 1000))
                 continue
             }
             let dotByte2 = UInt8(UInt32(r'.'))
@@ -518,6 +516,22 @@ public class VolumeArchiveUtils {
             }
         }
         return false
+    }
+
+    private static func isSplitZipFollower(lower: String): Bool {
+        if (lower.size < 4) {
+            return false
+        }
+        let ext = lower[lower.size - 4..lower.size]
+        let dot = UInt8(UInt32(r'.'))
+        let zChar = UInt8(UInt32(r'z'))
+        let zero = UInt8(UInt32(r'0'))
+        let nine = UInt8(UInt32(r'9'))
+        if (ext[0] != dot || ext[1] != zChar || ext[2] < zero || ext[2] > nine || ext[3] < zero || ext[3] > nine) {
+            return false
+        }
+        let num = try { toInt64(ext[2..4]) } catch (_: Exception) { 0 }
+        return num >= 2 && num <= 99
     }
 
     // ========== 通用工具 ==========

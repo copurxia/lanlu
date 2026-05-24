@@ -20,16 +20,28 @@ public class ArchiveFileHandler <: ArchiveHandler {
         return ArchiveTypes.ARCHIVE
     }
     public func listEntries(archivePath: String): Array<String> {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.listEntries(archivePath)
+            case None => ()
+        }
         return Archive.listEntries(archivePath)
     }
 
     public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>){
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.extractEntryToStream(archivePath, entryName)
+            case None => ()
+        }
         return (0i64,Archive.extractEntry(archivePath, entryName), "success".toArray())
     }
 
     public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
         let logger = getLogger("archive_file_handler")
         logger.debug("getEntryReader called", ("archivePath", archivePath), ("entryName", entryName))
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.getEntryReader(archivePath, entryName)
+            case None => ()
+        }
 
         // 使用流式读取，避免一次性加载整个文件到内存
         let (success, readerOpt, size, errorMsg) = Archive.openEntryReader(archivePath, entryName)
@@ -53,6 +65,10 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.extractEntryToFile(archivePath, entryName, outputPath)
+            case None => ()
+        }
         try {
             if (entryName.size == 0) {
                 return false
@@ -82,10 +98,18 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func getMediaCount(archivePath: String): Int32 {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.getMediaCount(archivePath)
+            case None => ()
+        }
         return Archive.countMediaEntries(archivePath)
     }
 
     public func getFirstCoverEntry(archivePath: String): (String, String) {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.getFirstCoverEntry(archivePath)
+            case None => ()
+        }
         // Fast-path: avoid listing/sorting all entries for large archives.
         // This scans headers once and selects the best cover candidate using natural order.
         let best = Archive.findFirstCoverEntry(archivePath)
@@ -147,6 +171,10 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.getCoverImage(archivePath)
+            case None => ()
+        }
         let (entryName, _) = getFirstCoverEntry(archivePath)
         if (entryName.isEmpty()) {
             return (1i64, Array<UInt8>(), "No cover media found".toArray())
@@ -155,6 +183,10 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        match (resolveVolumeHandler(archivePath)) {
+            case Some(handler) => return handler.listEntriesWithTitle(archivePath)
+            case None => ()
+        }
         let entries = listEntries(archivePath)
         var result = ArrayList<(String, String)>()
         for (entry in entries) {
@@ -172,6 +204,22 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
     private func directoryExists(path: String): Bool {
         return DirectoryScanner.directoryExists(path)
+    }
+
+    private static func resolveVolumeHandler(filePath: String): Option<ArchiveHandler> {
+        match (VolumeArchiveUtils.detectVolume(filePath)) {
+            case Some(volumeInfo) =>
+                if (volumeInfo.isEntry && volumeInfo.parts.size > 0) {
+                    return Some(VolumeArchiveHandler(
+                        volumeInfo.entryPath,
+                        volumeInfo.parts,
+                        volumeInfo.pattern,
+                        volumeInfo.underlyingFormat
+                    ))
+                }
+                return None
+            case None => return None
+        }
     }
 
     // ==================== 私有工具方法 - 媒体文件过滤 ====================

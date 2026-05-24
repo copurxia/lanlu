@@ -169,6 +169,13 @@ public class ScanArchiveTaskRunner {
 
     private static func resolveHandler(filePath: String, archiveTypeHint: String): Option<ArchiveHandler> {
         let factory = ArchiveHandlerFactory.getInstance()
+        match (VolumeArchiveUtils.detectVolume(filePath)) {
+            case Some(volumeInfo) =>
+                if (volumeInfo.isEntry) {
+                    return factory.getHandlerByPath(filePath)
+                }
+            case None => ()
+        }
         let hintedType = archiveTypeHint.trimAscii()
         if (hintedType.size > 0) {
             let hintedHandler = factory.getHandlerByType(hintedType)
@@ -253,6 +260,7 @@ public class ScanArchiveTaskRunner {
             match (existingArchive) {
                 case Some(archive) =>
                     logger.debug("Archive already exists in database: ${filePath}")
+                    refreshExistingVolumePageCount(filePath, handler, archive)
 
                     if (archive.relative_path.size == 0) {
                         logger.debug("Archive has empty relative_path, updating: ${archive.id}")
@@ -338,6 +346,36 @@ public class ScanArchiveTaskRunner {
             return ProcessResultData(true, dbResult.archiveId, "")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Error processing file: ${e.message}")
+        }
+    }
+
+    private static func refreshExistingVolumePageCount(filePath: String, handler: ArchiveHandler, archive: ArchiveData): Unit {
+        match (VolumeArchiveUtils.detectVolume(filePath)) {
+            case Some(info) =>
+                if (!info.isEntry) {
+                    return
+                }
+            case None => return
+        }
+
+        let pageCount = handler.getMediaCount(filePath)
+        if (pageCount <= 0 || pageCount == archive.pagecount) {
+            return
+        }
+        if (ArchiveDao.updatePageCount(archive.id, pageCount)) {
+            logger.debug(
+                "Updated existing volume archive page count",
+                ("archive_id", archive.id),
+                ("old_page_count", archive.pagecount.toString()),
+                ("new_page_count", pageCount.toString())
+            )
+        } else {
+            logger.error(
+                "Failed to update existing volume archive page count",
+                ("archive_id", archive.id),
+                ("old_page_count", archive.pagecount.toString()),
+                ("new_page_count", pageCount.toString())
+            )
         }
     }
 

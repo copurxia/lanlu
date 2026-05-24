@@ -159,8 +159,15 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
     }
 
     Array.from(files).forEach(file => {
-      const fileExtension = "." + file.name.split(".").pop()?.toLowerCase()
-      if (supportedFormats.includes(fileExtension)) {
+      const fileName = file.name.toLowerCase()
+      // 先用完整文件名后缀匹配（支持多段扩展名如 .zip.part.001）
+      const fullMatch = supportedFormats.some(ext => fileName.endsWith(ext))
+      // 再用最后一段扩展名匹配（单段如 .zip .rar）
+      const lastExt = fileName.split(".").pop() || ""
+      const extMatch = supportedFormats.includes("." + lastExt)
+      // 分卷后缀（.001-.999, .z01-.z99, .r00-.r99）
+      const volumeMatch = /\.(?:\d{2,3}|z\d{2}|r\d{2})$/.test(fileName)
+      if (fullMatch || extMatch || volumeMatch) {
         const uploadFile: UploadFile = {
           id: Math.random().toString(36).substr(2, 9),
           file,
@@ -457,7 +464,6 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                   type="file"
                   className="hidden"
                   onChange={handleFileInputChange}
-                  accept={supportedFormats.join(",")}
                   multiple
                 />
               </div>

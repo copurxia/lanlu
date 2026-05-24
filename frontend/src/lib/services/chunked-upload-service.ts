@@ -207,6 +207,11 @@ export class ChunkedUploadService {
       }
     }
 
+    // 分卷后缀（入口或跟随分卷：.001-.999, .z01-.z99, .r00-.r99）
+    if (/\.(?:\d{2,3}|z\d{2}|r\d{2})$/.test(fullName)) {
+      return { valid: true };
+    }
+
     return {
       valid: false,
       error: `不支持的文件格式: ${extension}。支持的格式: ${this.SUPPORTED_EXTENSIONS.join(', ')}`

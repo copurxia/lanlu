@@ -2,6 +2,7 @@ package lanlu.infrastructure.archivehandler
 
 import std.collection.*
 import lanlu.infrastructure.archiveindex.*
+import lanlu.shared.utils.VolumeArchiveUtils
 
 public class IndexedArchiveHandler <: ArchiveHandler {
     private let base: ArchiveHandler
@@ -23,6 +24,9 @@ public class IndexedArchiveHandler <: ArchiveHandler {
     }
 
     public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        if (isVolumeArchivePath(archivePath)) {
+            return base.getEntryReader(archivePath, entryName)
+        }
         match (ArchivePackageIndexStore.getOrBuild(base.getType(), archivePath, { path => base.listEntriesWithTitle(path) })) {
             case Some(index) =>
                 match (index.findEntry(entryName)) {
@@ -59,6 +63,9 @@ public class IndexedArchiveHandler <: ArchiveHandler {
     }
 
     public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        if (isVolumeArchivePath(archivePath)) {
+            return base.listEntriesWithTitle(archivePath)
+        }
         match (ArchivePackageIndexStore.getOrBuild(base.getType(), archivePath, { path => base.listEntriesWithTitle(path) })) {
             case Some(index) =>
                 let entries = ArrayList<(String, String)>()
@@ -67,6 +74,13 @@ public class IndexedArchiveHandler <: ArchiveHandler {
                 }
                 return entries.toArray()
             case None => return base.listEntriesWithTitle(archivePath)
+        }
+    }
+
+    private static func isVolumeArchivePath(archivePath: String): Bool {
+        match (VolumeArchiveUtils.detectVolume(archivePath)) {
+            case Some(info) => return info.isEntry
+            case None => return false
         }
     }
 }
