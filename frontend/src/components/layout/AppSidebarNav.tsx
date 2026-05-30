@@ -286,6 +286,22 @@ function AppSidebarNavContent({
               )}
             </SidebarSection>
 
+            <SidebarSection title="在线源">
+              <Link
+                href="/source"
+                onClick={onNavigate}
+                className={cn(
+                  itemClassName,
+                  pathname === '/source'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <Search className="h-4 w-4" />
+                <span className="min-w-0 flex-1 truncate">浏览在线源</span>
+              </Link>
+            </SidebarSection>
+
             <SidebarSection
               title={
                 smartFilters.length > 0

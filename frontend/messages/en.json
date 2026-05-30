@@ -65,6 +65,7 @@
     "random": "Random",
     "library": "Library",
     "settings": "Settings",
+    "source": "Online Source",
     "themeToggle": "Theme Toggle",
     "language": "Language"
   },
@@ -1004,6 +1005,7 @@
     "download": "Download",
     "login": "Login",
     "script": "Script",
+    "source": "Online Source",
     "pluginConfiguration": "Plugin Configuration",
     "pluginConfigurationDescription": "Configure plugin parameters using the smart form or JSON editor",
     "smartForm": "Smart Form",

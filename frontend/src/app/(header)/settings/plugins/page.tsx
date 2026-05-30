@@ -16,7 +16,7 @@ import { useConfirm } from '@/hooks/use-confirm';
 import { useToast } from '@/hooks/use-toast';
 import { extractApiError } from '@/lib/utils/api-utils';
 
-const TYPE_ORDER = ['metadata', 'download', 'login', 'script'];
+const TYPE_ORDER = ['metadata', 'download', 'login', 'script', 'source'];
 
 export default function SettingsPluginsPage() {
   const { t } = useLanguage();
@@ -253,6 +253,8 @@ export default function SettingsPluginsPage() {
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
       case 'script':
         return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+      case 'source':
+        return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200';
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
@@ -268,6 +270,8 @@ export default function SettingsPluginsPage() {
         return t('settings.login');
       case 'script':
         return t('settings.script');
+      case 'source':
+        return t('settings.source');
       default:
         return type;
     }

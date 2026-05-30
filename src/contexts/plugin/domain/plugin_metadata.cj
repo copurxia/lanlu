@@ -4,6 +4,7 @@ public enum PluginType {
     | Script
     | Metadata
     | Download
+    | Source
     | Unknown(String)
 
     public static func fromDb(value: String): PluginType {
@@ -11,6 +12,7 @@ public enum PluginType {
             case "script" => return Script
             case "metadata" => return Metadata
             case "download" => return Download
+            case "source" => return Source
             case _ => return Unknown(value.trimAscii())
         }
     }
@@ -24,6 +26,7 @@ public enum PluginType {
             case Script => return "Script"
             case Metadata => return "Metadata"
             case Download => return "Download"
+            case Source => return "Source"
             case Unknown(value) => return value
         }
     }
@@ -40,6 +43,7 @@ public enum PluginType {
             case Script => return true
             case Metadata => return true
             case Download => return true
+            case Source => return true
             case Unknown(_) => return false
         }
     }

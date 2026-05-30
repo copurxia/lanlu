@@ -13,7 +13,7 @@ import { HomeViewMenu } from '@/components/layout/HomeViewMenu';
 import { UserMenu } from '@/components/user/UserMenu';
 import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
-import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
+import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search, Globe } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAppBack } from '@/hooks/use-app-back';
@@ -191,6 +191,7 @@ export function Header() {
   const navigation = [
     { name: t('navigation.home'), href: '/', icon: Home },
     { name: t('navigation.random'), href: '#', icon: Shuffle, action: handleRandomRead },
+    { name: t('navigation.source'), href: '/source', icon: Globe },
   ];
 
   return (

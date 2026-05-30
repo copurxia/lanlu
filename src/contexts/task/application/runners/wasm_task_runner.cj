@@ -85,7 +85,7 @@ public class WasmTaskRunner {
     private static let pipelineKvTtlSeconds: Int64 = 86400
 
     public static func run(taskId: Int64, parameters: String): Unit {
-        let (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadataJson) = parseParameters(parameters)
+        let (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadataJson) = parseParameters(parameters)
         appendMirroredLog(taskId, parentTaskId, "wasm_task started")
         updateMirroredProgress(taskId, parentTaskId, 1, "WASM任务开始")
 
@@ -157,7 +157,8 @@ public class WasmTaskRunner {
                 url,
                 extraParams,
                 metadataJson,
-                interactivePreviewEnabled
+                interactivePreviewEnabled,
+                action: action
             )
             storePhaseResult(effectiveGroupId, plugin.namespace, mainResult)
             if (!mainResult.success) {
@@ -189,9 +190,9 @@ public class WasmTaskRunner {
                 completedStages += 1
             }
 
+            TaskIO.writeOutput(taskId, mainResult.output)
             updateMirroredProgress(taskId, parentTaskId, 100, "WASM任务完成")
             TaskModel.completeTask(taskId, "wasm_task completed")
-            TaskIO.writeOutput(taskId, mainResult.output)
         } catch (e: Exception) {
             fail(taskId, e.message)
         }
@@ -223,7 +224,8 @@ public class WasmTaskRunner {
         url: String,
         extraParams: String,
         metadataJson: String,
-        interactivePreviewEnabled: Bool
+        interactivePreviewEnabled: Bool,
+        action!: String = "run"
     ): TaskWaitResult {
         match (plugin.plugin_type.trimAscii()) {
             case "Metadata" =>
@@ -234,6 +236,8 @@ public class WasmTaskRunner {
                 return executeDownload(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, extraParams, interactivePreviewEnabled)
             case "Script" =>
                 return executeScript(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, oneshotParam, url, extraParams, interactivePreviewEnabled)
+            case "Source" =>
+                return executeSource(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, extraParams, action, interactivePreviewEnabled)
             case _ =>
                 return TaskWaitResult(false, "Unsupported wasm plugin type: ${plugin.plugin_type}", "")
         }
@@ -350,6 +354,10 @@ public class WasmTaskRunner {
         if (!result.success) {
             return TaskWaitResult(false, result.error, "")
         }
+        let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
+        if (!outputSuccess) {
+            return TaskWaitResult(false, outputError, result.output)
+        }
 
         let normalizedOutput = if (interactivePreviewEnabled) {
             normalizeMetadataPreviewOutputAssets(taskId, result.output, plugin.namespace, effectiveType, effectiveId)
@@ -402,6 +410,10 @@ public class WasmTaskRunner {
         )
         if (!result.success) {
             return TaskWaitResult(false, result.error, "")
+        }
+        let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
+        if (!outputSuccess) {
+            return TaskWaitResult(false, outputError, result.output)
         }
         return TaskWaitResult(true, "", result.output)
     }
@@ -463,6 +475,10 @@ public class WasmTaskRunner {
         if (!result.success) {
             return TaskWaitResult(false, result.error, "")
         }
+        let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
+        if (!outputSuccess) {
+            return TaskWaitResult(false, outputError, result.output)
+        }
         return TaskWaitResult(true, "", result.output)
     }
 
@@ -513,6 +529,68 @@ public class WasmTaskRunner {
         )
         if (!result.success) {
             return TaskWaitResult(false, result.error, "")
+        }
+        let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
+        if (!outputSuccess) {
+            return TaskWaitResult(false, outputError, result.output)
+        }
+        return TaskWaitResult(true, "", result.output)
+    }
+
+    private static func executeSource(
+        taskId: Int64,
+        parentTaskId: Int64,
+        plugin: PluginTaskData,
+        runtimePermissions: String,
+        groupId: String,
+        targetType: String,
+        targetId: String,
+        url: String,
+        extraParams: String,
+        action: String,
+        interactivePreviewEnabled: Bool
+    ): TaskWaitResult {
+        let effectiveAction = action.trimAscii()
+        if (effectiveAction.size == 0) {
+            return TaskWaitResult(false, "Missing action for Source plugin", "")
+        }
+
+        updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM Source插件输入")
+        let baseParams = buildPluginParametersJson(plugin)
+        let mergedParams = mergeParamsJson(baseParams, extraParams)
+        let finalParams = mergeParamsJson(
+            mergedParams,
+            buildRuntimeContextParamsJson(
+                targetType.trimAscii().toAsciiLower(),
+                targetId.trimAscii(),
+                taskId,
+                groupId,
+                plugin.namespace,
+                "Source",
+                url
+            )
+        )
+        let inputJson = buildSourceInputJson(effectiveAction, finalParams)
+
+        updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM Source插件")
+        let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
+        let result = WasmHostBridge.runGenericPlugin(
+            taskId,
+            parentTaskId,
+            plugin.namespace,
+            groupId,
+            wasmPath,
+            inputJson,
+            runtimePermissions,
+            interactivePreviewEnabled,
+            enableWasi: true
+        )
+        if (!result.success) {
+            return TaskWaitResult(false, result.error, "")
+        }
+        let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
+        if (!outputSuccess) {
+            return TaskWaitResult(false, outputError, result.output)
         }
         return TaskWaitResult(true, "", result.output)
     }
@@ -708,9 +786,10 @@ public class WasmTaskRunner {
         return if (scaled < 95) { scaled } else { 95 }
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, Int64, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, Int64, String, String) {
         var pluginNamespace = ""
         var pluginType = ""
+        var action = "run"
         var groupId = ""
         var targetType = "archive"
         var targetId = ""
@@ -722,13 +801,14 @@ public class WasmTaskRunner {
 
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
+            return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
         }
 
         try {
             let req = JsonCodec.decode<WasmTaskParametersReq>(trimmed)
             pluginNamespace = req.pluginNamespace
             pluginType = req.pluginType
+            action = req.action
             groupId = req.groupId
             targetType = req.targetType
             targetId = req.targetId
@@ -739,8 +819,9 @@ public class WasmTaskRunner {
             metadata = req.metadata
         } catch (_: Exception) {}
 
+        if (action.size == 0) { action = "run" }
         if (targetType.size == 0) { targetType = "archive" }
-        return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
+        return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
     }
 
     private static func isWasmPlugin(plugin: PluginTaskData): Bool {
@@ -1414,6 +1495,62 @@ public class WasmTaskRunner {
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildSourceInputJson(
+        action: String,
+        params: String
+    ): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("action").writeValue(action.trimAscii())
+        w.writeName("pluginType").writeValue("Source")
+
+        let trimmedParams = params.trimAscii()
+        if (trimmedParams.size > 0) {
+            w.writeName("params").jsonValue(trimmedParams)
+        } else {
+            w.writeName("params")
+            w.startObject()
+            w.endObject()
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func checkPluginOutputSuccess(output: String): (Bool, String) {
+        let trimmed = output.trimAscii()
+        if (trimmed.size == 0) {
+            return (true, "")
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return (true, "")
+            }
+            r.startObject()
+            var success = true
+            var error = ""
+            while (r.peek() != EndObject) {
+                let name = r.readName().trimAscii().toAsciiLower()
+                if (name == "success") {
+                    let v = r.readValue<String>().trimAscii().toAsciiLower()
+                    success = v != "false" && v != "0"
+                } else if (name == "error") {
+                    error = readJsonValueAsString(r)
+                } else {
+                    r.skip()
+                }
+            }
+            r.endObject()
+            return (success, error)
+        } catch (_: Exception) {
+            return (true, "")
+        }
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

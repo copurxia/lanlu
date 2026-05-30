@@ -24,6 +24,9 @@ public func registerApiRoutes(router: App) {
     // 注册插件相关路由
     registerPluginsRoutes(router)
 
+    // 注册在线源相关路由
+    registerSourcePluginsRoutes(router)
+
     // 注册TaskPool相关路由（任务管理）
     registerTaskPoolRoutes(router)
 

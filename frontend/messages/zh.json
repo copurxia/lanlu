@@ -65,6 +65,7 @@
     "random": "随便看看",
     "library": "书架",
     "settings": "设置",
+    "source": "在线源",
     "themeToggle": "主题切换",
     "language": "语言"
   },
@@ -1004,6 +1005,7 @@
     "download": "下载",
     "login": "登录",
     "script": "脚本",
+    "source": "在线源",
     "pluginConfiguration": "插件配置",
     "pluginConfigurationDescription": "使用智能表单或JSON编辑器配置插件参数",
     "smartForm": "智能表单",

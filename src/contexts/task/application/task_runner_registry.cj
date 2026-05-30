@@ -30,6 +30,8 @@ public class TaskRunnerRegistry {
             "plugin_asset_consume",
             "metadata_plugin",
             "download_url_callback",
+            "source_download",
+            "source_download_callback",
             "tag_import",
             "scan_all_categories",
             "scan_single_category",
@@ -105,6 +107,12 @@ public class TaskRunnerRegistry {
         }
         handlers["download_url_callback"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             DownloadUrlCallbackRunner.run(taskId, parameters, context)
+        }
+        handlers["source_download"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
+            SourceDownloadTaskRunner.run(taskId, parameters, context)
+        }
+        handlers["source_download_callback"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
+            SourceDownloadCallbackRunner.run(taskId, parameters, context)
         }
         handlers["tag_import"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             TagI18nImportTaskRunner.run(taskId, parameters, context)
