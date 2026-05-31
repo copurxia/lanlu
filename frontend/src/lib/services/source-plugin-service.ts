@@ -2,7 +2,11 @@
 
 import { apiClient } from '../api';
 import { extractApiError } from '@/lib/utils/api-utils';
-import { sourceCoverAssetLimiter, sourcePageAssetLimiter } from '@/lib/utils/concurrency-limiter';
+import {
+  sourceCoverAssetLimiter,
+  sourceDirectActionLimiter,
+  sourcePageAssetLimiter,
+} from '@/lib/utils/concurrency-limiter';
 
 export interface SourcePluginSummary {
   namespace: string;
@@ -317,18 +321,20 @@ export class SourcePluginService {
     fallbackError: string,
     signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
-    try {
-      const response = await apiClient.post(
-        `/api/admin/source-plugins/${encodeURIComponent(namespace)}/action/${encodeURIComponent(action)}`,
-        params,
-        { signal }
-      );
-      // 浏览类 action 后端已改为直连返回 { success, data, error }
-      const data = response.data as Record<string, unknown>;
-      return data;
-    } catch (error) {
-      return { success: false, error: extractApiError(error, fallbackError) };
-    }
+    return sourceDirectActionLimiter.run(async () => {
+      try {
+        const response = await apiClient.post(
+          `/api/admin/source-plugins/${encodeURIComponent(namespace)}/action/${encodeURIComponent(action)}`,
+          params,
+          { signal }
+        );
+        // 浏览类 action 后端已改为直连返回 { success, data, error }
+        const data = response.data as Record<string, unknown>;
+        return data;
+      } catch (error) {
+        return { success: false, error: extractApiError(error, fallbackError) };
+      }
+    });
   }
 
   private static parseBrowseResult(parsed: Record<string, unknown>, fallbackError: string): SourceBrowseResult {

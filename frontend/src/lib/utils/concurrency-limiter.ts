@@ -49,3 +49,6 @@ export const sourceCoverAssetLimiter = new ConcurrencyLimiter(4);
 
 /** Source 页面资产请求全局并发限制 */
 export const sourcePageAssetLimiter = new ConcurrencyLimiter(3);
+
+/** 所有 Source 直连 action 共用的全局并发限制 */
+export const sourceDirectActionLimiter = new ConcurrencyLimiter(4);

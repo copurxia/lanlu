@@ -10,6 +10,8 @@ import stdx.encoding.json.stream.*
  * 每个 action 会启动一个 WASM 实例，过多并发会导致内存/CPU 压力。
  */
 private let MAX_CONCURRENT_DIRECT_ACTIONS: Int64 = 4
+private let DIRECT_ACTION_WAIT_TIMEOUT_MS: Int64 = 5000
+private let DIRECT_ACTION_WAIT_INTERVAL_MS: Int64 = 50
 private let directActionActiveCount = AtomicInt64(0)
 
 public class SourceDirectActionService {
@@ -37,6 +39,26 @@ public class SourceDirectActionService {
         return "source_direct:${safeNamespace}:${safeAction}:${DateTime.now().toUnixTimeStamp().toSeconds()}"
     }
 
+    private static func nowMillis(): Int64 {
+        return DateTime.now().toUnixTimeStamp().toMilliseconds()
+    }
+
+    private static func acquireDirectActionSlot(): Bool {
+        let deadline = nowMillis() + DIRECT_ACTION_WAIT_TIMEOUT_MS
+        while (true) {
+            let currentActive = directActionActiveCount.fetchAdd(1)
+            if (currentActive < MAX_CONCURRENT_DIRECT_ACTIONS) {
+                return true
+            }
+            directActionActiveCount.fetchSub(1)
+            if (nowMillis() >= deadline) {
+                return false
+            }
+            sleep(Duration.millisecond * DIRECT_ACTION_WAIT_INTERVAL_MS)
+        }
+        return false
+    }
+
     public static func execute(
         namespace: String,
         action: String,
@@ -47,10 +69,8 @@ public class SourceDirectActionService {
             return errorJson("Not a browse action: ${effectiveAction}")
         }
 
-        // 并发保护：如果同时在执行的直连 action 超过上限，立即拒绝
-        let currentActive = directActionActiveCount.fetchAdd(1)
-        if (currentActive >= MAX_CONCURRENT_DIRECT_ACTIONS) {
-            directActionActiveCount.fetchSub(1)
+        // 并发保护：短暂等待槽位，避免懒加载突发请求直接打到用户侧错误。
+        if (!acquireDirectActionSlot()) {
             return errorJson("Too many concurrent direct source actions (max ${MAX_CONCURRENT_DIRECT_ACTIONS.toString()}), try again later")
         }
 
