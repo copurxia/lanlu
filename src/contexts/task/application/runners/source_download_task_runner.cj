@@ -25,6 +25,8 @@ public class SourceDownloadTaskRunner {
         let remoteId = parseRemoteId(parameters)
         let archiveId = parseArchiveId(parameters)
         let categoryId = parseCategoryId(parameters)
+        let kind = parseKind(parameters)
+        let parentRemoteId = parseParentRemoteId(parameters)
 
         if (namespace.size == 0) {
             fail(taskId, "namespace is required")
@@ -48,7 +50,7 @@ public class SourceDownloadTaskRunner {
         }
 
         try {
-            TaskIO.appendLog(taskId, "namespace=${namespace}, remote_id=${remoteId}, archive_id=${archiveId}, category_id=${categoryId}")
+            TaskIO.appendLog(taskId, "namespace=${namespace}, remote_id=${remoteId}, archive_id=${archiveId}, category_id=${categoryId}, kind=${kind}")
             TaskModel.updateTaskProgress(taskId, 5, "加载Source插件")
 
             let plugin = PluginTaskService.getPluginByNamespace(namespace)
@@ -83,6 +85,12 @@ public class SourceDownloadTaskRunner {
             if (archiveId.size > 0) {
                 w.writeName("oneshotParam").writeValue(archiveId)
             }
+            if (kind.size > 0) {
+                w.writeName("kind").writeValue(kind)
+            }
+            if (parentRemoteId.size > 0) {
+                w.writeName("parent_remote_id").writeValue(parentRemoteId)
+            }
             w.endObject()
             w.flush()
             let runnerParams = String.fromUtf8(readToEnd(out))
@@ -104,7 +112,7 @@ public class SourceDownloadTaskRunner {
             context.notifyTaskAvailable()
 
             TaskModel.updateTaskProgress(taskId, 15, "创建回调任务")
-            let callbackParams = buildCallbackParams(taskId, pluginTask.id, categoryId, plugin.namespace)
+            let callbackParams = buildCallbackParams(taskId, pluginTask.id, categoryId, plugin.namespace, kind, parentRemoteId)
             let callbackTask = TaskModel.createWaitingTask(
                 "在线源下载后处理",
                 "source_download_callback",
@@ -135,7 +143,7 @@ public class SourceDownloadTaskRunner {
         }
     }
 
-    private static func buildCallbackParams(sourceTaskId: Int64, pluginTaskId: Int64, categoryId: Int64, pluginNamespace: String): String {
+    private static func buildCallbackParams(sourceTaskId: Int64, pluginTaskId: Int64, categoryId: Int64, pluginNamespace: String, kind: String, parentRemoteId: String): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -143,6 +151,12 @@ public class SourceDownloadTaskRunner {
         w.writeName("pluginTaskId").writeValue(pluginTaskId)
         w.writeName("categoryId").writeValue(categoryId)
         w.writeName("pluginNamespace").writeValue(pluginNamespace)
+        if (kind.size > 0) {
+            w.writeName("kind").writeValue(kind)
+        }
+        if (parentRemoteId.size > 0) {
+            w.writeName("parent_remote_id").writeValue(parentRemoteId)
+        }
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
@@ -238,6 +252,48 @@ public class SourceDownloadTaskRunner {
             r.endObject()
         } catch (_: Exception) {}
         return 0
+    }
+
+    private static func parseKind(parameters: String): String {
+        let trimmed = parameters.trimAscii()
+        if (trimmed.size == 0) { return "archive" }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return "archive" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "kind" => return r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return "archive"
+    }
+
+    private static func parseParentRemoteId(parameters: String): String {
+        let trimmed = parameters.trimAscii()
+        if (trimmed.size == 0) { return "" }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return "" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "parent_remote_id" => return r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return ""
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

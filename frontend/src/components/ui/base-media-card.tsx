@@ -39,11 +39,19 @@ export function BaseMediaCard({
   extraBadge,
   detailsLabel,
   pagesLabel,
+  detailPath: detailPathOverride,
+  readerPath: readerPathOverride,
   priority = false,
   hideMetaOnMobile = false,
   disableContentVisibility = false,
   coverHeight,
   surfaceClassName,
+  onDownload,
+  canDownload,
+  disableFavorite = false,
+  disableEdit = false,
+  disableDelete = false,
+  disableReadStatus = false,
   onFavoriteToggle,
   selectable = false,
   selectionMode = false,
@@ -145,13 +153,17 @@ export function BaseMediaCard({
 
   const shouldEntranceAnimate = index < 24
   const animationDelay = shouldEntranceAnimate ? Math.min(index * 50, 500) : 0
-  const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
+  const detailPath = detailPathOverride || (type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`)
   const readerTargetId = type === 'archive' ? id : thumbnailId
-  const readerPath = readerTargetId
+  const readerPath = readerPathOverride || (readerTargetId
     ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined, type !== 'archive' ? id : undefined)
-    : detailPath
+    : detailPath)
   const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
   const [touchInputEnabled, setTouchInputEnabled] = React.useState(false)
+  const effectiveCanDelete = !disableDelete && canDelete
+  const effectiveCanEdit = !disableEdit && canEdit
+  const effectiveCanToggleFavorite = !disableFavorite && Boolean(onFavoriteToggle)
+  const effectiveCanDownload = canDownload ?? (type === 'archive' || Boolean(onDownload))
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -231,9 +243,10 @@ export function BaseMediaCard({
     <>
       {menuOpen ? (
         <MediaCardActions
-          canDelete={canDelete}
-          canEdit={canEdit}
-          canToggleFavorite={Boolean(onFavoriteToggle)}
+          canDelete={effectiveCanDelete}
+          canDownload={effectiveCanDownload}
+          canEdit={effectiveCanEdit}
+          canToggleFavorite={effectiveCanToggleFavorite}
           deleting={deleting}
           favoriteLoading={favoriteLoading}
           isFavorite={isFavorite}
@@ -242,11 +255,11 @@ export function BaseMediaCard({
           menuOpen={menuOpen}
           menuPosition={menuPosition}
           onDelete={handleDelete}
-          onDownload={handleDownload}
+          onDownload={onDownload || handleDownload}
           onOpenChange={handleMenuOpenChange}
           onOpenEdit={handleOpenEdit}
           onToggleFavorite={toggleFavorite}
-          onToggleReadStatus={handleToggleReadStatus}
+          onToggleReadStatus={disableReadStatus ? async () => {} : handleToggleReadStatus}
           onUseMultiSelect={() => toggleSelected(true)}
           onStartReading={navigateToReader}
           readStatusText={readStatusText}
@@ -254,6 +267,10 @@ export function BaseMediaCard({
           extraMenuItems={extraMenuItems}
           selectable={selectable}
           selectionMode={selectionMode}
+          showDeleteAction={!disableDelete}
+          showEditAction={!disableEdit}
+          showFavoriteAction={!disableFavorite}
+          showReadStatusAction={!disableReadStatus}
           t={t}
           type={type}
         />
@@ -328,7 +345,16 @@ export function BaseMediaCard({
               <div className="absolute inset-0 z-1 bg-black/45 pointer-events-none" />
             )}
 
-            {badge && <div className="absolute top-2 left-2 z-30">{badge}</div>}
+            {badge && (
+              <div
+                className={[
+                  'absolute top-2 z-30 transition-[left]',
+                  selectable ? (selectionMode || selected ? 'left-11' : 'left-2 md:group-hover:left-11') : 'left-2',
+                ].join(' ')}
+              >
+                {badge}
+              </div>
+            )}
 
             {selectable && (
               <div
@@ -387,24 +413,26 @@ export function BaseMediaCard({
               >
                 <Eye className="h-4 w-4" />
               </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="secondary"
-                className={[
-                  'h-8 w-8 bg-white/15 text-white hover:bg-white/25',
-                  isFavorite ? 'text-red-400' : '',
-                ].filter(Boolean).join(' ')}
-                aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                disabled={favoriteLoading}
-                onClick={async (event) => {
-                  event.stopPropagation()
-                  await toggleFavorite()
-                }}
-              >
-                <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
-              </Button>
+              {!disableFavorite && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className={[
+                    'h-8 w-8 bg-white/15 text-white hover:bg-white/25',
+                    isFavorite ? 'text-red-400' : '',
+                  ].filter(Boolean).join(' ')}
+                  aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                  title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                  disabled={favoriteLoading || !effectiveCanToggleFavorite}
+                  onClick={async (event) => {
+                    event.stopPropagation()
+                    await toggleFavorite()
+                  }}
+                >
+                  <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+                </Button>
+              )}
             </div>
 
             <div

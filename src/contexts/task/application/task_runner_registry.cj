@@ -32,6 +32,7 @@ public class TaskRunnerRegistry {
             "download_url_callback",
             "source_download",
             "source_download_callback",
+            "source_download_scan_callback",
             "tag_import",
             "scan_all_categories",
             "scan_single_category",
@@ -113,6 +114,9 @@ public class TaskRunnerRegistry {
         }
         handlers["source_download_callback"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             SourceDownloadCallbackRunner.run(taskId, parameters, context)
+        }
+        handlers["source_download_scan_callback"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
+            SourceDownloadScanCallbackRunner.run(taskId, parameters, context)
         }
         handlers["tag_import"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             TagI18nImportTaskRunner.run(taskId, parameters, context)

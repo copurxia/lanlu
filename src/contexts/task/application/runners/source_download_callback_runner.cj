@@ -16,7 +16,7 @@ public class SourceDownloadCallbackRunner {
         TaskIO.appendLog(taskId, "source_download_callback task started")
         TaskModel.updateTaskProgress(taskId, 10, "开始处理在线源下载回调")
 
-        let (downloadTaskId, pluginTaskId, categoryId, pluginNamespace) = parseParameters(parameters)
+        let (downloadTaskId, pluginTaskId, categoryId, pluginNamespace, kind) = parseParameters(parameters)
         if (downloadTaskId <= 0 || pluginTaskId <= 0 || categoryId <= 0 || pluginNamespace.size == 0) {
             fail(taskId, "Invalid callback parameters")
             return
@@ -87,11 +87,39 @@ public class SourceDownloadCallbackRunner {
 
         context.notifyTaskAvailable()
 
+        // Create a scan callback task that waits for download_url to complete,
+        // then waits for scan_archive and finally completes source_download with archive_id or tankoubon_id.
+        TaskModel.updateTaskProgress(taskId, 60, "创建扫描入库回调任务")
+        let scanCbOut = ByteBuffer()
+        let scanCbW = JsonWriter(scanCbOut)
+        scanCbW.startObject()
+        scanCbW.writeName("sourceDownloadTaskId").writeValue(downloadTaskId)
+        scanCbW.writeName("downloadUrlTaskId").writeValue(dlTask.id)
+        scanCbW.writeName("kind").writeValue(kind)
+        scanCbW.endObject()
+        scanCbW.flush()
+        let scanCbParams = String.fromUtf8(readToEnd(scanCbOut))
+        let scanCbTask = TaskModel.createWaitingTask(
+            "等待扫描入库",
+            "source_download_scan_callback",
+            scanCbParams,
+            dlTask.id,
+            "source_download:${downloadTaskId}",
+            "source_download:${downloadTaskId}"
+        )
+        if (scanCbTask.id <= 0) {
+            let errMsg = "Failed to create source_download_scan_callback task"
+            TaskModel.failTask(downloadTaskId, errMsg)
+            fail(taskId, errMsg)
+            return
+        }
+        context.notifyTaskAvailable()
+
+        // Do NOT complete source_download here; leave it waiting for scan callback.
         let resultJson = buildSuccessResult(dlTask.id, galleryUrl)
-        TaskModel.updateTaskProgress(downloadTaskId, 100, "已创建下载任务")
+        TaskModel.updateTaskProgress(downloadTaskId, 60, "等待下载和扫描入库")
         TaskIO.writeOutput(downloadTaskId, resultJson)
-        TaskModel.completeTask(downloadTaskId, resultJson)
-        TaskIO.appendLog(downloadTaskId, "source_download task completed: download_url_task_id=${dlTask.id}")
+        TaskIO.appendLog(downloadTaskId, "source_download waiting for scan: download_url_task_id=${dlTask.id}, scan_callback_task_id=${scanCbTask.id}")
 
         TaskModel.updateTaskProgress(taskId, 100, "在线源下载回调完成")
         TaskModel.completeTask(taskId, "source_download_callback completed")
@@ -101,11 +129,12 @@ public class SourceDownloadCallbackRunner {
         cbW.writeName("success").writeValue(1)
         cbW.writeName("download_task_id").writeValue(downloadTaskId)
         cbW.writeName("download_url_task_id").writeValue(dlTask.id)
+        cbW.writeName("scan_callback_task_id").writeValue(scanCbTask.id)
         cbW.endObject()
         cbW.flush()
         TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(cbOut)))
 
-        logger.debug("source_download_callback completed", ("download_task_id", downloadTaskId.toString()), ("download_url_task_id", dlTask.id.toString()))
+        logger.debug("source_download_callback completed", ("download_task_id", downloadTaskId.toString()), ("download_url_task_id", dlTask.id.toString()), ("scan_callback_task_id", scanCbTask.id.toString()))
     }
 
     private static func buildSuccessResult(dlTaskId: Int64, galleryUrl: String): String {
@@ -214,16 +243,17 @@ public class SourceDownloadCallbackRunner {
         return ""
     }
 
-    private static func parseParameters(parameters: String): (Int64, Int64, Int64, String) {
+    private static func parseParameters(parameters: String): (Int64, Int64, Int64, String, String) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (0, 0, 0, "")
+            return (0, 0, 0, "", "")
         }
 
         var downloadTaskId: Int64 = 0
         var pluginTaskId: Int64 = 0
         var categoryId: Int64 = 0
         var pluginNamespace = ""
+        var kind = ""
 
         try {
             var buf = ByteBuffer()
@@ -245,6 +275,7 @@ public class SourceDownloadCallbackRunner {
                             case "pluginTaskId" => pluginTaskId = readInt64Flexible()
                             case "categoryId" => categoryId = readInt64Flexible()
                             case "pluginNamespace" => pluginNamespace = r.readValue<String>().trimAscii()
+                            case "kind" => kind = r.readValue<String>().trimAscii()
                             case _ => r.skip()
                         }
                     }
@@ -253,7 +284,7 @@ public class SourceDownloadCallbackRunner {
             }
         } catch (_: Exception) {}
 
-        return (downloadTaskId, pluginTaskId, categoryId, pluginNamespace)
+        return (downloadTaskId, pluginTaskId, categoryId, pluginNamespace, kind)
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

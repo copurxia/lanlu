@@ -436,6 +436,16 @@ public class ArchiveController {
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 复合 ID 检测/转发
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(request) =>
+                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
+                ResponseView.json(ctx, json)
+                return
+            case None => ()
+        }
+
         let lang = (ctx.query("lang") ?? "").trimAscii()
         let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
@@ -582,6 +592,15 @@ public class ArchiveController {
     // GET /api/archives/{id}/files
     public static func getFiles(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 复合 ID 检测/转发
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(request) =>
+                let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
+                ResponseView.json(ctx, json)
+                return
+            case None => ()
+        }
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -1230,6 +1249,15 @@ public class ArchiveController {
     // GET /api/archives/{id}/page?path=...
     public static func getPage(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 复合 ID 检测/转发
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(request) =>
+                let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
+                ResponseView.json(ctx, json)
+                return
+            case None => ()
+        }
 
         // 检查ID是否为空
         if (id.size == 0) {

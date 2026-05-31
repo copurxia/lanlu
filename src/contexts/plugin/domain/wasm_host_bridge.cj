@@ -24,6 +24,9 @@ import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.infrastructure.archivehandler.*
 import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
+import lanlu.contexts.asset.domain.*
+import lanlu.contexts.asset.infrastructure.persistence.*
+import lanlu.contexts.system.application.SystemSettingsService
 
 public class WasmExecutionResult {
     public var success: Bool = false
@@ -813,6 +816,7 @@ public class WasmHostBridge {
         registerHostMethod("task_kv.list_keys", { ctx => handleTaskKvListKeys(ctx) })
         registerHostMethod("taskKv.listKeys", { ctx => handleTaskKvListKeys(ctx) })
         registerHostMethod("ui.select", { ctx => handleUiSelect(ctx) })
+        registerHostMethod("asset.install_from_file", { ctx => handleAssetInstallFromFile(ctx) })
         hostMethodRegistryInitialized = true
     }
 
@@ -3263,5 +3267,153 @@ public class WasmHostBridge {
             out[i] = UInt8(bytes[i])
         }
         return out
+    }
+
+    /**
+     * Host handler: asset.install_from_file
+     *
+     * 插件调用此方法，将已通过 WASI 文件系统写入的临时文件注册为系统资产。
+     * 文件将被复制到 ASSET_PATH 目录，并创建数据库记录。
+     *
+     * 请求参数 (JSON):
+     *   - guest_path: string (必填) 插件 WASI 视图下的文件路径，如 "/plugin/uuid.jpg"
+     *   - kind: string (可选) 资产类型，默认 "attachment"，可选值见 AssetKind 枚举
+     *   - original_filename: string (可选) 原始文件名，默认使用 guest_path 的文件名
+     *   - content_type: string (可选) MIME 类型，默认根据扩展名推断
+     *
+     * 返回: { "asset_id": 123 }
+     */
+    private static func handleAssetInstallFromFile(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, capErr) = ensureHostCapability(ctx.executionId, ["asset.install_from_file"], "asset.install_from_file")
+        if (!allowed) { return (false, "{}", capErr) }
+
+        let (guestPath, kind, originalFilename, contentType) = parseAssetInstallFromFileParams(ctx.effectiveParams)
+        if (guestPath.size == 0) {
+            return (false, "{}", "missing guest_path")
+        }
+
+        // 校验 guest_path 必须以 /plugin/ 开头
+        if (!guestPath.startsWith("/plugin/")) {
+            return (false, "{}", "guest_path must start with /plugin/")
+        }
+
+        // 解析 host 端真实路径: /plugin/foo -> {runtimeHostDir}/foo
+        let runtimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), ctx.pluginNamespace)
+        let relativePath = guestPath[7..] // strip "/plugin/" prefix (7 chars)
+        let hostPath = FileUtils.joinPath(runtimeHostDir, relativePath)
+
+        // 安全检查：确认解析后的路径仍在 runtimeHostDir 内
+        if (!hostPath.startsWith(runtimeHostDir)) {
+            return (false, "{}", "invalid guest_path: path traversal detected")
+        }
+
+        let hostPathObj = Path(hostPath)
+        if (!exists(hostPathObj)) {
+            return (false, "{}", "file not found at resolved path: ${hostPath}")
+        }
+
+        // 读取文件信息
+        let fileInfo = FileInfo(hostPathObj)
+        if (fileInfo.isDirectory()) {
+            return (false, "{}", "guest_path points to a directory, not a file")
+        }
+        let fileSize = Int64(fileInfo.size)
+
+        // 确定文件扩展名和 content type
+        let effectiveOriginalFilename = if (originalFilename.size > 0) { originalFilename } else {
+            // 从 guest_path 中提取文件名 (最后一段)
+            let parts = guestPath.split("/")
+            if (parts.size > 0) { parts[parts.size - 1] } else { relativePath }
+        }
+        let fileExt = FileUtils.getFileExtensionWithoutDot(effectiveOriginalFilename)
+        let effectiveContentType = if (contentType.size > 0) { contentType } else { guessContentTypeFromExt(fileExt) }
+
+        // 确定资产 kind
+        let effectiveKind = if (kind.size > 0 && AssetKind.isValidDbValue(kind)) { kind.toAsciiLower() } else { "attachment" }
+
+        // 创建资产数据库记录
+        match (AssetDao.create(None, effectiveKind, effectiveOriginalFilename, effectiveContentType, fileExt, fileSize, "")) {
+            case Some(assetId) =>
+                // 将文件复制/移动到 ASSET_PATH/{assetId}.{ext}
+                let assetDir = SystemSettingsService.getPath("ASSET_PATH")
+                let targetPathStr = FileUtils.joinPath(assetDir, "${assetId.toString()}.${fileExt}")
+                // 确保资产目录存在
+                try { FileUtils.ensureDirectoryExists(Path(assetDir)) } catch (_: Exception) {}
+                FileUtils.safeReplaceFile(Path(targetPathStr), hostPathObj)
+                return (true, buildAssetInstallResponseJson(assetId), "")
+            case None =>
+                return (false, "{}", "failed to create asset record")
+        }
+    }
+
+    /**
+     * 解析 asset.install_from_file 的请求参数
+     */
+    private static func parseAssetInstallFromFileParams(raw: String): (String, String, String, String) {
+        var guestPath = ""
+        var kind = ""
+        var originalFilename = ""
+        var contentType = ""
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return (guestPath, kind, originalFilename, contentType)
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                match (name) {
+                    case "guest_path" => guestPath = r.readValue<String>().trimAscii()
+                    case "guestPath" => guestPath = r.readValue<String>().trimAscii()
+                    case "kind" => kind = r.readValue<String>().trimAscii().toAsciiLower()
+                    case "original_filename" => originalFilename = r.readValue<String>().trimAscii()
+                    case "originalFilename" => originalFilename = r.readValue<String>().trimAscii()
+                    case "content_type" => contentType = r.readValue<String>().trimAscii().toAsciiLower()
+                    case "contentType" => contentType = r.readValue<String>().trimAscii().toAsciiLower()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return (guestPath, kind, originalFilename, contentType)
+    }
+
+    /**
+     * 构建 asset.install_from_file 成功响应
+     */
+    private static func buildAssetInstallResponseJson(assetId: Int64): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("asset_id").writeValue(assetId)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    /**
+     * 根据文件扩展名猜测 Content-Type
+     */
+    private static func guessContentTypeFromExt(ext: String): String {
+        let lower = ext.trimAscii().toAsciiLower()
+        match (lower) {
+            case "jpg" | "jpeg" => return "image/jpeg"
+            case "png" => return "image/png"
+            case "gif" => return "image/gif"
+            case "webp" => return "image/webp"
+            case "bmp" => return "image/bmp"
+            case "svg" => return "image/svg+xml"
+            case "avif" => return "image/avif"
+            case "mp4" => return "video/mp4"
+            case "webm" => return "video/webm"
+            case "mp3" => return "audio/mpeg"
+            case "pdf" => return "application/pdf"
+            case "json" => return "application/json"
+            case _ => return "application/octet-stream"
+        }
     }
 }

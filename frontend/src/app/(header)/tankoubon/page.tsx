@@ -33,6 +33,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { SourcePluginService } from '@/lib/services/source-plugin-service';
+import { CategoryService } from '@/lib/services/category-service';
 import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
@@ -47,6 +49,7 @@ import { useToast } from '@/hooks/use-toast';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
+import { parseSourceId, buildSourceReaderUrl, buildSourceArchiveUrl } from '@/lib/utils/source-id-utils';
 import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
@@ -103,6 +106,7 @@ type ArchiveListItemProps = {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  sourceParentRemoteId?: string | null;
 };
 
 function ArchiveListItem({
@@ -112,6 +116,7 @@ function ArchiveListItem({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  sourceParentRemoteId,
 }: ArchiveListItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
@@ -140,7 +145,21 @@ function ArchiveListItem({
   };
 
   const handleNavigateToReader = () => {
+    const parsed = parseSourceId(archive.arcid);
+    if (parsed) {
+      router.push(buildSourceReaderUrl(parsed.namespace, parsed.remoteId, { parentRemoteId: sourceParentRemoteId ?? undefined }));
+      return;
+    }
     router.push(buildReaderPath(archive.arcid, archive.progress));
+  };
+
+  const handleNavigateToDetails = () => {
+    const parsed = parseSourceId(archive.arcid);
+    if (parsed) {
+      router.push(buildSourceArchiveUrl(parsed.namespace, parsed.remoteId));
+      return;
+    }
+    router.push(`/archive?id=${archive.arcid}`);
   };
 
   const handleActivate = () => {
@@ -193,42 +212,46 @@ function ArchiveListItem({
       {!selectionMode ? (
         <div className="absolute right-3 top-3 flex items-center gap-2">
           <Button
-            asChild
             variant="secondary"
             size="icon"
             className="h-8 w-8"
             title={t('archive.details')}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Link href={`/archive?id=${archive.arcid}`} prefetch={false}>
-              <Eye className="h-4 w-4" />
-            </Link>
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
-            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-            disabled={favoriteLoading}
-            onClick={handleFavoriteClick}
-          >
-            {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className="h-8 w-8"
-            title={t('tankoubon.removeArchive')}
-            disabled={isRemoving}
             onClick={(e) => {
               e.stopPropagation();
-              onRemove();
+              handleNavigateToDetails();
             }}
           >
-            {isRemoving ? <Spinner size="sm" /> : <Minus className="h-4 w-4" />}
+            <Eye className="h-4 w-4" />
           </Button>
+          {!archive.arcid.startsWith('source:') && (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
+                title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                disabled={favoriteLoading}
+                onClick={handleFavoriteClick}
+              >
+                {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-8 w-8"
+                title={t('tankoubon.removeArchive')}
+                disabled={isRemoving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+              >
+                {isRemoving ? <Spinner size="sm" /> : <Minus className="h-4 w-4" />}
+              </Button>
+            </>
+          )}
         </div>
       ) : null}
 
@@ -290,6 +313,9 @@ function TankoubonDetailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const tankoubonId = searchParams?.get('id') ?? null;
+  const sourceNamespace = searchParams?.get('source') ?? null;
+  const remoteId = searchParams?.get('remote_id') ?? null;
+  const isSourceMode = Boolean(sourceNamespace && remoteId);
 
   const [tankoubon, setTankoubon] = useState<TankoubonMetadata | null>(null);
   const [archives, setArchives] = useState<Archive[]>([]);
@@ -464,6 +490,64 @@ function TankoubonDetailContent() {
 
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
+    if (isSourceMode && sourceNamespace && remoteId) {
+      try {
+        setLoading(true);
+        const result = await SourcePluginService.detail(sourceNamespace, remoteId);
+        if (result.success && result.data) {
+          const item = result.data;
+          const children = (item.children || []).map((child) => ({
+            entity_type: 'archive' as const,
+            entity_id: `source:${child.source_namespace}:${child.remote_id}`,
+            title: child.title || '',
+            description: child.description || '',
+            tags: child.tags || [],
+            assets: undefined,
+            pages: undefined,
+            locator: {
+              entity_type: 'archive',
+              entity_id: child.remote_id,
+              parent_entity_type: 'tankoubon',
+              parent_entity_id: item.remote_id,
+            },
+          }));
+          const nextData: TankoubonMetadata = {
+            tankoubon_id: `source:${item.source_namespace}:${item.remote_id}`,
+            title: item.title || '',
+            description: item.description || '',
+            tags: item.tags || [],
+            assets: undefined,
+            children,
+            archive_count: children.length,
+            pagecount: item.page_count || 0,
+            progress: 0,
+            isnew: true,
+            isfavorite: false,
+            release_at: '',
+            updated_at: '',
+            created_at: '',
+          };
+          setTankoubon(nextData);
+          setMetadataArchivePatches([]);
+          setIsFavorite(false);
+          setEditName(item.title || '');
+          setEditSummary(item.description || '');
+          setEditTags((item.tags || []).map(toCanonicalTag));
+          setEditCover('');
+          setEditBackdrop('');
+          setEditClearlogo('');
+          setEditAssetCoverId('');
+          setEditAssetBackdropId('');
+          setEditAssetClearlogoId('');
+        }
+      } catch (error) {
+        logger.apiError('fetch source tankoubon', error);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (!tankoubonId) return;
 
     try {
@@ -500,12 +584,31 @@ function TankoubonDetailContent() {
     } finally {
       setLoading(false);
     }
-  }, [language, tankoubonId, toCanonicalTag]);
+  }, [language, tankoubonId, toCanonicalTag, isSourceMode, sourceNamespace, remoteId]);
 
   // Fetch archives in tankoubon
   const currentTankoubonId = tankoubon?.tankoubon_id ?? null;
 
   const fetchArchives = useCallback(async () => {
+    if (isSourceMode && tankoubon?.children) {
+      const sourceArchives: Archive[] = tankoubon.children.map((child) => ({
+        arcid: String(child.entity_id || ''),
+        title: child.title || '',
+        filename: '',
+        description: child.description || '',
+        tags: (child.tags || []).join(', '),
+        pagecount: 0,
+        progress: 0,
+        isnew: true,
+        archivetype: 'image',
+        lastreadtime: 0,
+        size: 0,
+        assets: undefined,
+      }));
+      setArchives(sourceArchives);
+      return;
+    }
+
     if (!currentTankoubonId) {
       setArchives([]);
       return;
@@ -531,7 +634,7 @@ function TankoubonDetailContent() {
     } finally {
       setArchivesLoading(false);
     }
-  }, [currentTankoubonId, language]);
+  }, [currentTankoubonId, language, isSourceMode, tankoubon]);
 
   useEffect(() => {
     fetchTankoubon();
@@ -1912,12 +2015,22 @@ function TankoubonDetailContent() {
                 const itemKey = `tankoubon-archive:${archive.arcid}`;
                 return (
                   <div key={archive.arcid} className="relative group">
-                    <ArchiveCard
-                      archive={archive}
-                      index={index}
-                      coverHeight={archiveGridCoverHeights[itemKey]}
-                      surfaceClassName="border-none shadow-none bg-transparent"
-                      selectable
+	                    <ArchiveCard
+	                      archive={archive}
+	                      index={index}
+	                      coverHeight={archiveGridCoverHeights[itemKey]}
+	                      surfaceClassName="border-none shadow-none bg-transparent"
+	                      detailPath={(() => {
+	                        const parsed = parseSourceId(archive.arcid);
+	                        return parsed ? buildSourceArchiveUrl(parsed.namespace, parsed.remoteId) : undefined;
+	                      })()}
+	                      readerPath={(() => {
+	                        const parsed = parseSourceId(archive.arcid);
+	                        return parsed ? buildSourceReaderUrl(parsed.namespace, parsed.remoteId, {
+	                          parentRemoteId: isSourceMode && remoteId ? remoteId : undefined
+	                        }) : undefined;
+	                      })()}
+	                      selectable
                       selectionMode={selectionMode}
                       selected={selectedArchiveIds.has(archive.arcid)}
                       onToggleSelect={(selected) => toggleArchiveCardSelection(archive.arcid, selected)}
@@ -1969,6 +2082,7 @@ function TankoubonDetailContent() {
                   isRemoving={isRemoving}
                   selectionMode={selectionMode}
                   selected={selectedArchiveIds.has(archive.arcid)}
+                  sourceParentRemoteId={isSourceMode ? remoteId : null}
                   onToggleSelect={() => {
                     if (!selectionMode) {
                       enterSelectionMode();

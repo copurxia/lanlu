@@ -5,7 +5,7 @@ import lanlu.infrastructure.migrations.*
 
 public class V022_UserPasswordHashArgon2id <: Migration {
     public func version(): String {
-        return "022"
+        return "V022"
     }
 
     public func description(): String {

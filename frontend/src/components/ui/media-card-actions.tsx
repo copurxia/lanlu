@@ -12,6 +12,7 @@ import type { BaseMediaCardType } from '@/components/ui/base-media-card.types'
 
 type MediaCardActionsProps = {
   canDelete: boolean
+  canDownload?: boolean
   canEdit: boolean
   canToggleFavorite: boolean
   deleting: boolean
@@ -34,12 +35,17 @@ type MediaCardActionsProps = {
   readerTargetId: string
   selectable: boolean
   selectionMode: boolean
+  showDeleteAction?: boolean
+  showEditAction?: boolean
+  showFavoriteAction?: boolean
+  showReadStatusAction?: boolean
   t: (key: string) => string
   type: BaseMediaCardType
 }
 
 export function MediaCardActions({
   canDelete,
+  canDownload,
   canEdit,
   canToggleFavorite,
   deleting,
@@ -62,6 +68,10 @@ export function MediaCardActions({
   readerTargetId,
   selectable,
   selectionMode,
+  showDeleteAction = true,
+  showEditAction = true,
+  showFavoriteAction = true,
+  showReadStatusAction = true,
   t,
   type,
 }: MediaCardActionsProps) {
@@ -89,13 +99,18 @@ export function MediaCardActions({
       separator: selectable && !selectionMode,
     },
     // Archive类型特有操作
-    ...(type === 'archive'
+    ...(type === 'archive' || canDownload
       ? [
           {
             id: 'download',
             label: t('archive.download'),
             icon: Download,
+            disabled: !canDownload,
           },
+        ]
+      : []),
+    ...(type === 'archive' && showReadStatusAction
+      ? [
           {
             id: 'toggle-read-status',
             label: readStatusText,
@@ -104,49 +119,58 @@ export function MediaCardActions({
           },
         ]
       : []),
-    // 收藏
-    {
-      id: 'toggle-favorite',
-      label: favoriteLoading
-        ? t('common.loading')
-        : isFavorite
-          ? t('common.unfavorite')
-          : t('common.favorite'),
-      icon: Heart,
-      disabled: menuActionDisabled || favoriteLoading || !canToggleFavorite,
-      customRender: (item, close) => (
-        <button
-          key={item.id}
-          className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
-          disabled={item.disabled}
-          onClick={() => {
-            void onToggleFavorite()
-            close()
-          }}
-        >
-          <Heart className={`mr-2 h-4 w-4 ${isFavorite ? 'fill-current text-red-500' : ''}`} />
-          <span>{item.label}</span>
-        </button>
-      ),
-    },
-    // 编辑
-    {
-      id: 'edit',
-      label: t('common.edit'),
-      icon: Edit,
-      disabled: menuActionDisabled || !canEdit,
-      separator: true, // 在编辑前添加分割线
-    },
+    ...(showFavoriteAction
+      ? [
+          {
+            id: 'toggle-favorite',
+            label: favoriteLoading
+              ? t('common.loading')
+              : isFavorite
+                ? t('common.unfavorite')
+                : t('common.favorite'),
+            icon: Heart,
+            disabled: menuActionDisabled || favoriteLoading || !canToggleFavorite,
+            customRender: (item: MenuItem, close: () => void) => (
+              <button
+                key={item.id}
+                className="relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+                disabled={item.disabled}
+                onClick={() => {
+                  void onToggleFavorite()
+                  close()
+                }}
+              >
+                <Heart className={`mr-2 h-4 w-4 ${isFavorite ? 'fill-current text-red-500' : ''}`} />
+                <span>{item.label}</span>
+              </button>
+            ),
+          },
+        ]
+      : []),
+    ...(showEditAction
+      ? [
+          {
+            id: 'edit',
+            label: t('common.edit'),
+            icon: Edit,
+            disabled: menuActionDisabled || !canEdit,
+            separator: true,
+          },
+        ]
+      : []),
     ...(extraMenuItems ?? []),
-    // 删除
-    {
-      id: 'delete',
-      label: deleting ? t('common.loading') : t('common.delete'),
-      icon: Trash2,
-      danger: true,
-      disabled: menuActionDisabled || !canDelete,
-      group: 'management',
-    },
+    ...(showDeleteAction
+      ? [
+          {
+            id: 'delete',
+            label: deleting ? t('common.loading') : t('common.delete'),
+            icon: Trash2,
+            danger: true,
+            disabled: menuActionDisabled || !canDelete,
+            group: 'management',
+          },
+        ]
+      : []),
   ]
 
   // 处理菜单选择

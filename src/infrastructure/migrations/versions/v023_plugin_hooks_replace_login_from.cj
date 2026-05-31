@@ -5,7 +5,7 @@ import lanlu.infrastructure.migrations.*
 
 public class V023_PluginHooksReplaceLoginFrom <: Migration {
     public func version(): String {
-        return "023"
+        return "V023"
     }
 
     public func description(): String {

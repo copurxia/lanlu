@@ -18,11 +18,13 @@ public class ProcessResultData {
     public var success: Bool
     public var archiveId: String
     public var error: String
+    public var tankoubonId: String
 
-    public init(success: Bool, archiveId: String, error: String) {
+    public init(success: Bool, archiveId: String, error: String, tankoubonId!: String = "") {
         this.success = success
         this.archiveId = archiveId
         this.error = error
+        this.tankoubonId = tankoubonId
     }
 }
 

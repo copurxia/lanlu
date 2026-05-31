@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { SourcePluginService } from '@/lib/services/source-plugin-service';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type { ReadingMode } from '@/hooks/use-reader-settings';
 
@@ -26,6 +28,9 @@ export function useReaderImageLoading({
   visibleRange,
   resetKey,
   imageRefs,
+  sourceNamespace,
+  sourceRemoteId,
+  sourceParentRemoteId,
 }: {
   pages: PageInfo[];
   readingMode: ReadingMode;
@@ -34,6 +39,9 @@ export function useReaderImageLoading({
   visibleRange: VisibleRange;
   resetKey?: string | null;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
+  sourceNamespace?: string | null;
+  sourceRemoteId?: string | null;
+  sourceParentRemoteId?: string | null;
 }) {
   const [cachedPages, setCachedPages] = useState<string[]>([]);
   const [imagesLoading, setImagesLoading] = useState<Set<number>>(new Set());
@@ -379,6 +387,97 @@ export function useReaderImageLoading({
       observerRef.current?.disconnect();
     };
   }, [readingMode, pages.length, visibleRange.end, visibleRange.start, imageRefs, shouldLoadIndexNow]);
+
+  // Resolve asset_ref pages on-demand via source_page_asset
+  const resolvingPagesRef = useRef<Set<number>>(new Set());
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Create/re-create AbortController on each render cycle (covers all in-flight resolutions)
+  useEffect(() => {
+    abortControllerRef.current = new AbortController();
+    const controller = abortControllerRef.current;
+    return () => {
+      controller.abort();
+      abortControllerRef.current = null;
+    };
+  }, [sourceNamespace, sourceRemoteId]);
+
+  useEffect(() => {
+    if (!sourceNamespace || !sourceRemoteId) return;
+    if (pages.length === 0) return;
+
+    const controller = abortControllerRef.current;
+    const signal = controller?.signal;
+
+    // Iterate over imagesLoading set to find pages with unresolved asset_ref
+    for (const pageIndex of Array.from(imagesLoading)) {
+      if (resolvingPagesRef.current.has(pageIndex)) continue;
+      if (loadedImages.has(pageIndex)) continue;
+      if (cachedPages[pageIndex]) continue;
+
+      const page = pages[pageIndex];
+      if (!page) continue;
+      const source = ArchiveService.getPageSource(page);
+      if (!source) continue;
+      // Only resolve if URL is empty (asset_ref page) and asset_ref exists
+      const url = source.url?.trim() || '';
+      if (url) continue; // already has a URL, no need to resolve
+      const assetRef = source.metadata?.asset_ref || page.metadata?.asset_ref;
+      if (!assetRef) continue;
+
+      // Mark as resolving to prevent duplicate calls
+      resolvingPagesRef.current.add(pageIndex);
+
+      // Trigger on-demand resolution (fire-and-forget to avoid blocking)
+      SourcePluginService.pageAsset(
+        sourceNamespace,
+        sourceRemoteId,
+        pageIndex + 1, // pages are 1-indexed in the plugin
+        assetRef,
+        sourceParentRemoteId || undefined,
+        signal,
+      ).then((result) => {
+        // If aborted, skip processing stale result
+        if (signal?.aborted) {
+          resolvingPagesRef.current.delete(pageIndex);
+          return;
+        }
+        if (!result.success || !result.data) {
+          resolvingPagesRef.current.delete(pageIndex);
+          handleImageError(pageIndex);
+          return;
+        }
+        const assetId = result.data.asset_id;
+        if (assetId <= 0) {
+          resolvingPagesRef.current.delete(pageIndex);
+          handleImageError(pageIndex);
+          return;
+        }
+        const resolvedUrl = `/api/assets/${assetId}`;
+        // Update cachedPages so rendering picks up the resolved URL
+        setCachedPages((prev) => {
+          const next = [...prev];
+          next[pageIndex] = resolvedUrl;
+          return next;
+        });
+        // Re-add to imagesLoading so the preloader picks it up with the real URL
+        setImagesLoading((prev) => {
+          const next = new Set(prev);
+          next.add(pageIndex);
+          return next;
+        });
+        resolvingPagesRef.current.delete(pageIndex);
+      }).catch(() => {
+        // If aborted, the error is expected; don't trigger retry
+        if (signal?.aborted) {
+          resolvingPagesRef.current.delete(pageIndex);
+          return;
+        }
+        resolvingPagesRef.current.delete(pageIndex);
+        handleImageError(pageIndex);
+      });
+    }
+  }, [imagesLoading, pages, cachedPages, loadedImages, sourceNamespace, sourceRemoteId, sourceParentRemoteId, handleImageError]);
 
   return {
     cachedPages,

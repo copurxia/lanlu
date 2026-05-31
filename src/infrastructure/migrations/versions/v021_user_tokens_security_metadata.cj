@@ -5,7 +5,7 @@ import lanlu.infrastructure.migrations.*
 
 public class V021_UserTokensSecurityMetadata <: Migration {
     public func version(): String {
-        return "021"
+        return "V021"
     }
 
     public func description(): String {

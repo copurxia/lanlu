@@ -18,6 +18,8 @@ interface ArchiveCardProps {
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
   extraMenuItems?: MenuItem[];
+  detailPath?: string;
+  readerPath?: string;
   onCoverAspectRatioChange?: (aspectRatio: number) => void;
   recommendationContext?: {
     scene: RecommendationScene;
@@ -42,6 +44,8 @@ export function ArchiveCard({
   onToggleSelect,
   onRequestEnterSelection,
   extraMenuItems,
+  detailPath,
+  readerPath,
   onCoverAspectRatioChange,
   recommendationContext,
   onRecommendationOpenReader,
@@ -72,6 +76,8 @@ export function ArchiveCard({
       disableContentVisibility={disableContentVisibility}
       coverHeight={coverHeight}
       surfaceClassName={surfaceClassName}
+      detailPath={detailPath}
+      readerPath={readerPath}
       onFavoriteToggle={handleFavoriteToggle}
       selectable={selectable}
       selectionMode={selectionMode}

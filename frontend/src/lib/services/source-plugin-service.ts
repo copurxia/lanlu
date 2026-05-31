@@ -2,8 +2,7 @@
 
 import { apiClient } from '../api';
 import { extractApiError } from '@/lib/utils/api-utils';
-import { TaskPoolService } from './taskpool-service';
-import type { Task } from '@/types/task';
+import { sourceCoverAssetLimiter, sourcePageAssetLimiter } from '@/lib/utils/concurrency-limiter';
 
 export interface SourcePluginSummary {
   namespace: string;
@@ -17,13 +16,25 @@ export interface SourcePluginSummary {
 }
 
 export interface SourceItem {
-  id: string;
+  source_namespace: string;
+  remote_id: string;
+  kind: 'archive' | 'tankoubon';
   title: string;
   subtitle?: string;
   cover?: string;
+  cover_asset_id?: number;
   tags?: string[];
-  source?: string;
+  description?: string;
   page_count?: number;
+  downloadable?: boolean;
+  readable?: boolean;
+  children?: SourceItem[];
+  reader?: {
+    page_count?: number;
+    media_type?: string;
+    reader_action?: string;
+    download_action?: string;
+  };
 }
 
 export interface SourceBrowseResult {
@@ -35,24 +46,33 @@ export interface SourceBrowseResult {
   };
 }
 
-export interface SourceArchive {
-  id: string;
-  title: string;
-  filename?: string;
-  size?: number;
-}
-
 export interface SourceDetailResult {
   success: boolean;
   error?: string;
-  data?: {
-    id: string;
-    title: string;
-    description?: string;
-    cover?: string;
-    tags?: string[];
-    archives: SourceArchive[];
-  };
+  data?: SourceItem;
+}
+
+export interface SourceFilterOption {
+  label: string;
+  value: string;
+}
+
+export interface SourceFilter {
+  key: string;
+  label: string;
+  type: 'tabs' | 'select' | 'multi-select' | 'toggle' | 'text' | 'range';
+  options?: SourceFilterOption[];
+  default?: string | string[] | boolean;
+}
+
+export interface SourceFilterSchema {
+  filters: SourceFilter[];
+}
+
+export interface SourceFilterResult {
+  success: boolean;
+  filters?: SourceFilter[];
+  error?: string;
 }
 
 export interface SourceDownloadResult {
@@ -61,13 +81,7 @@ export interface SourceDownloadResult {
   error?: string;
 }
 
-type SourceTaskEnqueueResponse = {
-  success?: boolean | number;
-  job?: number | string;
-  task_id?: number | string;
-  task_type?: string;
-  error?: string;
-};
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -121,20 +135,174 @@ export class SourcePluginService {
     }
   }
 
+  static async reader(
+    namespace: string,
+    remoteId: string,
+    archiveId?: string,
+    parentRemoteId?: string
+  ): Promise<{ success: boolean; error?: string; data?: { pages: Array<{ path: string; url?: string; asset_id?: number; asset_ref?: string; type?: string; width?: number; height?: number; metadata?: Record<string, unknown> }> } }> {
+    try {
+      const params: Record<string, unknown> = { remote_id: remoteId };
+      if (archiveId) {
+        params.archive_id = archiveId;
+      }
+      if (parentRemoteId) {
+        params.parent_remote_id = parentRemoteId;
+      }
+      const parsed = await this.executeAction(
+        namespace,
+        'source_reader',
+        params,
+        'Failed to get reader pages'
+      );
+      if (!Boolean(parsed.success)) {
+        return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get reader pages' };
+      }
+      const data = isRecord(parsed.data) ? parsed.data : parsed;
+      const pages = Array.isArray(data.pages) ? data.pages : [];
+      return { success: true, data: { pages } };
+    } catch (error) {
+      return { success: false, error: extractApiError(error, 'Failed to get reader pages') };
+    }
+  }
+
+  /**
+   * 按需获取单页资产。Reader 翻页时调用，避免一次性下载全部页面。
+   * 输入: remote_id, parent_remote_id (可选), page, asset_ref
+   * 输出: { success, data: { asset_id } }
+   */
+  static async pageAsset(
+    namespace: string,
+    remoteId: string,
+    page: number,
+    assetRef: string,
+    parentRemoteId?: string,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; error?: string; data?: { asset_id: number } }> {
+    return sourcePageAssetLimiter.run(async () => {
+      try {
+        const params: Record<string, unknown> = {
+          remote_id: remoteId,
+          page,
+          asset_ref: assetRef,
+        };
+        if (parentRemoteId) {
+          params.parent_remote_id = parentRemoteId;
+        }
+        const parsed = await this.executeAction(
+          namespace,
+          'source_page_asset',
+          params,
+          'Failed to get page asset',
+          signal
+        );
+        if (!Boolean(parsed.success)) {
+          return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get page asset' };
+        }
+        const data = isRecord(parsed.data) ? parsed.data : parsed;
+        const assetId = typeof data.asset_id === 'number' ? data.asset_id : 0;
+        if (assetId <= 0) {
+          return { success: false, error: 'Invalid asset_id from source_page_asset' };
+        }
+        return { success: true, data: { asset_id: assetId } };
+      } catch (error) {
+        return { success: false, error: extractApiError(error, 'Failed to get page asset') };
+      }
+    });
+  }
+
+  /**
+   * 按需获取 Source 列表/搜索封面资产。
+   * 输入: remote_id, cover_ref
+   * 输出: { success, data: { asset_id } }
+   */
+  static async coverAsset(
+    namespace: string,
+    remoteId: string,
+    coverRef: string,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; error?: string; data?: { asset_id: number } }> {
+    return sourceCoverAssetLimiter.run(async () => {
+      try {
+        const parsed = await this.executeAction(
+          namespace,
+          'source_cover_asset',
+          {
+            remote_id: remoteId,
+            cover_ref: coverRef,
+          },
+          'Failed to get cover asset',
+          signal
+        );
+        if (!Boolean(parsed.success)) {
+          return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get cover asset' };
+        }
+        const data = isRecord(parsed.data) ? parsed.data : parsed;
+        const assetId = typeof data.asset_id === 'number' ? data.asset_id : 0;
+        if (assetId <= 0) {
+          return { success: false, error: 'Invalid asset_id from source_cover_asset' };
+        }
+        return { success: true, data: { asset_id: assetId } };
+      } catch (error) {
+        return { success: false, error: extractApiError(error, 'Failed to get cover asset') };
+      }
+    });
+  }
+
+  static async getFilters(namespace: string): Promise<SourceFilterResult> {
+    try {
+      const parsed = await this.executeAction(
+        namespace,
+        'source_filters',
+        {},
+        'Failed to get source filters'
+      );
+      if (!Boolean(parsed.success)) {
+        return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) };
+      }
+      const data = isRecord(parsed.data) ? parsed.data : parsed;
+      const filters = Array.isArray(data.filters) ? (data.filters as unknown[]) : [];
+      const validated: SourceFilter[] = [];
+      for (const raw of filters) {
+        if (!isRecord(raw)) continue;
+        const key = String(raw.key ?? '');
+        const label = String(raw.label ?? '');
+        const type = String(raw.type ?? '');
+        if (!key || !label || !type) continue;
+        if (!['tabs', 'select', 'multi-select', 'toggle', 'text', 'range'].includes(type)) continue;
+        const options = Array.isArray(raw.options)
+          ? (raw.options as unknown[]).filter(isRecord).map((o) => ({
+              label: String(o.label ?? ''),
+              value: String(o.value ?? ''),
+            }))
+          : undefined;
+        validated.push({ key, label, type: type as SourceFilter['type'], options });
+      }
+      return { success: true, filters: validated };
+    } catch (error) {
+      return { success: false, error: extractApiError(error, 'Failed to get source filters') };
+    }
+  }
+
   static async download(
     namespace: string,
     remoteId: string,
-    archiveId: string,
-    categoryId: number
+    categoryId: number,
+    kind: 'archive' | 'tankoubon' = 'archive',
+    parentRemoteId?: string
   ): Promise<SourceDownloadResult> {
     try {
+      const payload: Record<string, string> = {
+        remote_id: remoteId,
+        category_id: String(categoryId),
+        kind,
+      };
+      if (parentRemoteId) {
+        payload.parent_remote_id = parentRemoteId;
+      }
       const response = await apiClient.post(
         `/api/admin/source-plugins/${namespace}/download`,
-        {
-          remote_id: remoteId,
-          archive_id: archiveId,
-          category_id: String(categoryId),
-        }
+        payload
       );
       return response.data;
     } catch (error) {
@@ -146,70 +314,20 @@ export class SourcePluginService {
     namespace: string,
     action: string,
     params: Record<string, unknown>,
-    fallbackError: string
+    fallbackError: string,
+    signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
-    const response = await apiClient.post(
-      `/api/admin/source-plugins/${encodeURIComponent(namespace)}/action/${encodeURIComponent(action)}`,
-      params
-    );
-    return this.waitForSourceTask(response.data, fallbackError);
-  }
-
-  private static async waitForSourceTask(
-    enqueueResponse: SourceTaskEnqueueResponse,
-    fallbackError: string
-  ): Promise<Record<string, unknown>> {
-    const ok = Boolean(enqueueResponse?.success);
-    if (!ok) {
-      return { success: false, error: enqueueResponse?.error || fallbackError };
-    }
-
-    const jobId = this.readTaskId(enqueueResponse);
-    if (!jobId) {
-      return { success: false, error: 'No source task id returned' };
-    }
-
-    const task = await TaskPoolService.waitForTaskTerminal(jobId);
-    return this.parseSourceTaskOutput(task, fallbackError);
-  }
-
-  private static readTaskId(response: SourceTaskEnqueueResponse): number {
-    const raw = response?.job ?? response?.task_id;
-    if (typeof raw === 'number' && Number.isFinite(raw)) {
-      return raw;
-    }
-    if (typeof raw === 'string' && raw.trim() !== '') {
-      const parsed = Number(raw);
-      return Number.isFinite(parsed) ? parsed : 0;
-    }
-    return 0;
-  }
-
-  private static parseSourceTaskOutput(task: Task, fallbackError: string): Record<string, unknown> {
-    const raw = task.result?.trim();
-    if (!raw) {
-      return {
-        success: task.status === 'completed',
-        error: task.status === 'completed' ? undefined : task.message || fallbackError,
-      };
-    }
-
     try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const success = Boolean(parsed.success);
-      if (!success) {
-        return {
-          success: false,
-          error: (typeof parsed.error === 'string' ? parsed.error : undefined) || task.message || fallbackError,
-        };
-      }
-
-      return parsed;
-    } catch {
-      return {
-        success: task.status === 'completed',
-        error: task.status === 'completed' ? fallbackError : task.message || fallbackError,
-      };
+      const response = await apiClient.post(
+        `/api/admin/source-plugins/${encodeURIComponent(namespace)}/action/${encodeURIComponent(action)}`,
+        params,
+        { signal }
+      );
+      // 浏览类 action 后端已改为直连返回 { success, data, error }
+      const data = response.data as Record<string, unknown>;
+      return data;
+    } catch (error) {
+      return { success: false, error: extractApiError(error, fallbackError) };
     }
   }
 
@@ -219,7 +337,40 @@ export class SourcePluginService {
     }
 
     const data = isRecord(parsed.data) ? parsed.data : parsed;
-    const items = Array.isArray(data.items) ? data.items as SourceItem[] : [];
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items: SourceItem[] = [];
+    for (const raw of rawItems) {
+      if (!isRecord(raw)) continue;
+      const kind = raw.kind;
+      if (kind !== 'archive' && kind !== 'tankoubon') continue;
+      const remoteId = String(raw.remote_id ?? '');
+      if (!remoteId) continue;
+      const sourceNs = String(raw.source_namespace ?? '');
+      if (!sourceNs) continue;
+      const item: SourceItem = {
+        source_namespace: sourceNs,
+        remote_id: remoteId,
+        kind: kind as 'archive' | 'tankoubon',
+        title: String(raw.title ?? ''),
+        subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+        cover: typeof raw.cover === 'string' ? raw.cover : undefined,
+        cover_asset_id: typeof raw.cover_asset_id === 'number' ? raw.cover_asset_id : undefined,
+        tags: Array.isArray(raw.tags) ? raw.tags as string[] : undefined,
+        description: typeof raw.description === 'string' ? raw.description : undefined,
+        page_count: typeof raw.page_count === 'number' ? raw.page_count : undefined,
+        downloadable: Boolean(raw.downloadable),
+        readable: Boolean(raw.readable),
+        children: Array.isArray(raw.children) ? this.parseChildren(raw.children as unknown[]) : undefined,
+        reader: isRecord(raw.reader) ? {
+          page_count: typeof raw.reader.page_count === 'number' ? raw.reader.page_count : undefined,
+          media_type: typeof raw.reader.media_type === 'string' ? raw.reader.media_type : undefined,
+          reader_action: typeof raw.reader.reader_action === 'string' ? raw.reader.reader_action : undefined,
+          download_action: typeof raw.reader.download_action === 'string' ? raw.reader.download_action : undefined,
+        } : undefined,
+      };
+      items.push(item);
+    }
+
     const nextPage = data.next_page ?? data.nextPage;
     return {
       success: true,
@@ -230,22 +381,80 @@ export class SourcePluginService {
     };
   }
 
+  private static parseChildren(rawChildren: unknown[]): SourceItem[] {
+    const children: SourceItem[] = [];
+    for (const raw of rawChildren) {
+      if (!isRecord(raw)) continue;
+      const kind = raw.kind;
+      if (kind !== 'archive' && kind !== 'tankoubon') continue;
+      const remoteId = String(raw.remote_id ?? '');
+      if (!remoteId) continue;
+      const sourceNs = String(raw.source_namespace ?? '');
+      if (!sourceNs) continue;
+      const item: SourceItem = {
+        source_namespace: sourceNs,
+        remote_id: remoteId,
+        kind: kind as 'archive' | 'tankoubon',
+        title: String(raw.title ?? ''),
+        subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
+        cover: typeof raw.cover === 'string' ? raw.cover : undefined,
+        cover_asset_id: typeof raw.cover_asset_id === 'number' ? raw.cover_asset_id : undefined,
+        tags: Array.isArray(raw.tags) ? raw.tags as string[] : undefined,
+        description: typeof raw.description === 'string' ? raw.description : undefined,
+        page_count: typeof raw.page_count === 'number' ? raw.page_count : undefined,
+        downloadable: Boolean(raw.downloadable),
+        readable: Boolean(raw.readable),
+        children: Array.isArray(raw.children) ? this.parseChildren(raw.children as unknown[]) : undefined,
+      };
+      children.push(item);
+    }
+    return children;
+  }
+
   private static parseDetailResult(parsed: Record<string, unknown>, fallbackError: string): SourceDetailResult {
     if (!Boolean(parsed.success)) {
       return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || fallbackError };
     }
 
     const data = isRecord(parsed.data) ? parsed.data : parsed;
+    const kind = data.kind;
+    if (kind !== 'archive' && kind !== 'tankoubon') {
+      return { success: false, error: 'Invalid detail result: missing or invalid kind' };
+    }
+    const remoteId = String(data.remote_id ?? '');
+    if (!remoteId) {
+      return { success: false, error: 'Invalid detail result: missing remote_id' };
+    }
+    const sourceNs = String(data.source_namespace ?? '');
+    if (!sourceNs) {
+      return { success: false, error: 'Invalid detail result: missing source_namespace' };
+    }
+
+    const item: SourceItem = {
+      source_namespace: sourceNs,
+      remote_id: remoteId,
+      kind: kind as 'archive' | 'tankoubon',
+      title: String(data.title ?? ''),
+      subtitle: typeof data.subtitle === 'string' ? data.subtitle : undefined,
+      cover: typeof data.cover === 'string' ? data.cover : undefined,
+      cover_asset_id: typeof data.cover_asset_id === 'number' ? data.cover_asset_id : undefined,
+      tags: Array.isArray(data.tags) ? data.tags as string[] : undefined,
+      description: typeof data.description === 'string' ? data.description : undefined,
+      page_count: typeof data.page_count === 'number' ? data.page_count : undefined,
+      downloadable: Boolean(data.downloadable),
+      readable: Boolean(data.readable),
+      children: Array.isArray(data.children) ? this.parseChildren(data.children as unknown[]) : undefined,
+      reader: isRecord(data.reader) ? {
+        page_count: typeof data.reader.page_count === 'number' ? data.reader.page_count : undefined,
+        media_type: typeof data.reader.media_type === 'string' ? data.reader.media_type : undefined,
+        reader_action: typeof data.reader.reader_action === 'string' ? data.reader.reader_action : undefined,
+        download_action: typeof data.reader.download_action === 'string' ? data.reader.download_action : undefined,
+      } : undefined,
+    };
+
     return {
       success: true,
-      data: {
-        id: typeof data.id === 'string' ? data.id : '',
-        title: typeof data.title === 'string' ? data.title : '',
-        description: typeof data.description === 'string' ? data.description : undefined,
-        cover: typeof data.cover === 'string' ? data.cover : undefined,
-        tags: Array.isArray(data.tags) ? data.tags as string[] : undefined,
-        archives: Array.isArray(data.archives) ? data.archives as SourceArchive[] : [],
-      },
+      data: item,
     };
   }
 }

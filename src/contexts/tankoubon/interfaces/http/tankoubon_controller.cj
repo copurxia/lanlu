@@ -62,6 +62,16 @@ public class TankoubonController {
 
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 复合 ID 检测/转发
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(request) =>
+                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
+                ctx.json(json)
+                return
+            case None => ()
+        }
+
         let lang = (ctx.query("lang") ?? "").trimAscii()
         if (id.trimAscii().size == 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)

@@ -8,7 +8,11 @@ import { Button } from '@/components/ui/button';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 import type { ArchiveMetadata } from '@/types/archive';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { SourcePluginService } from '@/lib/services/source-plugin-service';
+import { CategoryService } from '@/lib/services/category-service';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
 type Props = {
   metadata: ArchiveMetadata;
@@ -20,6 +24,9 @@ type Props = {
   favoriteLoading: boolean;
   isNewStatusLoading: boolean;
   deleteLoading: boolean;
+  isSourceMode?: boolean;
+  sourceNamespace?: string | null;
+  remoteId?: string | null;
   onFavoriteClick: () => Promise<void> | void;
   onMarkAsRead: () => Promise<void> | void;
   onMarkAsNew: () => Promise<void> | void;
@@ -37,12 +44,17 @@ export function ArchiveMobileActions({
   favoriteLoading,
   isNewStatusLoading,
   deleteLoading,
+  isSourceMode = false,
+  sourceNamespace,
+  remoteId,
   onFavoriteClick,
   onMarkAsRead,
   onMarkAsNew,
   onStartEdit,
   onDeleteArchive,
 }: Props) {
+  const router = useRouter();
+  const { success, error: showError } = useToast();
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(true);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -84,7 +96,13 @@ export function ArchiveMobileActions({
     <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 supports-backdrop-filter:bg-background/70">
       <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center gap-2">
-          <Link href={buildReaderPath(metadata.arcid, metadata.progress)} className="flex-1">
+          <Link
+            href={isSourceMode && sourceNamespace && remoteId
+              ? `/reader?source=${encodeURIComponent(sourceNamespace)}&remote_id=${encodeURIComponent(remoteId)}`
+              : buildReaderPath(metadata.arcid, metadata.progress)
+            }
+            className="flex-1"
+          >
             <Button className="w-full">
               <BookOpen className="w-4 h-4 mr-2" />
               {t('archive.startReading')}
@@ -116,7 +134,34 @@ export function ArchiveMobileActions({
             <Button
               variant="outline"
               className="w-full justify-start"
-              onClick={() => {
+              onClick={async () => {
+                if (isSourceMode && sourceNamespace && remoteId) {
+                  try {
+                    const cats = await CategoryService.getAllCategories();
+                    const enabledCats = cats.filter((c) => c.enabled !== false);
+                    if (enabledCats.length === 0) {
+                      showError('没有可用的分类');
+                      setOpen(false);
+                      return;
+                    }
+                    const result = await SourcePluginService.download(
+                      sourceNamespace,
+                      remoteId,
+                      enabledCats[0].id,
+                      'archive'
+                    );
+                    if (result.success) {
+                      success('下载任务已创建');
+                      router.push('/settings/tasks');
+                    } else {
+                      showError(result.error || '创建下载任务失败');
+                    }
+                  } catch {
+                    showError('创建下载任务失败');
+                  }
+                  setOpen(false);
+                  return;
+                }
                 void ArchiveService.downloadArchive(metadata.arcid);
                 setOpen(false);
               }}
@@ -133,75 +178,80 @@ export function ArchiveMobileActions({
                 await onFavoriteClick();
                 setOpen(false);
               }}
-              disabled={!ready || favoriteLoading}
+              disabled={!ready || favoriteLoading || isSourceMode}
             >
               <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current' : ''}`} />
               {favoriteLoading ? t('common.loading') : isFavorite ? t('common.unfavorite') : t('common.favorite')}
             </Button>
 
-            {metadata.isnew ? (
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={async () => {
-                  await onMarkAsRead();
-                  setOpen(false);
-                }}
-                disabled={!ready || isNewStatusLoading}
-              >
-                <CheckCircle className="w-4 h-4 mr-2" />
-                {isNewStatusLoading ? t('common.loading') : t('archive.markAsRead')}
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={async () => {
-                  await onMarkAsNew();
-                  setOpen(false);
-                }}
-                disabled={!ready || isNewStatusLoading}
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                {isNewStatusLoading ? t('common.loading') : t('archive.markAsNew')}
-              </Button>
+            {!isSourceMode && (
+              metadata.isnew ? (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={async () => {
+                    await onMarkAsRead();
+                    setOpen(false);
+                  }}
+                  disabled={!ready || isNewStatusLoading}
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  {isNewStatusLoading ? t('common.loading') : t('archive.markAsRead')}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={async () => {
+                    await onMarkAsNew();
+                    setOpen(false);
+                  }}
+                  disabled={!ready || isNewStatusLoading}
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  {isNewStatusLoading ? t('common.loading') : t('archive.markAsNew')}
+                </Button>
+              )
             )}
 
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              disabled={!ready}
-              onClick={() => {
-                // Close the sheet first, then open the dialog (rendered outside the sheet).
-                setPendingAddDialog(true);
-                setOpen(false);
-              }}
-            >
-              <BookOpen className="w-4 h-4 mr-2" />
-              {t('tankoubon.addToCollection')}
-            </Button>
-
-            {isAuthenticated ? (
+            {!isSourceMode && (
               <Button
                 variant="outline"
                 className="w-full justify-start"
-                onClick={() => {
-                  onStartEdit();
-                  setOpen(false);
-                }}
                 disabled={!ready}
+                onClick={() => {
+                  setPendingAddDialog(true);
+                  setOpen(false);
+                }}
               >
-                <Edit className="w-4 h-4 mr-2" />
-                {t('common.edit')}
-              </Button>
-            ) : (
-              <Button variant="outline" className="w-full justify-start" disabled title="需要登录才能编辑">
-                <Edit className="w-4 h-4 mr-2" />
-                {t('common.edit')}
+                <BookOpen className="w-4 h-4 mr-2" />
+                {t('tankoubon.addToCollection')}
               </Button>
             )}
 
-            {isAdmin && (
+            {!isSourceMode && (
+              isAuthenticated ? (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    onStartEdit();
+                    setOpen(false);
+                  }}
+                  disabled={!ready}
+                >
+                  <Edit className="w-4 h-4 mr-2" />
+                  {t('common.edit')}
+                </Button>
+              ) : (
+                <Button variant="outline" className="w-full justify-start" disabled title="需要登录才能编辑">
+                  <Edit className="w-4 h-4 mr-2" />
+                  {t('common.edit')}
+                </Button>
+              )
+            )}
+
+            {!isSourceMode && isAdmin && (
               <Button
                 variant="destructive"
                 className="w-full justify-start"
@@ -225,12 +275,14 @@ export function ArchiveMobileActions({
       </Sheet>
 
       {/* Render outside the Sheet so it doesn't unmount during close animation. */}
-      <AddToTankoubonDialog
-        archiveId={metadata.arcid}
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
-        onAdded={() => setAddDialogOpen(false)}
-      />
+      {!isSourceMode && (
+        <AddToTankoubonDialog
+          archiveId={metadata.arcid}
+          open={addDialogOpen}
+          onOpenChange={setAddDialogOpen}
+          onAdded={() => setAddDialogOpen(false)}
+        />
+      )}
     </div>
   );
 }

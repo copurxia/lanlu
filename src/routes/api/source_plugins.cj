@@ -23,4 +23,7 @@ private func registerSourcePluginsRoutesAt(router: App, basePath: String) {
     source.post("/:namespace/download", audited("source.download", { ctx =>
         SourcePluginController.sourceDownload(ctx)
     }, riskLevel: 2))
+
+    // source_reader 通过 /:namespace/action/:action 统一入口，
+    // 媒体准备由 WASM 插件内部处理，不开放通用代理端点。
 }

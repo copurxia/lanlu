@@ -89,6 +89,7 @@ export interface PageSourceInfo {
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
+    asset_ref?: string;
     attachments?: MetadataPageAttachment[];
     release_at?: string;
   };
@@ -109,6 +110,7 @@ export interface PageInfo {
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
+    asset_ref?: string;
     attachments?: MetadataPageAttachment[];
     release_at?: string;
   };

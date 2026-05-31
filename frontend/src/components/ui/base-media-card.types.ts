@@ -28,11 +28,19 @@ export interface BaseMediaCardProps {
   extraBadge?: ReactNode
   detailsLabel?: string
   pagesLabel?: string
+  detailPath?: string
+  readerPath?: string
   priority?: boolean
   hideMetaOnMobile?: boolean
   disableContentVisibility?: boolean
   coverHeight?: number
   surfaceClassName?: string
+  onDownload?: () => void
+  canDownload?: boolean
+  disableFavorite?: boolean
+  disableEdit?: boolean
+  disableDelete?: boolean
+  disableReadStatus?: boolean
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
   selectable?: boolean
   selectionMode?: boolean

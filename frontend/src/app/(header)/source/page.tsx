@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Search,
@@ -9,15 +9,14 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
-  Check,
-  Square,
   X,
+  BookOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
+import { BaseMediaCard } from '@/components/ui/base-media-card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
@@ -33,169 +32,126 @@ import {
   type SourcePluginSummary,
   type SourceItem,
   type SourceBrowseResult,
-  type SourceDetailResult,
-  type SourceArchive,
+  type SourceFilter,
 } from '@/lib/services/source-plugin-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
+import { TaskPoolService } from '@/lib/services/taskpool-service';
 
-function SourceItemCard({
+function SourceMediaCard({
   item,
-  onClick,
   onDownload,
   onToggleSelect,
-  isDownloading,
+  onRequestEnterSelection,
   selectionMode,
   selected,
   index = 0,
 }: {
   item: SourceItem;
-  onClick: (item: SourceItem) => void;
   onDownload?: (item: SourceItem) => void;
-  onToggleSelect?: (item: SourceItem) => void;
-  isDownloading?: boolean;
+  onToggleSelect?: (item: SourceItem, selected: boolean) => void;
+  onRequestEnterSelection?: () => void;
   selectionMode?: boolean;
   selected?: boolean;
   index?: number;
 }) {
-  const shouldAnimate = index < 24;
-  const delay = shouldAnimate ? Math.min(index * 50, 500) : 0;
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const itemKey = `${item.source_namespace}:${item.remote_id}`;
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [lazyCoverAssetId, setLazyCoverAssetId] = useState<number | undefined>(item.cover_asset_id);
+  const [coverVisible, setCoverVisible] = useState(false);
+  const coverAssetId = item.cover_asset_id ?? lazyCoverAssetId;
+  const detailPath = item.kind === 'tankoubon'
+    ? `/tankoubon?source=${encodeURIComponent(item.source_namespace)}&remote_id=${encodeURIComponent(item.remote_id)}`
+    : `/archive?source=${encodeURIComponent(item.source_namespace)}&remote_id=${encodeURIComponent(item.remote_id)}`;
+  const firstChild = item.kind === 'tankoubon'
+    ? item.children?.find((child) => child.kind === 'archive')
+    : undefined;
+  const readerRemoteId = item.kind === 'archive' ? item.remote_id : firstChild?.remote_id;
+  const readerNamespace = item.kind === 'archive' ? item.source_namespace : firstChild?.source_namespace;
+  const readerPath = readerRemoteId && readerNamespace
+    ? `/reader?source=${encodeURIComponent(readerNamespace)}&remote_id=${encodeURIComponent(readerRemoteId)}${item.kind === 'tankoubon' ? `&tankoubon=${encodeURIComponent(item.remote_id)}` : ''}`
+    : detailPath;
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    window.addEventListener('click', close, { once: true });
-    return () => window.removeEventListener('click', close);
-  }, [menuOpen]);
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (selectionMode) {
-      onToggleSelect?.(item);
+    if (item.cover_asset_id || !item.cover) return;
+    const element = cardRef.current;
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setCoverVisible(true);
       return;
     }
-    if (!onDownload) return;
-    setMenuPos({ x: e.clientX, y: e.clientY });
-    setMenuOpen(true);
-  };
 
-  const handleClick = () => {
-    if (selectionMode) {
-      onToggleSelect?.(item);
-      return;
-    }
-    onClick(item);
-  };
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setCoverVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '600px 0px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [item.cover, item.cover_asset_id, itemKey]);
+
+  useEffect(() => {
+    if (!coverVisible || item.cover_asset_id || !item.cover) return;
+
+    let cancelled = false;
+    SourcePluginService.coverAsset(item.source_namespace, item.remote_id, item.cover)
+      .then((result) => {
+        if (cancelled || !result.success || !result.data?.asset_id) return;
+        setLazyCoverAssetId(result.data.asset_id);
+      })
+      .catch(() => {
+        // Keep the text-first card visible; cover loading is best-effort.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [coverVisible, item.cover, item.cover_asset_id, item.remote_id, item.source_namespace]);
 
   return (
-    <>
-      <div
-        className={[
-          'group motion-reduce:animate-none',
-          shouldAnimate ? 'motion-safe:animate-archive-card-in' : '',
-          selectionMode ? 'cursor-pointer' : 'cursor-pointer',
-        ].filter(Boolean).join(' ')}
-        style={{
-          animationDelay: shouldAnimate ? `${delay}ms` : undefined,
-          contentVisibility: 'auto',
-          containIntrinsicSize: '220px 420px',
-        }}
-        onClick={handleClick}
-        onContextMenu={handleContextMenu}
-      >
-        <Card className={[
-          'overflow-hidden bg-transparent transition-shadow dark:bg-transparent',
-          selected ? 'ring-2 ring-primary' : 'hover:shadow-lg',
-        ].filter(Boolean).join(' ')}>
-          <div className="bg-muted relative aspect-[2/3]">
-            {item.cover ? (
-              <img
-                src={item.cover}
-                alt={item.title}
-                loading="lazy"
-                className="absolute inset-0 h-full w-full object-cover select-none"
-                style={{
-                  WebkitTouchCallout: 'none',
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-                onDragStart={(e) => e.preventDefault()}
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Globe className="h-10 w-10 text-muted-foreground/40" />
-              </div>
-            )}
-
-            {/* Selection checkbox */}
-            {selectionMode && (
-              <div className="absolute top-2 left-2 z-30">
-                <div
-                  className={[
-                    'inline-flex h-7 w-7 items-center justify-center rounded-full border transition-colors',
-                    selected
-                      ? 'bg-primary text-primary-foreground border-primary/60 shadow-xs'
-                      : 'bg-black/50 text-white border-white/40 hover:bg-black/65',
-                  ].join(' ')}
-                >
-                  {selected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                </div>
-              </div>
-            )}
-
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-end bg-linear-to-t from-black/70 via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-              <div className="w-full p-3 pb-8">
-                {item.page_count && item.page_count > 0 && (
-                  <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white">
-                    {item.page_count}P
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        </Card>
-
-        <div className="pt-3">
-          <div className="h-5 mb-1">
-            <span className="block w-full truncate text-left font-semibold text-sm">
-              {item.title}
-            </span>
-          </div>
-          {item.subtitle && (
-            <div className="text-xs text-muted-foreground truncate">
-              {item.subtitle}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {menuOpen && onDownload && !selectionMode && (
-        <div
-          className="fixed z-50 min-w-[140px] rounded-lg border bg-popover p-1 shadow-lg"
-          style={{ left: menuPos.x, top: menuPos.y }}
-        >
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDownload(item);
-              setMenuOpen(false);
-            }}
-            disabled={isDownloading}
-          >
-            {isDownloading ? (
-              <Spinner className="h-4 w-4" />
-            ) : (
-              <Download className="h-4 w-4 text-muted-foreground" />
-            )}
-            下载
-          </button>
-        </div>
-      )}
-    </>
+    <div ref={cardRef}>
+    <BaseMediaCard
+      id={itemKey}
+      title={item.title || item.remote_id}
+      thumbnailId={readerRemoteId || ''}
+      thumbnailAssetId={coverAssetId}
+      tags={(item.tags || []).join(', ')}
+      summary={item.description || item.subtitle || ''}
+      pagecount={item.page_count || item.reader?.page_count || 0}
+      progress={0}
+      isnew={false}
+      isfavorite={false}
+      type={item.kind}
+      index={index}
+      badge={item.kind === 'tankoubon' ? (
+        <Badge className="bg-primary">
+          <BookOpen className="w-3 h-3 mr-1" />
+          合集
+        </Badge>
+      ) : undefined}
+      extraBadge={item.kind === 'tankoubon' && item.children?.length ? (
+        <Badge className="bg-black/70 text-white">
+          {item.children.length} 档案
+        </Badge>
+      ) : undefined}
+      detailsLabel="详情"
+      pagesLabel={item.kind === 'tankoubon'
+        ? `${item.children?.length || 0} 档案`
+        : `${item.page_count || item.reader?.page_count || 0} 页`}
+      detailPath={detailPath}
+      readerPath={readerPath}
+      onDownload={onDownload ? () => onDownload(item) : undefined}
+      canDownload={Boolean(onDownload)}
+      disableFavorite
+      disableEdit
+      disableDelete
+      disableReadStatus
+      selectable={Boolean(onToggleSelect)}
+      selectionMode={selectionMode}
+      selected={selected}
+      onToggleSelect={(nextSelected) => onToggleSelect?.(item, nextSelected)}
+      onRequestEnterSelection={onRequestEnterSelection}
+    />
+    </div>
   );
 }
 
@@ -215,20 +171,18 @@ function SkeletonGrid() {
 function SourceHomeGrid({
   items,
   loading,
-  onItemClick,
   onDownload,
   onToggleSelect,
-  quickDownloadId,
+  onRequestEnterSelection,
   selectionMode,
   selectedIds,
   hasSearched,
 }: {
   items: SourceItem[];
   loading: boolean;
-  onItemClick: (item: SourceItem) => void;
   onDownload?: (item: SourceItem) => void;
-  onToggleSelect?: (item: SourceItem) => void;
-  quickDownloadId?: string;
+  onToggleSelect?: (item: SourceItem, selected: boolean) => void;
+  onRequestEnterSelection?: () => void;
   selectionMode?: boolean;
   selectedIds?: Set<string>;
   hasSearched: boolean;
@@ -248,66 +202,50 @@ function SourceHomeGrid({
 
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-9 5xl:grid-cols-10 gap-4">
-      {items.map((item, idx) => (
-        <SourceItemCard
-          key={item.id}
-          item={item}
-          onClick={onItemClick}
-          onDownload={onDownload}
-          onToggleSelect={onToggleSelect}
-          isDownloading={quickDownloadId === item.id}
-          selectionMode={selectionMode}
-          selected={selectedIds?.has(item.id)}
-          index={idx}
-        />
-      ))}
+      {items.map((item, idx) => {
+        const itemKey = `${item.source_namespace}:${item.remote_id}`;
+        return (
+          <SourceMediaCard
+            key={itemKey}
+            item={item}
+            onDownload={onDownload}
+            onToggleSelect={onToggleSelect}
+            onRequestEnterSelection={onRequestEnterSelection}
+            selectionMode={selectionMode}
+            selected={selectedIds?.has(itemKey)}
+            index={idx}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function ArchiveDownloadRow({
-  archive,
-  onDownload,
-  loading,
-}: {
-  archive: SourceArchive;
-  onDownload: (archive: SourceArchive) => void;
-  loading: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3 p-3 rounded-xl border bg-card hover:bg-accent/40 transition-colors">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate">{archive.title}</p>
-        <div className="flex items-center gap-2 mt-0.5">
-          {archive.filename && (
-            <p className="text-xs text-muted-foreground truncate">{archive.filename}</p>
-          )}
-          {archive.size != null && (
-            <span className="text-xs text-muted-foreground shrink-0">
-              {formatSize(archive.size)}
-            </span>
-          )}
-        </div>
-      </div>
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={loading}
-        onClick={() => onDownload(archive)}
-        className="shrink-0"
-      >
-        {loading ? <Spinner className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
-        下载
-      </Button>
-    </div>
-  );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+function readInitialSourceUrlState(): {
+  plugin: string;
+  query: string;
+  page: number;
+  sort: string;
+  filters: Record<string, unknown>;
+} {
+  if (typeof window === 'undefined') {
+    return { plugin: '', query: '', page: 1, sort: 'date', filters: {} };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const page = Number.parseInt(params.get('page') || '1', 10);
+  const filters: Record<string, unknown> = {};
+  params.forEach((value, key) => {
+    if (key.startsWith('f_')) {
+      filters[key.slice(2)] = value;
+    }
+  });
+  return {
+    plugin: params.get('plugin') || '',
+    query: params.get('q') || '',
+    page: Number.isNaN(page) ? 1 : page,
+    sort: params.get('sort') || 'date',
+    filters,
+  };
 }
 
 export default function SourcePage() {
@@ -321,24 +259,45 @@ export default function SourcePage() {
   });
 
   const router = useRouter();
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const initialUrlState = useMemo(() => readInitialSourceUrlState(), []);
 
   const [plugins, setPlugins] = useState<SourcePluginSummary[]>([]);
-  const [selectedPlugin, setSelectedPlugin] = useState<string>('');
+  const [selectedPlugin, setSelectedPlugin] = useState<string>(initialUrlState.plugin);
   const [loadingPlugins, setLoadingPlugins] = useState(true);
 
   const [items, setItems] = useState<SourceItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState(initialUrlState.query);
+  const [currentPage, setCurrentPage] = useState(initialUrlState.page);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [sortValue, setSortValue] = useState<string>(initialUrlState.sort);
 
-  const [detailItem, setDetailItem] = useState<SourceDetailResult['data'] | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
+  // Dynamic filter schema from plugin
+  const [filterSchema, setFilterSchema] = useState<SourceFilter[] | null>(null);
+  const [filterValues, setFilterValues] = useState<Record<string, unknown>>(initialUrlState.filters);
+
+  // Sync URL params when state changes
+  const syncUrlParams = useCallback((plugin: string, q: string, page: number, sort: string, filters: Record<string, unknown>) => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams();
+    if (plugin) params.set('plugin', plugin);
+    if (q.trim()) params.set('q', q.trim());
+    if (page > 1) params.set('page', String(page));
+    if (sort && sort !== 'date') params.set('sort', sort);
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(`f_${key}`, String(value));
+      }
+    }
+    const qs = params.toString();
+    const newUrl = qs ? `${pathname}?${qs}` : pathname;
+    router.replace(newUrl, { scroll: false });
+  }, [pathname, router]);
 
   const [downloadOpen, setDownloadOpen] = useState(false);
-  const [downloadArchive, setDownloadArchive] = useState<SourceArchive | null>(null);
+  const [downloadItem, setDownloadItem] = useState<SourceItem | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [downloading, setDownloading] = useState(false);
@@ -348,18 +307,87 @@ export default function SourcePage() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const selectedItems = useMemo(() => {
+    return items.filter((item) => selectedIds.has(`${item.source_namespace}:${item.remote_id}`));
+  }, [items, selectedIds]);
+
+  // Active download tracking for completion toasts
+  interface ActiveDownload {
+    taskId: number;
+    title: string;
+    kind: 'archive' | 'tankoubon';
+  }
+  const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([]);
+  const subscribedTaskIdsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const unsubscribes: (() => void)[] = [];
+    for (const dl of activeDownloads) {
+      if (subscribedTaskIdsRef.current.has(dl.taskId)) continue;
+      subscribedTaskIdsRef.current.add(dl.taskId);
+      const unsub = TaskPoolService.subscribeTask(dl.taskId, {
+        onDone: (task) => {
+          setActiveDownloads((prev) => prev.filter((d) => d.taskId !== dl.taskId));
+          subscribedTaskIdsRef.current.delete(dl.taskId);
+          if (task.status === 'completed') {
+            let archiveId: string | undefined;
+            let tankoubonId: string | undefined;
+            try {
+              const result = JSON.parse(task.result || '{}') as Record<string, unknown>;
+              // 同时接受 string 和 number 类型的 ID，兼容不同序列化路径
+              const rawAid = result.archive_id;
+              if (typeof rawAid === 'string' && rawAid) archiveId = rawAid;
+              else if (typeof rawAid === 'number' && rawAid > 0) archiveId = String(rawAid);
+              const rawTid = result.tankoubon_id;
+              if (typeof rawTid === 'string' && rawTid) tankoubonId = rawTid;
+              else if (typeof rawTid === 'number' && rawTid > 0) tankoubonId = String(rawTid);
+            } catch {
+              // ignore parse errors
+            }
+            const localId = dl.kind === 'tankoubon' ? tankoubonId : archiveId;
+            const openPath = dl.kind === 'tankoubon' && localId
+              ? `/tankoubon?id=${encodeURIComponent(localId)}`
+              : archiveId
+                ? `/archive?id=${encodeURIComponent(archiveId)}`
+                : undefined;
+            toastSuccessRef.current(`"${dl.title}" 下载完成`, {
+              action: openPath
+                ? {
+                    label: '打开',
+                    onClick: () => router.push(openPath),
+                  }
+                : undefined,
+            });
+          } else if (task.status === 'failed') {
+            toastErrorRef.current(`"${dl.title}" 下载失败：${task.message || '未知错误'}`);
+          }
+        },
+        onError: () => {
+          setActiveDownloads((prev) => prev.filter((d) => d.taskId !== dl.taskId));
+          subscribedTaskIdsRef.current.delete(dl.taskId);
+        },
+      });
+      unsubscribes.push(unsub);
+    }
+    return () => {
+      for (const unsub of unsubscribes) {
+        unsub();
+      }
+    };
+  }, [activeDownloads, router]);
+
   useEffect(() => {
     SourcePluginService.listSourcePlugins()
       .then((data) => {
         const enabled = data.filter((p) => p.enabled);
         setPlugins(enabled);
-        if (enabled.length > 0) {
+        if (!initialUrlState.plugin && enabled.length > 0) {
           setSelectedPlugin(enabled[0].namespace);
         }
       })
       .catch(() => toastErrorRef.current('加载在线源插件列表失败'))
       .finally(() => setLoadingPlugins(false));
-  }, []);
+  }, [initialUrlState.plugin]);
 
   const handleBrowseResult = useCallback((result: SourceBrowseResult) => {
     if (result.success && result.data?.items) {
@@ -378,40 +406,42 @@ export default function SourcePage() {
     if (!selectedPlugin) return;
     setLoadingItems(true);
     setHasSearched(true);
-    const result = await SourcePluginService.home(selectedPlugin, { page });
+    const result = await SourcePluginService.home(selectedPlugin, { page, sort: sortValue, ...filterValues });
     handleBrowseResult(result);
     setLoadingItems(false);
-  }, [selectedPlugin, handleBrowseResult]);
+  }, [selectedPlugin, sortValue, filterValues, handleBrowseResult]);
 
   const handleSearch = useCallback(async (page: number = 1) => {
     if (!selectedPlugin || !searchQuery.trim()) return;
     setLoadingItems(true);
     setHasSearched(true);
-    const result = await SourcePluginService.search(selectedPlugin, searchQuery.trim(), page);
+    const result = await SourcePluginService.search(selectedPlugin, searchQuery.trim(), page, { sort: sortValue, ...filterValues });
     handleBrowseResult(result);
     setLoadingItems(false);
-  }, [selectedPlugin, searchQuery, handleBrowseResult]);
+  }, [selectedPlugin, searchQuery, sortValue, filterValues, handleBrowseResult]);
 
   const handleNextPage = useCallback(() => {
     const next = currentPage + 1;
     setCurrentPage(next);
+    syncUrlParams(selectedPlugin, searchQuery, next, sortValue, filterValues);
     if (searchQuery.trim()) {
       handleSearch(next);
     } else {
       loadHome(next);
     }
-  }, [currentPage, searchQuery, handleSearch, loadHome]);
+  }, [currentPage, searchQuery, sortValue, filterValues, selectedPlugin, handleSearch, loadHome, syncUrlParams]);
 
   const handlePrevPage = useCallback(() => {
     if (currentPage <= 1) return;
     const prev = currentPage - 1;
     setCurrentPage(prev);
+    syncUrlParams(selectedPlugin, searchQuery, prev, sortValue, filterValues);
     if (searchQuery.trim()) {
       handleSearch(prev);
     } else {
       loadHome(prev);
     }
-  }, [currentPage, searchQuery, handleSearch, loadHome]);
+  }, [currentPage, searchQuery, sortValue, filterValues, selectedPlugin, handleSearch, loadHome, syncUrlParams]);
 
   const prevPluginRef = useRef<string>('');
 
@@ -423,11 +453,21 @@ export default function SourcePage() {
       setHasNextPage(false);
       setItems([]);
       setSearchQuery('');
+      setSortValue('date');
+      setFilterValues({});
+      setFilterSchema(null);
       setSelectionMode(false);
       setSelectedIds(new Set());
+      syncUrlParams(selectedPlugin, '', 1, 'date', {});
+      // Load filter schema for this plugin
+      SourcePluginService.getFilters(selectedPlugin).then((res) => {
+        if (res.success && res.filters && res.filters.length > 0) {
+          setFilterSchema(res.filters);
+        }
+      }).catch(() => {});
       loadHome(1);
     }
-  }, [selectedPlugin, loadHome]);
+  }, [selectedPlugin, loadHome, syncUrlParams]);
 
   const enterSelectionMode = useCallback(() => {
     setSelectionMode(true);
@@ -439,86 +479,89 @@ export default function SourcePage() {
     setSelectedIds(new Set());
   }, []);
 
-  const handleToggleSelect = useCallback((item: SourceItem) => {
+  const handleToggleSelect = useCallback((item: SourceItem, forceSelected?: boolean) => {
+    const key = `${item.source_namespace}:${item.remote_id}`;
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(item.id)) {
-        next.delete(item.id);
+      if (forceSelected === true) {
+        next.add(key);
+      } else if (forceSelected === false) {
+        next.delete(key);
+      } else if (next.has(key)) {
+        next.delete(key);
       } else {
-        next.add(item.id);
+        next.add(key);
       }
       return next;
     });
   }, []);
 
   const handleSelectAll = useCallback(() => {
-    setSelectedIds(new Set(items.map((i) => i.id)));
+    setSelectedIds(new Set(items.map((i) => `${i.source_namespace}:${i.remote_id}`)));
   }, [items]);
 
   const handleBatchDownload = useCallback(async () => {
-    if (!selectedPlugin || selectedIds.size === 0) return;
+    if (selectedItems.length === 0) return;
     setQuickDownloadId('batch');
-    const ids = Array.from(selectedIds);
     const failed: string[] = [];
-    for (const id of ids) {
+    const newDownloads: ActiveDownload[] = [];
+
+    // Auto-download with first enabled category
+    let defaultCatId = 0;
+    try {
+      const cats = await CategoryService.getAllCategories();
+      const enabledCats = cats.filter((c) => c.enabled !== false);
+      if (enabledCats.length === 0) {
+        toastErrorRef.current('没有可用的分类，请先在设置中启用一个分类');
+        setQuickDownloadId('');
+        return;
+      }
+      defaultCatId = enabledCats[0].id;
+    } catch {
+      // pass
+    }
+
+    for (const item of selectedItems) {
       try {
-        const result = await SourcePluginService.detail(selectedPlugin, id);
-        if (result.success && result.data?.archives && result.data.archives.length > 0) {
-          // Auto-download first archive with first enabled category
-          const cats = await CategoryService.getAllCategories();
-          const enabledCats = cats.filter((c) => c.enabled !== false);
-          if (enabledCats.length === 0) {
-            failed.push(id);
-            continue;
-          }
-          const catId = String(enabledCats[0].id);
-          const dlResult = await SourcePluginService.download(
-            selectedPlugin,
-            result.data.id,
-            result.data.archives[0].id,
-            Number(catId)
-          );
-          if (!dlResult.success) {
-            failed.push(id);
-          }
+        const dlResult = await SourcePluginService.download(
+          item.source_namespace,
+          item.remote_id,
+          defaultCatId,
+          item.kind
+        );
+        if (dlResult.success && dlResult.task_id) {
+          newDownloads.push({
+            taskId: dlResult.task_id,
+            title: item.title || item.remote_id,
+            kind: item.kind,
+          });
         } else {
-          failed.push(id);
+          failed.push(item.remote_id);
         }
       } catch {
-        failed.push(id);
+        failed.push(item.remote_id);
       }
     }
+
+    if (newDownloads.length > 0) {
+      setActiveDownloads((prev) => [...prev, ...newDownloads]);
+    }
+
+    const total = selectedItems.length;
     if (failed.length === 0) {
-      toastSuccessRef.current(`已创建 ${ids.length} 个下载任务`);
+      toastSuccessRef.current(`已创建 ${total} 个下载任务`);
     } else {
-      toastSuccessRef.current(`已创建 ${ids.length - failed.length} 个任务，${failed.length} 个失败`);
+      toastSuccessRef.current(`已创建 ${total - failed.length} 个任务，${failed.length} 个失败`);
     }
     setQuickDownloadId('');
     exitSelectionMode();
-  }, [selectedPlugin, selectedIds, exitSelectionMode]);
+  }, [selectedItems, exitSelectionMode]);
 
-  const handleItemClick = async (item: SourceItem) => {
-    if (!selectedPlugin) return;
-    setDetailOpen(true);
-    setDetailLoading(true);
-    setDetailItem(null);
-    const result = await SourcePluginService.detail(selectedPlugin, item.id);
-    if (result.success && result.data) {
-      setDetailItem(result.data);
-    } else {
-      toastErrorRef.current(result.error || '获取详情失败');
-    }
-    setDetailLoading(false);
-  };
-
-  const openDownloadDialog = async (archive: SourceArchive, autoRemoteId?: string) => {
-    setDownloadArchive(archive);
+  const openDownloadDialog = async (item: SourceItem) => {
+    setDownloadItem(item);
     setDownloadOpen(true);
     setCategories([]);
     setSelectedCategory('');
-    if (autoRemoteId) {
-      setDetailItem({ id: autoRemoteId, title: archive.title, archives: [archive] } as SourceDetailResult['data']);
-    }
     try {
       const cats = await CategoryService.getAllCategories();
       const enabledCats = cats.filter((c) => c.enabled !== false);
@@ -533,34 +576,31 @@ export default function SourcePage() {
 
   const handleQuickDownload = async (item: SourceItem) => {
     if (!selectedPlugin || quickDownloadId) return;
-    setQuickDownloadId(item.id);
-    try {
-      const result = await SourcePluginService.detail(selectedPlugin, item.id);
-      if (result.success && result.data?.archives && result.data.archives.length > 0) {
-        await openDownloadDialog(result.data.archives[0], result.data.id);
-      } else {
-        toastErrorRef.current(result.error || '无可下载归档');
-      }
-    } catch {
-      toastErrorRef.current('获取详情失败');
-    }
+    setQuickDownloadId(`${item.source_namespace}:${item.remote_id}`);
+    await openDownloadDialog(item);
     setQuickDownloadId('');
   };
 
   const handleConfirmDownload = async () => {
-    if (!selectedPlugin || !downloadArchive || !selectedCategory) return;
+    if (!downloadItem || !selectedCategory) return;
     setDownloading(true);
-    const remoteId = detailItem?.id || '';
     const result = await SourcePluginService.download(
-      selectedPlugin,
-      remoteId,
-      downloadArchive.id,
-      Number(selectedCategory)
+      downloadItem.source_namespace,
+      downloadItem.remote_id,
+      Number(selectedCategory),
+      downloadItem.kind
     );
-    if (result.success) {
+    if (result.success && result.task_id) {
       toastSuccessRef.current('下载任务已创建');
+      setActiveDownloads((prev) => [
+        ...prev,
+        {
+          taskId: result.task_id!,
+          title: downloadItem.title || downloadItem.remote_id,
+          kind: downloadItem.kind,
+        },
+      ]);
       setDownloadOpen(false);
-      router.push('/settings/tasks');
     } else {
       toastErrorRef.current(result.error || '创建下载任务失败');
     }
@@ -594,42 +634,231 @@ export default function SourcePage() {
         )}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <Select value={selectedPlugin} onValueChange={setSelectedPlugin} disabled={loadingPlugins}>
-          <SelectTrigger className="w-full sm:w-[240px]">
-            <SelectValue placeholder={loadingPlugins ? '加载中...' : '选择在线源'} />
-          </SelectTrigger>
-          <SelectContent>
-            {plugins.map((p) => (
-              <SelectItem key={p.namespace} value={p.namespace}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-col gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Select value={selectedPlugin} onValueChange={setSelectedPlugin} disabled={loadingPlugins}>
+            <SelectTrigger className="w-full sm:w-[240px]">
+              <SelectValue placeholder={loadingPlugins ? '加载中...' : '选择在线源'} />
+            </SelectTrigger>
+            <SelectContent>
+              {plugins.map((p) => (
+                <SelectItem key={p.namespace} value={p.namespace}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        <div className="flex-1 flex gap-2">
-          <Input
-            placeholder="搜索在线归档..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            className="flex-1"
-          />
-          <Button onClick={() => handleSearch()} disabled={loadingItems || !selectedPlugin}>
-            <Search className="h-4 w-4 mr-2" />
-            搜索
-          </Button>
+          <div className="flex-1 flex gap-2">
+            <Input
+              placeholder="搜索在线归档..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                syncUrlParams(selectedPlugin, e.target.value, currentPage, sortValue, filterValues);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  syncUrlParams(selectedPlugin, searchQuery, 1, sortValue, filterValues);
+                  handleSearch(1);
+                }
+              }}
+              className="flex-1"
+            />
+            <Button onClick={() => {
+              syncUrlParams(selectedPlugin, searchQuery, 1, sortValue, filterValues);
+              handleSearch(1);
+            }} disabled={loadingItems || !selectedPlugin}>
+              <Search className="h-4 w-4 mr-2" />
+              搜索
+            </Button>
+          </div>
         </div>
+
+        {/* Dynamic filter bar */}
+        {filterSchema && filterSchema.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            {filterSchema.map((filter) => {
+              const val = filterValues[filter.key];
+              const applyFilter = (next: Record<string, unknown>) => {
+                setFilterValues(next);
+                syncUrlParams(selectedPlugin, searchQuery, 1, sortValue, next);
+                setCurrentPage(1);
+                if (searchQuery.trim()) {
+                  handleSearch(1);
+                } else {
+                  loadHome(1);
+                }
+              };
+              if (filter.type === 'tabs') {
+                const current = String(val ?? '');
+                return (
+                  <div key={filter.key} className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground mr-1">{filter.label}</span>
+                    <Button
+                      variant={current === '' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => applyFilter({ ...filterValues, [filter.key]: '' })}
+                    >
+                      全部
+                    </Button>
+                    {filter.options?.map((opt) => (
+                      <Button
+                        key={opt.value}
+                        variant={current === opt.value ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => applyFilter({ ...filterValues, [filter.key]: opt.value })}
+                      >
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                );
+              }
+              if (filter.type === 'select') {
+                return (
+                  <Select
+                    key={filter.key}
+                    value={val === '' || val == null ? '_all' : String(val)}
+                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: v === '_all' ? '' : v })}
+                  >
+                    <SelectTrigger className="w-auto min-w-[120px]">
+                      <SelectValue placeholder={filter.label} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_all">全部</SelectItem>
+                      {filter.options?.map((opt) => (
+                        opt.value !== '' && (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                        )
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              }
+              if (filter.type === 'multi-select') {
+                const currentSet = new Set(
+                  typeof val === 'string' && val.trim() !== '' ? val.split(',') : []
+                );
+                return (
+                  <div key={filter.key} className="flex items-center gap-1 flex-wrap">
+                    <span className="text-xs text-muted-foreground mr-1">{filter.label}</span>
+                    {filter.options?.map((opt) => {
+                      const active = currentSet.has(opt.value);
+                      return (
+                        <Button
+                          key={opt.value}
+                          variant={active ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => {
+                            const nextSet = new Set(currentSet);
+                            if (active) {
+                              nextSet.delete(opt.value);
+                            } else {
+                              nextSet.add(opt.value);
+                            }
+                            const nextVal = Array.from(nextSet).join(',');
+                            applyFilter({ ...filterValues, [filter.key]: nextVal });
+                          }}
+                        >
+                          {opt.label}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                );
+              }
+              if (filter.type === 'toggle') {
+                const active = Boolean(val);
+                return (
+                  <Button
+                    key={filter.key}
+                    variant={active ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => applyFilter({ ...filterValues, [filter.key]: active ? '' : '1' })}
+                  >
+                    {filter.label}
+                  </Button>
+                );
+              }
+              if (filter.type === 'text') {
+                return (
+                  <Input
+                    key={filter.key}
+                    placeholder={filter.label}
+                    value={String(val ?? '')}
+                    onChange={(e) => {
+                      const next = { ...filterValues, [filter.key]: e.target.value };
+                      setFilterValues(next);
+                      syncUrlParams(selectedPlugin, searchQuery, currentPage, sortValue, next);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const next = { ...filterValues, [filter.key]: e.currentTarget.value };
+                        applyFilter(next);
+                      }
+                    }}
+                    className="w-[180px]"
+                  />
+                );
+              }
+              if (filter.type === 'range') {
+                const [minVal = '', maxVal = ''] = typeof val === 'string' ? val.split(',') : [];
+                return (
+                  <div key={filter.key} className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">{filter.label}</span>
+                    <Input
+                      type="number"
+                      placeholder="最小"
+                      value={minVal}
+                      onChange={(e) => {
+                        const next = { ...filterValues, [filter.key]: `${e.target.value},${maxVal}` };
+                        setFilterValues(next);
+                        syncUrlParams(selectedPlugin, searchQuery, currentPage, sortValue, next);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const next = { ...filterValues, [filter.key]: `${e.currentTarget.value},${maxVal}` };
+                          applyFilter(next);
+                        }
+                      }}
+                      className="w-[80px]"
+                    />
+                    <span className="text-muted-foreground">-</span>
+                    <Input
+                      type="number"
+                      placeholder="最大"
+                      value={maxVal}
+                      onChange={(e) => {
+                        const next = { ...filterValues, [filter.key]: `${minVal},${e.target.value}` };
+                        setFilterValues(next);
+                        syncUrlParams(selectedPlugin, searchQuery, currentPage, sortValue, next);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const next = { ...filterValues, [filter.key]: `${minVal},${e.currentTarget.value}` };
+                          applyFilter(next);
+                        }
+                      }}
+                      className="w-[80px]"
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
+        )}
       </div>
 
       <SourceHomeGrid
         items={items}
         loading={loadingItems}
-        onItemClick={handleItemClick}
         onDownload={handleQuickDownload}
         onToggleSelect={handleToggleSelect}
-        quickDownloadId={quickDownloadId}
+        onRequestEnterSelection={enterSelectionMode}
         selectionMode={selectionMode}
         selectedIds={selectedIds}
         hasSearched={hasSearched}
@@ -661,84 +890,12 @@ export default function SourcePage() {
         </div>
       )}
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto p-0 gap-0">
-          {detailLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Spinner />
-            </div>
-          ) : detailItem ? (
-            <>
-              {/* Cover */}
-              {detailItem.cover && (
-                <div className="relative w-full bg-muted">
-                  <img
-                    src={detailItem.cover}
-                    alt={detailItem.title}
-                    className="w-full h-auto max-h-[360px] object-cover object-top"
-                    onContextMenu={(e) => e.preventDefault()}
-                  />
-                </div>
-              )}
-
-              <div className="p-6 space-y-5">
-                {/* Title */}
-                <div>
-                  <h2 className="text-lg font-semibold leading-snug">{detailItem.title}</h2>
-                </div>
-
-                {/* Tags */}
-                {detailItem.tags && detailItem.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {detailItem.tags.map((tag) => (
-                      <Badge key={tag} variant="outline" className="text-xs font-normal px-2.5 py-0.5 rounded-full">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-
-                {/* Description */}
-                {detailItem.description && (
-                  <div className="rounded-xl border bg-card p-4 space-y-1.5">
-                    {detailItem.description.split('\n').filter(Boolean).map((line, i) => (
-                      <p key={i} className="text-sm text-muted-foreground leading-relaxed">
-                        {line}
-                      </p>
-                    ))}
-                  </div>
-                )}
-
-                {/* Archives */}
-                {detailItem.archives && detailItem.archives.length > 0 && (
-                  <div className="space-y-3 pt-1">
-                    <h3 className="text-sm font-semibold">可下载归档</h3>
-                    <div className="space-y-2">
-                      {detailItem.archives.map((archive) => (
-                        <ArchiveDownloadRow
-                          key={archive.id}
-                          archive={archive}
-                          onDownload={(a) => openDownloadDialog(a)}
-                          loading={false}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground text-sm">无法加载详情</div>
-          )}
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={downloadOpen} onOpenChange={setDownloadOpen}>
         <DialogContent className="max-w-md p-0 gap-0">
           <DialogHeader className="p-6 pb-0">
             <DialogTitle>选择目标分类</DialogTitle>
             <DialogDescription>
-              将 <span className="font-medium text-foreground">{downloadArchive?.title || '归档'}</span> 下载到本地
+              将 <span className="font-medium text-foreground">{downloadItem?.title || '归档'}</span> 下载到本地
             </DialogDescription>
           </DialogHeader>
 

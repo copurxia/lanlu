@@ -56,6 +56,9 @@ public class ScanArchiveTaskRunner {
             w.startObject()
             w.writeName("success").writeValue(1)
             w.writeName("archive_id").writeValue(result.archiveId)
+            if (result.tankoubonId.size > 0) {
+                w.writeName("tankoubon_id").writeValue(result.tankoubonId)
+            }
             w.writeName("path").writeValue(config.archivePath)
             w.endObject()
             w.flush()
@@ -257,6 +260,8 @@ public class ScanArchiveTaskRunner {
             }
             let resolvedCoverEntry = resolveThumbnailCoverEntry(filePath, archiveType, cachedCoverEntry)
 
+            var tankoubonId = ""
+
             match (existingArchive) {
                 case Some(archive) =>
                     logger.debug("Archive already exists in database: ${filePath}")
@@ -277,19 +282,20 @@ public class ScanArchiveTaskRunner {
                             }
 
                             // 直接返回成功，不等待缩略图生成完成
-                            try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
-                            return ProcessResultData(true, archive.id, "")
+                            try { tankoubonId = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                            return ProcessResultData(true, archive.id, "", tankoubonId: tankoubonId)
                         }
 
                         logger.debug("Thumbnail hash is empty but no local cover candidate is available, deferring to metadata plugins",
                             ("archive_id", archive.id), ("archive_type", archiveType))
                         submitArchiveMetadataTasks(archive.id, categoryInternalId, relativePath, dirFullPath, pluginNamespaces, notifier)
-                        return ProcessResultData(true, archive.id, "")
+                        try { tankoubonId = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                        return ProcessResultData(true, archive.id, "", tankoubonId: tankoubonId)
                     } else {
                         // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
                         logger.debug("Archive already processed with thumbnail: ${filePath}")
-                        try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
-                        return ProcessResultData(true, archive.id, "")
+                        try { tankoubonId = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                        return ProcessResultData(true, archive.id, "", tankoubonId: tankoubonId)
                     }
                 case None =>
                     logger.debug("Archive not found in database, processing new file: ${filePath}")
@@ -343,7 +349,8 @@ public class ScanArchiveTaskRunner {
 
             // 页面元数据改为插件驱动（metadata_plugin_callback 写回 pages），扫描阶段不再自动提交 page_metadata。
 
-            return ProcessResultData(true, dbResult.archiveId, "")
+            try { tankoubonId = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+            return ProcessResultData(true, dbResult.archiveId, "", tankoubonId: tankoubonId)
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Error processing file: ${e.message}")
         }
