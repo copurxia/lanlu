@@ -2,6 +2,8 @@
 
 兰鹿 - 基于仓颉语言的漫画归档管理系统
 
+![star](https://gitcode.com/copur/lanlu/star/badge.svg)
+
 *Vibe Coding Warning*
 
 | 类型 | CNB | Gitea | GitHub |
