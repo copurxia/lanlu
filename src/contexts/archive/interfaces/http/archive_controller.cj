@@ -512,6 +512,14 @@ public class ArchiveController {
             return
         }
 
+        // Source: 复合 ID — 返回空列表
+        match (SourceRequestResolver.parseFromCompositeId(arcid)) {
+            case Some(_) =>
+                ResponseView.json(ctx, "{\"filtered\":0,\"result\":[],\"total\":0}")
+                return
+            case None => ()
+        }
+
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
         let tankoubons = match (userIdOpt) {
             case Some(userId) => TankoubonModel.getTankoubonsForArchiveWithUser(arcid, userId)
@@ -553,6 +561,15 @@ public class ArchiveController {
             ResponseView.json(ctx, errorResponse)
             return
         }
+
+        // Source: 复合 ID — no-op
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(_) =>
+                ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
+                return
+            case None => ()
+        }
+
         if (requestBody.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Request body is required\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
@@ -935,6 +952,14 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.json(ctx, errorResponse)
                     return
+                }
+
+                // Source: 复合 ID — no-op
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"delete_archive\",\"success\":1}")
+                        return
+                    case None => ()
                 }
 
                 // 检查归档是否存在
@@ -1849,6 +1874,14 @@ public class ArchiveController {
                     return
                 }
 
+                // Source: 复合 ID — no-op
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"set_isnew\",\"success\":1}")
+                        return
+                    case None => ()
+                }
+
                 // 检查归档是否存在
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
@@ -1898,6 +1931,14 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.json(ctx, errorResponse)
                     return
+                }
+
+                // Source: 复合 ID — no-op
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"clear_isnew\",\"success\":1}")
+                        return
+                    case None => ()
                 }
 
                 // 检查归档是否存在
@@ -1956,6 +1997,14 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.json(ctx, errorResponse)
                     return
+                }
+
+                // Source: 复合 ID — no-op（Source 无本地进度）
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"update_progress\",\"success\":1}")
+                        return
+                    case None => ()
                 }
 
                 // 解析页数为整数
@@ -2026,6 +2075,14 @@ public class ArchiveController {
                     return
                 }
 
+                // Source: 复合 ID — no-op
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"add_favorite\",\"success\":1}")
+                        return
+                    case None => ()
+                }
+
                 // 检查归档是否存在
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
@@ -2074,6 +2131,14 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.json(ctx, errorResponse)
                     return
+                }
+
+                // Source: 复合 ID — no-op
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        ResponseView.json(ctx, "{\"operation\":\"remove_favorite\",\"success\":1}")
+                        return
+                    case None => ()
                 }
 
                 // 获取归档的数据库内部ID

@@ -764,7 +764,7 @@ function ReaderContent() {
     });
   }, []);
 
-  const archive = useReaderArchiveMetadata({ id: (queryArchiveId && ArchiveService.isSourceId(queryArchiveId)) ? null : activeArchiveId, language });
+  const archive = useReaderArchiveMetadata({ id: activeArchiveId, language });
   const { htmlContents, loadHtmlPage } = useReaderHtmlPages({ id: (queryArchiveId && ArchiveService.isSourceId(queryArchiveId)) ? null : sourceArchiveId, pages: effectivePages, onError: setError });
 
   // 用于跟踪拆分封面模式的变化，避免无限循环
@@ -1037,13 +1037,6 @@ function ReaderContent() {
   // - In a tankoubon, use previous/next chapter.
   // - For a standalone archive, reuse archive-related recommendations.
   useEffect(() => {
-    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) {
-      setTankoubonContext(null);
-      setPrevArchiveId(null);
-      setNextArchiveByArchiveId({});
-      return;
-    }
-
     if (!sourceArchiveId) {
       setTankoubonContext(null);
       setPrevArchiveId(null);

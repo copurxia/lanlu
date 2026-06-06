@@ -521,6 +521,64 @@ public class RecommendationDao {
         return result.toArray()
     }
 
+    public static func getTagBasedCandidates(tags: Array<String>, limit: Int32): Array<RecommendationArchiveCandidateRow> {
+        let result = ArrayList<RecommendationArchiveCandidateRow>()
+        if (tags.size == 0 || limit <= 0) { return result.toArray() }
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return result.toArray()
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT
+                            aws.arcid,
+                            aws.id,
+                            aws.category_id,
+                            aws.title,
+                            aws.filename,
+                            aws.summary,
+                            aws.tags,
+                            aws.pagecount,
+                            aws.cover_asset_id,
+                            COALESCE(aws.created_at::TEXT, ''),
+                            COALESCE(aws.updated_at::TEXT, ''),
+                            COALESCE(aws.release_at::TEXT, ''),
+                            COUNT(DISTINCT mt.tag)::INT AS overlap_count
+                        FROM archive_metadata_search aws
+                        JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
+                        JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                        WHERE mt.tag = ANY(?::text[])
+                        GROUP BY
+                            aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
+                            aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
+                            aws.created_at, aws.updated_at, aws.release_at
+                        ORDER BY overlap_count DESC, aws.updated_at DESC
+                        LIMIT ?
+                    """)
+                    try {
+                        DatabaseConfig.setTextArray(stmt, 0, tags)
+                        stmt.set(1, limit)
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                result.add(mapArchiveCandidateRow(rs))
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    let logger = getLogger("recommendation_dao")
+                    logger.error("获取 tag-based 候选失败", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+        return result.toArray()
+    }
+
     public static func getArchiveToPrimaryTankoubonMap(archiveIds: Array<String>): HashMap<String, String> {
         let result = HashMap<String, String>()
         if (archiveIds.size == 0) { return result }

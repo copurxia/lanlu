@@ -95,7 +95,7 @@ export function ArchiveDetailContent() {
   const [metadataPluginPreviewPages, setMetadataPluginPreviewPages] = useState<MetadataPagePatchInput[]>([]);
   const [previewRefreshToken, setPreviewRefreshToken] = useState(0);
   const { previewLoading, previewError, displayPages } =
-    useArchivePreview({ id: isSourceMode ? null : id, showPreview, t, refreshToken: previewRefreshToken });
+    useArchivePreview({ id, showPreview, t, refreshToken: previewRefreshToken });
 
   const pages = displayPages;
 

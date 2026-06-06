@@ -6,7 +6,10 @@ import std.sort.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.recommendation.domain.*
 import lanlu.contexts.recommendation.infrastructure.persistence.*
+import lanlu.contexts.plugin.application.{SourceRequestResolver, SourceDirectActionService}
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
+import std.io.ByteBuffer
+import stdx.encoding.json.stream.*
 
 public class RecommendationResultItem {
     public var itemType: String = "archive"
@@ -174,6 +177,59 @@ public class RecommendationService {
         }
         let normalized = matched / maxPossible
         return if (normalized > 1.0) { 1.0 } else { normalized }
+    }
+
+    private static func getSourceTags(archiveId: String): String {
+        match (SourceRequestResolver.parseFromCompositeId(archiveId)) {
+            case Some(request) =>
+                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
+                // Parse JSON to extract tags array and join them
+                try {
+                    let buf = ByteBuffer()
+                    unsafe { buf.write(json.rawData()) }
+                    let r = JsonReader(buf)
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let name = r.readName()
+                        if (name == "data") {
+                            if (r.peek() == BeginObject) {
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let dataName = r.readName()
+                                    if (dataName == "tags") {
+                                        if (r.peek() == BeginArray) {
+                                            let tagBuilder = ArrayList<String>()
+                                            r.startArray()
+                                            while (r.peek() != EndArray) {
+                                                tagBuilder.add(r.readValue<String>())
+                                            }
+                                            r.endArray()
+                                            var result = ""
+                                            for (i in 0..tagBuilder.size) {
+                                                if (i > 0) { result += "," }
+                                                result += tagBuilder[i]
+                                            }
+                                            return result
+                                        } else {
+                                            r.skip()
+                                        }
+                                    } else {
+                                        r.skip()
+                                    }
+                                }
+                                r.endObject()
+                            } else {
+                                r.skip()
+                            }
+                        } else {
+                            r.skip()
+                        }
+                    }
+                    r.endObject()
+                } catch (_: Exception) {}
+                return ""
+            case None => return ""
+        }
     }
 
     private static func sortScoredItems(items: ArrayList<RecommendationScoredItem>): Unit {
@@ -406,20 +462,38 @@ public class RecommendationService {
 
     public static func getArchiveRelatedRecommendations(userId: Int64, sessionKey: String, archiveId: String, count: Int32): Array<RecommendationResultItem> {
         let seed = ArchiveDao.getArchiveMetadataById(archiveId)
-        if (seed.id.size == 0) { return Array<RecommendationResultItem>() }
+        var sourceTags: String = ""
+        if (seed.id.size == 0) {
+            // Source 复合 ID → 插件取 metadata，用 tags 继续推荐
+            let tags = getSourceTags(archiveId)
+            if (tags.size == 0) { return Array<RecommendationResultItem>() }
+            sourceTags = tags
+        }
         let safeCount = if (count > 0) { count } else { 12i32 }
         var recentArchiveIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "archive_related", "archive", 72i32)
         let userTagWeights = RecommendationDao.getRecentUserTagWeights(userId, 24i32)
 
         func buildArchiveRelatedRankedItems(recentIds: HashSet<String>): ArrayList<RecommendationScoredItem> {
             let ranked = ArrayList<RecommendationScoredItem>()
-            for (candidate in RecommendationDao.getArchiveRelatedCandidates(archiveId, safeCount * 16i32)) {
+            let effectiveTags = if (seed.id.size > 0) { seed.tags } else { sourceTags }
+            let candidates = if (seed.id.size > 0) {
+                RecommendationDao.getArchiveRelatedCandidates(archiveId, safeCount * 16i32)
+            } else {
+                // For source items, use tag-based candidate lookup
+                let tagBuilder = ArrayList<String>()
+                for (s in sourceTags.split(",")) {
+                    let t = s.trimAscii()
+                    if (t.size > 0) { tagBuilder.add(t) }
+                }
+                RecommendationDao.getTagBasedCandidates(tagBuilder.toArray(), safeCount * 16i32)
+            }
+            for (candidate in candidates) {
                 if (candidate.arcid.size == 0 || candidate.arcid == archiveId) { continue }
                 if (recentIds.contains(candidate.arcid)) { continue }
 
-                let tagSim = weightedJaccard(seed.tags, candidate.tags)
+                let tagSim = weightedJaccard(effectiveTags, candidate.tags)
                 let affinity = userAffinityScore(candidate.tags, userTagWeights)
-                let categoryScore = if (candidate.categoryId > 0 && candidate.categoryId == seed.category_id) { 1.0 } else { 0.0 }
+                let categoryScore = if (candidate.categoryId > 0 && seed.id.size > 0 && candidate.categoryId == seed.category_id) { 1.0 } else { 0.0 }
                 let structureScore = pageSimilarity(seed.pagecount, candidate.pagecount)
                 let quality = qualityScore(candidate.title, candidate.summary, candidate.tags, candidate.coverAssetId)
 
