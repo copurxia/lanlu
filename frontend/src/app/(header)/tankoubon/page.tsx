@@ -105,6 +105,7 @@ type ArchiveListItemProps = {
   selected?: boolean;
   onToggleSelect?: () => void;
   sourceParentRemoteId?: string | null;
+  tankoubonId?: string;
 };
 
 function ArchiveListItem({
@@ -115,6 +116,7 @@ function ArchiveListItem({
   selected = false,
   onToggleSelect,
   sourceParentRemoteId,
+  tankoubonId,
 }: ArchiveListItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
@@ -144,10 +146,10 @@ function ArchiveListItem({
 
   const handleNavigateToReader = () => {
     if (archive.arcid.startsWith('source:')) {
-      router.push(`/reader?id=${encodeURIComponent(archive.arcid)}`);
+      router.push(buildReaderPath(archive.arcid, archive.progress, tankoubonId));
       return;
     }
-    router.push(buildReaderPath(archive.arcid, archive.progress));
+    router.push(buildReaderPath(archive.arcid, archive.progress, tankoubonId));
   };
 
   const handleNavigateToDetails = () => {
@@ -583,25 +585,6 @@ function TankoubonDetailContent() {
   const currentTankoubonId = tankoubon?.tankoubon_id ?? null;
 
   const fetchArchives = useCallback(async () => {
-    if (isSourceMode && tankoubon?.children) {
-      const sourceArchives: Archive[] = tankoubon.children.map((child) => ({
-        arcid: String(child.entity_id || ''),
-        title: child.title || '',
-        filename: '',
-        description: child.description || '',
-        tags: (child.tags || []).join(', '),
-        pagecount: 0,
-        progress: 0,
-        isnew: true,
-        archivetype: 'image',
-        lastreadtime: 0,
-        size: 0,
-        assets: undefined,
-      }));
-      setArchives(sourceArchives);
-      return;
-    }
-
     if (!currentTankoubonId) {
       setArchives([]);
       return;
@@ -2072,6 +2055,7 @@ function TankoubonDetailContent() {
                   selectionMode={selectionMode}
                   selected={selectedArchiveIds.has(archive.arcid)}
                   sourceParentRemoteId={isSourceMode ? remoteId : null}
+                  tankoubonId={tankoubon?.tankoubon_id}
                   onToggleSelect={() => {
                     if (!selectionMode) {
                       enterSelectionMode();

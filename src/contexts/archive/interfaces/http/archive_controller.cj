@@ -298,6 +298,103 @@ public class ArchiveController {
         return value.toString()
     }
 
+    /**
+     * 对字符串进行 URL 组件编码（等价于 JavaScript encodeURIComponent）。
+     * 保留 unreserved 字符（字母、数字、-_.~），其余字符进行百分号编码。
+     */
+    private static func urlEncodeComponent(input: String): String {
+        let unreserved = HashSet<UInt8>()
+        let hexChars = [
+            UInt8(UInt32(r'0')), UInt8(UInt32(r'1')), UInt8(UInt32(r'2')), UInt8(UInt32(r'3')),
+            UInt8(UInt32(r'4')), UInt8(UInt32(r'5')), UInt8(UInt32(r'6')), UInt8(UInt32(r'7')),
+            UInt8(UInt32(r'8')), UInt8(UInt32(r'9')), UInt8(UInt32(r'A')), UInt8(UInt32(r'B')),
+            UInt8(UInt32(r'C')), UInt8(UInt32(r'D')), UInt8(UInt32(r'E')), UInt8(UInt32(r'F'))
+        ]
+        unsafe {
+            for (c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~".rawData()) {
+                unreserved.add(c)
+            }
+        }
+        let bytes = unsafe { input.rawData() }
+        var out = ""
+        for (b in bytes) {
+            if (unreserved.contains(b)) {
+                out += String.fromUtf8(Array<UInt8>(1, {_ => b}))
+            } else {
+                let high = Int64((UInt32(b) >> 4) & 0x0Fu32)
+                let low = Int64(UInt32(b) & 0x0Fu32)
+                out += "%"
+                out += String.fromUtf8(Array<UInt8>(1, {_ => hexChars[high]}))
+                out += String.fromUtf8(Array<UInt8>(1, {_ => hexChars[low]}))
+            }
+        }
+        return out
+    }
+
+    /**
+     * 从 source_reader 响应中查找匹配 asset_ref 的 page index。
+     * 返回「第 N 页」的字符串形式（1-based），为空表示未找到。
+     */
+    private static func resolvePageIndexFromSourceReader(request: SourceRequest, targetAssetRef: String): String {
+        try {
+            let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
+            let buf = ByteBuffer()
+            unsafe { buf.write(json.rawData()) }
+            let r = JsonReader(buf)
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == "data") {
+                    if (r.peek() == BeginObject) {
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let dataName = r.readName()
+                            if (dataName == "pages") {
+                                if (r.peek() == BeginArray) {
+                                    r.startArray()
+                                    var idx: Int64 = 0
+                                    while (r.peek() != EndArray) {
+                                        idx += 1
+                                        if (r.peek() == BeginObject) {
+                                            r.startObject()
+                                            var assetRef = ""
+                                            while (r.peek() != EndObject) {
+                                                let fieldName = r.readName()
+                                                if (fieldName == "asset_ref") {
+                                                    assetRef = r.readValue<String>()
+                                                } else {
+                                                    r.skip()
+                                                }
+                                            }
+                                            r.endObject()
+                                            if (assetRef == targetAssetRef) {
+                                                return idx.toString()
+                                            }
+                                        } else {
+                                            r.skip()
+                                        }
+                                    }
+                                    r.endArray()
+                                } else {
+                                    r.skip()
+                                }
+                            } else {
+                                r.skip()
+                            }
+                        }
+                        r.endObject()
+                    } else {
+                        r.skip()
+                    }
+                } else {
+                    r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return ""
+    }
+
     private static func extractEpisodeToken(text: String): String {
         let lower = trimAsciiLower(text)
         if (lower.size < 6) {
@@ -437,11 +534,210 @@ public class ArchiveController {
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
 
-        // Source: 复合 ID 检测/转发
+        // Source: 复合 ID 检测/转发 → 构建 ArchiveMetadata
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
                 let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
-                ResponseView.json(ctx, json)
+                // Parse outer { success, data: {...} } to extract data bytes
+                try {
+                    let buf = ByteBuffer()
+                    unsafe { buf.write(json.rawData()) }
+                    let r = JsonReader(buf)
+                    r.startObject()
+                    var srcDataBytes: Array<Byte> = []
+                    while (r.peek() != EndObject) {
+                        let name = r.readName()
+                        if (name == "success") {
+                            let ok = r.readValue<Bool>()
+                            if (!ok) {
+                                ResponseView.errorJson(ctx, "Source plugin returned error")
+                                return
+                            }
+                        } else if (name == "data") {
+                            srcDataBytes = r.readValueBytes()
+                        } else {
+                            r.skip()
+                        }
+                    }
+                    r.endObject()
+
+                    if (srcDataBytes.size > 0) {
+                        // Parse data object to extract individual fields
+                        let dataBuf = ByteBuffer()
+                        unsafe { dataBuf.write(srcDataBytes) }
+                        let dr = JsonReader(dataBuf)
+
+                        var srcTitle = ""
+                        var srcDescription = ""
+                        var srcTags = ArrayList<String>()
+                        var srcPageCount: Int64 = 0
+                        var srcCoverAssetId = ""
+                        var srcMediaType = "image"
+                        var srcChildrenBytes: Array<Byte> = []
+
+                        dr.startObject()
+                        while (dr.peek() != EndObject) {
+                            let fieldName = dr.readName()
+                            if (fieldName == "title") {
+                                srcTitle = dr.readValue<String>()
+                            } else if (fieldName == "description") {
+                                srcDescription = dr.readValue<String>()
+                            } else if (fieldName == "tags") {
+                                if (dr.peek() == BeginArray) {
+                                    dr.startArray()
+                                    while (dr.peek() != EndArray) {
+                                        srcTags.add(dr.readValue<String>())
+                                    }
+                                    dr.endArray()
+                                } else {
+                                    dr.skip()
+                                }
+                            } else if (fieldName == "page_count") {
+                                try {
+                                    srcPageCount = dr.readValue<Int64>()
+                                } catch (_: Exception) {
+                                    try {
+                                        let pf = dr.readValue<Float64>()
+                                        srcPageCount = Int64(pf)
+                                    } catch (_: Exception) {
+                                        dr.skip()
+                                    }
+                                }
+                            } else if (fieldName == "cover_asset_id") {
+                                srcCoverAssetId = dr.readValue<String>()
+                            } else if (fieldName == "reader") {
+                                if (dr.peek() == BeginObject) {
+                                    dr.startObject()
+                                    while (dr.peek() != EndObject) {
+                                        let readerField = dr.readName()
+                                        if (readerField == "media_type") {
+                                            srcMediaType = dr.readValue<String>()
+                                        } else {
+                                            dr.skip()
+                                        }
+                                    }
+                                    dr.endObject()
+                                } else {
+                                    dr.skip()
+                                }
+                            } else if (fieldName == "children") {
+                                if (dr.peek() == BeginArray) {
+                                    srcChildrenBytes = dr.readValueBytes()
+                                } else {
+                                    dr.skip()
+                                }
+                            } else {
+                                dr.skip()
+                            }
+                        }
+                        dr.endObject()
+
+                        // Build ArchiveMetadata JSON output
+                        let out = ByteBuffer()
+                        let w = JsonWriter(out)
+                        w.startObject()
+                        w.writeName("arcid").writeValue(id)
+                        w.writeName("title").writeValue(srcTitle)
+                        w.writeName("description").writeValue(srcDescription)
+                        w.writeName("tags")
+                        w.startArray()
+                        for (tag in srcTags) {
+                            w.writeValue(tag)
+                        }
+                        w.endArray()
+                        w.writeName("pagecount").writeValue(srcPageCount)
+                        w.writeName("page_count").writeValue(srcPageCount)
+                        w.writeName("progress").writeValue(0)
+                        w.writeName("isnew").writeValue(true)
+                        w.writeName("isfavorite").writeValue(false)
+                        w.writeName("archivetype").writeValue(srcMediaType)
+                        w.writeName("lastreadtime").writeValue(0)
+                        w.writeName("size").writeValue(0)
+                        // assets
+                        if (srcCoverAssetId.size > 0) {
+                            w.writeName("assets")
+                            w.startObject()
+                            w.writeName("cover").writeValue(srcCoverAssetId)
+                            w.endObject()
+                        } else {
+                            w.writeName("assets")
+                            w.startObject()
+                            w.endObject()
+                        }
+                        w.writeName("filename").writeValue("")
+                        w.writeName("relative_path").writeValue("")
+                        w.writeName("thumbnail_hash").writeValue("")
+                        w.writeName("release_at").writeValue("")
+                        w.writeName("updated_at").writeValue("")
+                        w.writeName("created_at").writeValue("")
+                        // children
+                        w.writeName("children")
+                        if (srcChildrenBytes.size > 0) {
+                            w.startArray()
+                            let childBuf = ByteBuffer()
+                            unsafe { childBuf.write(srcChildrenBytes) }
+                            let cr = JsonReader(childBuf)
+                            cr.startArray()
+                            while (cr.peek() != EndArray) {
+                                if (cr.peek() == BeginObject) {
+                                    cr.startObject()
+                                    var childRemoteId = ""
+                                    var childTitle = ""
+                                    var childDescription = ""
+                                    var childTags = ArrayList<String>()
+                                    while (cr.peek() != EndObject) {
+                                        let childField = cr.readName()
+                                        if (childField == "remote_id") {
+                                            childRemoteId = cr.readValue<String>()
+                                        } else if (childField == "title") {
+                                            childTitle = cr.readValue<String>()
+                                        } else if (childField == "description") {
+                                            childDescription = cr.readValue<String>()
+                                        } else if (childField == "tags") {
+                                            if (cr.peek() == BeginArray) {
+                                                cr.startArray()
+                                                while (cr.peek() != EndArray) {
+                                                    childTags.add(cr.readValue<String>())
+                                                }
+                                                cr.endArray()
+                                            } else {
+                                                cr.skip()
+                                            }
+                                        } else {
+                                            cr.skip()
+                                        }
+                                    }
+                                    cr.endObject()
+
+                                    w.startObject()
+                                    w.writeName("entity_type").writeValue("archive")
+                                    w.writeName("entity_id").writeValue("source:${request.namespace}:${childRemoteId}")
+                                    w.writeName("title").writeValue(childTitle)
+                                    w.writeName("description").writeValue(childDescription)
+                                    w.writeName("tags")
+                                    w.startArray()
+                                    for (ct in childTags) {
+                                        w.writeValue(ct)
+                                    }
+                                    w.endArray()
+                                    w.endObject()
+                                } else {
+                                    cr.skip()
+                                }
+                            }
+                            cr.endArray()
+                            w.endArray()
+                        } else {
+                            w.startArray()
+                            w.endArray()
+                        }
+                        w.endObject()
+                        w.flush()
+                        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+                        return
+                    }
+                } catch (_: Exception) {}
+                ResponseView.errorJson(ctx, "Failed to parse source plugin response")
                 return
             case None => ()
         }
@@ -613,9 +909,212 @@ public class ArchiveController {
         // Source: 复合 ID 检测/转发
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
-                ResponseView.json(ctx, json)
-                return
+                let tankoubonId = (ctx.query("tankoubon_id") ?? "").trimAscii()
+                var effectiveRequest = request
+
+                // 如果传了 tankoubon_id，解析单行本的第一个子项作为实际阅读目标
+                if (tankoubonId.size > 0) {
+                    match (SourceRequestResolver.parseFromCompositeId(tankoubonId)) {
+                        case Some(tankoubonRequest) =>
+                            let detailJson = SourceDirectActionService.execute(
+                                tankoubonRequest.namespace, "source_detail", tankoubonRequest
+                            )
+                            try {
+                                let buf = ByteBuffer()
+                                unsafe { buf.write(detailJson.rawData()) }
+                                let r = JsonReader(buf)
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let name = r.readName()
+                                    if (name == "data") {
+                                        if (r.peek() == BeginObject) {
+                                            r.startObject()
+                                            while (r.peek() != EndObject) {
+                                                let dataName = r.readName()
+                                                if (dataName == "children") {
+                                                    if (r.peek() == BeginArray) {
+                                                        r.startArray()
+                                                        if (r.peek() != EndArray) {
+                                                            if (r.peek() == BeginObject) {
+                                                                r.startObject()
+                                                                var childRemoteId = ""
+                                                                while (r.peek() != EndObject) {
+                                                                    let childName = r.readName()
+                                                                    if (childName == "remote_id") {
+                                                                        childRemoteId = r.readValue<String>()
+                                                                    } else {
+                                                                        r.skip()
+                                                                    }
+                                                                }
+                                                                r.endObject()
+
+                                                                if (childRemoteId.size > 0) {
+                                                                    let out = ByteBuffer()
+                                                                    let w = JsonWriter(out)
+                                                                    w.startObject()
+                                                                    w.writeName("remote_id").writeValue(childRemoteId)
+                                                                    w.endObject()
+                                                                    w.flush()
+                                                                    let childRequest = SourceRequest(request.namespace, childRemoteId)
+                                                                    childRequest.paramsJson = String.fromUtf8(readToEnd(out))
+                                                                    effectiveRequest = childRequest
+                                                                }
+                                                            }
+                                                        }
+                                                        while (r.peek() != EndArray) { r.skip() }
+                                                        r.endArray()
+                                                    } else {
+                                                        r.skip()
+                                                    }
+                                                } else {
+                                                    r.skip()
+                                                }
+                                            }
+                                            r.endObject()
+                                        } else {
+                                            r.skip()
+                                        }
+                                    } else {
+                                        r.skip()
+                                    }
+                                }
+                                r.endObject()
+                            } catch (_: Exception) {}
+                        case None => ()
+                    }
+                }
+
+                let json = SourceDirectActionService.execute(effectiveRequest.namespace, "source_reader", effectiveRequest)
+                // 解析 source_reader 响应，转换为前端 PageInfo 数据格式
+                try {
+                    let buf = ByteBuffer()
+                    unsafe { buf.write(json.rawData()) }
+                    let r = JsonReader(buf)
+                    r.startObject()
+                    var successFlag = false
+                    var pagesList = ArrayList<HashMap<String, String>>()
+                    while (r.peek() != EndObject) {
+                        let name = r.readName()
+                        if (name == "success") {
+                            successFlag = r.readValue<Bool>()
+                        } else if (name == "data") {
+                            if (r.peek() == BeginObject) {
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let dataName = r.readName()
+                                    if (dataName == "pages") {
+                                        if (r.peek() == BeginArray) {
+                                            r.startArray()
+                                            while (r.peek() != EndArray) {
+                                                if (r.peek() == BeginObject) {
+                                                    r.startObject()
+                                                    let page = HashMap<String, String>()
+                                                    while (r.peek() != EndObject) {
+                                                        let pageKey = r.readName()
+                                                        if (pageKey == "path" || pageKey == "asset_ref" || pageKey == "asset_id") {
+                                                            page[pageKey] = r.readValue<String>()
+                                                        } else {
+                                                            r.skip()
+                                                        }
+                                                    }
+                                                    r.endObject()
+                                                    pagesList.add(page)
+                                                } else {
+                                                    r.skip()
+                                                }
+                                            }
+                                            r.endArray()
+                                        } else {
+                                            r.skip()
+                                        }
+                                    } else {
+                                        r.skip()
+                                    }
+                                }
+                                r.endObject()
+                            } else {
+                                r.skip()
+                            }
+                        } else {
+                            r.skip()
+                        }
+                    }
+                    r.endObject()
+
+                    if (!successFlag) {
+                        ResponseView.errorJson(ctx, "Source plugin returned error")
+                        return
+                    }
+
+                    // 构建前端 PageInfo 输出：{ pages: [...] }
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("pages").startArray()
+
+                    for (i in 0..pagesList.size) {
+                        let page = pagesList[i]
+                        let pagePath = page.get("path") ?? ""
+                        let assetRef = page.get("asset_ref") ?? ""
+                        let assetId = page.get("asset_id") ?? ""
+
+                        let effectivePath = if (assetRef.size > 0) { assetRef } else { pagePath }
+                        let srcId = "src-${i.toString()}"
+
+                        let pageUrl: String
+                        if (assetId.size > 0) {
+                            // 已缓存的资源，直接使用 asset URL
+                            pageUrl = "/api/assets/${assetId}"
+                        } else {
+                            // 构造通过插件按需加载的页面 URL
+                            let encodedId = urlEncodeComponent(id)
+                            let encodedRef = urlEncodeComponent(assetRef)
+                            pageUrl = "/api/archives/${encodedId}/page?path=${encodedRef}"
+                        }
+
+                        w.startObject()
+                        w.writeName("id").writeValue(pagePath)
+                        w.writeName("type").writeValue("image")
+
+                        // defaultSource
+                        w.writeName("defaultSource").startObject()
+                        w.writeName("id").writeValue(srcId)
+                        w.writeName("path").writeValue(effectivePath)
+                        w.writeName("url").writeValue(pageUrl)
+                        w.writeName("type").writeValue("image")
+                        w.endObject()
+
+                        // sources 数组
+                        w.writeName("sources").startArray()
+                        w.startObject()
+                        w.writeName("id").writeValue(srcId)
+                        w.writeName("path").writeValue(effectivePath)
+                        w.writeName("url").writeValue(pageUrl)
+                        w.writeName("type").writeValue("image")
+                        w.writeName("metadata")
+                        w.startObject()
+                        w.endObject()
+                        w.endObject()
+                        w.endArray()
+
+                        // metadata
+                        w.writeName("metadata")
+                        w.startObject()
+                        w.endObject()
+
+                        w.endObject()
+                    }
+
+                    w.endArray()
+                    w.endObject()
+                    w.flush()
+
+                    ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+                    return
+                } catch (e: Exception) {
+                    ResponseView.errorJson(ctx, "Failed to parse source plugin response: ${e.message}")
+                    return
+                }
             case None => ()
         }
 
@@ -1278,18 +1777,26 @@ public class ArchiveController {
         // Source: 复合 ID 检测/转发到 source_page_asset
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let pageIndex = (ctx.query("page") ?? "").trimAscii()
-                let assetRef = (ctx.query("asset_ref") ?? "").trimAscii()
+                let path = (ctx.query("path") ?? "").trimAscii()
+                let tankoubonId = (ctx.query("tankoubon_id") ?? ctx.query("tankoubon") ?? "").trimAscii()
                 let parentRemoteId = (ctx.query("parent_remote_id") ?? "").trimAscii()
 
-                if (pageIndex.size > 0 && assetRef.size > 0) {
+                if (path.size > 0) {
+                    // 从 source_reader 推导 page index，无需前端传 page 参数
+                    let derivedPageIndex = resolvePageIndexFromSourceReader(request, path)
+
                     // Build paramsJson for source_page_asset action
                     let out = ByteBuffer()
                     let w = JsonWriter(out)
                     w.startObject()
                     w.writeName("remote_id").writeValue(request.remoteId)
-                    w.writeName("page").writeValue(pageIndex)
-                    w.writeName("asset_ref").writeValue(assetRef)
+                    w.writeName("asset_ref").writeValue(path)
+                    if (derivedPageIndex.size > 0) {
+                        w.writeName("page").writeValue(derivedPageIndex)
+                    }
+                    if (tankoubonId.size > 0) {
+                        w.writeName("tankoubon_id").writeValue(tankoubonId)
+                    }
                     if (parentRemoteId.size > 0) {
                         w.writeName("parent_remote_id").writeValue(parentRemoteId)
                     }
@@ -1343,7 +1850,7 @@ public class ArchiveController {
 
                     ResponseView.errorJson(ctx, "Failed to resolve source page asset")
                 } else {
-                    ResponseView.errorJson(ctx, "Missing page or asset_ref parameter for source archive")
+                    ResponseView.errorJson(ctx, "Missing path parameter for source archive")
                 }
                 return
             case None => ()

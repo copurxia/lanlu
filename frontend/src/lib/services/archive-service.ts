@@ -246,45 +246,6 @@ export class ArchiveService {
       }
       const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
 
-      // Source response format: { success, data: { title, description, tags, page_count, cover_asset_id, ... } }
-      if (response.data?.success !== undefined && response.data?.data) {
-        const src = response.data.data;
-        const sourceMetadata: ArchiveMetadata = {
-          arcid: id,
-          title: src.title || '',
-          description: src.description || '',
-          tags: Array.isArray(src.tags) ? src.tags : [],
-          pagecount: src.page_count || src.reader?.page_count || 0,
-          progress: 0,
-          isnew: true,
-          isfavorite: false,
-          archivetype: src.reader?.media_type || 'image',
-          lastreadtime: 0,
-          size: 0,
-          assets: src.cover_asset_id ? { cover: src.cover_asset_id } : undefined,
-          children: Array.isArray(src.children) ? src.children.map((child: any) => ({
-            entity_type: 'archive' as const,
-            entity_id: `source:${child.source_namespace}:${child.remote_id}`,
-            title: child.title || '',
-            description: child.description || '',
-            tags: Array.isArray(child.tags) ? child.tags : [],
-            volume_no: child.volume_no,
-            order_index: child.order_index,
-          })) : undefined,
-          release_at: '',
-          updated_at: '',
-          created_at: '',
-          filename: '',
-          relative_path: '',
-          thumbnail_hash: '',
-        };
-        this.metadataCache.set(cacheKey, {
-          data: sourceMetadata,
-          expiresAt: Date.now() + this.METADATA_CACHE_TTL_MS,
-        });
-        return sourceMetadata;
-      }
-
       const normalized = normalizeArchiveMetadata(response.data);
       this.metadataCache.set(cacheKey, {
         data: normalized,
@@ -312,46 +273,7 @@ export class ArchiveService {
   }
 
   static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[] }> {
-    const response = await apiClient.get(`/api/archives/${id}/files`, { params });
-
-    // Source response format: { success, data: { pages: [{ path, asset_id?, asset_ref?, type? }] } }
-    if (response.data?.success !== undefined && response.data?.data?.pages) {
-      const sourcePages = response.data.data.pages.map((sp: any, idx: number): PageInfo => ({
-        id: sp.path || `${id}:src:${idx}`,
-        type: sp.type === 'video' || sp.type === 'audio' || sp.type === 'html' ? sp.type : 'image',
-        defaultSource: sp.asset_id ? {
-          id: sp.path || `src-${idx}`,
-          path: sp.path || '',
-          url: `/api/assets/${sp.asset_id}`,
-          type: sp.type || 'image',
-        } : sp.url ? {
-          id: sp.path || `src-${idx}`,
-          path: sp.path || '',
-          url: sp.url,
-          type: sp.type || 'image',
-        } : undefined,
-        sources: sp.asset_id ? [{
-          id: sp.path || `src-${idx}`,
-          path: sp.path || '',
-          url: `/api/assets/${sp.asset_id}`,
-          type: sp.type || 'image',
-        }] : sp.asset_ref ? [{
-          id: sp.path || `src-${idx}`,
-          path: sp.path || '',
-          url: `/api/archives/${id}/page?asset_ref=${encodeURIComponent(sp.asset_ref)}&page=${idx + 1}`,
-          type: sp.type || 'image',
-          metadata: { asset_ref: sp.asset_ref, ...sp.metadata },
-        }] : sp.url ? [{
-          id: sp.path || `src-${idx}`,
-          path: sp.path || '',
-          url: sp.url,
-          type: sp.type || 'image',
-          metadata: sp.metadata,
-        }] : [],
-        metadata: { ...sp.metadata },
-      }));
-      return { pages: sourcePages };
-    }
+    const response = await apiClient.get(`/api/archives/${encodeURIComponent(id)}/files`, { params });
 
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
       const normalizeAttachments = (rawAttachments: any): MetadataPageAttachment[] | undefined => {
@@ -407,9 +329,11 @@ export class ArchiveService {
       };
 
       const buildPageUrl = (path: string, fallbackUrl: string): string => {
-        return path
-          ? this.addTokenToUrl(this.getPageUrl(id, path))
-          : this.addTokenToUrl(String(fallbackUrl || ''));
+        const normalizedFallbackUrl = String(fallbackUrl || '').trim();
+        if (normalizedFallbackUrl) {
+          return this.addTokenToUrl(normalizedFallbackUrl);
+        }
+        return path ? this.addTokenToUrl(this.getPageUrl(id, path)) : '';
       };
 
       const path = normalizePath(rawPage);
@@ -537,8 +461,9 @@ export class ArchiveService {
 
   static getPageUrl(id: string, path: string): string {
     const normalizedPath = String(path || '').trim();
+    const encodedId = encodeURIComponent(String(id || '').trim());
     const encodedPath = encodeURIComponent(normalizedPath);
-    return `/api/archives/${id}/page?path=${encodedPath}`;
+    return `/api/archives/${encodedId}/page?path=${encodedPath}`;
   }
 
   /**

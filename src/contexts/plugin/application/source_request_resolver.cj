@@ -56,10 +56,13 @@ public class SourceRequestResolver {
     }
 
     public static func parseFromCompositeId(compositeId: String): Option<SourceRequest> {
-        if (!compositeId.startsWith("source:")) {
+        let normalizedCompositeId = compositeId
+            .replace("%3A", ":")
+            .replace("%3a", ":")
+        if (!normalizedCompositeId.startsWith("source:")) {
             return None
         }
-        let parts = compositeId.split(":")
+        let parts = normalizedCompositeId.split(":")
         if (parts.size < 3) {
             return None
         }

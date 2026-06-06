@@ -4,6 +4,7 @@ import lanlu.contexts.tag.infrastructure.persistence.*
 
 import ignite.*
 import lanlu.contexts.archive.domain.*
+import lanlu.contexts.plugin.application.{SourceDirectActionService, SourceRequestResolver}
 import lanlu.shared.views.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
@@ -78,6 +79,125 @@ public class SearchController {
             joined += categoryIds[i]
         }
         return joined
+    }
+
+    /**
+     * 从 source_detail 响应的 children 数组中读取单个 child 并写出 Archive 形状的 JSON 对象。
+     */
+    private static func writeSourceChildAsArchive(w: JsonWriter, r: JsonReader, parentNamespace: String): Unit {
+        var title = ""
+        var description = ""
+        var tags = ""
+        var pageCount = 0i32
+        var sourceNs = ""
+        var remoteId = ""
+        var coverAssetId = ""
+
+        if (r.peek() == Some(BeginObject)) {
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let fieldName = r.readName()
+                let rawBytes = r.readValueBytes()
+                let rawStr = String.fromUtf8(rawBytes)
+                if (fieldName == "title") {
+                    title = stripJsonString(rawStr)
+                } else if (fieldName == "description") {
+                    description = stripJsonString(rawStr)
+                } else if (fieldName == "tags") {
+                    tags = normalizeTagValue(rawStr)
+                } else if (fieldName == "page_count") {
+                    try { pageCount = Int32.parse(stripJsonString(rawStr)) } catch (_: Exception) {}
+                } else if (fieldName == "source_namespace") {
+                    sourceNs = stripJsonString(rawStr)
+                } else if (fieldName == "remote_id") {
+                    remoteId = stripJsonString(rawStr)
+                } else if (fieldName == "cover_asset_id") {
+                    coverAssetId = stripJsonString(rawStr)
+                }
+            }
+            r.endObject()
+        } else {
+            if (r.peek() != EndArray) {
+                r.skip()
+            }
+            return
+        }
+
+        if (sourceNs.size == 0) {
+            sourceNs = parentNamespace
+        }
+
+        let arcid = "source:${sourceNs}:${remoteId}"
+
+        w.startObject()
+        w.writeName("arcid").writeValue(arcid)
+        w.writeName("title").writeValue(title)
+        w.writeName("filename").writeValue("")
+        w.writeName("description").writeValue(description)
+        w.writeName("tags").writeValue(tags)
+        w.writeName("pagecount").writeValue(pageCount)
+        w.writeName("progress").writeValue(0)
+        w.writeName("isnew").writeValue(true)
+        w.writeName("isfavorite").writeValue(false)
+        w.writeName("archivetype").writeValue("image")
+        w.writeName("lastreadtime").writeValue(0)
+        w.writeName("size").writeValue(0)
+        w.writeName("assets")
+        if (coverAssetId.size > 0) {
+            w.startObject()
+            w.writeName("cover").writeValue(coverAssetId)
+            w.endObject()
+        } else {
+            w.startObject()
+            w.endObject()
+        }
+        w.writeName("release_at").writeValue("")
+        w.writeName("created_at").writeValue("")
+        w.writeName("updated_at").writeValue("")
+        w.endObject()
+    }
+
+    /**
+     * 去除 JSON 字符串值两端的引号。
+     */
+    private static func stripJsonString(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            return trimmed[1..trimmed.size - 1]
+        }
+        return trimmed
+    }
+
+    /**
+     * 归一化标签值：JSON 字符串去掉引号；JSON 数组用逗号连接。
+     */
+    private static func normalizeTagValue(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size == 0) {
+            return ""
+        }
+        // JSON 字符串: "tag1,tag2"
+        if (trimmed.size >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            return trimmed[1..trimmed.size - 1]
+        }
+        // JSON 数组: ["tag1","tag2"]
+        if (trimmed.size >= 2 && trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            try {
+                var tagBuf = ByteBuffer()
+                unsafe { tagBuf.write(trimmed.rawData()) }
+                let tagR = JsonReader(tagBuf)
+                let arr = tagR.readValue<Array<String>>()
+                var result = ""
+                for (i in 0..arr.size) {
+                    if (i > 0) { result += "," }
+                    result += arr[i]
+                }
+                return result
+            } catch (_: Exception) {
+                return ""
+            }
+        }
+        return trimmed
     }
 
     private static func loadSearchPageBundle(
@@ -519,6 +639,84 @@ public class SearchController {
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             return
+        }
+
+        // 处理 source 类型的 tankoubon_id（从源插件获取数据并构造 Archive 列表）
+        if (tankoubonId.startsWith("source:")) {
+            match (SourceRequestResolver.parseFromCompositeId(tankoubonId)) {
+                case Some(sourceRequest) =>
+                    let jsonResponse = SourceDirectActionService.execute(sourceRequest.namespace, "source_detail", sourceRequest)
+
+                    try {
+                        var respBuf = ByteBuffer()
+                        unsafe { respBuf.write(jsonResponse.rawData()) }
+                        let respR = JsonReader(respBuf)
+
+                        var responseSuccess = false
+                        var dataStr = ""
+
+                        respR.startObject()
+                        while (respR.peek() != EndObject) {
+                            let name = respR.readName()
+                            if (name == "success") {
+                                responseSuccess = respR.readValue<Bool>()
+                            } else if (name == "data") {
+                                dataStr = String.fromUtf8(respR.readValueBytes())
+                            } else {
+                                respR.skip()
+                            }
+                        }
+                        respR.endObject()
+
+                        if (responseSuccess && dataStr.size > 0) {
+                            let resultOut = ByteBuffer()
+                            let resultW = JsonWriter(resultOut)
+
+                            // Parse children from data object
+                            var dataBuf = ByteBuffer()
+                            unsafe { dataBuf.write(dataStr.rawData()) }
+                            let dataR = JsonReader(dataBuf)
+
+                            resultW.startObject()
+                            resultW.writeName("data")
+                            resultW.startArray()
+
+                            var recordCount = 0i32
+
+                            dataR.startObject()
+                            while (dataR.peek() != EndObject) {
+                                let name = dataR.readName()
+                                if (name == "children") {
+                                    if (dataR.peek() == Some(BeginArray)) {
+                                        dataR.startArray()
+                                        while (dataR.peek() != EndArray) {
+                                            writeSourceChildAsArchive(resultW, dataR, sourceRequest.namespace)
+                                            recordCount++
+                                        }
+                                        dataR.endArray()
+                                    } else {
+                                        dataR.skip()
+                                    }
+                                } else {
+                                    dataR.skip()
+                                }
+                            }
+                            dataR.endObject()
+
+                            resultW.endArray()
+                            resultW.writeName("draw").writeValue(0)
+                            resultW.writeName("page").writeValue(page)
+                            resultW.writeName("pageSize").writeValue(pageSize)
+                            resultW.writeName("recordsFiltered").writeValue(recordCount)
+                            resultW.writeName("recordsTotal").writeValue(recordCount)
+                            resultW.endObject()
+                            resultW.flush()
+                            ResponseView.json(ctx, String.fromUtf8(readToEnd(resultOut)))
+                            return
+                        }
+                    } catch (_: Exception) {}
+                case None => ()
+            }
         }
 
         let out = ByteBuffer()

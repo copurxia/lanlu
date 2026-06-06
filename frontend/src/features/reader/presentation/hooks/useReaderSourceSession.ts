@@ -100,41 +100,12 @@ export function useReaderSourceSession({
       webtoonVirtualPageSeenRef.current = false;
 
       try {
-        let effectiveArchiveId = sourceArchiveId;
-
-        if (tankoubonParam) {
-          try {
-            const { TankoubonService } = await import('@/lib/services/tankoubon-service');
-            const tankMeta = await TankoubonService.getMetadata(tankoubonParam);
-            const childIds = (tankMeta.children || []).map(c => c.entity_id).filter(Boolean) as string[];
-            if (childIds.length > 0) {
-              const childMetas = await Promise.all(
-                childIds.map(id => ArchiveService.getMetadata(id).catch(() => null)),
-              );
-              let resumeIdx = 0;
-              let resumePage = 0;
-              for (let i = childMetas.length - 1; i >= 0; i--) {
-                const m = childMetas[i];
-                if (m && typeof m.progress === 'number' && m.progress > 0) {
-                  resumeIdx = i;
-                  resumePage = Math.min(m.progress, m.pagecount || m.progress);
-                  break;
-                }
-              }
-              effectiveArchiveId = childIds[resumeIdx];
-              if (resumePage > 0) {
-                latestPageParamRef.current = String(resumePage);
-              }
-            }
-          } catch {
-            // fallback to original sourceArchiveId
-          }
-        }
+        const effectiveArchiveId = sourceArchiveId;
 
         // Unified path: ArchiveService.getFiles handles both Source and local formats
         const data = await ArchiveService.getFiles(effectiveArchiveId);
         const { mapPageDtosToReaderPageItems } = await import('@/features/reader/domain/mappers/page-dto-mapper');
-        const initialPages = mapPageDtosToReaderPageItems(data.pages, sourceArchiveId);
+        const initialPages = mapPageDtosToReaderPageItems(data.pages, effectiveArchiveId);
 
         appendedArchiveIdsRef.current = new Set([effectiveArchiveId]);
         setSegments([

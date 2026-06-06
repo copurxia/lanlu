@@ -1134,7 +1134,6 @@ function ReaderContent() {
   }, [activeArchiveId, archive.archiveTitle, setSegments]);
 
   useEffect(() => {
-    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) return;
     if (!seamlessEnabled) return;
     if (segments.length <= 0) return;
 
@@ -1164,7 +1163,6 @@ function ReaderContent() {
 	  ]);
 
   const appendNextArchiveToStream = useCallback(async () => {
-    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) return false;
     if (!seamlessEnabled) return false;
     if (segments.length === 0) return false;
     if (seamlessAppendInFlightRef.current) return false;
