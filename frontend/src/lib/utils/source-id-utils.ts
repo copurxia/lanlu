@@ -23,30 +23,4 @@ export function parseSourceId(id: string): SourceIdParsed | null {
   return { namespace, remoteId };
 }
 
-/**
- * 构建 Source Reader URL
- */
-export function buildSourceReaderUrl(
-  namespace: string,
-  remoteId: string,
-  options?: { page?: number; parentRemoteId?: string; tankoubon?: string }
-): string {
-  let url = `/reader?source=${encodeURIComponent(namespace)}&remote_id=${encodeURIComponent(remoteId)}`;
-  if (options?.page != null) {
-    url += `&page=${options.page}`;
-  }
-  if (options?.parentRemoteId) {
-    url += `&parent_remote_id=${encodeURIComponent(options.parentRemoteId)}`;
-  }
-  if (options?.tankoubon) {
-    url += `&tankoubon=${encodeURIComponent(options.tankoubon)}`;
-  }
-  return url;
-}
 
-/**
- * 构建 Source Archive (详情) URL
- */
-export function buildSourceArchiveUrl(namespace: string, remoteId: string): string {
-  return `/archive?source=${encodeURIComponent(namespace)}&remote_id=${encodeURIComponent(remoteId)}`;
-}

@@ -139,6 +139,14 @@ export class ArchiveService {
     }
   }
 
+  static isSourceId(id: string): boolean {
+    return id.startsWith('source:');
+  }
+
+  static isLocallyStoredArchive(id: string): boolean {
+    return !this.isSourceId(id);
+  }
+
   private static isArchiveItem(item: unknown): item is Archive {
     return Boolean(item) && typeof item === 'object' && 'arcid' in (item as Record<string, unknown>);
   }
@@ -237,6 +245,46 @@ export class ArchiveService {
         params.include_pages = '1';
       }
       const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
+
+      // Source response format: { success, data: { title, description, tags, page_count, cover_asset_id, ... } }
+      if (response.data?.success !== undefined && response.data?.data) {
+        const src = response.data.data;
+        const sourceMetadata: ArchiveMetadata = {
+          arcid: id,
+          title: src.title || '',
+          description: src.description || '',
+          tags: Array.isArray(src.tags) ? src.tags : [],
+          pagecount: src.page_count || src.reader?.page_count || 0,
+          progress: 0,
+          isnew: true,
+          isfavorite: false,
+          archivetype: src.reader?.media_type || 'image',
+          lastreadtime: 0,
+          size: 0,
+          assets: src.cover_asset_id ? { cover: src.cover_asset_id } : undefined,
+          children: Array.isArray(src.children) ? src.children.map((child: any) => ({
+            entity_type: 'archive' as const,
+            entity_id: `source:${child.source_namespace}:${child.remote_id}`,
+            title: child.title || '',
+            description: child.description || '',
+            tags: Array.isArray(child.tags) ? child.tags : [],
+            volume_no: child.volume_no,
+            order_index: child.order_index,
+          })) : undefined,
+          release_at: '',
+          updated_at: '',
+          created_at: '',
+          filename: '',
+          relative_path: '',
+          thumbnail_hash: '',
+        };
+        this.metadataCache.set(cacheKey, {
+          data: sourceMetadata,
+          expiresAt: Date.now() + this.METADATA_CACHE_TTL_MS,
+        });
+        return sourceMetadata;
+      }
+
       const normalized = normalizeArchiveMetadata(response.data);
       this.metadataCache.set(cacheKey, {
         data: normalized,
@@ -265,6 +313,46 @@ export class ArchiveService {
 
   static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[] }> {
     const response = await apiClient.get(`/api/archives/${id}/files`, { params });
+
+    // Source response format: { success, data: { pages: [{ path, asset_id?, asset_ref?, type? }] } }
+    if (response.data?.success !== undefined && response.data?.data?.pages) {
+      const sourcePages = response.data.data.pages.map((sp: any, idx: number): PageInfo => ({
+        id: sp.path || `${id}:src:${idx}`,
+        type: sp.type === 'video' || sp.type === 'audio' || sp.type === 'html' ? sp.type : 'image',
+        defaultSource: sp.asset_id ? {
+          id: sp.path || `src-${idx}`,
+          path: sp.path || '',
+          url: `/api/assets/${sp.asset_id}`,
+          type: sp.type || 'image',
+        } : sp.url ? {
+          id: sp.path || `src-${idx}`,
+          path: sp.path || '',
+          url: sp.url,
+          type: sp.type || 'image',
+        } : undefined,
+        sources: sp.asset_id ? [{
+          id: sp.path || `src-${idx}`,
+          path: sp.path || '',
+          url: `/api/assets/${sp.asset_id}`,
+          type: sp.type || 'image',
+        }] : sp.asset_ref ? [{
+          id: sp.path || `src-${idx}`,
+          path: sp.path || '',
+          url: `/api/archives/${id}/page?asset_ref=${encodeURIComponent(sp.asset_ref)}&page=${idx + 1}`,
+          type: sp.type || 'image',
+          metadata: { asset_ref: sp.asset_ref, ...sp.metadata },
+        }] : sp.url ? [{
+          id: sp.path || `src-${idx}`,
+          path: sp.path || '',
+          url: sp.url,
+          type: sp.type || 'image',
+          metadata: sp.metadata,
+        }] : [],
+        metadata: { ...sp.metadata },
+      }));
+      return { pages: sourcePages };
+    }
+
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
       const normalizeAttachments = (rawAttachments: any): MetadataPageAttachment[] | undefined => {
         if (!Array.isArray(rawAttachments)) return undefined;
@@ -451,6 +539,33 @@ export class ArchiveService {
     const normalizedPath = String(path || '').trim();
     const encodedPath = encodeURIComponent(normalizedPath);
     return `/api/archives/${id}/page?path=${encodedPath}`;
+  }
+
+  /**
+   * 按需解析页面资产。对 source:id 返回统一 page URL（后端自动转发到 source_page_asset 并 302 重定向）。
+   */
+  static async resolvePageAsset(
+    id: string,
+    pageIndex: number,
+    assetRef: string,
+    parentRemoteId?: string,
+    _signal?: AbortSignal
+  ): Promise<{ success: boolean; error?: string; data?: { asset_id: number; url?: string } }> {
+    // Source ID: return the unified page URL (backend handles redirect to /api/assets/{id})
+    if (this.isSourceId(id)) {
+      const encodedId = encodeURIComponent(id);
+      const encodedRef = encodeURIComponent(assetRef);
+      const parentParam = parentRemoteId ? `&parent_remote_id=${encodeURIComponent(parentRemoteId)}` : '';
+      const url = `/api/archives/${encodedId}/page?asset_ref=${encodedRef}&page=${pageIndex}${parentParam}`;
+      return { success: true, data: { asset_id: 0, url } };
+    }
+
+    // Local archive: build page URL (assets are already available locally)
+    const url = this.getPageUrl(id, assetRef);
+    if (!url) {
+      return { success: false, error: 'No page URL available' };
+    }
+    return { success: true, data: { asset_id: 0 } };
   }
 
   static getPageDefaultSource(page: Pick<PageInfo, 'defaultSource' | 'sources' | 'defaultSourceIndex'> | null | undefined): PageSourceInfo | undefined {

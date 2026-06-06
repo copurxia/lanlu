@@ -59,16 +59,17 @@ function SourceMediaCard({
   const [lazyCoverAssetId, setLazyCoverAssetId] = useState<number | undefined>(item.cover_asset_id);
   const [coverVisible, setCoverVisible] = useState(false);
   const coverAssetId = item.cover_asset_id ?? lazyCoverAssetId;
+  const archiveId = `source:${item.source_namespace}:${item.remote_id}`;
   const detailPath = item.kind === 'tankoubon'
-    ? `/tankoubon?source=${encodeURIComponent(item.source_namespace)}&remote_id=${encodeURIComponent(item.remote_id)}`
-    : `/archive?source=${encodeURIComponent(item.source_namespace)}&remote_id=${encodeURIComponent(item.remote_id)}`;
+    ? `/tankoubon?id=${encodeURIComponent(archiveId)}`
+    : `/archive?id=${encodeURIComponent(archiveId)}`;
   const firstChild = item.kind === 'tankoubon'
     ? item.children?.find((child) => child.kind === 'archive')
     : undefined;
   const readerRemoteId = item.kind === 'archive' ? item.remote_id : firstChild?.remote_id;
   const readerNamespace = item.kind === 'archive' ? item.source_namespace : firstChild?.source_namespace;
   const readerPath = readerRemoteId && readerNamespace
-    ? `/reader?source=${encodeURIComponent(readerNamespace)}&remote_id=${encodeURIComponent(readerRemoteId)}${item.kind === 'tankoubon' ? `&tankoubon=${encodeURIComponent(item.remote_id)}` : ''}`
+    ? `/reader?id=source:${encodeURIComponent(readerNamespace)}:${encodeURIComponent(readerRemoteId)}${item.kind === 'tankoubon' ? `&tankoubon=${encodeURIComponent(item.remote_id)}` : ''}`
     : detailPath;
 
   useEffect(() => {

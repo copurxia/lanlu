@@ -26,9 +26,7 @@ import { useMounted } from '@/hooks/common-hooks';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
-import { buildReaderPath } from '@/lib/utils/reader';
 import { extractApiError } from '@/lib/utils/api-utils';
-import { parseSourceId } from '@/lib/utils/source-id-utils';
 import { getTvMetaSummary, isTvArchiveMetadata } from '@/lib/utils/tv-media';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
@@ -74,13 +72,10 @@ export function ArchiveDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawId = searchParams?.get('id') ?? null;
-  const sourceIdParsed = rawId ? parseSourceId(rawId) : null;
-  const sourceIdNamespace = sourceIdParsed?.namespace ?? null;
-  const sourceIdRemoteId = sourceIdParsed?.remoteId ?? null;
-  const id = sourceIdNamespace && sourceIdRemoteId ? null : rawId;
-  const sourceNamespace = searchParams?.get('source') ?? sourceIdNamespace;
-  const remoteId = searchParams?.get('remote_id') ?? sourceIdRemoteId;
-  const isSourceMode = Boolean(sourceNamespace && remoteId);
+  const id = rawId;
+  const isSourceMode = Boolean(id && id.startsWith('source:'));
+  const sourceNamespace = isSourceMode ? id!.split(':')[1] : null;
+  const remoteId = isSourceMode ? id!.split(':').slice(2).join(':') : null;
   const { t, language } = useLanguage();
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.isAdmin === true;
@@ -90,8 +85,6 @@ export function ArchiveDetailContent() {
 
   const { metadata, loading, error, isFavorite, setIsFavorite, refetch } = useArchiveMetadata({
     id,
-    sourceNamespace,
-    remoteId,
     language,
     t,
   });
@@ -800,10 +793,7 @@ export function ArchiveDetailContent() {
                       {/* Desktop/tablet actions now sit above summary/tags. */}
                       <div className="hidden sm:inline-flex mt-4 w-fit shrink-0 flex-col items-start gap-3">
                         <div className="inline-flex flex-wrap items-center justify-start gap-2">
-                          <Link href={isSourceMode
-                            ? `/reader?source=${encodeURIComponent(sourceNamespace!)}&remote_id=${encodeURIComponent(remoteId!)}`
-                            : buildReaderPath(metadata.arcid, metadata.progress)
-                          }>
+                          <Link href={`/reader?id=${encodeURIComponent(rawId ?? metadata.arcid)}`}>
                             <Button size="sm" variant="default" className="h-9">
                               <BookOpen className="w-4 h-4 mr-2" />
                               {t('archive.startReading')}

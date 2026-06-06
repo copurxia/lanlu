@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
-import { SourcePluginService } from '@/lib/services/source-plugin-service';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type { ReadingMode } from '@/hooks/use-reader-settings';
 
@@ -28,8 +27,7 @@ export function useReaderImageLoading({
   visibleRange,
   resetKey,
   imageRefs,
-  sourceNamespace,
-  sourceRemoteId,
+  sourceId,
   sourceParentRemoteId,
 }: {
   pages: PageInfo[];
@@ -39,8 +37,7 @@ export function useReaderImageLoading({
   visibleRange: VisibleRange;
   resetKey?: string | null;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
-  sourceNamespace?: string | null;
-  sourceRemoteId?: string | null;
+  sourceId?: string | null;
   sourceParentRemoteId?: string | null;
 }) {
   const [cachedPages, setCachedPages] = useState<string[]>([]);
@@ -400,10 +397,10 @@ export function useReaderImageLoading({
       controller.abort();
       abortControllerRef.current = null;
     };
-  }, [sourceNamespace, sourceRemoteId]);
+  }, [sourceId]);
 
   useEffect(() => {
-    if (!sourceNamespace || !sourceRemoteId) return;
+    if (!sourceId || !ArchiveService.isSourceId(sourceId)) return;
     if (pages.length === 0) return;
 
     const controller = abortControllerRef.current;
@@ -429,9 +426,8 @@ export function useReaderImageLoading({
       resolvingPagesRef.current.add(pageIndex);
 
       // Trigger on-demand resolution (fire-and-forget to avoid blocking)
-      SourcePluginService.pageAsset(
-        sourceNamespace,
-        sourceRemoteId,
+      ArchiveService.resolvePageAsset(
+        sourceId!,
         pageIndex + 1, // pages are 1-indexed in the plugin
         assetRef,
         sourceParentRemoteId || undefined,
@@ -477,7 +473,7 @@ export function useReaderImageLoading({
         handleImageError(pageIndex);
       });
     }
-  }, [imagesLoading, pages, cachedPages, loadedImages, sourceNamespace, sourceRemoteId, sourceParentRemoteId, handleImageError]);
+  }, [imagesLoading, pages, cachedPages, loadedImages, sourceId, sourceParentRemoteId, handleImageError]);
 
   return {
     cachedPages,

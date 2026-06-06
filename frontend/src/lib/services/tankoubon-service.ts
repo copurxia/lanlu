@@ -33,6 +33,21 @@ export class TankoubonService {
   }
 
   /**
+   * Check if an ID is a source-based ID (prefixed with "source:")
+   */
+  static isSourceId(id: string): boolean {
+    return id.startsWith('source:');
+  }
+
+  /**
+   * Check if a tankoubon is locally stored (not a source-based one).
+   * Source items are not stored locally.
+   */
+  static isLocallyStoredTankoubon(id: string): boolean {
+    return !this.isSourceId(id);
+  }
+
+  /**
    * Get all tankoubons
    */
   static async getAllTankoubons(options?: { signal?: AbortSignal }): Promise<Tankoubon[]> {

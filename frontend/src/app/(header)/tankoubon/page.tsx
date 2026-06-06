@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { ArchiveService } from '@/lib/services/archive-service';
-import { SourcePluginService } from '@/lib/services/source-plugin-service';
 import { CategoryService } from '@/lib/services/category-service';
 import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
@@ -49,7 +48,6 @@ import { useToast } from '@/hooks/use-toast';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
-import { parseSourceId, buildSourceReaderUrl, buildSourceArchiveUrl } from '@/lib/utils/source-id-utils';
 import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
@@ -145,18 +143,16 @@ function ArchiveListItem({
   };
 
   const handleNavigateToReader = () => {
-    const parsed = parseSourceId(archive.arcid);
-    if (parsed) {
-      router.push(buildSourceReaderUrl(parsed.namespace, parsed.remoteId, { parentRemoteId: sourceParentRemoteId ?? undefined }));
+    if (archive.arcid.startsWith('source:')) {
+      router.push(`/reader?id=${encodeURIComponent(archive.arcid)}`);
       return;
     }
     router.push(buildReaderPath(archive.arcid, archive.progress));
   };
 
   const handleNavigateToDetails = () => {
-    const parsed = parseSourceId(archive.arcid);
-    if (parsed) {
-      router.push(buildSourceArchiveUrl(parsed.namespace, parsed.remoteId));
+    if (archive.arcid.startsWith('source:')) {
+      router.push(`/archive?id=${encodeURIComponent(archive.arcid)}`);
       return;
     }
     router.push(`/archive?id=${archive.arcid}`);
@@ -223,7 +219,7 @@ function ArchiveListItem({
           >
             <Eye className="h-4 w-4" />
           </Button>
-          {!archive.arcid.startsWith('source:') && (
+          {TankoubonService.isLocallyStoredTankoubon(archive.arcid) && (
             <>
               <Button
                 type="button"
@@ -490,56 +486,53 @@ function TankoubonDetailContent() {
 
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
-    if (isSourceMode && sourceNamespace && remoteId) {
+    if (isSourceMode && tankoubonId) {
       try {
         setLoading(true);
-        const result = await SourcePluginService.detail(sourceNamespace, remoteId);
-        if (result.success && result.data) {
-          const item = result.data;
-          const children = (item.children || []).map((child) => ({
-            entity_type: 'archive' as const,
-            entity_id: `source:${child.source_namespace}:${child.remote_id}`,
-            title: child.title || '',
-            description: child.description || '',
-            tags: child.tags || [],
-            assets: undefined,
-            pages: undefined,
-            locator: {
-              entity_type: 'archive',
-              entity_id: child.remote_id,
-              parent_entity_type: 'tankoubon',
-              parent_entity_id: item.remote_id,
-            },
-          }));
-          const nextData: TankoubonMetadata = {
-            tankoubon_id: `source:${item.source_namespace}:${item.remote_id}`,
-            title: item.title || '',
-            description: item.description || '',
-            tags: item.tags || [],
-            assets: undefined,
-            children,
-            archive_count: children.length,
-            pagecount: item.page_count || 0,
-            progress: 0,
-            isnew: true,
-            isfavorite: false,
-            release_at: '',
-            updated_at: '',
-            created_at: '',
-          };
-          setTankoubon(nextData);
-          setMetadataArchivePatches([]);
-          setIsFavorite(false);
-          setEditName(item.title || '');
-          setEditSummary(item.description || '');
-          setEditTags((item.tags || []).map(toCanonicalTag));
-          setEditCover('');
-          setEditBackdrop('');
-          setEditClearlogo('');
-          setEditAssetCoverId('');
-          setEditAssetBackdropId('');
-          setEditAssetClearlogoId('');
-        }
+        const meta = await ArchiveService.getMetadata(tankoubonId);
+        const children = Array.isArray(meta.children) ? meta.children.map((child: any) => ({
+          entity_type: 'archive' as const,
+          entity_id: child.entity_id,
+          title: child.title || '',
+          description: child.description || '',
+          tags: Array.isArray(child.tags) ? child.tags : [],
+          assets: undefined,
+          pages: undefined,
+          locator: {
+            entity_type: 'archive',
+            entity_id: child.entity_id,
+            parent_entity_type: 'tankoubon',
+            parent_entity_id: tankoubonId,
+          },
+        })) : [];
+        const nextData: TankoubonMetadata = {
+          tankoubon_id: tankoubonId,
+          title: meta.title || '',
+          description: meta.description || '',
+          tags: Array.isArray(meta.tags) ? meta.tags : [],
+          assets: undefined,
+          children,
+          archive_count: children.length,
+          pagecount: meta.pagecount || 0,
+          progress: 0,
+          isnew: true,
+          isfavorite: false,
+          release_at: '',
+          updated_at: '',
+          created_at: '',
+        };
+        setTankoubon(nextData);
+        setMetadataArchivePatches([]);
+        setIsFavorite(false);
+        setEditName(meta.title || '');
+        setEditSummary(meta.description || '');
+        setEditTags((Array.isArray(meta.tags) ? meta.tags : []).map(toCanonicalTag));
+        setEditCover('');
+        setEditBackdrop('');
+        setEditClearlogo('');
+        setEditAssetCoverId('');
+        setEditAssetBackdropId('');
+        setEditAssetClearlogoId('');
       } catch (error) {
         logger.apiError('fetch source tankoubon', error);
       } finally {
@@ -2020,16 +2013,12 @@ function TankoubonDetailContent() {
 	                      index={index}
 	                      coverHeight={archiveGridCoverHeights[itemKey]}
 	                      surfaceClassName="border-none shadow-none bg-transparent"
-	                      detailPath={(() => {
-	                        const parsed = parseSourceId(archive.arcid);
-	                        return parsed ? buildSourceArchiveUrl(parsed.namespace, parsed.remoteId) : undefined;
-	                      })()}
-	                      readerPath={(() => {
-	                        const parsed = parseSourceId(archive.arcid);
-	                        return parsed ? buildSourceReaderUrl(parsed.namespace, parsed.remoteId, {
-	                          parentRemoteId: isSourceMode && remoteId ? remoteId : undefined
-	                        }) : undefined;
-	                      })()}
+	                      detailPath={archive.arcid.startsWith('source:')
+	                        ? `/archive?id=${encodeURIComponent(archive.arcid)}`
+	                        : undefined}
+	                      readerPath={archive.arcid.startsWith('source:')
+	                        ? `/reader?id=${encodeURIComponent(archive.arcid)}`
+	                        : undefined}
 	                      selectable
                       selectionMode={selectionMode}
                       selected={selectedArchiveIds.has(archive.arcid)}

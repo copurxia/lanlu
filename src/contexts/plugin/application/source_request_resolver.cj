@@ -2,6 +2,8 @@ package lanlu.contexts.plugin.application
 
 import std.collection.*
 import std.fs.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import ignite.*
 import lanlu.shared.utils.JsonCodec
 
@@ -70,7 +72,18 @@ public class SourceRequestResolver {
         if (namespace.size == 0 || remoteId.size == 0) {
             return None
         }
-        return Some(SourceRequest(namespace, remoteId))
+
+        // Build default paramsJson with remote_id so WASM plugins get the required field
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("remote_id").writeValue(remoteId)
+        w.endObject()
+        w.flush()
+
+        let request = SourceRequest(namespace, remoteId)
+        request.paramsJson = String.fromUtf8(readToEnd(out))
+        return Some(request)
     }
 
     public static func validatePlugin(request: SourceRequest): Option<PluginTaskData> {

@@ -5,7 +5,6 @@ import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'rea
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
-import { parseSourceId } from '@/lib/utils/source-id-utils';
 import type { PageEditData } from '@/components/reader/components/ReaderPageEditDialog';
 import { RecommendationService } from '@/lib/services/recommendation-service';
 import type { Archive } from '@/types/archive';
@@ -289,16 +288,10 @@ function ReaderContent() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const rawQueryArchiveId = searchParams?.get('id') ?? null;
-  const sourceIdParsed = rawQueryArchiveId ? parseSourceId(rawQueryArchiveId) : null;
-  const sourceIdNamespace = sourceIdParsed?.namespace ?? null;
-  const sourceIdRemoteId = sourceIdParsed?.remoteId ?? null;
-  const queryArchiveId = sourceIdNamespace && sourceIdRemoteId ? null : rawQueryArchiveId;
+  const queryArchiveId = searchParams?.get('id') ?? null;
   const pageParam = searchParams?.get('page');
   const tankoubonParam = searchParams?.get('tankoubon');
-  const sourceParentRemoteId = searchParams?.get('parent_remote_id') ?? tankoubonParam;
-  const sourceNamespace = searchParams?.get('source') ?? sourceIdNamespace;
-  const sourceRemoteId = searchParams?.get('remote_id') ?? sourceIdRemoteId;
+  const sourceParentRemoteId = tankoubonParam;
   const { t, language } = useLanguage();
   
   const [scale, setScale] = useState(1);
@@ -409,31 +402,21 @@ function ReaderContent() {
       return;
     }
 
-    if (sourceNamespace && sourceRemoteId) {
-      router.push(`/archive?source=${encodeURIComponent(sourceNamespace)}&remote_id=${encodeURIComponent(sourceRemoteId)}`);
-      return;
-    }
-
-    const targetArchiveId = currentArchiveIdRef.current;
+    const targetArchiveId = currentArchiveIdRef.current || queryArchiveId;
     if (targetArchiveId) {
       router.push(`/archive?id=${targetArchiveId}`);
       return;
     }
 
     router.push('/');
-  }, [router, sourceNamespace, sourceRemoteId]);
+  }, [router, queryArchiveId]);
 
   const handleNavigateToArchiveFromSettings = useCallback(() => {
-    if (sourceNamespace && sourceRemoteId) {
-      setSettingsOpen(false);
-      router.push(`/archive?source=${encodeURIComponent(sourceNamespace)}&remote_id=${encodeURIComponent(sourceRemoteId)}`);
-      return;
-    }
-    const targetArchiveId = currentArchiveIdRef.current;
+    const targetArchiveId = currentArchiveIdRef.current || queryArchiveId;
     if (!targetArchiveId) return;
     setSettingsOpen(false);
     router.push(`/archive?id=${targetArchiveId}`);
-  }, [router, sourceNamespace, sourceRemoteId]);
+  }, [router, queryArchiveId]);
 
   const pushReader = useCallback(
     (targetId: string, page: number) => {
@@ -550,8 +533,6 @@ function ReaderContent() {
     initialPreloadPage,
   } = useReaderSourceSession({
     queryArchiveId,
-    sourceNamespace,
-    sourceRemoteId,
     seamlessEnabled,
     readingMode,
     pageParam,
@@ -783,8 +764,8 @@ function ReaderContent() {
     });
   }, []);
 
-  const archive = useReaderArchiveMetadata({ id: sourceNamespace ? null : activeArchiveId, language });
-  const { htmlContents, loadHtmlPage } = useReaderHtmlPages({ id: sourceNamespace ? null : sourceArchiveId, pages: effectivePages, onError: setError });
+  const archive = useReaderArchiveMetadata({ id: (queryArchiveId && ArchiveService.isSourceId(queryArchiveId)) ? null : activeArchiveId, language });
+  const { htmlContents, loadHtmlPage } = useReaderHtmlPages({ id: (queryArchiveId && ArchiveService.isSourceId(queryArchiveId)) ? null : sourceArchiveId, pages: effectivePages, onError: setError });
 
   // 用于跟踪拆分封面模式的变化，避免无限循环
   const splitCoverModeRef = useRef(splitCoverMode);
@@ -920,8 +901,7 @@ function ReaderContent() {
     visibleRange: webtoonVisibleRealRange,
     resetKey: sourceArchiveId,
     imageRefs,
-    sourceNamespace,
-    sourceRemoteId,
+    sourceId: queryArchiveId,
     sourceParentRemoteId,
   });
   const { setImagesLoading } = imageLoading;
@@ -962,7 +942,7 @@ function ReaderContent() {
           const nextId = idx >= 0 ? chosen.children?.[idx + 1] : undefined;
           if (nextId && !isExcluded(nextId)) {
             // Source archive: skip metadata fetch (lazy-loaded via source plugin)
-            if (parseSourceId(nextId)) {
+            if (ArchiveService.isSourceId(nextId)) {
               return { id: nextId, title: '', source: 'tankoubon' };
             }
             try {
@@ -1057,7 +1037,7 @@ function ReaderContent() {
   // - In a tankoubon, use previous/next chapter.
   // - For a standalone archive, reuse archive-related recommendations.
   useEffect(() => {
-    if (sourceNamespace) {
+    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) {
       setTankoubonContext(null);
       setPrevArchiveId(null);
       setNextArchiveByArchiveId({});
@@ -1114,7 +1094,7 @@ function ReaderContent() {
         }
 
         // Source archive: skip metadata fetch (lazy-loaded via source plugin)
-        if (parseSourceId(nextId)) {
+        if (ArchiveService.isSourceId(nextId)) {
           setResolvedNextArchive(sourceArchiveId, { id: nextId, title: '', source: 'tankoubon' });
           return;
         }
@@ -1146,7 +1126,7 @@ function ReaderContent() {
     return () => {
       cancelled = true;
     };
-  }, [sourceArchiveId, sourceNamespace, language, resolveNextArchiveCandidateCached, setResolvedNextArchive]);
+  }, [sourceArchiveId, language, resolveNextArchiveCandidateCached, setResolvedNextArchive]);
 
   useEffect(() => {
     if (!activeArchiveId || !archive.archiveTitle) return;
@@ -1161,7 +1141,7 @@ function ReaderContent() {
   }, [activeArchiveId, archive.archiveTitle, setSegments]);
 
   useEffect(() => {
-    if (sourceNamespace) return;
+    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) return;
     if (!seamlessEnabled) return;
     if (segments.length <= 0) return;
 
@@ -1187,11 +1167,11 @@ function ReaderContent() {
     seamlessEnabled,
     segments,
 	    setResolvedNextArchive,
-	    sourceNamespace,
+	    sourceArchiveId,
 	  ]);
 
   const appendNextArchiveToStream = useCallback(async () => {
-    if (sourceNamespace) return false;
+    if (sourceArchiveId && ArchiveService.isSourceId(sourceArchiveId)) return false;
     if (!seamlessEnabled) return false;
     if (segments.length === 0) return false;
     if (seamlessAppendInFlightRef.current) return false;
@@ -1240,7 +1220,7 @@ function ReaderContent() {
 	    setPages,
 	    setResolvedNextArchive,
 	    setSegments,
-	    sourceNamespace,
+	    sourceArchiveId,
 	  ]);
 
   const handleWebtoonScroll = useCallback(

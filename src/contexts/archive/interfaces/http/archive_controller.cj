@@ -1250,11 +1250,76 @@ public class ArchiveController {
     public static func getPage(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
 
-        // Source: 复合 ID 检测/转发
+        // Source: 复合 ID 检测/转发到 source_page_asset
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
-                ResponseView.json(ctx, json)
+                let pageIndex = (ctx.query("page") ?? "").trimAscii()
+                let assetRef = (ctx.query("asset_ref") ?? "").trimAscii()
+                let parentRemoteId = (ctx.query("parent_remote_id") ?? "").trimAscii()
+
+                if (pageIndex.size > 0 && assetRef.size > 0) {
+                    // Build paramsJson for source_page_asset action
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("remote_id").writeValue(request.remoteId)
+                    w.writeName("page").writeValue(pageIndex)
+                    w.writeName("asset_ref").writeValue(assetRef)
+                    if (parentRemoteId.size > 0) {
+                        w.writeName("parent_remote_id").writeValue(parentRemoteId)
+                    }
+                    w.endObject()
+                    w.flush()
+                    request.paramsJson = String.fromUtf8(readToEnd(out))
+
+                    let json = SourceDirectActionService.execute(request.namespace, "source_page_asset", request)
+
+                    // Parse result JSON to extract asset_id
+                    try {
+                        let buf = ByteBuffer()
+                        unsafe { buf.write(json.rawData()) }
+                        let r = JsonReader(buf)
+                        r.startObject()
+                        var success = false
+                        var assetId: Int64 = 0
+                        while (r.peek() != EndObject) {
+                            let name = r.readName()
+                            if (name == "success") {
+                                success = r.readValue<Bool>()
+                            } else if (name == "data") {
+                                if (r.peek() == BeginObject) {
+                                    r.startObject()
+                                    while (r.peek() != EndObject) {
+                                        let dataName = r.readName()
+                                        if (dataName == "asset_id") {
+                                            assetId = r.readValue<Int64>()
+                                        } else {
+                                            r.skip()
+                                        }
+                                    }
+                                    r.endObject()
+                                } else {
+                                    r.skip()
+                                }
+                            } else {
+                                r.skip()
+                            }
+                        }
+                        r.endObject()
+
+                        if (success && assetId > 0) {
+                            // Redirect to the unified asset URL
+                            ctx.status(302)
+                            ctx.setHeader("Location", "/api/assets/${assetId.toString()}")
+                            ctx.sendString("")
+                            return
+                        }
+                    } catch (_: Exception) {}
+
+                    ResponseView.errorJson(ctx, "Failed to resolve source page asset")
+                } else {
+                    ResponseView.errorJson(ctx, "Missing page or asset_ref parameter for source archive")
+                }
                 return
             case None => ()
         }
