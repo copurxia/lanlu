@@ -17,6 +17,7 @@ public class SourceDetailResult {
 }
 
 public class SourceChildItem {
+    public var sourceNamespace: String = ""
     public var remoteId: String = ""
     public var title: String = ""
     public var description: String = ""
@@ -260,7 +261,9 @@ public class SourceArchiveReadService {
         r.startObject()
         while (r.peek() != EndObject) {
             let name = r.readName()
-            if (name == "remote_id") {
+            if (name == "source_namespace") {
+                child.sourceNamespace = r.readValue<String>()
+            } else if (name == "remote_id") {
                 child.remoteId = r.readValue<String>()
             } else if (name == "title") {
                 child.title = r.readValue<String>()

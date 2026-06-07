@@ -66,144 +66,73 @@ public class TankoubonController {
         // Source: 复合 ID 检测/转发 → 构建 TankoubonMetadata
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
-                try {
-                    let buf = ByteBuffer()
-                    unsafe { buf.write(json.rawData()) }
-                    let r = JsonReader(buf)
-                    r.startObject()
-                    var success = false
-                    var dataStr = ""
-                    while (r.peek() != EndObject) {
-                        let name = r.readName()
-                        if (name == "success") {
-                            let ok = r.readValue<Bool>()
-                            if (ok) { success = true }
-                        } else if (name == "data") {
-                            dataStr = String.fromUtf8(r.readValueBytes())
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-
-                    if (!success || dataStr.size == 0) {
-                        ctx.json("{\"error\":\"Source plugin returned error\",\"success\":0}")
-                        return
-                    }
-
-                    // 解析 source data 所有字段到 map
-                    var dataBuf = ByteBuffer()
-                    unsafe { dataBuf.write(dataStr.rawData()) }
-                    let dr = JsonReader(dataBuf)
-                    var fields = HashMap<String, String>()
-                    dr.startObject()
-                    while (dr.peek() != EndObject) {
-                        let name = dr.readName()
-                        fields[name] = String.fromUtf8(dr.readValueBytes())
-                    }
-                    dr.endObject()
-
-                    // 解析 children 数组转为结构化列表
-                    var children = ArrayList<HashMap<String, String>>()
-                    if (fields.contains("children")) {
-                        var childArrBuf = ByteBuffer()
-                        unsafe { childArrBuf.write(fields["children"].rawData()) }
-                        let childArrR = JsonReader(childArrBuf)
-                        if (childArrR.peek() == Some(BeginArray)) {
-                            childArrR.startArray()
-                            while (childArrR.peek() != EndArray) {
-                                let childRaw = String.fromUtf8(childArrR.readValueBytes())
-                                var childFieldBuf = ByteBuffer()
-                                unsafe { childFieldBuf.write(childRaw.rawData()) }
-                                let childFieldR = JsonReader(childFieldBuf)
-                                var cFields = HashMap<String, String>()
-                                childFieldR.startObject()
-                                while (childFieldR.peek() != EndObject) {
-                                    let cName = childFieldR.readName()
-                                    cFields[cName] = String.fromUtf8(childFieldR.readValueBytes())
-                                }
-                                childFieldR.endObject()
-                                children.add(cFields)
-                            }
-                            childArrR.endArray()
-                        }
-                    }
-
-                    // 构建 TankoubonMetadata JSON
-                    let out = ByteBuffer()
-                    let w = JsonWriter(out)
-                    w.startObject()
-
-                    w.writeName("tankoubon_id").writeValue(id)
-
-                    let title = match (fields.get("title")) { case Some(v) => v; case None => "" }
-                    w.writeName("title").writeValue(title)
-
-                    let description = match (fields.get("description")) { case Some(v) => v; case None => "" }
-                    w.writeName("description").writeValue(description)
-
-                    if (fields.contains("tags")) {
-                        w.writeName("tags").jsonValue(fields["tags"])
-                    } else {
-                        w.writeName("tags")
-                        w.startArray()
-                        w.endArray()
-                    }
-
-                    if (fields.contains("cover_asset_id")) {
-                        w.writeName("assets")
-                        w.startObject()
-                        w.writeName("cover").jsonValue(fields["cover_asset_id"])
-                        w.endObject()
-                    } else {
-                        w.writeName("assets")
-                        w.startObject()
-                        w.endObject()
-                    }
-
-                    w.writeName("children")
-                    w.startArray()
-                    for (cFields in children) {
-                        w.startObject()
-                        w.writeName("entity_type").writeValue("archive")
-                        let childNs = match (cFields.get("source_namespace")) { case Some(v) => v; case None => request.namespace }
-                        let childRemoteId = match (cFields.get("remote_id")) { case Some(v) => v; case None => "" }
-                        w.writeName("entity_id").writeValue("source:${childNs}:${childRemoteId}")
-                        let childTitle = match (cFields.get("title")) { case Some(v) => v; case None => "" }
-                        w.writeName("title").writeValue(childTitle)
-                        let childDesc = match (cFields.get("description")) { case Some(v) => v; case None => "" }
-                        w.writeName("description").writeValue(childDesc)
-                        if (cFields.contains("tags")) {
-                            w.writeName("tags").jsonValue(cFields["tags"])
-                        } else {
-                            w.writeName("tags")
-                            w.startArray()
-                            w.endArray()
-                        }
-                        w.endObject()
-                    }
-                    w.endArray()
-
-                    w.writeName("archive_count").writeValue(children.size)
-                    let pageCountVal = match (fields.get("page_count")) { case Some(v) => v; case None => "0" }
-                    w.writeName("pagecount").jsonValue(pageCountVal)
-                    w.writeName("progress").writeValue(0)
-                    w.writeName("lastreadtime").writeValue("")
-                    w.writeName("isnew").writeValue(true)
-                    w.writeName("isfavorite").writeValue(false)
-                    w.writeName("release_at").writeValue("")
-                    w.writeName("updated_at").writeValue("")
-                    w.writeName("created_at").writeValue("")
-
-                    w.endObject()
-                    w.flush()
-                    ctx.json(String.fromUtf8(readToEnd(out)))
-                    return
-                } catch (_: Exception) {
-                    ctx.json("{\"error\":\"Failed to parse source plugin response\",\"success\":0}")
+                let detail = SourceArchiveReadService.fetchDetail(id)
+                if (detail.hasError()) {
+                    ctx.json("{\"error\":\"${detail.errorMessage}\",\"success\":0}")
                     return
                 }
+
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+
+                w.writeName("tankoubon_id").writeValue(id)
+                w.writeName("title").writeValue(detail.title)
+                w.writeName("description").writeValue(detail.description)
+                w.writeName("tags")
+                w.startArray()
+                for (tag in detail.tags) {
+                    w.writeValue(tag)
+                }
+                w.endArray()
+
+                w.writeName("assets")
+                w.startObject()
+                if (detail.coverAssetId > 0) {
+                    w.writeName("cover").writeValue(detail.coverAssetId)
+                }
+                w.endObject()
+
+                w.writeName("children")
+                w.startArray()
+                for (child in detail.children) {
+                    if (child.remoteId.trimAscii().size == 0) {
+                        continue
+                    }
+                    let childNamespace = if (child.sourceNamespace.trimAscii().size > 0) {
+                        child.sourceNamespace
+                    } else {
+                        request.namespace
+                    }
+                    w.startObject()
+                    w.writeName("entity_type").writeValue("archive")
+                    w.writeName("entity_id").writeValue("source:${childNamespace}:${child.remoteId}")
+                    w.writeName("title").writeValue(child.title)
+                    w.writeName("description").writeValue(child.description)
+                    w.writeName("tags")
+                    w.startArray()
+                    for (tag in child.tags) {
+                        w.writeValue(tag)
+                    }
+                    w.endArray()
+                    w.endObject()
+                }
+                w.endArray()
+
+                w.writeName("archive_count").writeValue(detail.children.size)
+                w.writeName("pagecount").writeValue(detail.pageCount)
+                w.writeName("progress").writeValue(0)
+                w.writeName("lastreadtime").writeValue("")
+                w.writeName("isnew").writeValue(true)
+                w.writeName("isfavorite").writeValue(false)
+                w.writeName("release_at").writeValue("")
+                w.writeName("updated_at").writeValue("")
+                w.writeName("created_at").writeValue("")
+
+                w.endObject()
+                w.flush()
+                ctx.json(String.fromUtf8(readToEnd(out)))
+                return
             case None => ()
         }
 

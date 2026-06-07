@@ -559,9 +559,10 @@ public class ArchiveController {
                 w.writeName("children")
                 w.startArray()
                 for (child in detail.children) {
+                    let childNamespace = if (child.sourceNamespace.trimAscii().size > 0) { child.sourceNamespace } else { request.namespace }
                     w.startObject()
                     w.writeName("entity_type").writeValue("archive")
-                    w.writeName("entity_id").writeValue("source:${request.namespace}:${child.remoteId}")
+                    w.writeName("entity_id").writeValue("source:${childNamespace}:${child.remoteId}")
                     w.writeName("title").writeValue(child.title)
                     w.writeName("description").writeValue(child.description)
                     w.writeName("tags")

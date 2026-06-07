@@ -52,6 +52,7 @@ import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { parseSourceId } from '@/lib/utils/source-id-utils';
 import { cn } from '@/lib/utils/utils';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
@@ -311,9 +312,9 @@ function TankoubonDetailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const tankoubonId = searchParams?.get('id') ?? null;
-  const sourceNamespace = searchParams?.get('source') ?? null;
-  const remoteId = searchParams?.get('remote_id') ?? null;
-  const isSourceMode = Boolean(sourceNamespace && remoteId);
+  const sourceParsed = tankoubonId ? parseSourceId(tankoubonId) : null;
+  const isSourceMode = sourceParsed !== null;
+  const remoteId = sourceParsed?.remoteId ?? null;
 
   const [tankoubon, setTankoubon] = useState<TankoubonMetadata | null>(null);
   const [archives, setArchives] = useState<Archive[]>([]);
@@ -488,61 +489,6 @@ function TankoubonDetailContent() {
 
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
-    if (isSourceMode && tankoubonId) {
-      try {
-        setLoading(true);
-        const meta = await ArchiveService.getMetadata(tankoubonId);
-        const children = Array.isArray(meta.children) ? meta.children.map((child: any) => ({
-          entity_type: 'archive' as const,
-          entity_id: child.entity_id,
-          title: child.title || '',
-          description: child.description || '',
-          tags: Array.isArray(child.tags) ? child.tags : [],
-          assets: undefined,
-          pages: undefined,
-          locator: {
-            entity_type: 'archive',
-            entity_id: child.entity_id,
-            parent_entity_type: 'tankoubon',
-            parent_entity_id: tankoubonId,
-          },
-        })) : [];
-        const nextData: TankoubonMetadata = {
-          tankoubon_id: tankoubonId,
-          title: meta.title || '',
-          description: meta.description || '',
-          tags: Array.isArray(meta.tags) ? meta.tags : [],
-          assets: undefined,
-          children,
-          archive_count: children.length,
-          pagecount: meta.pagecount || 0,
-          progress: 0,
-          isnew: true,
-          isfavorite: false,
-          release_at: '',
-          updated_at: '',
-          created_at: '',
-        };
-        setTankoubon(nextData);
-        setMetadataArchivePatches([]);
-        setIsFavorite(false);
-        setEditName(meta.title || '');
-        setEditSummary(meta.description || '');
-        setEditTags((Array.isArray(meta.tags) ? meta.tags : []).map(toCanonicalTag));
-        setEditCover('');
-        setEditBackdrop('');
-        setEditClearlogo('');
-        setEditAssetCoverId('');
-        setEditAssetBackdropId('');
-        setEditAssetClearlogoId('');
-      } catch (error) {
-        logger.apiError('fetch source tankoubon', error);
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
     if (!tankoubonId) return;
 
     try {
@@ -579,7 +525,7 @@ function TankoubonDetailContent() {
     } finally {
       setLoading(false);
     }
-  }, [language, tankoubonId, toCanonicalTag, isSourceMode, sourceNamespace, remoteId]);
+  }, [language, tankoubonId, toCanonicalTag]);
 
   // Fetch archives in tankoubon
   const currentTankoubonId = tankoubon?.tankoubon_id ?? null;
@@ -610,7 +556,7 @@ function TankoubonDetailContent() {
     } finally {
       setArchivesLoading(false);
     }
-  }, [currentTankoubonId, language, isSourceMode, tankoubon]);
+  }, [currentTankoubonId, language]);
 
   useEffect(() => {
     fetchTankoubon();
