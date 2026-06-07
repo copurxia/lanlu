@@ -20,6 +20,7 @@ type Props = {
   onDelete?: () => void;
   onAddToTankoubon?: () => void;
   t: TFunction;
+  capabilities?: string[];
 };
 
 export function ArchiveDetailActions({
@@ -35,10 +36,13 @@ export function ArchiveDetailActions({
   onDelete,
   onAddToTankoubon,
   t,
+  capabilities: caps,
 }: Props) {
   const {colors} = useTheme();
   const progress = Number(metadata.progress || 0);
   const [menuVisible, setMenuVisible] = useState(false);
+
+  const hasCap = (cap: string) => !caps || caps.length === 0 || caps.includes(cap);
 
   const styles = useMemo(
     () =>
@@ -161,37 +165,42 @@ export function ArchiveDetailActions({
         onClose={() => setMenuVisible(false)}
         style={{backgroundColor: colors.background}}>
         <View style={styles.menuSheet}>
-          {renderMenuItem(
-            t('archive.download'),
-            <Download color={colors.text} size={20} />,
-            onDownload,
-          )}
-          {renderMenuItem(
-            t('archive.markAsRead'),
-            <CheckCircle color={colors.text} size={20} />,
-            onMarkAsRead,
-          )}
-          {renderMenuItem(
-            t('archive.markAsNew'),
-            <RotateCcw color={colors.text} size={20} />,
-            onMarkAsNew,
-          )}
+          {hasCap('download') &&
+            renderMenuItem(
+              t('archive.download'),
+              <Download color={colors.text} size={20} />,
+              onDownload,
+            )}
+          {hasCap('isnew') &&
+            renderMenuItem(
+              t('archive.markAsRead'),
+              <CheckCircle color={colors.text} size={20} />,
+              onMarkAsRead,
+            )}
+          {hasCap('isnew') &&
+            renderMenuItem(
+              t('archive.markAsNew'),
+              <RotateCcw color={colors.text} size={20} />,
+              onMarkAsNew,
+            )}
           {renderMenuItem(
             t('tankoubon.addArchive'),
             <FolderOpen color={colors.text} size={20} />,
             onAddToTankoubon,
           )}
-          {renderMenuItem(
-            t('common.edit'),
-            <Edit color={colors.text} size={20} />,
-            onEdit,
-          )}
-          {renderMenuItem(
-            t('common.delete'),
-            <Trash2 color={colors.danger} size={20} />,
-            onDelete,
-            true,
-          )}
+          {hasCap('update_metadata') &&
+            renderMenuItem(
+              t('common.edit'),
+              <Edit color={colors.text} size={20} />,
+              onEdit,
+            )}
+          {hasCap('delete') &&
+            renderMenuItem(
+              t('common.delete'),
+              <Trash2 color={colors.danger} size={20} />,
+              onDelete,
+              true,
+            )}
         </View>
       </Drawer>
     </View>

@@ -385,7 +385,7 @@ export function useReaderImageLoading({
     };
   }, [readingMode, pages.length, visibleRange.end, visibleRange.start, imageRefs, shouldLoadIndexNow]);
 
-  // Resolve asset_ref pages on-demand via source_page_asset
+  // Resolve source pages on-demand via page URL (backend uses path as resource key)
   const resolvingPagesRef = useRef<Set<number>>(new Set());
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -406,7 +406,6 @@ export function useReaderImageLoading({
     const controller = abortControllerRef.current;
     const signal = controller?.signal;
 
-    // Iterate over imagesLoading set to find pages with unresolved asset_ref
     for (const pageIndex of Array.from(imagesLoading)) {
       if (resolvingPagesRef.current.has(pageIndex)) continue;
       if (loadedImages.has(pageIndex)) continue;
@@ -416,64 +415,31 @@ export function useReaderImageLoading({
       if (!page) continue;
       const source = ArchiveService.getPageSource(page);
       if (!source) continue;
-      // Only resolve if URL is empty (asset_ref page) and asset_ref exists
-      const url = source.url?.trim() || '';
-      if (url) continue; // already has a URL, no need to resolve
-      const assetRef = source.metadata?.asset_ref || page.metadata?.asset_ref;
-      if (!assetRef) continue;
 
-      // Mark as resolving to prevent duplicate calls
+      // Skip if page already has a URL (most common case)
+      const url = source.url?.trim() || '';
+      if (url) continue;
+
+      // Fallback: use path to build the URL (for pages without a pre-generated URL)
+      const pagePath = source.path || page.path || source.metadata?.path || page.metadata?.path;
+      if (!pagePath) continue;
+
       resolvingPagesRef.current.add(pageIndex);
 
-      // Trigger on-demand resolution (fire-and-forget to avoid blocking)
-      ArchiveService.resolvePageAsset(
-        sourceId!,
-        pageIndex + 1, // pages are 1-indexed in the plugin
-        assetRef,
-        sourceParentRemoteId || undefined,
-        signal,
-      ).then((result) => {
-        // If aborted, skip processing stale result
-        if (signal?.aborted) {
-          resolvingPagesRef.current.delete(pageIndex);
-          return;
-        }
-        if (!result.success || !result.data) {
-          resolvingPagesRef.current.delete(pageIndex);
-          handleImageError(pageIndex);
-          return;
-        }
-        const assetId = result.data.asset_id;
-        if (assetId <= 0) {
-          resolvingPagesRef.current.delete(pageIndex);
-          handleImageError(pageIndex);
-          return;
-        }
-        const resolvedUrl = `/api/assets/${assetId}`;
-        // Update cachedPages so rendering picks up the resolved URL
-        setCachedPages((prev) => {
-          const next = [...prev];
-          next[pageIndex] = resolvedUrl;
-          return next;
-        });
-        // Re-add to imagesLoading so the preloader picks it up with the real URL
-        setImagesLoading((prev) => {
-          const next = new Set(prev);
-          next.add(pageIndex);
-          return next;
-        });
-        resolvingPagesRef.current.delete(pageIndex);
-      }).catch(() => {
-        // If aborted, the error is expected; don't trigger retry
-        if (signal?.aborted) {
-          resolvingPagesRef.current.delete(pageIndex);
-          return;
-        }
-        resolvingPagesRef.current.delete(pageIndex);
-        handleImageError(pageIndex);
+      const resolvedUrl = `/api/archives/${encodeURIComponent(sourceId)}/page?path=${encodeURIComponent(pagePath)}`;
+      setCachedPages((prev) => {
+        const next = [...prev];
+        next[pageIndex] = resolvedUrl;
+        return next;
       });
+      setImagesLoading((prev) => {
+        const next = new Set(prev);
+        next.add(pageIndex);
+        return next;
+      });
+      resolvingPagesRef.current.delete(pageIndex);
     }
-  }, [imagesLoading, pages, cachedPages, loadedImages, sourceId, sourceParentRemoteId, handleImageError]);
+  }, [imagesLoading, pages, cachedPages, loadedImages, sourceId, handleImageError]);
 
   return {
     cachedPages,

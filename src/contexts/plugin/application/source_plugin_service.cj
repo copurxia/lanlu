@@ -21,6 +21,36 @@ public class SourcePluginService {
         return Some(plugin)
     }
 
+    /**
+     * 执行 Source 插件的 browse 类 action，返回 task id。
+     *
+     * Source 插件契约说明：
+     *
+     * ## Browse Actions
+     * - source_home: 获取首页内容
+     * - source_search: 搜索
+     * - source_filters: 获取过滤器列表
+     * - source_detail: 获取条目详情（返回 title, description, tags, page_count, cover_asset_id, reader.media_type, children）
+     * - source_reader: 获取页面列表
+     * - source_cover_asset: 获取封面资源
+     * - source_page_asset: 获取页面资源
+     *
+     * ## source_reader 输出契约
+     * 响应 data.pages[] 中每个条目 SHALL 包含以下字段：
+     * - path: 必填，页面资源 key（后续翻页时传回插件的标识）。
+     *   插件可自行定义 path 的格式（URL、远端 ID、文件 key、页码字符串等），宿主不解释。
+     * - asset_id: 可选，如果插件能直接提供资源 ID 可在此返回，必须是 JSON number 类型。
+     *
+     * ## source_page_asset 输入契约
+     * 宿主调用时 SHALL 提供以下参数：
+     * - remote_id: 必填
+     * - path: 必填，值来自 source_reader 输出的 data.pages[].path
+     * - page: 可选，仅作为插件自用 hint（如页码索引）
+     *
+     * ## source_page_asset 输出契约
+     * 响应 data 中 SHALL 包含以下字段：
+     * - asset_id: 必填，JSON number 类型。
+     */
     public static func executeBrowseAction(
         namespace: String,
         action: String,

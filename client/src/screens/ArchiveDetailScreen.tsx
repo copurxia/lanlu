@@ -529,6 +529,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         onEdit={isAuthenticated ? () => setEditDialogOpen(true) : undefined}
         onDelete={isAdmin ? handleDeleteArchive : undefined}
         t={t}
+        capabilities={metadata?.capabilities}
       />
       <ArchiveDescription description={merged.description} t={t} />
       <ArchiveTags tags={tags} onTagPress={handleTagPress} t={t} />

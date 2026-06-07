@@ -331,70 +331,6 @@ public class ArchiveController {
         return out
     }
 
-    /**
-     * 从 source_reader 响应中查找匹配 asset_ref 的 page index。
-     * 返回「第 N 页」的字符串形式（1-based），为空表示未找到。
-     */
-    private static func resolvePageIndexFromSourceReader(request: SourceRequest, targetAssetRef: String): String {
-        try {
-            let json = SourceDirectActionService.execute(request.namespace, "source_reader", request)
-            let buf = ByteBuffer()
-            unsafe { buf.write(json.rawData()) }
-            let r = JsonReader(buf)
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == "data") {
-                    if (r.peek() == BeginObject) {
-                        r.startObject()
-                        while (r.peek() != EndObject) {
-                            let dataName = r.readName()
-                            if (dataName == "pages") {
-                                if (r.peek() == BeginArray) {
-                                    r.startArray()
-                                    var idx: Int64 = 0
-                                    while (r.peek() != EndArray) {
-                                        idx += 1
-                                        if (r.peek() == BeginObject) {
-                                            r.startObject()
-                                            var assetRef = ""
-                                            while (r.peek() != EndObject) {
-                                                let fieldName = r.readName()
-                                                if (fieldName == "asset_ref") {
-                                                    assetRef = r.readValue<String>()
-                                                } else {
-                                                    r.skip()
-                                                }
-                                            }
-                                            r.endObject()
-                                            if (assetRef == targetAssetRef) {
-                                                return idx.toString()
-                                            }
-                                        } else {
-                                            r.skip()
-                                        }
-                                    }
-                                    r.endArray()
-                                } else {
-                                    r.skip()
-                                }
-                            } else {
-                                r.skip()
-                            }
-                        }
-                        r.endObject()
-                    } else {
-                        r.skip()
-                    }
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-        return ""
-    }
-
     private static func extractEpisodeToken(text: String): String {
         let lower = trimAsciiLower(text)
         if (lower.size < 6) {
@@ -530,6 +466,20 @@ public class ArchiveController {
         w.endObject()
     }
 
+    private static func injectCapabilities(json: String, capsArray: String): String {
+        let trimmed = json.trimAscii()
+        if (trimmed.size < 2) { return json }
+        // 找到最后一个 } 的位置，在其前面插入 ,"capabilities":capsArray
+        let lastBrace = trimmed.lastIndexOf("}")
+        match (lastBrace) {
+            case Some(idx) =>
+                let before = trimmed[0..idx]
+                let after = trimmed[idx..trimmed.size]
+                return "${before},\"capabilities\":${capsArray}${after}"
+            case None => return json
+        }
+    }
+
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
@@ -537,207 +487,93 @@ public class ArchiveController {
         // Source: 复合 ID 检测/转发 → 构建 ArchiveMetadata
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
-                // Parse outer { success, data: {...} } to extract data bytes
-                try {
-                    let buf = ByteBuffer()
-                    unsafe { buf.write(json.rawData()) }
-                    let r = JsonReader(buf)
-                    r.startObject()
-                    var srcDataBytes: Array<Byte> = []
-                    while (r.peek() != EndObject) {
-                        let name = r.readName()
-                        if (name == "success") {
-                            let ok = r.readValue<Bool>()
-                            if (!ok) {
-                                ResponseView.errorJson(ctx, "Source plugin returned error")
-                                return
-                            }
-                        } else if (name == "data") {
-                            srcDataBytes = r.readValueBytes()
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
+                let detail = SourceArchiveReadService.fetchDetail(id)
 
-                    if (srcDataBytes.size > 0) {
-                        // Parse data object to extract individual fields
-                        let dataBuf = ByteBuffer()
-                        unsafe { dataBuf.write(srcDataBytes) }
-                        let dr = JsonReader(dataBuf)
+                // 检查插件返回是否有效，失败时返回明确错误
+                if (detail.hasError() || (detail.title.size == 0 && detail.pageCount <= 0)) {
+                    let errMsg = if (detail.hasError()) { detail.errorMessage } else { "plugin returned empty result" }
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ResponseView.errorJson(ctx, "Failed to fetch source detail: ${errMsg}")
+                    return
+                }
 
-                        var srcTitle = ""
-                        var srcDescription = ""
-                        var srcTags = ArrayList<String>()
-                        var srcPageCount: Int64 = 0
-                        var srcCoverAssetId = ""
-                        var srcMediaType = "image"
-                        var srcChildrenBytes: Array<Byte> = []
+                // 合并用户状态（如果登录）
+                var progress: Int32 = 0
+                var isNew: Bool = true
+                var isFavorite: Bool = false
+                var lastReadTime: Int64 = 0
+                match (AuthMiddleware.optionalUser(ctx)) {
+                    case Some(userId) =>
+                        progress = UserTargetStatusDao.getProgress(userId, "source_archive", id)
+                        isNew = UserTargetStatusDao.isNew(userId, "source_archive", id)
+                        isFavorite = UserTargetFavoritesDao.isFavorite(userId, "source_archive", id)
+                        lastReadTime = UserTargetStatusDao.getLastReadTime(userId, "source_archive", id)
+                    case None => ()
+                }
 
-                        dr.startObject()
-                        while (dr.peek() != EndObject) {
-                            let fieldName = dr.readName()
-                            if (fieldName == "title") {
-                                srcTitle = dr.readValue<String>()
-                            } else if (fieldName == "description") {
-                                srcDescription = dr.readValue<String>()
-                            } else if (fieldName == "tags") {
-                                if (dr.peek() == BeginArray) {
-                                    dr.startArray()
-                                    while (dr.peek() != EndArray) {
-                                        srcTags.add(dr.readValue<String>())
-                                    }
-                                    dr.endArray()
-                                } else {
-                                    dr.skip()
-                                }
-                            } else if (fieldName == "page_count") {
-                                try {
-                                    srcPageCount = dr.readValue<Int64>()
-                                } catch (_: Exception) {
-                                    try {
-                                        let pf = dr.readValue<Float64>()
-                                        srcPageCount = Int64(pf)
-                                    } catch (_: Exception) {
-                                        dr.skip()
-                                    }
-                                }
-                            } else if (fieldName == "cover_asset_id") {
-                                srcCoverAssetId = dr.readValue<String>()
-                            } else if (fieldName == "reader") {
-                                if (dr.peek() == BeginObject) {
-                                    dr.startObject()
-                                    while (dr.peek() != EndObject) {
-                                        let readerField = dr.readName()
-                                        if (readerField == "media_type") {
-                                            srcMediaType = dr.readValue<String>()
-                                        } else {
-                                            dr.skip()
-                                        }
-                                    }
-                                    dr.endObject()
-                                } else {
-                                    dr.skip()
-                                }
-                            } else if (fieldName == "children") {
-                                if (dr.peek() == BeginArray) {
-                                    srcChildrenBytes = dr.readValueBytes()
-                                } else {
-                                    dr.skip()
-                                }
-                            } else {
-                                dr.skip()
-                            }
-                        }
-                        dr.endObject()
-
-                        // Build ArchiveMetadata JSON output
-                        let out = ByteBuffer()
-                        let w = JsonWriter(out)
-                        w.startObject()
-                        w.writeName("arcid").writeValue(id)
-                        w.writeName("title").writeValue(srcTitle)
-                        w.writeName("description").writeValue(srcDescription)
-                        w.writeName("tags")
-                        w.startArray()
-                        for (tag in srcTags) {
-                            w.writeValue(tag)
-                        }
-                        w.endArray()
-                        w.writeName("pagecount").writeValue(srcPageCount)
-                        w.writeName("page_count").writeValue(srcPageCount)
-                        w.writeName("progress").writeValue(0)
-                        w.writeName("isnew").writeValue(true)
-                        w.writeName("isfavorite").writeValue(false)
-                        w.writeName("archivetype").writeValue(srcMediaType)
-                        w.writeName("lastreadtime").writeValue(0)
-                        w.writeName("size").writeValue(0)
-                        // assets
-                        if (srcCoverAssetId.size > 0) {
-                            w.writeName("assets")
-                            w.startObject()
-                            w.writeName("cover").writeValue(srcCoverAssetId)
-                            w.endObject()
-                        } else {
-                            w.writeName("assets")
-                            w.startObject()
-                            w.endObject()
-                        }
-                        w.writeName("filename").writeValue("")
-                        w.writeName("relative_path").writeValue("")
-                        w.writeName("thumbnail_hash").writeValue("")
-                        w.writeName("release_at").writeValue("")
-                        w.writeName("updated_at").writeValue("")
-                        w.writeName("created_at").writeValue("")
-                        // children
-                        w.writeName("children")
-                        if (srcChildrenBytes.size > 0) {
-                            w.startArray()
-                            let childBuf = ByteBuffer()
-                            unsafe { childBuf.write(srcChildrenBytes) }
-                            let cr = JsonReader(childBuf)
-                            cr.startArray()
-                            while (cr.peek() != EndArray) {
-                                if (cr.peek() == BeginObject) {
-                                    cr.startObject()
-                                    var childRemoteId = ""
-                                    var childTitle = ""
-                                    var childDescription = ""
-                                    var childTags = ArrayList<String>()
-                                    while (cr.peek() != EndObject) {
-                                        let childField = cr.readName()
-                                        if (childField == "remote_id") {
-                                            childRemoteId = cr.readValue<String>()
-                                        } else if (childField == "title") {
-                                            childTitle = cr.readValue<String>()
-                                        } else if (childField == "description") {
-                                            childDescription = cr.readValue<String>()
-                                        } else if (childField == "tags") {
-                                            if (cr.peek() == BeginArray) {
-                                                cr.startArray()
-                                                while (cr.peek() != EndArray) {
-                                                    childTags.add(cr.readValue<String>())
-                                                }
-                                                cr.endArray()
-                                            } else {
-                                                cr.skip()
-                                            }
-                                        } else {
-                                            cr.skip()
-                                        }
-                                    }
-                                    cr.endObject()
-
-                                    w.startObject()
-                                    w.writeName("entity_type").writeValue("archive")
-                                    w.writeName("entity_id").writeValue("source:${request.namespace}:${childRemoteId}")
-                                    w.writeName("title").writeValue(childTitle)
-                                    w.writeName("description").writeValue(childDescription)
-                                    w.writeName("tags")
-                                    w.startArray()
-                                    for (ct in childTags) {
-                                        w.writeValue(ct)
-                                    }
-                                    w.endArray()
-                                    w.endObject()
-                                } else {
-                                    cr.skip()
-                                }
-                            }
-                            cr.endArray()
-                            w.endArray()
-                        } else {
-                            w.startArray()
-                            w.endArray()
-                        }
-                        w.endObject()
-                        w.flush()
-                        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-                        return
-                    }
-                } catch (_: Exception) {}
-                ResponseView.errorJson(ctx, "Failed to parse source plugin response")
+                // 构建 ArchiveMetadata JSON 输出
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("arcid").writeValue(id)
+                w.writeName("title").writeValue(detail.title)
+                w.writeName("description").writeValue(detail.description)
+                w.writeName("tags")
+                w.startArray()
+                for (tag in detail.tags) { w.writeValue(tag) }
+                w.endArray()
+                w.writeName("pagecount").writeValue(detail.pageCount)
+                w.writeName("page_count").writeValue(detail.pageCount)
+                w.writeName("progress").writeValue(progress)
+                w.writeName("isnew").writeValue(isNew)
+                w.writeName("isfavorite").writeValue(isFavorite)
+                w.writeName("archivetype").writeValue(detail.mediaType)
+                w.writeName("lastreadtime").writeValue(lastReadTime)
+                w.writeName("size").writeValue(0)
+                // assets
+                if (detail.coverAssetId > 0) {
+                    w.writeName("assets")
+                    w.startObject()
+                    w.writeName("cover").writeValue(detail.coverAssetId)
+                    w.endObject()
+                } else {
+                    w.writeName("assets")
+                    w.startObject()
+                    w.endObject()
+                }
+                w.writeName("filename").writeValue("")
+                w.writeName("relative_path").writeValue("")
+                w.writeName("thumbnail_hash").writeValue("")
+                w.writeName("release_at").writeValue("")
+                w.writeName("updated_at").writeValue("")
+                w.writeName("created_at").writeValue("")
+                // capabilities
+                w.writeName("capabilities")
+                w.startArray()
+                w.writeValue("read")
+                w.writeValue("progress")
+                w.writeValue("favorite")
+                w.writeValue("isnew")
+                w.endArray()
+                // children
+                w.writeName("children")
+                w.startArray()
+                for (child in detail.children) {
+                    w.startObject()
+                    w.writeName("entity_type").writeValue("archive")
+                    w.writeName("entity_id").writeValue("source:${request.namespace}:${child.remoteId}")
+                    w.writeName("title").writeValue(child.title)
+                    w.writeName("description").writeValue(child.description)
+                    w.writeName("tags")
+                    w.startArray()
+                    for (ct in child.tags) { w.writeValue(ct) }
+                    w.endArray()
+                    w.endObject()
+                }
+                w.endArray()
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 return
             case None => ()
         }
@@ -795,7 +631,9 @@ public class ArchiveController {
             ResponseView.json(ctx, "{\"error\":\"${err}\",\"success\":0}")
             return
         }
-        ResponseView.json(ctx, metadataJson)
+        // 向 metadata JSON 注入 capabilities
+        let injectedJson = injectCapabilities(metadataJson, "[\"read\",\"download\",\"update_metadata\",\"delete\",\"progress\",\"favorite\",\"isnew\"]")
+        ResponseView.json(ctx, injectedJson)
     }
 
     // GET /api/archives/{id}/tankoubons
@@ -858,10 +696,11 @@ public class ArchiveController {
             return
         }
 
-        // Source: 复合 ID — no-op
+        // Source: 复合 ID — 在线源元数据只读
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(_) =>
-                ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
+                ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"error\":\"Online source metadata is read-only\",\"success\":0}")
                 return
             case None => ()
         }
@@ -916,205 +755,96 @@ public class ArchiveController {
                 if (tankoubonId.size > 0) {
                     match (SourceRequestResolver.parseFromCompositeId(tankoubonId)) {
                         case Some(tankoubonRequest) =>
-                            let detailJson = SourceDirectActionService.execute(
-                                tankoubonRequest.namespace, "source_detail", tankoubonRequest
-                            )
-                            try {
-                                let buf = ByteBuffer()
-                                unsafe { buf.write(detailJson.rawData()) }
-                                let r = JsonReader(buf)
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let name = r.readName()
-                                    if (name == "data") {
-                                        if (r.peek() == BeginObject) {
-                                            r.startObject()
-                                            while (r.peek() != EndObject) {
-                                                let dataName = r.readName()
-                                                if (dataName == "children") {
-                                                    if (r.peek() == BeginArray) {
-                                                        r.startArray()
-                                                        if (r.peek() != EndArray) {
-                                                            if (r.peek() == BeginObject) {
-                                                                r.startObject()
-                                                                var childRemoteId = ""
-                                                                while (r.peek() != EndObject) {
-                                                                    let childName = r.readName()
-                                                                    if (childName == "remote_id") {
-                                                                        childRemoteId = r.readValue<String>()
-                                                                    } else {
-                                                                        r.skip()
-                                                                    }
-                                                                }
-                                                                r.endObject()
-
-                                                                if (childRemoteId.size > 0) {
-                                                                    let out = ByteBuffer()
-                                                                    let w = JsonWriter(out)
-                                                                    w.startObject()
-                                                                    w.writeName("remote_id").writeValue(childRemoteId)
-                                                                    w.endObject()
-                                                                    w.flush()
-                                                                    let childRequest = SourceRequest(request.namespace, childRemoteId)
-                                                                    childRequest.paramsJson = String.fromUtf8(readToEnd(out))
-                                                                    effectiveRequest = childRequest
-                                                                }
-                                                            }
-                                                        }
-                                                        while (r.peek() != EndArray) { r.skip() }
-                                                        r.endArray()
-                                                    } else {
-                                                        r.skip()
-                                                    }
-                                                } else {
-                                                    r.skip()
-                                                }
-                                            }
-                                            r.endObject()
-                                        } else {
-                                            r.skip()
-                                        }
-                                    } else {
-                                        r.skip()
-                                    }
-                                }
-                                r.endObject()
-                            } catch (_: Exception) {}
+                            let detail = SourceArchiveReadService.fetchDetail(tankoubonId)
+                            if (detail.children.size > 0 && detail.children[0].remoteId.size > 0) {
+                                let out = ByteBuffer()
+                                let w = JsonWriter(out)
+                                w.startObject()
+                                w.writeName("remote_id").writeValue(detail.children[0].remoteId)
+                                w.endObject()
+                                w.flush()
+                                let childRequest = SourceRequest(request.namespace, detail.children[0].remoteId)
+                                childRequest.paramsJson = String.fromUtf8(readToEnd(out))
+                                effectiveRequest = childRequest
+                            }
                         case None => ()
                     }
                 }
 
-                let json = SourceDirectActionService.execute(effectiveRequest.namespace, "source_reader", effectiveRequest)
-                // 解析 source_reader 响应，转换为前端 PageInfo 数据格式
-                try {
-                    let buf = ByteBuffer()
-                    unsafe { buf.write(json.rawData()) }
-                    let r = JsonReader(buf)
-                    r.startObject()
-                    var successFlag = false
-                    var pagesList = ArrayList<HashMap<String, String>>()
-                    while (r.peek() != EndObject) {
-                        let name = r.readName()
-                        if (name == "success") {
-                            successFlag = r.readValue<Bool>()
-                        } else if (name == "data") {
-                            if (r.peek() == BeginObject) {
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let dataName = r.readName()
-                                    if (dataName == "pages") {
-                                        if (r.peek() == BeginArray) {
-                                            r.startArray()
-                                            while (r.peek() != EndArray) {
-                                                if (r.peek() == BeginObject) {
-                                                    r.startObject()
-                                                    let page = HashMap<String, String>()
-                                                    while (r.peek() != EndObject) {
-                                                        let pageKey = r.readName()
-                                                        if (pageKey == "path" || pageKey == "asset_ref" || pageKey == "asset_id") {
-                                                            page[pageKey] = r.readValue<String>()
-                                                        } else {
-                                                            r.skip()
-                                                        }
-                                                    }
-                                                    r.endObject()
-                                                    pagesList.add(page)
-                                                } else {
-                                                    r.skip()
-                                                }
-                                            }
-                                            r.endArray()
-                                        } else {
-                                            r.skip()
-                                        }
-                                    } else {
-                                        r.skip()
-                                    }
-                                }
-                                r.endObject()
-                            } else {
-                                r.skip()
-                            }
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
+                // 使用 effectiveRequest 构建实际阅读目标的 compositeId
+                let effectiveId: String
+                if (effectiveRequest.remoteId != request.remoteId) {
+                    effectiveId = "source:${effectiveRequest.namespace}:${effectiveRequest.remoteId}"
+                } else {
+                    effectiveId = id
+                }
+                let result = SourceArchiveReadService.fetchPages(effectiveId)
 
-                    if (!successFlag) {
-                        ResponseView.errorJson(ctx, "Source plugin returned error")
-                        return
-                    }
-
-                    // 构建前端 PageInfo 输出：{ pages: [...] }
-                    let out = ByteBuffer()
-                    let w = JsonWriter(out)
-                    w.startObject()
-                    w.writeName("pages").startArray()
-
-                    for (i in 0..pagesList.size) {
-                        let page = pagesList[i]
-                        let pagePath = page.get("path") ?? ""
-                        let assetRef = page.get("asset_ref") ?? ""
-                        let assetId = page.get("asset_id") ?? ""
-
-                        let effectivePath = if (assetRef.size > 0) { assetRef } else { pagePath }
-                        let srcId = "src-${i.toString()}"
-
-                        let pageUrl: String
-                        if (assetId.size > 0) {
-                            // 已缓存的资源，直接使用 asset URL
-                            pageUrl = "/api/assets/${assetId}"
-                        } else {
-                            // 构造通过插件按需加载的页面 URL
-                            let encodedId = urlEncodeComponent(id)
-                            let encodedRef = urlEncodeComponent(assetRef)
-                            pageUrl = "/api/archives/${encodedId}/page?path=${encodedRef}"
-                        }
-
-                        w.startObject()
-                        w.writeName("id").writeValue(pagePath)
-                        w.writeName("type").writeValue("image")
-
-                        // defaultSource
-                        w.writeName("defaultSource").startObject()
-                        w.writeName("id").writeValue(srcId)
-                        w.writeName("path").writeValue(effectivePath)
-                        w.writeName("url").writeValue(pageUrl)
-                        w.writeName("type").writeValue("image")
-                        w.endObject()
-
-                        // sources 数组
-                        w.writeName("sources").startArray()
-                        w.startObject()
-                        w.writeName("id").writeValue(srcId)
-                        w.writeName("path").writeValue(effectivePath)
-                        w.writeName("url").writeValue(pageUrl)
-                        w.writeName("type").writeValue("image")
-                        w.writeName("metadata")
-                        w.startObject()
-                        w.endObject()
-                        w.endObject()
-                        w.endArray()
-
-                        // metadata
-                        w.writeName("metadata")
-                        w.startObject()
-                        w.endObject()
-
-                        w.endObject()
-                    }
-
-                    w.endArray()
-                    w.endObject()
-                    w.flush()
-
-                    ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-                    return
-                } catch (e: Exception) {
-                    ResponseView.errorJson(ctx, "Failed to parse source plugin response: ${e.message}")
+                // 检查插件返回是否有效
+                if (result.hasError() || result.pages.size == 0) {
+                    let errMsg = if (result.hasError()) { result.errorMessage } else { "plugin returned empty result" }
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ResponseView.errorJson(ctx, "Failed to fetch source pages: ${errMsg}")
                     return
                 }
+
+                // 构建前端 PageInfo 输出
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("pages").startArray()
+
+                for (i in 0..result.pages.size) {
+                    let page = result.pages[i]
+                    let pagePath = page.path
+
+                    let srcId = "src-${i.toString()}"
+
+                    let pageUrl: String
+                    if (page.assetId > 0) {
+                        pageUrl = "/api/assets/${page.assetId.toString()}"
+                    } else {
+                        let encodedId = urlEncodeComponent(effectiveId)
+                        let encodedPath = urlEncodeComponent(pagePath)
+                        pageUrl = "/api/archives/${encodedId}/page?path=${encodedPath}"
+                    }
+
+                    w.startObject()
+                    w.writeName("id").writeValue(pagePath)
+                    w.writeName("type").writeValue("image")
+
+                    w.writeName("defaultSource").startObject()
+                    w.writeName("id").writeValue(srcId)
+                    w.writeName("path").writeValue(pagePath)
+                    w.writeName("url").writeValue(pageUrl)
+                    w.writeName("type").writeValue("image")
+                    w.endObject()
+
+                    w.writeName("sources").startArray()
+                    w.startObject()
+                    w.writeName("id").writeValue(srcId)
+                    w.writeName("path").writeValue(pagePath)
+                    w.writeName("url").writeValue(pageUrl)
+                    w.writeName("type").writeValue("image")
+                    w.writeName("metadata")
+                    w.startObject()
+                    w.endObject()
+                    w.endObject()
+                    w.endArray()
+
+                    w.writeName("metadata")
+                    w.startObject()
+                    w.endObject()
+
+                    w.endObject()
+                }
+
+                w.endArray()
+                w.endObject()
+                w.flush()
+
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+                return
             case None => ()
         }
 
@@ -1453,10 +1183,11 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op
+                // Source: 复合 ID — 在线源不允许删除
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"delete_archive\",\"success\":1}")
+                        ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                        ResponseView.json(ctx, "{\"operation\":\"delete_archive\",\"error\":\"Online source archives cannot be deleted\",\"success\":0}")
                         return
                     case None => ()
                 }
@@ -1589,6 +1320,16 @@ public class ArchiveController {
 
     public static func downloadArchive(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 复合 ID — 档案统一下载端点不负责在线源下载。
+        // 在线源下载需要分类等上下文，应走 source-plugins download/action 入口。
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(_) =>
+                ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                ResponseView.json(ctx, "{\"operation\":\"download_archive\",\"error\":\"Online source archives cannot be downloaded from this endpoint\",\"success\":0}")
+                return
+            case None => ()
+        }
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -1778,77 +1519,18 @@ public class ArchiveController {
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
                 let path = (ctx.query("path") ?? "").trimAscii()
-                let tankoubonId = (ctx.query("tankoubon_id") ?? ctx.query("tankoubon") ?? "").trimAscii()
-                let parentRemoteId = (ctx.query("parent_remote_id") ?? "").trimAscii()
-
                 if (path.size > 0) {
-                    // 从 source_reader 推导 page index，无需前端传 page 参数
-                    let derivedPageIndex = resolvePageIndexFromSourceReader(request, path)
-
-                    // Build paramsJson for source_page_asset action
-                    let out = ByteBuffer()
-                    let w = JsonWriter(out)
-                    w.startObject()
-                    w.writeName("remote_id").writeValue(request.remoteId)
-                    w.writeName("asset_ref").writeValue(path)
-                    if (derivedPageIndex.size > 0) {
-                        w.writeName("page").writeValue(derivedPageIndex)
+                    let pageHint = (ctx.query("page") ?? "").trimAscii()
+                    let assetId = SourceArchiveReadService.resolvePageAsset(
+                        request.namespace, request.remoteId, path, page: pageHint
+                    )
+                    if (assetId > 0) {
+                        ctx.status(302)
+                        ctx.setHeader("Location", "/api/assets/${assetId.toString()}")
+                        ctx.sendString("")
+                    } else {
+                        ResponseView.errorJson(ctx, "Failed to resolve source page asset")
                     }
-                    if (tankoubonId.size > 0) {
-                        w.writeName("tankoubon_id").writeValue(tankoubonId)
-                    }
-                    if (parentRemoteId.size > 0) {
-                        w.writeName("parent_remote_id").writeValue(parentRemoteId)
-                    }
-                    w.endObject()
-                    w.flush()
-                    request.paramsJson = String.fromUtf8(readToEnd(out))
-
-                    let json = SourceDirectActionService.execute(request.namespace, "source_page_asset", request)
-
-                    // Parse result JSON to extract asset_id
-                    try {
-                        let buf = ByteBuffer()
-                        unsafe { buf.write(json.rawData()) }
-                        let r = JsonReader(buf)
-                        r.startObject()
-                        var success = false
-                        var assetId: Int64 = 0
-                        while (r.peek() != EndObject) {
-                            let name = r.readName()
-                            if (name == "success") {
-                                success = r.readValue<Bool>()
-                            } else if (name == "data") {
-                                if (r.peek() == BeginObject) {
-                                    r.startObject()
-                                    while (r.peek() != EndObject) {
-                                        let dataName = r.readName()
-                                        if (dataName == "asset_id") {
-                                            assetId = r.readValue<Int64>()
-                                        } else {
-                                            r.skip()
-                                        }
-                                    }
-                                    r.endObject()
-                                } else {
-                                    r.skip()
-                                }
-                            } else {
-                                r.skip()
-                            }
-                        }
-                        r.endObject()
-
-                        if (success && assetId > 0) {
-                            // Redirect to the unified asset URL
-                            ctx.status(302)
-                            ctx.setHeader("Location", "/api/assets/${assetId.toString()}")
-                            ctx.sendString("")
-                            return
-                        }
-                    } catch (_: Exception) {}
-
-                    ResponseView.errorJson(ctx, "Failed to resolve source page asset")
                 } else {
                     ResponseView.errorJson(ctx, "Missing path parameter for source archive")
                 }
@@ -2381,10 +2063,17 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op
+                // Source: 复合 ID — 真实持久化
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"set_isnew\",\"success\":1}")
+                        let ok = UserTargetStatusDao.setIsNew(userId, "source_archive", id)
+                        if (ok) {
+                            ResponseView.json(ctx, "{\"operation\":\"set_isnew\",\"success\":1}")
+                        } else {
+                            let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Failed to set isNew flag\",\"success\":0}"
+                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ResponseView.json(ctx, errorResponse)
+                        }
                         return
                     case None => ()
                 }
@@ -2440,10 +2129,17 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op
+                // Source: 复合 ID — 真实持久化
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"clear_isnew\",\"success\":1}")
+                        let ok = UserTargetStatusDao.clearIsNew(userId, "source_archive", id)
+                        if (ok) {
+                            ResponseView.json(ctx, "{\"operation\":\"clear_isnew\",\"success\":1}")
+                        } else {
+                            let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Failed to clear isNew flag\",\"success\":0}"
+                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ResponseView.json(ctx, errorResponse)
+                        }
                         return
                     case None => ()
                 }
@@ -2506,14 +2202,6 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op（Source 无本地进度）
-                match (SourceRequestResolver.parseFromCompositeId(id)) {
-                    case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"update_progress\",\"success\":1}")
-                        return
-                    case None => ()
-                }
-
                 // 解析页数为整数
                 var progress = try {
                     Int32.parse(pageParam)
@@ -2522,6 +2210,22 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.json(ctx, errorResponse)
                     return
+                }
+
+                // Source: 复合 ID — 真实持久化
+                match (SourceRequestResolver.parseFromCompositeId(id)) {
+                    case Some(_) =>
+                        let ok = UserTargetStatusDao.updateProgress(userId, "source_archive", id, progress)
+                        if (ok) {
+                            let result = "{\"operation\":\"update_progress\",\"progress\":${progress},\"success\":1}"
+                            ResponseView.json(ctx, result)
+                        } else {
+                            let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Failed to update progress\",\"success\":0}"
+                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ResponseView.json(ctx, errorResponse)
+                        }
+                        return
+                    case None => ()
                 }
 
                 // 检查归档是否存在
@@ -2582,10 +2286,17 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op
+                // Source: 复合 ID — 真实持久化
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"add_favorite\",\"success\":1}")
+                        let ok = UserTargetFavoritesDao.addFavorite(userId, "source_archive", id)
+                        if (ok) {
+                            ResponseView.json(ctx, "{\"operation\":\"add_favorite\",\"success\":1}")
+                        } else {
+                            let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
+                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ResponseView.json(ctx, errorResponse)
+                        }
                         return
                     case None => ()
                 }
@@ -2640,10 +2351,17 @@ public class ArchiveController {
                     return
                 }
 
-                // Source: 复合 ID — no-op
+                // Source: 复合 ID — 真实持久化
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ResponseView.json(ctx, "{\"operation\":\"remove_favorite\",\"success\":1}")
+                        let ok = UserTargetFavoritesDao.removeFavorite(userId, "source_archive", id)
+                        if (ok) {
+                            ResponseView.json(ctx, "{\"operation\":\"remove_favorite\",\"success\":1}")
+                        } else {
+                            let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
+                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ResponseView.json(ctx, errorResponse)
+                        }
                         return
                     case None => ()
                 }

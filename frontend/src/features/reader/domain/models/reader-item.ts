@@ -6,9 +6,9 @@ export type ReaderItemType = ReaderContentItemType | "virtual-end";
 export type ReaderItemMetadata = {
   title?: string;
   description?: string;
+  path?: string;
   thumb_asset_id?: number;
   thumb?: string;
-  asset_ref?: string;
   attachments?: MetadataPageAttachment[];
   release_at?: string;
 };
@@ -25,6 +25,7 @@ export type ReaderPageSourceItem = {
 export type ReaderPageItem = {
   id: string;
   archiveId: string;
+  path: string;
   type: ReaderContentItemType;
   title?: string;
   groupKey?: string;

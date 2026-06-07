@@ -87,9 +87,9 @@ export interface PageSourceInfo {
   metadata?: {
     title?: string;
     description?: string;
+    path?: string;
     thumb_asset_id?: number;
     thumb?: string;
-    asset_ref?: string;
     attachments?: MetadataPageAttachment[];
     release_at?: string;
   };
@@ -98,6 +98,7 @@ export interface PageSourceInfo {
 // 页面信息接口（支持图片、视频和HTML）
 export interface PageInfo {
   id: string;
+  path: string;
   type: 'image' | 'video' | 'audio' | 'html';
   title?: string;  // 章节标题（EPUB类型会有值）
   groupKey?: string;
@@ -108,9 +109,9 @@ export interface PageInfo {
   metadata?: {
     title?: string;
     description?: string;
+    path?: string;
     thumb_asset_id?: number;
     thumb?: string;
-    asset_ref?: string;
     attachments?: MetadataPageAttachment[];
     release_at?: string;
   };
@@ -399,6 +400,7 @@ export class ArchiveService {
             : typeof rawPage?.group_key === 'string' && rawPage.group_key.trim()
             ? rawPage.group_key.trim()
             : defaultSource?.id || path,
+        path,
         type:
           rawPage?.type === 'video' || rawPage?.type === 'audio' || rawPage?.type === 'html'
             ? rawPage.type
@@ -472,21 +474,21 @@ export class ArchiveService {
   static async resolvePageAsset(
     id: string,
     pageIndex: number,
-    assetRef: string,
+    path: string,
     parentRemoteId?: string,
     _signal?: AbortSignal
   ): Promise<{ success: boolean; error?: string; data?: { asset_id: number; url?: string } }> {
     // Source ID: return the unified page URL (backend handles redirect to /api/assets/{id})
     if (this.isSourceId(id)) {
       const encodedId = encodeURIComponent(id);
-      const encodedRef = encodeURIComponent(assetRef);
+      const encodedPath = encodeURIComponent(path);
       const parentParam = parentRemoteId ? `&parent_remote_id=${encodeURIComponent(parentRemoteId)}` : '';
-      const url = `/api/archives/${encodedId}/page?asset_ref=${encodedRef}&page=${pageIndex}${parentParam}`;
+      const url = `/api/archives/${encodedId}/page?path=${encodedPath}&page=${pageIndex}${parentParam}`;
       return { success: true, data: { asset_id: 0, url } };
     }
 
     // Local archive: build page URL (assets are already available locally)
-    const url = this.getPageUrl(id, assetRef);
+    const url = this.getPageUrl(id, path);
     if (!url) {
       return { success: false, error: 'No page URL available' };
     }

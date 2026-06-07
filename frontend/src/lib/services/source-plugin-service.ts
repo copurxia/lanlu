@@ -144,7 +144,7 @@ export class SourcePluginService {
     remoteId: string,
     archiveId?: string,
     parentRemoteId?: string
-  ): Promise<{ success: boolean; error?: string; data?: { pages: Array<{ path: string; url?: string; asset_id?: number; asset_ref?: string; type?: string; width?: number; height?: number; metadata?: Record<string, unknown> }> } }> {
+  ): Promise<{ success: boolean; error?: string; data?: { pages: Array<{ path: string; url?: string; asset_id?: number; type?: string; width?: number; height?: number; metadata?: Record<string, unknown> }> } }> {
     try {
       const params: Record<string, unknown> = { remote_id: remoteId };
       if (archiveId) {
@@ -172,14 +172,14 @@ export class SourcePluginService {
 
   /**
    * 按需获取单页资产。Reader 翻页时调用，避免一次性下载全部页面。
-   * 输入: remote_id, parent_remote_id (可选), page, asset_ref
+   * 输入: remote_id, parent_remote_id (可选), page, path
    * 输出: { success, data: { asset_id } }
    */
   static async pageAsset(
     namespace: string,
     remoteId: string,
     page: number,
-    assetRef: string,
+    path: string,
     parentRemoteId?: string,
     signal?: AbortSignal
   ): Promise<{ success: boolean; error?: string; data?: { asset_id: number } }> {
@@ -188,7 +188,7 @@ export class SourcePluginService {
         const params: Record<string, unknown> = {
           remote_id: remoteId,
           page,
-          asset_ref: assetRef,
+          path,
         };
         if (parentRemoteId) {
           params.parent_remote_id = parentRemoteId;

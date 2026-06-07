@@ -15,6 +15,19 @@ private let DIRECT_ACTION_WAIT_INTERVAL_MS: Int64 = 50
 private let directActionActiveCount = AtomicInt64(0)
 
 public class SourceDirectActionService {
+    /**
+     * Source 插件支持的 browse action 列表。
+     * 每个 action 会直接启动一个 WASM 实例执行（受并发限流控制）。
+     *
+     * Action 说明：
+     * - source_home: 获取首页内容
+     * - source_search: 搜索
+     * - source_filters: 获取过滤器列表
+     * - source_detail: 获取条目详情
+     * - source_reader: 获取页面列表，输出 data.pages[].path 作为页面资源 key
+     * - source_cover_asset: 获取封面资源
+     * - source_page_asset: 获取页面资源，输入 path（必填，来自 source_reader 输出的 pages[].path）、page（可选 hint）
+     */
     private static let BROWSE_ACTIONS = [
         "source_home",
         "source_search",

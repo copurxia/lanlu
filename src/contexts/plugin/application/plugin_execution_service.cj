@@ -584,10 +584,9 @@ public class PluginExecutionService {
                                             warnings.add("page[${pageIndex.toString()}].url is deprecated, should use asset_id")
                                         }
                                     } else if (pageKey == "asset_id") {
-                                        let assetIdVal = r.readValue<String>()
-                                        let assetId = parsePositiveAssetId(assetIdVal)
+                                        let assetId = r.readValue<Int64>()
                                         if (assetId <= 0) {
-                                            warnings.add("page[${pageIndex.toString()}].asset_id is invalid: ${assetIdVal}")
+                                            warnings.add("page[${pageIndex.toString()}].asset_id is invalid: ${assetId.toString()}")
                                         }
                                     } else {
                                         r.skip()
@@ -661,10 +660,9 @@ public class PluginExecutionService {
                     while (r.peek() != EndObject) {
                         let dataKey = r.readName()
                         if (dataKey == "asset_id") {
-                            let assetIdVal = r.readValue<String>()
-                            let assetId = parsePositiveAssetId(assetIdVal)
+                            let assetId = r.readValue<Int64>()
                             if (assetId <= 0) {
-                                return (false, "asset_id is invalid: ${assetIdVal}")
+                                return (false, "asset_id is invalid: ${assetId.toString()}")
                             }
                             assetIdFound = true
                         } else {

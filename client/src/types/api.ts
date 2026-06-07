@@ -102,6 +102,7 @@ export type ArchiveMetadata = {
   release_at?: string;
   updated_at?: string;
   created_at?: string;
+  capabilities?: string[];
 };
 
 export type PageInfo = {
