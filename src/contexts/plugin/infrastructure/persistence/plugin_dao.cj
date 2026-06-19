@@ -21,6 +21,7 @@ public class PluginData {
     public var plugin_type: String = ""
     public var tags: String = ""
     public var url_regex: String = ""
+    public var source_id_regex: String = ""
     public var pre_hooks: String = "[]"
     public var after_hooks: String = "[]"
     public var permissions: String = ""
@@ -60,7 +61,7 @@ public class PluginDao {
 
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins ORDER BY id")
+                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins ORDER BY id")
                 try {
                     let rs = stmt.query()
 
@@ -77,21 +78,22 @@ public class PluginDao {
                             plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
                             plugin.tags = rs.getOrNull<String>(8) ?? ""
                             plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                            plugin.pre_hooks = rs.getOrNull<String>(10) ?? "[]"
-                            plugin.after_hooks = rs.getOrNull<String>(11) ?? "[]"
-                            let permissionsOpt = rs.getOrNull<String>(12)
+                            plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
+                            plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
+                            plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
+                            let permissionsOpt = rs.getOrNull<String>(13)
                             plugin.permissions = match (permissionsOpt) {
                                 case Some(value) => value
                                 case None => ""
                             }
-                            plugin.icon = rs.getOrNull<String>(13) ?? ""
-                            plugin.enabled = rs.getOrNull<Bool>(14) ?? false
-                            plugin.installed = rs.getOrNull<Bool>(15) ?? false
-                            plugin.has_schema = rs.getOrNull<Bool>(16) ?? false
-                            plugin.parameters = rs.getOrNull<String>(17) ?? "[]"
-                            plugin.update_url = rs.getOrNull<String>(18) ?? ""
-                            plugin.created_at = rs.getOrNull<String>(19) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(20) ?? ""
+                            plugin.icon = rs.getOrNull<String>(14) ?? ""
+                            plugin.enabled = rs.getOrNull<Bool>(15) ?? false
+                            plugin.installed = rs.getOrNull<Bool>(16) ?? false
+                            plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
+                            plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
+                            plugin.update_url = rs.getOrNull<String>(19) ?? ""
+                            plugin.created_at = rs.getOrNull<String>(20) ?? ""
+                            plugin.updated_at = rs.getOrNull<String>(21) ?? ""
                             plugins.add(plugin)
                         }
                     } finally {
@@ -134,7 +136,7 @@ public class PluginDao {
                 
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) ORDER BY id")
+                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) ORDER BY id")
                 try {
                     stmt.set(0, pluginType)
                     let rs = stmt.query()
@@ -152,21 +154,22 @@ public class PluginDao {
                             plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
                             plugin.tags = rs.getOrNull<String>(8) ?? ""
                             plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                            plugin.pre_hooks = rs.getOrNull<String>(10) ?? "[]"
-                            plugin.after_hooks = rs.getOrNull<String>(11) ?? "[]"
-                            let permissionsOpt = rs.getOrNull<String>(12)
+                            plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
+                            plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
+                            plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
+                            let permissionsOpt = rs.getOrNull<String>(13)
                             plugin.permissions = match (permissionsOpt) {
                                 case Some(value) => value
                                 case None => ""
                             }
-                            plugin.icon = rs.getOrNull<String>(13) ?? ""
-                            plugin.enabled = rs.getOrNull<Bool>(14) ?? false
-                            plugin.installed = rs.getOrNull<Bool>(15) ?? false
-                            plugin.has_schema = rs.getOrNull<Bool>(16) ?? false
-                            plugin.parameters = rs.getOrNull<String>(17) ?? "[]"
-                            plugin.update_url = rs.getOrNull<String>(18) ?? ""
-                            plugin.created_at = rs.getOrNull<String>(19) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(20) ?? ""
+                            plugin.icon = rs.getOrNull<String>(14) ?? ""
+                            plugin.enabled = rs.getOrNull<Bool>(15) ?? false
+                            plugin.installed = rs.getOrNull<Bool>(16) ?? false
+                            plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
+                            plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
+                            plugin.update_url = rs.getOrNull<String>(19) ?? ""
+                            plugin.created_at = rs.getOrNull<String>(20) ?? ""
+                            plugin.updated_at = rs.getOrNull<String>(21) ?? ""
                             plugins.add(plugin)
                         }
                     } finally {
@@ -209,7 +212,7 @@ public class PluginDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE namespace = ?")
+                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE namespace = ?")
                     try {
                         stmt.set(0, namespace)
                         let rs = stmt.query()
@@ -226,21 +229,22 @@ public class PluginDao {
                                 plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
                                 plugin.tags = rs.getOrNull<String>(8) ?? ""
                                 plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                                plugin.pre_hooks = rs.getOrNull<String>(10) ?? "[]"
-                                plugin.after_hooks = rs.getOrNull<String>(11) ?? "[]"
-                                let permissionsOpt = rs.getOrNull<String>(12)
+                                plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
+                                plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
+                                plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
+                                let permissionsOpt = rs.getOrNull<String>(13)
                                 plugin.permissions = match (permissionsOpt) {
                                     case Some(value) => value
                                     case None => ""
                                 }
-                                plugin.icon = rs.getOrNull<String>(13) ?? ""
-                                plugin.enabled = rs.getOrNull<Bool>(14) ?? false
-                                plugin.installed = rs.getOrNull<Bool>(15) ?? false
-                                plugin.has_schema = rs.getOrNull<Bool>(16) ?? false
-                                plugin.parameters = rs.getOrNull<String>(17) ?? "[]"
-                                plugin.update_url = rs.getOrNull<String>(18) ?? ""
-                                plugin.created_at = rs.getOrNull<String>(19) ?? ""
-                                plugin.updated_at = rs.getOrNull<String>(20) ?? ""
+                                plugin.icon = rs.getOrNull<String>(14) ?? ""
+                                plugin.enabled = rs.getOrNull<Bool>(15) ?? false
+                                plugin.installed = rs.getOrNull<Bool>(16) ?? false
+                                plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
+                                plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
+                                plugin.update_url = rs.getOrNull<String>(19) ?? ""
+                                plugin.created_at = rs.getOrNull<String>(20) ?? ""
+                                plugin.updated_at = rs.getOrNull<String>(21) ?? ""
 
                                 return plugin
                             }
@@ -270,7 +274,7 @@ public class PluginDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     try {
                         stmt.set(0, plugin.name)
                         stmt.set(1, plugin.namespace)
@@ -281,15 +285,16 @@ public class PluginDao {
                         stmt.set(6, plugin.plugin_type)
                         stmt.set(7, plugin.tags)
                         stmt.set(8, plugin.url_regex)
-                        stmt.set(9, plugin.pre_hooks)
-                        stmt.set(10, plugin.after_hooks)
-                        stmt.set(11, plugin.permissions)
-                        stmt.set(12, plugin.icon)
-                        stmt.set(13, plugin.enabled)
-                        stmt.set(14, plugin.installed)
-                        stmt.set(15, plugin.has_schema)
-                        stmt.set(16, plugin.parameters)
-                        stmt.set(17, plugin.update_url)
+                        stmt.set(9, plugin.source_id_regex)
+                        stmt.set(10, plugin.pre_hooks)
+                        stmt.set(11, plugin.after_hooks)
+                        stmt.set(12, plugin.permissions)
+                        stmt.set(13, plugin.icon)
+                        stmt.set(14, plugin.enabled)
+                        stmt.set(15, plugin.installed)
+                        stmt.set(16, plugin.has_schema)
+                        stmt.set(17, plugin.parameters)
+                        stmt.set(18, plugin.update_url)
 
                         stmt.update()
                         return true
@@ -318,7 +323,7 @@ public class PluginDao {
                 
                 try {
                 let stmt = conn.prepareStatement(
-                    "UPDATE plugins SET name = ?, version = ?, description = ?, author = ?, entry = ?, plugin_type = ?, tags = ?, url_regex = ?, pre_hooks = ?, after_hooks = ?, permissions = ?, icon = ?, enabled = ?, installed = ?, has_schema = ?, parameters = ?, update_url = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
+                    "UPDATE plugins SET name = ?, version = ?, description = ?, author = ?, entry = ?, plugin_type = ?, tags = ?, url_regex = ?, source_id_regex = ?, pre_hooks = ?, after_hooks = ?, permissions = ?, icon = ?, enabled = ?, installed = ?, has_schema = ?, parameters = ?, update_url = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
 
                 stmt.set(0, plugin.name)
                 stmt.set(1, plugin.version)
@@ -328,16 +333,17 @@ public class PluginDao {
                 stmt.set(5, plugin.plugin_type)
                 stmt.set(6, plugin.tags)
                 stmt.set(7, plugin.url_regex)
-                stmt.set(8, plugin.pre_hooks)
-                stmt.set(9, plugin.after_hooks)
-                stmt.set(10, plugin.permissions)
-                stmt.set(11, plugin.icon)
-                stmt.set(12, plugin.enabled)
-                stmt.set(13, plugin.installed)
-                stmt.set(14, plugin.has_schema)
-                stmt.set(15, plugin.parameters)
-                stmt.set(16, plugin.update_url)
-                stmt.set(17, plugin.namespace)
+                stmt.set(8, plugin.source_id_regex)
+                stmt.set(9, plugin.pre_hooks)
+                stmt.set(10, plugin.after_hooks)
+                stmt.set(11, plugin.permissions)
+                stmt.set(12, plugin.icon)
+                stmt.set(13, plugin.enabled)
+                stmt.set(14, plugin.installed)
+                stmt.set(15, plugin.has_schema)
+                stmt.set(16, plugin.parameters)
+                stmt.set(17, plugin.update_url)
+                stmt.set(18, plugin.namespace)
 
                 stmt.update()
                 conn.close()
@@ -459,7 +465,7 @@ public class PluginDao {
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) AND enabled = true ORDER BY id")
+                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) AND enabled = true ORDER BY id")
                     stmt.set(0, pluginType)
                     let rs = stmt.query()
 
@@ -475,21 +481,22 @@ public class PluginDao {
                         plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
                         plugin.tags = rs.getOrNull<String>(8) ?? ""
                         plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                        plugin.pre_hooks = rs.getOrNull<String>(10) ?? "[]"
-                        plugin.after_hooks = rs.getOrNull<String>(11) ?? "[]"
-                        let permissionsOpt = rs.getOrNull<String>(12)
+                        plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
+                        plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
+                        plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
+                        let permissionsOpt = rs.getOrNull<String>(13)
                         plugin.permissions = match (permissionsOpt) {
                                 case Some(value) => value
                                 case None => ""
                             }
-                        plugin.icon = rs.getOrNull<String>(13) ?? ""
-                        plugin.enabled = rs.getOrNull<Bool>(14) ?? false
-                        plugin.installed = rs.getOrNull<Bool>(15) ?? false
-                        plugin.has_schema = rs.getOrNull<Bool>(16) ?? false
-                        plugin.parameters = rs.getOrNull<String>(17) ?? "[]"
-                        plugin.update_url = rs.getOrNull<String>(18) ?? ""
-                        plugin.created_at = rs.getOrNull<String>(19) ?? ""
-                        plugin.updated_at = rs.getOrNull<String>(20) ?? ""
+                        plugin.icon = rs.getOrNull<String>(14) ?? ""
+                        plugin.enabled = rs.getOrNull<Bool>(15) ?? false
+                        plugin.installed = rs.getOrNull<Bool>(16) ?? false
+                        plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
+                        plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
+                        plugin.update_url = rs.getOrNull<String>(19) ?? ""
+                        plugin.created_at = rs.getOrNull<String>(20) ?? ""
+                        plugin.updated_at = rs.getOrNull<String>(21) ?? ""
                         plugins.add(plugin)
                     }
 

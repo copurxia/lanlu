@@ -6,10 +6,8 @@ import std.sort.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.recommendation.domain.*
 import lanlu.contexts.recommendation.infrastructure.persistence.*
-import lanlu.contexts.plugin.application.{SourceRequestResolver, SourceDirectActionService}
+import lanlu.contexts.plugin.application.SourceArchiveReadService
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
-import std.io.ByteBuffer
-import stdx.encoding.json.stream.*
 
 public class RecommendationResultItem {
     public var itemType: String = "archive"
@@ -180,56 +178,11 @@ public class RecommendationService {
     }
 
     private static func getSourceTags(archiveId: String): String {
-        match (SourceRequestResolver.parseFromCompositeId(archiveId)) {
-            case Some(request) =>
-                let json = SourceDirectActionService.execute(request.namespace, "source_detail", request)
-                // Parse JSON to extract tags array and join them
-                try {
-                    let buf = ByteBuffer()
-                    unsafe { buf.write(json.rawData()) }
-                    let r = JsonReader(buf)
-                    r.startObject()
-                    while (r.peek() != EndObject) {
-                        let name = r.readName()
-                        if (name == "data") {
-                            if (r.peek() == BeginObject) {
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let dataName = r.readName()
-                                    if (dataName == "tags") {
-                                        if (r.peek() == BeginArray) {
-                                            let tagBuilder = ArrayList<String>()
-                                            r.startArray()
-                                            while (r.peek() != EndArray) {
-                                                tagBuilder.add(r.readValue<String>())
-                                            }
-                                            r.endArray()
-                                            var result = ""
-                                            for (i in 0..tagBuilder.size) {
-                                                if (i > 0) { result += "," }
-                                                result += tagBuilder[i]
-                                            }
-                                            return result
-                                        } else {
-                                            r.skip()
-                                        }
-                                    } else {
-                                        r.skip()
-                                    }
-                                }
-                                r.endObject()
-                            } else {
-                                r.skip()
-                            }
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-                } catch (_: Exception) {}
-                return ""
-            case None => return ""
+        let detail = SourceArchiveReadService.fetchDetail(archiveId)
+        if (detail.tags.size > 0) {
+            return String.join(detail.tags, delimiter: ",")
         }
+        return ""
     }
 
     private static func sortScoredItems(items: ArrayList<RecommendationScoredItem>): Unit {

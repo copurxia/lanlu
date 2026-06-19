@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { logger } from '@/lib/utils/logger';
+import { extractApiError } from '@/lib/utils/api-utils';
 import type { ArchiveMetadata } from '@/types/archive';
 
 type UseArchiveMetadataParams = {
@@ -27,6 +28,8 @@ export function useArchiveMetadata({ id, language, t }: UseArchiveMetadataParams
       return data;
     } catch (err) {
       logger.apiError('fetch metadata', err);
+      setError(extractApiError(err, t('archive.fetchError')));
+      setMetadata(null);
       return null;
     }
   }, [id, language, t]);

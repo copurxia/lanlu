@@ -250,6 +250,7 @@ public class ScanPluginsTaskRunner {
             pluginData.parameters = pluginMetadata.parameters
             pluginData.has_schema = pluginMetadata.has_schema
             pluginData.url_regex = pluginMetadata.url_regex
+            pluginData.source_id_regex = pluginMetadata.source_id_regex
             pluginData.pre_hooks = pluginMetadata.pre_hooks
             pluginData.after_hooks = pluginMetadata.after_hooks
             pluginData.icon = pluginMetadata.icon
@@ -375,6 +376,7 @@ public class ScanPluginsTaskRunner {
                             case None => ()
                         }
                     case "url_regex" => metadata.url_regex = r.readValue<String>()
+                    case "source_id_regex" => metadata.source_id_regex = r.readValue<String>()
                     case "pre" => metadata.pre_hooks = readStringArrayJson("pre")
                     case "after" => metadata.after_hooks = readStringArrayJson("after")
                     case "login_from" =>
@@ -563,6 +565,7 @@ public class ScanPluginsTaskRunner {
         pluginData.tags = newMetadata.tags
         pluginData.permissions = newMetadata.permissions
         pluginData.url_regex = newMetadata.url_regex
+        pluginData.source_id_regex = newMetadata.source_id_regex
         pluginData.pre_hooks = newMetadata.pre_hooks
         pluginData.after_hooks = newMetadata.after_hooks
         pluginData.icon = newMetadata.icon

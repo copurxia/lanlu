@@ -95,18 +95,16 @@ public class TankoubonController {
 
                 w.writeName("children")
                 w.startArray()
+                var archiveChildCount = 0i64
                 for (child in detail.children) {
+                    if (child.entityType != "archive") { continue }
                     if (child.remoteId.trimAscii().size == 0) {
                         continue
                     }
-                    let childNamespace = if (child.sourceNamespace.trimAscii().size > 0) {
-                        child.sourceNamespace
-                    } else {
-                        request.namespace
-                    }
+                    archiveChildCount += 1
                     w.startObject()
                     w.writeName("entity_type").writeValue("archive")
-                    w.writeName("entity_id").writeValue("source:${childNamespace}:${child.remoteId}")
+                    w.writeName("entity_id").writeValue(child.remoteId)
                     w.writeName("title").writeValue(child.title)
                     w.writeName("description").writeValue(child.description)
                     w.writeName("tags")
@@ -119,7 +117,7 @@ public class TankoubonController {
                 }
                 w.endArray()
 
-                w.writeName("archive_count").writeValue(detail.children.size)
+                w.writeName("archive_count").writeValue(archiveChildCount)
                 w.writeName("pagecount").writeValue(detail.pageCount)
                 w.writeName("progress").writeValue(0)
                 w.writeName("lastreadtime").writeValue("")
@@ -175,224 +173,7 @@ public class TankoubonController {
         ctx.json(metadataJson)
     }
 
-    /**
-     * Enrich children in a tankoubon source_detail response by calling source_detail
-     * for each source-based child item.
-     */
-    private static func enrichSourceTankoubonChildren(dataStr: String, parentNamespace: String): String {
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
 
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(dataStr.rawData()) }
-            let r = JsonReader(buf)
-
-            if (r.peek() != Some(BeginObject)) {
-                return dataStr
-            }
-
-            r.startObject()
-            w.startObject()
-
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == "children") {
-                    w.writeName("children")
-                    processAndEnrichChildren(r, w, parentNamespace)
-                } else {
-                    w.writeName(name)
-                    let rawBytes = r.readValueBytes()
-                    w.jsonValue(String.fromUtf8(rawBytes))
-                }
-            }
-
-            r.endObject()
-            w.endObject()
-            w.flush()
-            return String.fromUtf8(readToEnd(out))
-        } catch (_: Exception) {
-            return dataStr
-        }
-    }
-
-    /**
-     * Read the children array and enrich each source-based child.
-     */
-    private static func processAndEnrichChildren(r: JsonReader, w: JsonWriter, parentNamespace: String): Unit {
-        if (r.peek() != Some(BeginArray)) {
-            let rawBytes = r.readValueBytes()
-            w.jsonValue(String.fromUtf8(rawBytes))
-            return
-        }
-
-        r.startArray()
-        w.startArray()
-
-        while (r.peek() != EndArray) {
-            let childBytes = r.readValueBytes()
-            let childStr = String.fromUtf8(childBytes)
-            let enrichedStr = enrichSingleChild(childStr, parentNamespace)
-            w.jsonValue(enrichedStr)
-        }
-
-        r.endArray()
-        w.endArray()
-    }
-
-    /**
-     * Enrich a single child item by calling source_detail if it has source_namespace and remote_id.
-     */
-    private static func enrichSingleChild(childStr: String, parentNamespace: String): String {
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(childStr.rawData()) }
-            let r = JsonReader(buf)
-
-            if (r.peek() != Some(BeginObject)) {
-                return childStr
-            }
-
-            var sourceNamespace = ""
-            var remoteId = ""
-
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == "source_namespace") {
-                    sourceNamespace = r.readValue<String>()
-                } else if (name == "remote_id") {
-                    remoteId = r.readValue<String>()
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-
-            // Use parent namespace as fallback if child doesn't specify its own
-            if (sourceNamespace.size == 0) {
-                sourceNamespace = parentNamespace
-            }
-
-            if (sourceNamespace.size == 0 || remoteId.size == 0) {
-                return childStr
-            }
-
-            let compositeId = "source:${sourceNamespace}:${remoteId}"
-            match (SourceRequestResolver.parseFromCompositeId(compositeId)) {
-                case Some(request) =>
-                    let detailJson = SourceDirectActionService.execute(request.namespace, "source_detail", request)
-                    return unwrapAndMergeChildData(childStr, detailJson)
-                case None =>
-                    return childStr
-            }
-        } catch (_: Exception) {
-            return childStr
-        }
-    }
-
-    /**
-     * Unwrap { success, data: {...} } from source_detail response and merge into child.
-     */
-    private static func unwrapAndMergeChildData(originalStr: String, detailJson: String): String {
-        try {
-            var detailBuf = ByteBuffer()
-            unsafe { detailBuf.write(detailJson.rawData()) }
-            let detailR = JsonReader(detailBuf)
-
-            var detailDataStr = ""
-
-            detailR.startObject()
-            while (detailR.peek() != EndObject) {
-                let name = detailR.readName()
-                if (name == "success") {
-                    let ok = detailR.readValue<Bool>()
-                    if (!ok) {
-                        return originalStr
-                    }
-                } else if (name == "data") {
-                    detailDataStr = String.fromUtf8(detailR.readValueBytes())
-                } else {
-                    detailR.skip()
-                }
-            }
-            detailR.endObject()
-
-            if (detailDataStr.size == 0) {
-                return originalStr
-            }
-
-            return mergeChildWithEnrichment(originalStr, detailDataStr)
-        } catch (_: Exception) {
-            return originalStr
-        }
-    }
-
-    /**
-     * Merge enrichment data into original child JSON.
-     * Enrichment fields override original fields, except "children" from enrichment is skipped.
-     */
-    private static func mergeChildWithEnrichment(originalStr: String, enrichmentStr: String): String {
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-
-        try {
-            var origBuf = ByteBuffer()
-            unsafe { origBuf.write(originalStr.rawData()) }
-            let origR = JsonReader(origBuf)
-
-            var enrichBuf = ByteBuffer()
-            unsafe { enrichBuf.write(enrichmentStr.rawData()) }
-            let enrichR = JsonReader(enrichBuf)
-
-            if (origR.peek() != Some(BeginObject) || enrichR.peek() != Some(BeginObject)) {
-                return originalStr
-            }
-
-            var origFields = HashMap<String, String>()
-            origR.startObject()
-            while (origR.peek() != EndObject) {
-                let name = origR.readName()
-                let bytes = origR.readValueBytes()
-                origFields[name] = String.fromUtf8(bytes)
-            }
-            origR.endObject()
-
-            var enrichFields = HashMap<String, String>()
-            enrichR.startObject()
-            while (enrichR.peek() != EndObject) {
-                let name = enrichR.readName()
-                let bytes = enrichR.readValueBytes()
-                enrichFields[name] = String.fromUtf8(bytes)
-            }
-            enrichR.endObject()
-
-            w.startObject()
-            // Original fields: if enrichment has same field, use enrichment value (except "children")
-            for ((name, raw) in origFields) {
-                if (enrichFields.contains(name)) {
-                    if (name == "children") {
-                        w.writeName(name).jsonValue(raw)
-                    } else {
-                        w.writeName(name).jsonValue(enrichFields[name])
-                    }
-                } else {
-                    w.writeName(name).jsonValue(raw)
-                }
-            }
-            // Enrichment-only fields: add them (except "children")
-            for ((name, raw) in enrichFields) {
-                if (!origFields.contains(name) && name != "children") {
-                    w.writeName(name).jsonValue(raw)
-                }
-            }
-            w.endObject()
-            w.flush()
-            return String.fromUtf8(readToEnd(out))
-        } catch (_: Exception) {
-            return originalStr
-        }
-    }
 
     public static func updateMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""

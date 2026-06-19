@@ -86,6 +86,7 @@ main(): Int64 {
     MigrationRegistry.register(V023_PluginHooksReplaceLoginFrom())
     MigrationRegistry.register(V024_SearchAndRecommendationHotPathIndexes())
     MigrationRegistry.register(V025_UserTargetState())
+    MigrationRegistry.register(V026_AddSourceIdRegexToPlugins())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()

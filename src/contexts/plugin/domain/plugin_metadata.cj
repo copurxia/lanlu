@@ -63,6 +63,7 @@ public class PluginMetadata {
     public var parameters: String = "[]"
     public var update_url: String = ""
     public var url_regex: String = ""
+    public var source_id_regex: String = ""
     public var pre_hooks: String = "[]"
     public var after_hooks: String = "[]"
     public var icon: String = ""

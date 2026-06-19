@@ -547,28 +547,48 @@ public class ArchiveController {
                 w.writeName("release_at").writeValue("")
                 w.writeName("updated_at").writeValue("")
                 w.writeName("created_at").writeValue("")
-                // capabilities
+                // capabilities - 由 SourcePluginMatcher 动态计算
+                let caps = SourcePluginMatcher.getCapabilities(id)
+                var hasPageChildren = false
+                for (child in detail.children) {
+                    if (child.entityType == "page") { hasPageChildren = true; break }
+                }
                 w.writeName("capabilities")
                 w.startArray()
-                w.writeValue("read")
+                for (cap in caps) {
+                    if (cap == "read" && !hasPageChildren) { continue }
+                    w.writeValue(cap)
+                }
                 w.writeValue("progress")
                 w.writeValue("favorite")
                 w.writeValue("isnew")
                 w.endArray()
-                // children
+                // children - 由 Metadata 插件提供，支持 archive 和 page 两种 entity_type
                 w.writeName("children")
                 w.startArray()
                 for (child in detail.children) {
-                    let childNamespace = if (child.sourceNamespace.trimAscii().size > 0) { child.sourceNamespace } else { request.namespace }
+                    let isPage = child.entityType == "page"
                     w.startObject()
-                    w.writeName("entity_type").writeValue("archive")
-                    w.writeName("entity_id").writeValue("source:${childNamespace}:${child.remoteId}")
-                    w.writeName("title").writeValue(child.title)
-                    w.writeName("description").writeValue(child.description)
-                    w.writeName("tags")
-                    w.startArray()
-                    for (ct in child.tags) { w.writeValue(ct) }
-                    w.endArray()
+                    w.writeName("entity_type").writeValue(child.entityType)
+                    if (isPage) {
+                        // page children 使用 path 定位资源
+                        w.writeName("entity_id").writeValue(child.remoteId)
+                        w.writeName("title").writeValue(child.title)
+                        w.writeName("path").writeValue(child.path)
+                        w.writeName("media_type").writeValue(child.mediaType)
+                        if (child.sortOrder > 0) {
+                            w.writeName("sort_order").writeValue(child.sortOrder)
+                        }
+                    } else {
+                        // archive children 使用 child.remoteId（已包含完整 source:ns:id）
+                        w.writeName("entity_id").writeValue(child.remoteId)
+                        w.writeName("title").writeValue(child.title)
+                        w.writeName("description").writeValue(child.description)
+                        w.writeName("tags")
+                        w.startArray()
+                        for (ct in child.tags) { w.writeValue(ct) }
+                        w.endArray()
+                    }
                     w.endObject()
                 }
                 w.endArray()
@@ -1521,16 +1541,22 @@ public class ArchiveController {
             case Some(request) =>
                 let path = (ctx.query("path") ?? "").trimAscii()
                 if (path.size > 0) {
-                    let pageHint = (ctx.query("page") ?? "").trimAscii()
-                    let assetId = SourceArchiveReadService.resolvePageAsset(
-                        request.namespace, request.remoteId, path, page: pageHint
+                    let result = SourceArchiveReadService.resolvePageAsset(
+                        request.namespace, request.remoteId, path
                     )
-                    if (assetId > 0) {
+                    if (result.assetId > 0) {
                         ctx.status(302)
-                        ctx.setHeader("Location", "/api/assets/${assetId.toString()}")
+                        ctx.setHeader("Location", "/api/assets/${result.assetId.toString()}")
                         ctx.sendString("")
                     } else {
-                        ResponseView.errorJson(ctx, "Failed to resolve source page asset")
+                        let errorDetail = if (result.errorMessage.size > 0) {
+                            result.errorMessage
+                        } else {
+                            "Failed to resolve source page asset"
+                        }
+                        // 504: plugin execution/dependency failure
+                        ctx.status(HttpStatusCode.STATUS_GATEWAY_TIMEOUT)
+                        ResponseView.errorJson(ctx, errorDetail, 504)
                     }
                 } else {
                     ResponseView.errorJson(ctx, "Missing path parameter for source archive")

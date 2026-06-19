@@ -80,7 +80,7 @@ public class PluginExecutionService {
         return result
     }
 
-    private static func parseHookNamespaces(rawJson: String): Option<Array<String>> {
+    public static func parseHookNamespacesPublic(rawJson: String): Option<Array<String>> {
         let trimmed = rawJson.trimAscii()
         if (trimmed.size == 0 || trimmed == "[]") {
             return Some(Array<String>())
@@ -113,7 +113,7 @@ public class PluginExecutionService {
         }
     }
 
-    private static func resolveHookPlugin(namespace: String): Option<PluginTaskData> {
+    public static func resolveHookPluginPublic(namespace: String): Option<PluginTaskData> {
         let hookNamespace = namespace.trimAscii()
         if (hookNamespace.size == 0) {
             return None
@@ -129,7 +129,7 @@ public class PluginExecutionService {
         return Some(plugin)
     }
 
-    private static func executeDirectHook(
+    public static func executeDirectHook(
         plugin: PluginTaskData,
         groupId: String,
         targetType: String,
@@ -790,14 +790,14 @@ public class PluginExecutionService {
         parentTaskId: Int64,
         groupId: String
     ): WasmExecutionResult {
-        let hooks = match (parseHookNamespaces(plugin.pre_hooks)) {
+        let hooks = match (parseHookNamespacesPublic(plugin.pre_hooks)) {
             case Some(value) => value
             case None => return WasmExecutionResult(false, "", "Invalid pre hooks for plugin ${plugin.namespace}")
         }
 
         // 执行 pre-hooks
         for (hookNs in hooks) {
-            let hookPlugin = match (resolveHookPlugin(hookNs)) {
+            let hookPlugin = match (resolveHookPluginPublic(hookNs)) {
                 case Some(value) => value
                 case None => return WasmExecutionResult(false, "", "Pre-hook plugin not found or invalid: ${hookNs}")
             }

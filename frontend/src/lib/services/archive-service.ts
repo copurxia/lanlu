@@ -245,7 +245,7 @@ export class ArchiveService {
       if (options?.includePages) {
         params.include_pages = '1';
       }
-      const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
+      const response = await apiClient.get(`/api/archives/${encodeURIComponent(id)}/metadata`, { params });
 
       const normalized = normalizeArchiveMetadata(response.data);
       this.metadataCache.set(cacheKey, {
@@ -268,7 +268,8 @@ export class ArchiveService {
   ): Promise<void> {
     const params = buildQueryParams({ lang: lang || undefined });
     const query = params.toString();
-    const url = query ? `/api/archives/${id}/metadata?${query}` : `/api/archives/${id}/metadata`;
+    const encodedId = encodeURIComponent(id);
+    const url = query ? `/api/archives/${encodedId}/metadata?${query}` : `/api/archives/${encodedId}/metadata`;
     await apiClient.put(url, metadata);
     this.invalidateMetadataCache(id);
   }
@@ -473,21 +474,18 @@ export class ArchiveService {
    */
   static async resolvePageAsset(
     id: string,
-    pageIndex: number,
+    _pageIndex: number,
     path: string,
-    parentRemoteId?: string,
+    _parentRemoteId?: string,
     _signal?: AbortSignal
   ): Promise<{ success: boolean; error?: string; data?: { asset_id: number; url?: string } }> {
-    // Source ID: return the unified page URL (backend handles redirect to /api/assets/{id})
+    // Source ID: return the unified page URL (backend resolves path and 302 to /api/assets/{id})
     if (this.isSourceId(id)) {
-      const encodedId = encodeURIComponent(id);
-      const encodedPath = encodeURIComponent(path);
-      const parentParam = parentRemoteId ? `&parent_remote_id=${encodeURIComponent(parentRemoteId)}` : '';
-      const url = `/api/archives/${encodedId}/page?path=${encodedPath}&page=${pageIndex}${parentParam}`;
+      const url = this.getPageUrl(id, path);
       return { success: true, data: { asset_id: 0, url } };
     }
 
-    // Local archive: build page URL (assets are already available locally)
+    // Local archive: assets are already available locally
     const url = this.getPageUrl(id, path);
     if (!url) {
       return { success: false, error: 'No page URL available' };
@@ -583,11 +581,11 @@ export class ArchiveService {
   }
 
   static getDownloadUrl(id: string): string {
-    return `/api/archives/${id}/download`;
+    return `/api/archives/${encodeURIComponent(id)}/download`;
   }
 
   static async getDownloadParts(id: string): Promise<ArchiveDownloadPart[]> {
-    const response = await apiClient.get<ArchiveDownloadPartsResponse>(`/api/archives/${id}/download/parts`);
+    const response = await apiClient.get<ArchiveDownloadPartsResponse>(`/api/archives/${encodeURIComponent(id)}/download/parts`);
     const payload = response.data;
     if (!isSuccessResponse(payload?.success)) {
       throw new Error(payload?.error || 'Failed to get download parts');

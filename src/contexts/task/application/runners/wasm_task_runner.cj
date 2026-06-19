@@ -233,7 +233,7 @@ public class WasmTaskRunner {
             case "Login" =>
                 return executeLogin(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, interactivePreviewEnabled)
             case "Download" =>
-                return executeDownload(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, extraParams, interactivePreviewEnabled)
+                return executeDownload(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, extraParams, interactivePreviewEnabled, action: action)
             case "Script" =>
                 return executeScript(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, oneshotParam, url, extraParams, interactivePreviewEnabled)
             case "Source" =>
@@ -430,10 +430,13 @@ public class WasmTaskRunner {
         extraParams: String,
         interactivePreviewEnabled: Bool,
         mainPluginNamespace!: String = "",
-        mainPluginType!: String = ""
+        mainPluginType!: String = "",
+        action!: String = "run"
     ): TaskWaitResult {
+        let effectiveAction = action.trimAscii()
         let trimmedUrl = url.trimAscii()
-        if (trimmedUrl.size == 0) {
+        // download_archive 不依赖 url，走 source targetId
+        if (effectiveAction != "download_archive" && trimmedUrl.size == 0) {
             return TaskWaitResult(false, "Missing url", "")
         }
 
@@ -455,7 +458,11 @@ public class WasmTaskRunner {
         let pluginRuntimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), plugin.namespace)
         FileUtils.ensureDirectoryExists(Path(pluginRuntimeHostDir))
         let pluginGuestDir = "/plugin"
-        let inputJson = buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams)
+        let inputJson = if (effectiveAction == "download_archive") {
+            buildDownloadArchiveInputJson(targetType.trimAscii(), targetId.trimAscii(), finalParams)
+        } else {
+            buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams)
+        }
 
         updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM下载插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
@@ -1725,6 +1732,32 @@ public class WasmTaskRunner {
         w.writeName("pluginType").writeValue(pluginType)
         w.writeName("url").writeValue(url)
         w.writeName("pluginDir").writeValue(pluginDir)
+
+        let trimmedParams = params.trimAscii()
+        if (trimmedParams.size > 0) {
+            w.writeName("params").jsonValue(trimmedParams)
+        } else {
+            w.writeName("params")
+            w.startObject()
+            w.endObject()
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildDownloadArchiveInputJson(
+        targetType: String,
+        targetId: String,
+        params: String
+    ): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("action").writeValue("download_archive")
+        w.writeName("pluginType").writeValue("Download")
+        w.writeName("targetType").writeValue(targetType)
+        w.writeName("targetId").writeValue(targetId)
 
         let trimmedParams = params.trimAscii()
         if (trimmedParams.size > 0) {

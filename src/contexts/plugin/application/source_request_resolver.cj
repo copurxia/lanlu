@@ -59,6 +59,8 @@ public class SourceRequestResolver {
         let normalizedCompositeId = compositeId
             .replace("%3A", ":")
             .replace("%3a", ":")
+            .replace("%2F", "/")
+            .replace("%2f", "/")
         if (!normalizedCompositeId.startsWith("source:")) {
             return None
         }
