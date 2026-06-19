@@ -1544,6 +1544,20 @@ public class ArchiveController {
                     let result = SourceArchiveReadService.resolvePageAsset(
                         request.namespace, request.remoteId, path
                     )
+
+                    // 新协议：直接返回二进制数据（零磁盘、零 DB）
+                    match (result.binaryData) {
+                        case Some(binaryData) =>
+                            let ct = if (result.contentType.size > 0) { result.contentType } else { "application/octet-stream" }
+                            ctx.setHeader("Content-Type", ct)
+                            ctx.setHeader("Cache-Control", "private, max-age=3600")
+                            ctx.status(HttpStatusCode.STATUS_OK)
+                            ctx.send(binaryData)
+                            return
+                        case None => ()
+                    }
+
+                    // 旧协议：302 重定向到 asset
                     if (result.assetId > 0) {
                         ctx.status(302)
                         ctx.setHeader("Location", "/api/assets/${result.assetId.toString()}")

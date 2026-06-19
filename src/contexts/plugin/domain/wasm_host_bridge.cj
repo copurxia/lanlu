@@ -32,6 +32,7 @@ public class WasmExecutionResult {
     public var success: Bool = false
     public var output: String = ""
     public var error: String = ""
+    public var binaryOutput: Option<Array<UInt8>> = None
 
     public init() {}
 
@@ -355,8 +356,11 @@ public class WasmHostBridge {
                     return WasmExecutionResult(false, "", err)
                 }
 
-                let outputJson = decodeUtf8(created.readMemory(UInt32(resultPtr), UInt32(resultLen)))
-                return WasmExecutionResult(true, outputJson, "")
+                let rawBytes = created.readMemory(UInt32(resultPtr), UInt32(resultLen))
+                let (outJson, binOpt) = parsePluginOutput(rawBytes)
+                let result = WasmExecutionResult(true, outJson, "")
+                result.binaryOutput = binOpt
+                return result
             } finally {
                 if (inputAddr > 0) {
                     try { created.executeVoid_2("lanlu_plugin_free", inputAddr, Int32(inputBytes.size)) } catch (_: Exception) {}
@@ -3231,6 +3235,50 @@ public class WasmHostBridge {
         } catch (_: Exception) {
             return defaultValue
         }
+    }
+
+    /**
+     * 解析插件输出，支持新协议（4字节LE头 + JSON + 二进制）。
+     * 旧插件（无头）fallback 到整段 UTF-8 解码。
+     *
+     * @return (jsonString, optionalBinaryBytes)
+     */
+    private static func parsePluginOutput(rawBytes: Array<UInt8>): (String, Option<Array<UInt8>>) {
+        if (rawBytes.size == 0) {
+            return ("", None)
+        }
+
+        // 尝试解析新协议：前 4 字节 = json_len (u32 LE)
+        if (rawBytes.size >= 4) {
+            let b0 = Int64(rawBytes[0])
+            let b1 = Int64(rawBytes[1])
+            let b2 = Int64(rawBytes[2])
+            let b3 = Int64(rawBytes[3])
+            let jsonLen = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+            // 合法检查：jsonLen 在 [1, rawBytes.size - 4] 范围内
+            if (jsonLen > 0 && jsonLen <= Int64(rawBytes.size) - 4) {
+                let jsonBytes = Array<UInt8>(jsonLen, repeat: 0u8)
+                for (i in 0..jsonLen) {
+                    jsonBytes[i] = rawBytes[4 + i]
+                }
+                let jsonStr = decodeUtf8(jsonBytes)
+
+                let binaryLen = rawBytes.size - 4 - jsonLen
+                var binaryOpt = Option<Array<UInt8>>.None
+                if (binaryLen > 0) {
+                    let binBytes = Array<UInt8>(binaryLen, repeat: 0u8)
+                    for (i in 0..binaryLen) {
+                        binBytes[i] = rawBytes[4 + jsonLen + i]
+                    }
+                    binaryOpt = Option<Array<UInt8>>.Some(binBytes)
+                }
+                return (jsonStr, binaryOpt)
+            }
+        }
+
+        // Fallback：旧插件直接返回 JSON 字符串（无二进制头）
+        return (decodeUtf8(rawBytes), None)
     }
 
     private static func decodeUtf8(bytes: Array<UInt8>): String {

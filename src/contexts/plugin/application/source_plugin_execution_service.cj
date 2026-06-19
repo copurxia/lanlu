@@ -28,6 +28,10 @@ import lanlu.shared.utils.*
 public class PageAssetResult {
     public var assetId: Int64 = 0
     public var errorMessage: String = ""
+    /// 直接返回的二进制数据（新协议，跳过 asset 持久化）
+    public var binaryData: Option<Array<UInt8>> = None
+    /// 二进制数据的 Content-Type（如 "image/jpeg"）
+    public var contentType: String = ""
 }
 
 public class SourcePluginExecutionService {
@@ -44,7 +48,8 @@ public class SourcePluginExecutionService {
         match (SourcePluginMatcher.findMetadataPlugin(sourceId)) {
             case Some(plugin) =>
                 let inputJson = buildResolveMetadataInputJson(sourceId)
-                return executePlugin(plugin, inputJson, logger)
+                let result = executePlugin(plugin, inputJson, logger)
+                return if (result.success) { result.output } else { "" }
             case None =>
                 logger.warn("未找到匹配 sourceId 的 Metadata 插件", ("sourceId", sourceId))
                 return ""
@@ -71,22 +76,28 @@ public class SourcePluginExecutionService {
         match (SourcePluginMatcher.findDownloadPlugin(sourceId)) {
             case Some(plugin) =>
                 let inputJson = buildResolvePageAssetInputJson(sourceId, path)
-                let output = executePlugin(plugin, inputJson, logger)
-                if (output.trimAscii().size == 0) {
+                let result = executePlugin(plugin, inputJson, logger)
+
+                // 新协议：插件返回二进制数据，直接写入 HTTP response
+                match (result.binaryOutput) {
+                    case Some(binaryData) =>
+                        zero.binaryData = result.binaryOutput
+                        zero.contentType = parseContentTypeFromJson(result.output)
+                        return zero
+                    case None => ()
+                }
+
+                // 旧协议：解析 asset_id（兼容未迁移的插件）
+                if (result.output.trimAscii().size == 0) {
                     zero.errorMessage = "plugin returned empty output for ${sourceId}"
                     return zero
                 }
-                let (outputSuccess, outputError) = checkPluginOutputSuccess(output)
-                if (!outputSuccess) {
-                    zero.errorMessage = outputError
-                    return zero
-                }
-                let assetId = parseAssetIdFromOutput(output)
+                let assetId = parseAssetIdFromOutput(result.output)
                 if (assetId > 0) {
                     zero.assetId = assetId
                     return zero
                 } else {
-                    let content = if (output.size <= 500) { output } else { "${output[..500]}..." }
+                    let content = if (result.output.size <= 500) { result.output } else { "${result.output[..500]}..." }
                     zero.errorMessage = "failed to parse asset_id from output: ${content}"
                     return zero
                 }
@@ -203,7 +214,7 @@ public class SourcePluginExecutionService {
      * 再执行主插件，且两者共享同一个 groupId，使登录插件写入的
      * __lanlu.phase.{loginNs}.data 能被主插件读取。
      */
-    private static func executePlugin(plugin: PluginTaskData, inputJson: String, logger: Logger): String {
+    private static func executePlugin(plugin: PluginTaskData, inputJson: String, logger: Logger): WasmExecutionResult {
         // 直连执行的稳定 groupId：在一次请求内 pre-hook 与主插件共享。
         // 带时间戳避免不同请求间相互干扰，但同一请求内保持一致。
         let groupId = "source_direct:${plugin.namespace}:${DateTime.now().toUnixTimeStamp().toSeconds().toString()}"
@@ -211,7 +222,7 @@ public class SourcePluginExecutionService {
         // 1. 运行 pre-hooks（Login/Script），让登录态写入同一 groupId。
         let hookResult = runPreHooksForDirectExecution(plugin, groupId, logger)
         if (!hookResult) {
-            return ""
+            return WasmExecutionResult(false, "", "pre-hook failed")
         }
 
         // 2. 运行主插件。
@@ -236,16 +247,18 @@ public class SourcePluginExecutionService {
 
         if (!result.success) {
             logger.error("WASM 插件执行失败", ("namespace", plugin.namespace), ("error", result.error))
-            return ""
+            return result
         }
 
         let (outputSuccess, outputError) = checkPluginOutputSuccess(result.output)
         if (!outputSuccess) {
             logger.error("WASM 插件返回失败", ("namespace", plugin.namespace), ("error", outputError))
-            return ""
+            result.success = false
+            result.error = outputError
+            return result
         }
 
-        return result.output
+        return result
     }
 
     /**
@@ -429,6 +442,35 @@ public class SourcePluginExecutionService {
             return (success, error)
         } catch (_: Exception) {
             return (true, "")
+        }
+    }
+
+    /**
+     * 从 JSON 输出中提取 content_type 字段。
+     * 用于新协议（二进制返回）场景。
+     */
+    private static func parseContentTypeFromJson(output: String): String {
+        let trimmed = output.trimAscii()
+        if (trimmed.size == 0) { return "application/octet-stream" }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return "application/octet-stream" }
+            r.startObject()
+            var ct = ""
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == "content_type" || name == "contentType") {
+                    ct = r.readValue<String>().trimAscii()
+                } else {
+                    r.skip()
+                }
+            }
+            r.endObject()
+            return if (ct.size > 0) { ct } else { "application/octet-stream" }
+        } catch (_: Exception) {
+            return "application/octet-stream"
         }
     }
 }
