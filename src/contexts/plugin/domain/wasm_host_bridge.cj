@@ -821,6 +821,8 @@ public class WasmHostBridge {
         registerHostMethod("taskKv.listKeys", { ctx => handleTaskKvListKeys(ctx) })
         registerHostMethod("ui.select", { ctx => handleUiSelect(ctx) })
         registerHostMethod("asset.install_from_file", { ctx => handleAssetInstallFromFile(ctx) })
+        registerHostMethod("asset.allocate", { ctx => handleAssetAllocate(ctx) })
+        registerHostMethod("asset.install_into", { ctx => handleAssetInstallInto(ctx) })
         hostMethodRegistryInitialized = true
     }
 
@@ -3441,6 +3443,141 @@ public class WasmHostBridge {
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
+    }
+
+    /**
+     * Host handler: asset.allocate
+     *
+     * 只创建 DB 资产记录（不写文件），返回 asset_id。
+     * 用于封面解析等需要先占位、后异步安装文件的场景。
+     *
+     * 请求参数 (JSON):
+     *   - kind: string (可选) 资产类型，默认 "attachment"
+     *   - original_filename: string (可选) 原始文件名
+     *   - content_type: string (可选) MIME 类型
+     *   - file_ext: string (可选) 文件扩展名
+     *
+     * 返回: { "asset_id": 123 }
+     */
+    private static func handleAssetAllocate(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, capErr) = ensureHostCapability(ctx.executionId, ["asset.install_from_file"], "asset.allocate")
+        if (!allowed) { return (false, "{}", capErr) }
+
+        var kind = "attachment"
+        var originalFilename = "placeholder"
+        var contentType = "application/octet-stream"
+        var fileExt = ""
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(ctx.effectiveParams.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let name = r.readName()
+                    match (name) {
+                        case "kind" => kind = r.readValue<String>().trimAscii().toAsciiLower()
+                        case "original_filename" | "originalFilename" => originalFilename = r.readValue<String>().trimAscii()
+                        case "content_type" | "contentType" => contentType = r.readValue<String>().trimAscii().toAsciiLower()
+                        case "file_ext" | "fileExt" => fileExt = r.readValue<String>().trimAscii().toAsciiLower()
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+            }
+        } catch (_: Exception) {}
+
+        if (kind.size == 0) { kind = "attachment" }
+        if (originalFilename.size == 0) { originalFilename = "cover_placeholder" }
+        if (contentType.size == 0) { contentType = "application/octet-stream" }
+        if (fileExt.size == 0 && originalFilename.contains(".")) {
+            fileExt = FileUtils.getFileExtensionWithoutDot(originalFilename)
+        }
+
+        match (AssetDao.create(None, kind, originalFilename, contentType, fileExt, 0, "")) {
+            case Some(assetId) => return (true, buildAssetInstallResponseJson(assetId), "")
+            case None => return (false, "{}", "failed to create asset record")
+        }
+    }
+
+    /**
+     * Host handler: asset.install_into
+     *
+     * 将插件已有文件安装到指定的占位 asset 记录中。
+     * 与 asset.install_from_file 的区别：不创建新 DB 记录，只安装文件。
+     *
+     * 请求参数 (JSON):
+     *   - asset_id: int (必填) 已存在的 asset ID
+     *   - guest_path: string (必填) 插件 WASI 视图下的文件路径
+     *
+     * 返回: { "installed": true, "asset_id": 123 }
+     */
+    private static func handleAssetInstallInto(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, capErr) = ensureHostCapability(ctx.executionId, ["asset.install_from_file"], "asset.install_into")
+        if (!allowed) { return (false, "{}", capErr) }
+
+        var assetId: Int64 = 0
+        var guestPath = ""
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(ctx.effectiveParams.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let name = r.readName()
+                    match (name) {
+                        case "asset_id" | "assetId" => assetId = r.readValue<Int64>()
+                        case "guest_path" | "guestPath" => guestPath = r.readValue<String>().trimAscii()
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+            }
+        } catch (_: Exception) {}
+
+        if (assetId <= 0 || guestPath.size == 0) {
+            return (false, "{}", "missing asset_id or guest_path")
+        }
+        if (!guestPath.startsWith("/plugin/")) {
+            return (false, "{}", "guest_path must start with /plugin/")
+        }
+
+        let runtimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), ctx.pluginNamespace)
+        let relativePath = guestPath[7..]
+        let hostPath = FileUtils.joinPath(runtimeHostDir, relativePath)
+        if (!hostPath.startsWith(runtimeHostDir)) {
+            return (false, "{}", "invalid guest_path: path traversal detected")
+        }
+
+        let hostPathObj = Path(hostPath)
+        if (!exists(hostPathObj)) {
+            return (false, "{}", "file not found at resolved path: ${hostPath}")
+        }
+
+        // 查找 asset 记录获取扩展名
+        let asset = AssetDao.getById(assetId)
+        if (asset.id <= 0) {
+            return (false, "{}", "asset not found: ${assetId.toString()}")
+        }
+
+        let fileExt = asset.fileExt.trimAscii()
+        let ext = if (fileExt.size > 0) { fileExt } else { "bin" }
+        let assetDir = SystemSettingsService.getPath("ASSET_PATH")
+        let targetPathStr = FileUtils.joinPath(assetDir, "${assetId.toString()}.${ext}")
+        try { FileUtils.ensureDirectoryExists(Path(assetDir)) } catch (_: Exception) {}
+        FileUtils.safeReplaceFile(Path(targetPathStr), hostPathObj)
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("installed").writeValue(true)
+        w.writeName("asset_id").writeValue(assetId)
+        w.endObject()
+        w.flush()
+        return (true, String.fromUtf8(readToEnd(out)), "")
     }
 
     /**

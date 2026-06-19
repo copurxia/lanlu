@@ -600,18 +600,8 @@ public class WasmTaskRunner {
             return TaskWaitResult(false, outputError, result.output)
         }
 
-        // 对 source_reader / source_page_asset 等动作做资产引用校验
-        if (effectiveAction == "source_reader") {
-            let (valid, msg) = validateSourceReaderOutput(result.output)
-            if (!valid) {
-                appendMirroredLog(taskId, parentTaskId, "source_reader 输出校验警告: ${msg}")
-            }
-        } else if (effectiveAction == "source_page_asset") {
-            let (valid, msg) = validateSourcePageAssetOutput(result.output)
-            if (!valid) {
-                appendMirroredLog(taskId, parentTaskId, "source_page_asset 输出校验: ${msg}")
-            }
-        } else if (effectiveAction == "source_home" || effectiveAction == "source_search" || effectiveAction == "source_detail") {
+        // 对 source_home / source_search / source_filters 输出做轻量校验
+        if (effectiveAction == "source_home" || effectiveAction == "source_search" || effectiveAction == "source_filters") {
             let (valid, msg) = validateSourceBrowseItemOutput(result.output)
             if (!valid) {
                 appendMirroredLog(taskId, parentTaskId, "${effectiveAction} 输出校验警告: ${msg}")
@@ -872,157 +862,17 @@ public class WasmTaskRunner {
      * - 校验 asset_id 是否为正数（如果有）
      */
     private static func validateSourceReaderOutput(outputJson: String): (Bool, String) {
-        let trimmed = outputJson.trimAscii()
-        if (trimmed.size == 0) {
-            return (false, "empty output")
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return (false, "output is not a JSON object")
-            }
-            r.startObject()
-            var dataFound = false
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == "data") {
-                    dataFound = true
-                    if (r.peek() != Some(BeginObject)) {
-                        return (false, "data is not a JSON object")
-                    }
-                    r.startObject()
-                    var pagesFound = false
-                    while (r.peek() != EndObject) {
-                        let dataKey = r.readName()
-                        if (dataKey == "pages") {
-                            pagesFound = true
-                            if (r.peek() != Some(BeginArray)) {
-                                return (false, "pages is not a JSON array")
-                            }
-                            r.startArray()
-                            var pageIndex: Int64 = 0
-                            var warnings = ArrayList<String>()
-                            while (r.peek() != EndArray) {
-                                if (r.peek() != Some(BeginObject)) {
-                                    r.skip()
-                    pageIndex += 1
-                                    continue
-                    }
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let pageKey = r.readName()
-                                    if (pageKey == "url") {
-                                        let urlVal = r.readValue<String>()
-                                        if (urlVal.trimAscii().size > 0) {
-                            warnings.add("page[${pageIndex.toString()}].url is deprecated, should use asset_id")
-                        }
-                    } else if (pageKey == "asset_id") {
-                                        let assetIdVal = r.readValue<String>()
-                                        let assetId = parsePositiveAssetId(assetIdVal)
-                                        if (assetId <= 0) {
-                            warnings.add("page[${pageIndex.toString()}].asset_id is invalid: ${assetIdVal}")
-                        }
-                    } else {
-                                        r.skip()
-                                    }
-                                }
-                                r.endObject()
-                                pageIndex += 1
-                            }
-                            r.endArray()
-
-                            if (warnings.size > 0) {
-                                var combined = ""
-                                for (w in warnings) {
-                                    if (combined.size > 0) { combined += "; " }
-                                    combined += w
-                                }
-                                return (false, combined)
-                            }
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-                    if (!pagesFound) {
-                        return (false, "data.pages not found")
-                    }
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-            if (!dataFound) {
-                return (false, "data field not found")
-            }
-            return (true, "")
-        } catch (e: Exception) {
-            return (false, "parse error: ${e.message}")
-        }
+        // 旧校验已废弃 — source_reader action 已移除
+        return (true, "")
     }
+
 
     /**
      * 校验 source_page_asset 输出：检查 data.asset_id 是否为有效正数
      */
     private static func validateSourcePageAssetOutput(outputJson: String): (Bool, String) {
-        let trimmed = outputJson.trimAscii()
-        if (trimmed.size == 0) {
-            return (false, "empty output")
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return (false, "output is not a JSON object")
-            }
-            var successFound = false
-            var dataFound = false
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == "success") {
-                    successFound = r.readValue<Bool>()
-                } else if (name == "data") {
-                    dataFound = true
-                    if (r.peek() != Some(BeginObject)) {
-                        return (false, "data is not a JSON object")
-                    }
-                    r.startObject()
-                    var assetIdFound = false
-                    while (r.peek() != EndObject) {
-                        let dataKey = r.readName()
-                        if (dataKey == "asset_id") {
-                            let assetIdVal = r.readValue<String>()
-                            let assetId = parsePositiveAssetId(assetIdVal)
-                            if (assetId <= 0) {
-                                return (false, "asset_id is invalid: ${assetIdVal}")
-                            }
-                            assetIdFound = true
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-                    if (!assetIdFound) {
-                        return (false, "data.asset_id not found")
-                    }
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-            if (!successFound) {
-                return (false, "success is false")
-            }
-            return (true, "")
-        } catch (e: Exception) {
-            return (false, "parse error: ${e.message}")
-        }
+        // 旧校验已废弃 — source_page_asset action 已移除
+        return (true, "")
     }
 
     /**

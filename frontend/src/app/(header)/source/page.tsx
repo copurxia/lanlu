@@ -54,32 +54,94 @@ function SourceMediaCard({
   selected?: boolean;
   index?: number;
 }) {
-  const itemKey = `${item.source_namespace}:${item.remote_id}`;
-  const cardRef = useRef<HTMLDivElement | null>(null);
-  const [lazyCoverAssetId, setLazyCoverAssetId] = useState<number | undefined>(item.cover_asset_id);
-  const [coverVisible, setCoverVisible] = useState(false);
-  const coverAssetId = item.cover_asset_id ?? lazyCoverAssetId;
-  const archiveId = `source:${item.source_namespace}:${item.remote_id}`;
-  const detailPath = item.kind === 'tankoubon'
-    ? `/tankoubon?id=${encodeURIComponent(archiveId)}`
-    : `/archive?id=${encodeURIComponent(archiveId)}`;
-  const firstChild = item.kind === 'tankoubon'
-    ? item.children?.find((child) => child.kind === 'archive')
-    : undefined;
-  const readerRemoteId = item.kind === 'archive' ? item.remote_id : firstChild?.remote_id;
-  const readerNamespace = item.kind === 'archive' ? item.source_namespace : firstChild?.source_namespace;
-  const readerPath = readerRemoteId && readerNamespace
-    ? `/reader?id=source:${encodeURIComponent(readerNamespace)}:${encodeURIComponent(readerRemoteId)}${item.kind === 'tankoubon' ? `&tankoubon=${encodeURIComponent(item.remote_id)}` : ''}`
-    : detailPath;
+	  const itemKey = `${item.source_namespace}:${item.remote_id}`;
+	  const cardRef = useRef<HTMLDivElement | null>(null);
+	  const fetchRef = useRef(false);
+	  const [coverVisible, setCoverVisible] = useState(false);
+	  const [coverAssetId, setCoverAssetId] = useState<number | null>(null);
+	  const [coverReady, setCoverReady] = useState(false);
+	  const archiveId = `source:${item.source_namespace}:${item.remote_id}`;
+	  const detailPath = item.kind === 'tankoubon'
+	    ? `/tankoubon?id=${encodeURIComponent(archiveId)}`
+	    : `/archive?id=${encodeURIComponent(archiveId)}`;
+	  const firstChild = item.kind === 'tankoubon'
+	    ? item.children?.find((child) => child.kind === 'archive')
+	    : undefined;
+	  const readerRemoteId = item.kind === 'archive' ? item.remote_id : firstChild?.remote_id;
+	  const readerNamespace = item.kind === 'archive' ? item.source_namespace : firstChild?.source_namespace;
+	  const readerPath = readerRemoteId && readerNamespace
+	    ? `/reader?id=source:${encodeURIComponent(readerNamespace)}:${encodeURIComponent(readerRemoteId)}${item.kind === 'tankoubon' ? `&tankoubon=${encodeURIComponent(item.remote_id)}` : ''}`
+	    : detailPath;
 
+	  // Lazy cover: fetch /cover to get asset ID, switch from raw URL to local asset
+	  useEffect(() => {
+	    if (!coverVisible || !item.cover) return;
+	    if (fetchRef.current) return; // guard against StrictMode double-mount
+	    fetchRef.current = true;
+	    const sourceId = archiveId;
+	    fetch(`/api/archives/${encodeURIComponent(sourceId)}/cover`)
+	      .then((res) => res.json())
+	      .then((data) => {
+	        if (data?.cover_asset_id > 0) {
+	          setCoverAssetId(data.cover_asset_id);
+	        }
+	      })
+	      .catch(() => {});
+	  }, [coverVisible, item.cover, archiveId]);
+
+	  // Reset probe state when the asset id changes (e.g. remount / new card)
+	  useEffect(() => {
+	    setCoverReady(false);
+	  }, [coverAssetId]);
+
+	  // Probe placeholder asset until the file is installed.
+	  // Backend returns 404 for the missing file; browsers don't cache 4xx,
+	  // so each retry re-requests. Once installed, the 200 is cached and the
+	  // <Image> in BaseMediaCard hits that cache with the same URL.
+	  useEffect(() => {
+	    if (!coverAssetId || coverReady) return;
+	    let cancelled = false;
+	    let timer: ReturnType<typeof setTimeout> | null = null;
+	    let probe = new Image();
+	    let attempt = 1;
+	    const maxAttempts = 20;
+	    const tick = () => {
+	      if (cancelled) return;
+	      const url = `/api/assets/${coverAssetId}`;
+	      probe.onload = () => {
+	        if (cancelled) return;
+	        setCoverReady(true);
+	      };
+	      probe.onerror = () => {
+	        if (cancelled || attempt >= maxAttempts) return;
+	        attempt += 1;
+	        timer = setTimeout(tick, 1500);
+	      };
+	      probe.src = url;
+	    };
+	    tick();
+	    return () => {
+	      cancelled = true;
+	      if (timer) clearTimeout(timer);
+	      probe.onload = null;
+	      probe.onerror = null;
+	      probe.src = '';
+	    };
+	  }, [coverAssetId, coverReady]);
+
+	  // Show local asset once the placeholder file is installed; otherwise raw URL fallback
+	  const coverUrl = coverReady && coverAssetId
+	    ? `/api/assets/${coverAssetId}`
+	    : (item.cover || '');
+
+  // IntersectionObserver to trigger cover fetch
   useEffect(() => {
-    if (item.cover_asset_id || !item.cover) return;
+    if (!item.cover) return;
     const element = cardRef.current;
     if (!element || typeof IntersectionObserver === 'undefined') {
       setCoverVisible(true);
       return;
     }
-
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         setCoverVisible(true);
@@ -88,36 +150,19 @@ function SourceMediaCard({
     }, { rootMargin: '600px 0px' });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [item.cover, item.cover_asset_id, itemKey]);
+  }, [item.cover, itemKey]);
 
-  useEffect(() => {
-    if (!coverVisible || item.cover_asset_id || !item.cover) return;
-
-    let cancelled = false;
-    SourcePluginService.coverAsset(item.source_namespace, item.remote_id, item.cover)
-      .then((result) => {
-        if (cancelled || !result.success || !result.data?.asset_id) return;
-        setLazyCoverAssetId(result.data.asset_id);
-      })
-      .catch(() => {
-        // Keep the text-first card visible; cover loading is best-effort.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [coverVisible, item.cover, item.cover_asset_id, item.remote_id, item.source_namespace]);
 
   return (
     <div ref={cardRef}>
-    <BaseMediaCard
-      id={itemKey}
-      title={item.title || item.remote_id}
-      thumbnailId={readerRemoteId || ''}
-      thumbnailAssetId={coverAssetId}
+	    <BaseMediaCard
+	      id={itemKey}
+	      title={item.title || item.remote_id}
+	      thumbnailId={readerRemoteId || ''}
+	      thumbnailUrl={coverUrl || undefined}
       tags={(item.tags || []).join(', ')}
       summary={item.description || item.subtitle || ''}
-      pagecount={item.page_count || item.reader?.page_count || 0}
+      pagecount={item.page_count || 0}
       progress={0}
       isnew={false}
       isfavorite={false}
@@ -137,7 +182,7 @@ function SourceMediaCard({
       detailsLabel="详情"
       pagesLabel={item.kind === 'tankoubon'
         ? `${item.children?.length || 0} 档案`
-        : `${item.page_count || item.reader?.page_count || 0} 页`}
+        : `${item.page_count || 0} 页`}
       detailPath={detailPath}
       readerPath={readerPath}
       onDownload={onDownload ? () => onDownload(item) : undefined}

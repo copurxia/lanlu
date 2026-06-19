@@ -23,25 +23,11 @@ public class SourceDirectActionService {
      * - source_home: 获取首页内容
      * - source_search: 搜索
      * - source_filters: 获取过滤器列表
-     * - source_detail: 获取条目详情
-     * - source_reader: 获取页面列表，输出 data.pages[].path 作为页面资源 key
-     * - source_cover_asset: 获取封面资源
-     * - source_page_asset: 获取页面资源，输入 path（必填，来自 source_reader 输出的 pages[].path）、page（可选 hint）
      */
     private static let BROWSE_ACTIONS = [
-        // 已废弃 action（向后兼容过渡期保留）：
-        // - source_detail       → Metadata 插件的 resolve_metadata
-        // - source_reader       → 从 Metadata 插件的 children 派生
-        // - source_cover_asset  → Metadata 插件的 resolve_metadata 返回 cover_asset_id
-        // - source_page_asset   → Download 插件的 resolve_page_asset
-        // 待所有插件迁移完成后移除。
         "source_home",
         "source_search",
-        "source_filters",
-        "source_detail",
-        "source_reader",
-        "source_cover_asset",
-        "source_page_asset"
+        "source_filters"
     ]
 
     public static func isBrowseAction(action: String): Bool {

@@ -3,9 +3,7 @@
 import { apiClient } from '../api';
 import { extractApiError } from '@/lib/utils/api-utils';
 import {
-  sourceCoverAssetLimiter,
   sourceDirectActionLimiter,
-  sourcePageAssetLimiter,
 } from '@/lib/utils/concurrency-limiter';
 
 export interface SourcePluginSummary {
@@ -26,19 +24,10 @@ export interface SourceItem {
   title: string;
   subtitle?: string;
   cover?: string;
-  cover_asset_id?: number;
   tags?: string[];
   description?: string;
   page_count?: number;
-  downloadable?: boolean;
-  readable?: boolean;
   children?: SourceItem[];
-  reader?: {
-    page_count?: number;
-    media_type?: string;
-    reader_action?: string;
-    download_action?: string;
-  };
 }
 
 export interface SourceBrowseResult {
@@ -125,133 +114,6 @@ export class SourcePluginService {
     }
   }
 
-  static async detail(namespace: string, remoteId: string): Promise<SourceDetailResult> {
-    try {
-      const parsed = await this.executeAction(
-        namespace,
-        'source_detail',
-        { remote_id: remoteId },
-        'Failed to get detail'
-      );
-      return this.parseDetailResult(parsed, 'Failed to get detail');
-    } catch (error) {
-      return { success: false, error: extractApiError(error, 'Failed to get detail') };
-    }
-  }
-
-  static async reader(
-    namespace: string,
-    remoteId: string,
-    archiveId?: string,
-    parentRemoteId?: string
-  ): Promise<{ success: boolean; error?: string; data?: { pages: Array<{ path: string; url?: string; asset_id?: number; type?: string; width?: number; height?: number; metadata?: Record<string, unknown> }> } }> {
-    try {
-      const params: Record<string, unknown> = { remote_id: remoteId };
-      if (archiveId) {
-        params.archive_id = archiveId;
-      }
-      if (parentRemoteId) {
-        params.parent_remote_id = parentRemoteId;
-      }
-      const parsed = await this.executeAction(
-        namespace,
-        'source_reader',
-        params,
-        'Failed to get reader pages'
-      );
-      if (!Boolean(parsed.success)) {
-        return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get reader pages' };
-      }
-      const data = isRecord(parsed.data) ? parsed.data : parsed;
-      const pages = Array.isArray(data.pages) ? data.pages : [];
-      return { success: true, data: { pages } };
-    } catch (error) {
-      return { success: false, error: extractApiError(error, 'Failed to get reader pages') };
-    }
-  }
-
-  /**
-   * 按需获取单页资产。Reader 翻页时调用，避免一次性下载全部页面。
-   * 输入: remote_id, parent_remote_id (可选), page, path
-   * 输出: { success, data: { asset_id } }
-   */
-  static async pageAsset(
-    namespace: string,
-    remoteId: string,
-    page: number,
-    path: string,
-    parentRemoteId?: string,
-    signal?: AbortSignal
-  ): Promise<{ success: boolean; error?: string; data?: { asset_id: number } }> {
-    return sourcePageAssetLimiter.run(async () => {
-      try {
-        const params: Record<string, unknown> = {
-          remote_id: remoteId,
-          page,
-          path,
-        };
-        if (parentRemoteId) {
-          params.parent_remote_id = parentRemoteId;
-        }
-        const parsed = await this.executeAction(
-          namespace,
-          'source_page_asset',
-          params,
-          'Failed to get page asset',
-          signal
-        );
-        if (!Boolean(parsed.success)) {
-          return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get page asset' };
-        }
-        const data = isRecord(parsed.data) ? parsed.data : parsed;
-        const assetId = typeof data.asset_id === 'number' ? data.asset_id : 0;
-        if (assetId <= 0) {
-          return { success: false, error: 'Invalid asset_id from source_page_asset' };
-        }
-        return { success: true, data: { asset_id: assetId } };
-      } catch (error) {
-        return { success: false, error: extractApiError(error, 'Failed to get page asset') };
-      }
-    });
-  }
-
-  /**
-   * 按需获取 Source 列表/搜索封面资产。
-   * 输入: remote_id, cover_ref
-   * 输出: { success, data: { asset_id } }
-   */
-  static async coverAsset(
-    namespace: string,
-    remoteId: string,
-    coverRef: string,
-    signal?: AbortSignal
-  ): Promise<{ success: boolean; error?: string; data?: { asset_id: number } }> {
-    return sourceCoverAssetLimiter.run(async () => {
-      try {
-        const parsed = await this.executeAction(
-          namespace,
-          'source_cover_asset',
-          {
-            remote_id: remoteId,
-            cover_ref: coverRef,
-          },
-          'Failed to get cover asset',
-          signal
-        );
-        if (!Boolean(parsed.success)) {
-          return { success: false, error: (typeof parsed.error === 'string' ? parsed.error : undefined) || 'Failed to get cover asset' };
-        }
-        const data = isRecord(parsed.data) ? parsed.data : parsed;
-        const assetId = typeof data.asset_id === 'number' ? data.asset_id : 0;
-        if (assetId <= 0) {
-          return { success: false, error: 'Invalid asset_id from source_cover_asset' };
-        }
-        return { success: true, data: { asset_id: assetId } };
-      } catch (error) {
-        return { success: false, error: extractApiError(error, 'Failed to get cover asset') };
-      }
-    });
-  }
 
   static async getFilters(namespace: string): Promise<SourceFilterResult> {
     try {
@@ -288,27 +150,19 @@ export class SourcePluginService {
     }
   }
 
+
   static async download(
     namespace: string,
     remoteId: string,
     categoryId: number,
-    kind: 'archive' | 'tankoubon' = 'archive',
-    parentRemoteId?: string
+    kind: 'archive' | 'tankoubon' = 'archive'
   ): Promise<SourceDownloadResult> {
     try {
-      const payload: Record<string, string> = {
-        remote_id: remoteId,
-        category_id: String(categoryId),
-        kind,
-      };
-      if (parentRemoteId) {
-        payload.parent_remote_id = parentRemoteId;
-      }
       const response = await apiClient.post(
-        `/api/admin/source-plugins/${namespace}/download`,
-        payload
+        `/api/admin/source-plugins/${encodeURIComponent(namespace)}/download`,
+        { remote_id: remoteId, category_id: String(categoryId), kind }
       );
-      return response.data;
+      return response.data as SourceDownloadResult;
     } catch (error) {
       return { success: false, error: extractApiError(error, 'Failed to create download task') };
     }
@@ -360,19 +214,10 @@ export class SourcePluginService {
         title: String(raw.title ?? ''),
         subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
         cover: typeof raw.cover === 'string' ? raw.cover : undefined,
-        cover_asset_id: typeof raw.cover_asset_id === 'number' ? raw.cover_asset_id : undefined,
         tags: Array.isArray(raw.tags) ? raw.tags as string[] : undefined,
         description: typeof raw.description === 'string' ? raw.description : undefined,
         page_count: typeof raw.page_count === 'number' ? raw.page_count : undefined,
-        downloadable: Boolean(raw.downloadable),
-        readable: Boolean(raw.readable),
         children: Array.isArray(raw.children) ? this.parseChildren(raw.children as unknown[]) : undefined,
-        reader: isRecord(raw.reader) ? {
-          page_count: typeof raw.reader.page_count === 'number' ? raw.reader.page_count : undefined,
-          media_type: typeof raw.reader.media_type === 'string' ? raw.reader.media_type : undefined,
-          reader_action: typeof raw.reader.reader_action === 'string' ? raw.reader.reader_action : undefined,
-          download_action: typeof raw.reader.download_action === 'string' ? raw.reader.download_action : undefined,
-        } : undefined,
       };
       items.push(item);
     }
@@ -404,12 +249,9 @@ export class SourcePluginService {
         title: String(raw.title ?? ''),
         subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : undefined,
         cover: typeof raw.cover === 'string' ? raw.cover : undefined,
-        cover_asset_id: typeof raw.cover_asset_id === 'number' ? raw.cover_asset_id : undefined,
         tags: Array.isArray(raw.tags) ? raw.tags as string[] : undefined,
         description: typeof raw.description === 'string' ? raw.description : undefined,
         page_count: typeof raw.page_count === 'number' ? raw.page_count : undefined,
-        downloadable: Boolean(raw.downloadable),
-        readable: Boolean(raw.readable),
         children: Array.isArray(raw.children) ? this.parseChildren(raw.children as unknown[]) : undefined,
       };
       children.push(item);
@@ -443,21 +285,11 @@ export class SourcePluginService {
       title: String(data.title ?? ''),
       subtitle: typeof data.subtitle === 'string' ? data.subtitle : undefined,
       cover: typeof data.cover === 'string' ? data.cover : undefined,
-      cover_asset_id: typeof data.cover_asset_id === 'number' ? data.cover_asset_id : undefined,
       tags: Array.isArray(data.tags) ? data.tags as string[] : undefined,
       description: typeof data.description === 'string' ? data.description : undefined,
       page_count: typeof data.page_count === 'number' ? data.page_count : undefined,
-      downloadable: Boolean(data.downloadable),
-      readable: Boolean(data.readable),
       children: Array.isArray(data.children) ? this.parseChildren(data.children as unknown[]) : undefined,
-      reader: isRecord(data.reader) ? {
-        page_count: typeof data.reader.page_count === 'number' ? data.reader.page_count : undefined,
-        media_type: typeof data.reader.media_type === 'string' ? data.reader.media_type : undefined,
-        reader_action: typeof data.reader.reader_action === 'string' ? data.reader.reader_action : undefined,
-        download_action: typeof data.reader.download_action === 'string' ? data.reader.download_action : undefined,
-      } : undefined,
     };
-
     return {
       success: true,
       data: item,

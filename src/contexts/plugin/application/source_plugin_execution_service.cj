@@ -8,6 +8,7 @@ import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.contexts.plugin.domain.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.shared.utils.*
 
 /**
@@ -140,6 +141,56 @@ public class SourcePluginExecutionService {
         }
     }
 
+    /**
+     * 通过 Metadata 插件异步解析 source 封面。
+     * 先分配占位 asset，再投递 taskpool 任务由插件异步安装封面文件。
+     * 重复调用同一 sourceId 不会重复创建（groupId 去重）。
+     *
+     * @param sourceId 完整的 sourceId
+     * @return asset_id (>0 成功)，0 表示失败
+     */
+    public static func resolveCover(sourceId: String): Int64 {
+        let logger = getLogger("source_plugin_execution")
+
+        match (SourcePluginMatcher.findMetadataPlugin(sourceId)) {
+            case Some(plugin) =>
+                let groupId = "cover_resolve:${sourceId}"
+                let assetId = AssetDao.create(
+                    None,
+                    "cover_placeholder",
+                    "cover_placeholder",
+                    "application/octet-stream",
+                    "",
+                    0,
+                    ""
+                )
+                match (assetId) {
+                    case Some(id) =>
+                        let taskParams = buildResolveCoverTaskParams(sourceId, id, plugin.namespace)
+                        let task = TaskModel.createTaskWithOptions(
+                            "在线源封面",
+                            "wasm_task",
+                            taskParams,
+                            30,
+                            groupId,
+                            "source"
+                        )
+                        if (task.id > 0) {
+                            return id
+                        } else {
+                            logger.error("封面任务创建失败", ("sourceId", sourceId))
+                            return id  // 占位已创建，返回 asset_id
+                        }
+                    case None =>
+                        logger.error("封面占位 asset 创建失败", ("sourceId", sourceId))
+                        return 0
+                }
+            case None =>
+                logger.warn("未找到匹配 sourceId 的 Metadata 插件", ("sourceId", sourceId))
+                return 0
+        }
+    }
+
     // ─── 内部方法 ───
 
     /**
@@ -198,6 +249,33 @@ public class SourcePluginExecutionService {
         w.writeName("pluginNamespace").writeValue(pluginNamespace)
         w.writeName("pluginType").writeValue("Download")
         w.writeName("action").writeValue("download_archive")
+        w.writeName("groupId").writeValue(groupId)
+        w.writeName("targetType").writeValue("source")
+        w.writeName("targetId").writeValue(sourceId)
+        w.writeName("extraParams").writeValue(String.fromUtf8(readToEnd(paramsOut)))
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    /**
+     * 构建封面解析的 task params JSON。
+     */
+    private static func buildResolveCoverTaskParams(sourceId: String, assetId: Int64, pluginNamespace: String): String {
+        let groupId = "cover_resolve:${sourceId}"
+        let paramsOut = ByteBuffer()
+        let pw = JsonWriter(paramsOut)
+        pw.startObject()
+        pw.writeName("asset_id").writeValue(assetId)
+        pw.endObject()
+        pw.flush()
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("pluginNamespace").writeValue(pluginNamespace)
+        w.writeName("pluginType").writeValue("Metadata")
+        w.writeName("action").writeValue("resolve_cover")
         w.writeName("groupId").writeValue(groupId)
         w.writeName("targetType").writeValue("source")
         w.writeName("targetId").writeValue(sourceId)

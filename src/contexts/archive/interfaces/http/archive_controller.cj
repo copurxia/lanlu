@@ -1598,6 +1598,46 @@ public class ArchiveController {
         }
     }
 
+    // GET /api/archives/{id}/cover
+    public static func getCover(ctx: Ctx): Unit {
+        let id = ctx.paramsOpt("id") ?? ""
+
+        // Source: 分配占位 asset + 投递异步任务
+        match (SourceRequestResolver.parseFromCompositeId(id)) {
+            case Some(request) =>
+                let assetId = SourcePluginExecutionService.resolveCover(id)
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("cover_asset_id").writeValue(assetId)
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+                return
+            case None => ()
+        }
+
+        // Local archive: 查 metadata 已有 cover
+        var coverAssetId: Int64 = 0
+        match (MetadataDao.getMetadataObject("archive", id)) {
+            case Some(meta) =>
+                for (asset in meta.assets) {
+                    if (asset.slot == "cover" && asset.asset_id > 0) {
+                        coverAssetId = asset.asset_id
+                        break
+                    }
+                }
+            case None => ()
+        }
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("cover_asset_id").writeValue(coverAssetId)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+    }
+
     /**
      * getPage 内部实现
      */

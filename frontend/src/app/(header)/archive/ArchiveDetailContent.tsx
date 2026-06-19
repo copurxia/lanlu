@@ -837,24 +837,10 @@ export function ArchiveDetailContent() {
                             onClick={async () => {
                               if (isSourceMode && sourceNamespace && remoteId) {
                                 try {
-                                  const cats = await CategoryService.getAllCategories();
-                                  const enabledCats = cats.filter((c) => c.enabled !== false);
-                                  if (enabledCats.length === 0) {
-                                    showError('没有可用的分类');
-                                    return;
-                                  }
-                                  const result = await SourcePluginService.download(
-                                    sourceNamespace,
-                                    remoteId,
-                                    enabledCats[0].id,
-                                    'archive'
-                                  );
-                                  if (result.success) {
-                                    success('下载任务已创建');
-                                    router.push('/settings/tasks');
-                                  } else {
-                                    showError(result.error || '创建下载任务失败');
-                                  }
+                                  const sourceId = `source:${sourceNamespace}:${remoteId}`;
+                                  await ArchiveService.downloadArchive(sourceId);
+                                  success('下载任务已创建');
+                                  router.push('/settings/tasks');
                                 } catch {
                                   showError('创建下载任务失败');
                                 }

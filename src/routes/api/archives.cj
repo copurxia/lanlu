@@ -54,6 +54,11 @@ public class ArchiveRoutes {
             ArchiveController.getPage(ctx)
         })
 
+        // 获取/创建归档封面
+        archives.get("/:id/cover", { ctx =>
+            ArchiveController.getCover(ctx)
+        })
+
         // 删除归档
         archives.delete("/:id", audited("archive.delete", { ctx =>
             ArchiveController.deleteArchive(ctx)

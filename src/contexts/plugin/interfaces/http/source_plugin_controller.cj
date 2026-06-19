@@ -88,6 +88,7 @@ public class SourcePluginController {
         }
     }
 
+    // 改为通过新的 download_archive 协议执行
     public static func sourceDownload(ctx: Ctx) {
         let logger = getLogger("source_plugin_controller")
         let namespace = ctx.paramsOpt("namespace") ?? ""
@@ -96,33 +97,18 @@ public class SourcePluginController {
             return
         }
 
-        match (SourcePluginService.getEnabledSourcePlugin(namespace)) {
-            case Some(_) => ()
-            case None =>
-                ResponseView.errorJson(ctx, "Source plugin not found or disabled: ${namespace}")
-                return
-        }
-
         var remoteId = ""
-        var archiveId = ""
         var categoryId: Int64 = 0
         var kind = "archive"
-        var parentRemoteId = ""
 
         try {
             let body = ctx.bodyString()
             if (body.size > 0) {
                 let requestMap = JsonCodec.decode<HashMap<String, String>>(body)
                 remoteId = requestMap.get("remote_id") ?? ""
-                archiveId = requestMap.get("archive_id") ?? ""
                 let catStr = requestMap.get("category_id") ?? "0"
-                try {
-                    categoryId = Int64.parse(catStr)
-                } catch (_: Exception) {
-                    categoryId = 0
-                }
+                try { categoryId = Int64.parse(catStr) } catch (_: Exception) { categoryId = 0 }
                 kind = requestMap.get("kind") ?? "archive"
-                parentRemoteId = requestMap.get("parent_remote_id") ?? ""
             }
         } catch (e: Exception) {
             logger.error("解析下载请求失败", [("error", e.message)])
@@ -130,40 +116,14 @@ public class SourcePluginController {
             return
         }
 
-        if (remoteId.size == 0) {
-            ResponseView.errorJson(ctx, "remote_id is required")
-            return
-        }
-        if (categoryId <= 0) {
-            ResponseView.errorJson(ctx, "category_id is required")
+        if (remoteId.size == 0 || categoryId <= 0) {
+            ResponseView.errorJson(ctx, "remote_id and category_id are required")
             return
         }
 
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("namespace").writeValue(namespace)
-        w.writeName("remote_id").writeValue(remoteId)
-        w.writeName("archive_id").writeValue(archiveId)
-        w.writeName("category_id").writeValue(categoryId)
-        w.writeName("kind").writeValue(kind)
-        if (parentRemoteId.size > 0) {
-            w.writeName("parent_remote_id").writeValue(parentRemoteId)
-        }
-        w.endObject()
-        w.flush()
-        let taskParams = String.fromUtf8(readToEnd(out))
-
-        let task = TaskModel.createTaskWithOptions(
-            "在线源下载",
-            "source_download",
-            taskParams,
-            50,
-            "source_download:${namespace}",
-            "source"
-        )
-
-        if (task.id <= 0) {
+        let sourceId = "source:${namespace}:${remoteId}"
+        let taskId = SourcePluginExecutionService.downloadArchive(sourceId, categoryId, kind)
+        if (taskId <= 0) {
             ResponseView.errorJson(ctx, "Failed to create download task")
             return
         }
@@ -172,7 +132,7 @@ public class SourcePluginController {
         let responseW = JsonWriter(responseOut)
         responseW.startObject()
         responseW.writeName("success").writeValue(true)
-        responseW.writeName("task_id").writeValue(task.id)
+        responseW.writeName("task_id").writeValue(taskId)
         responseW.endObject()
         responseW.flush()
         ctx.json(String.fromUtf8(readToEnd(responseOut)))
