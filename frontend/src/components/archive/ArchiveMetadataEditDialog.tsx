@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
 import { RawImage } from '@/components/ui/raw-image';
@@ -199,20 +199,26 @@ export function ArchiveMetadataEditDialog({
     </div>
   ) : null;
   const mobileToggle = showSidebar && isMobile ? (
-    <div className="flex items-center justify-between border-b px-4 py-2.5">
-      <span className="text-sm font-medium">
-        {mobileView === 'list' ? t('tankoubon.archiveList') : t('tankoubon.editTankoubon')}
-      </span>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-muted-foreground">{t('tankoubon.showArchiveList')}</span>
-        <Switch
-          checked={mobileView === 'form'}
-          onCheckedChange={(checked) => setMobileView(checked ? 'form' : 'list')}
-          aria-label={t('tankoubon.showEditForm')}
-        />
-        <span className="text-xs text-muted-foreground">{t('tankoubon.showEditForm')}</span>
-      </div>
-    </div>
+    <Tabs
+      value={mobileView}
+      onValueChange={(v) => setMobileView(v as 'list' | 'form')}
+      className="w-full border-b"
+    >
+      <TabsList className="mx-3 my-2 h-9 w-full gap-0 rounded-md bg-muted p-0.5">
+        <TabsTrigger
+          value="list"
+          className="h-full flex-1 rounded-sm px-4 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-xs"
+        >
+          {t('tankoubon.archiveList')}
+        </TabsTrigger>
+        <TabsTrigger
+          value="form"
+          className="h-full flex-1 rounded-sm px-4 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-xs"
+        >
+          {t('tankoubon.editTankoubon')}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
   ) : null;
 
   const formContent = (
