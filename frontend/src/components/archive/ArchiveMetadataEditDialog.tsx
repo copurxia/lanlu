@@ -1,17 +1,23 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import { Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
 import { RawImage } from '@/components/ui/raw-image';
+import { TankoubonArchiveListItem } from '@/components/tankoubon/TankoubonArchiveListItem';
+import { useMediaQuery } from '@/components/ui/unified-menu/hooks/use-media-query';
 import type { Plugin } from '@/lib/services/plugin-service';
-export type { RpcSelectOption, RpcSelectRequest } from '@/types/metadata-plugin';
 import type { RpcSelectRequest } from '@/types/metadata-plugin';
+import type { Archive } from '@/types/archive';
+import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon';
+export type { RpcSelectOption, RpcSelectRequest } from '@/types/metadata-plugin';
 
 type RpcSelectState = {
   request: RpcSelectRequest | null;
@@ -67,7 +73,14 @@ type Props = {
   metadataPluginMessage?: string;
   onRunMetadataPlugin?: () => void | Promise<void>;
   rpcSelect?: RpcSelectState;
+  archives?: Archive[];
+  onArchiveEdit?: (archive: Archive) => void;
+  onArchiveRemove?: (archive: Archive) => void;
+  isRemovingArchiveId?: string | null;
+  archiveMetadataPatches?: TankoubonMemberMetadataPatch[];
 };
+
+const MOBILE_BREAKPOINT = '(max-width: 767px)';
 
 export function ArchiveMetadataEditDialog({
   open,
@@ -114,115 +127,235 @@ export function ArchiveMetadataEditDialog({
   metadataPluginMessage = '',
   onRunMetadataPlugin,
   rpcSelect,
+  archives,
+  onArchiveEdit,
+  onArchiveRemove,
+  isRemovingArchiveId,
+  archiveMetadataPatches = [],
 }: Props) {
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
+  const [mobileView, setMobileView] = useState<'list' | 'form'>('form');
+  const showSidebar = Boolean(
+    archives && archives.length > 0 && (onArchiveEdit || onArchiveRemove)
+  );
+
+  const displayedArchives = useMemo(() => {
+    if (!archives || archives.length === 0) return archives;
+    if (!archiveMetadataPatches || archiveMetadataPatches.length === 0) return archives;
+
+    const patchMap = new Map(
+      archiveMetadataPatches
+        .filter((patch) => patch.entity_id)
+        .map((patch) => [patch.entity_id!, patch])
+    );
+
+    return archives.map((archive) => {
+      const patch = patchMap.get(archive.arcid);
+      if (!patch) return archive;
+
+      const patchedTags = Array.isArray(patch.tags)
+        ? patch.tags.join(',')
+        : typeof patch.tags === 'string'
+          ? patch.tags
+          : archive.tags;
+
+      const merged: Archive = {
+        ...archive,
+        title: patch.title || archive.title,
+        description: patch.description || archive.description,
+        tags: patchedTags,
+      };
+
+      if (patch.assets && !Array.isArray(patch.assets)) {
+        merged.assets = { ...archive.assets, ...patch.assets };
+      }
+
+      return merged;
+    });
+  }, [archives, archiveMetadataPatches]);
+  const dialogSize = showSidebar ? 'xl' : 'md';
+
+  const sidebarContent = showSidebar ? (
+    <div className="flex h-full flex-col">
+      <div className="border-b px-4 py-3">
+        <h3 className="font-semibold">{t('tankoubon.archiveList')}</h3>
+        <p className="text-xs text-muted-foreground">
+          {t('tankoubon.archiveCount')}: {displayedArchives!.length}
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        <div className="space-y-1">
+          {displayedArchives!.map((archive) => (
+            <TankoubonArchiveListItem
+              key={archive.arcid}
+              archive={archive}
+              isRemoving={isRemovingArchiveId === archive.arcid}
+              onEdit={onArchiveEdit!}
+              onRemove={onArchiveRemove!}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  ) : null;
+  const mobileToggle = showSidebar && isMobile ? (
+    <div className="flex items-center justify-between border-b px-4 py-2.5">
+      <span className="text-sm font-medium">
+        {mobileView === 'list' ? t('tankoubon.archiveList') : t('tankoubon.editTankoubon')}
+      </span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">{t('tankoubon.showArchiveList')}</span>
+        <Switch
+          checked={mobileView === 'form'}
+          onCheckedChange={(checked) => setMobileView(checked ? 'form' : 'list')}
+          aria-label={t('tankoubon.showEditForm')}
+        />
+        <span className="text-xs text-muted-foreground">{t('tankoubon.showEditForm')}</span>
+      </div>
+    </div>
+  ) : null;
+
+  const formContent = (
+    <div className="space-y-4">
+      {showAssetFields ? (
+        <MetadataAssetsEditor
+          t={t}
+          title={title}
+          disabled={isSaving || isMetadataPluginRunning}
+          coverAssetId={assetCoverId}
+          onCoverAssetIdChange={onAssetCoverIdChange}
+          backdropAssetId={assetBackdropId}
+          onBackdropAssetIdChange={onAssetBackdropIdChange}
+          clearlogoAssetId={assetClearlogoId}
+          onClearlogoAssetIdChange={onAssetClearlogoIdChange}
+          coverValue={assetCoverValue}
+          backdropValue={assetBackdropValue}
+          clearlogoValue={assetClearlogoValue}
+          onUploadCover={() => {
+            void onUploadAssetCover?.();
+          }}
+          onUploadBackdrop={() => {
+            void onUploadAssetBackdrop?.();
+          }}
+          onUploadClearlogo={() => {
+            void onUploadAssetClearlogo?.();
+          }}
+          uploadingCover={uploadingAssetCover}
+          uploadingBackdrop={uploadingAssetBackdrop}
+          uploadingClearlogo={uploadingAssetClearlogo}
+        />
+      ) : null}
+      <div>
+        <label className="text-sm font-medium">{titleLabel || t('archive.titleField')}</label>
+        <Input value={title} onChange={(e) => onTitleChange(e.target.value)} disabled={isSaving} />
+      </div>
+      <div>
+        <label className="text-sm font-medium">{summaryLabel || t('archive.summary')}</label>
+        <Textarea
+          value={summary}
+          onChange={(e) => onSummaryChange(e.target.value)}
+          placeholder={summaryPlaceholder || t('archive.summaryPlaceholder')}
+          rows={3}
+          disabled={isSaving}
+        />
+      </div>
+      {showMetadataPlugin ? (
+        <div>
+          <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="sm:w-[220px]">
+                <Select value={selectedMetadataPlugin} onValueChange={(next) => onSelectedMetadataPluginChange?.(next)}>
+                  <SelectTrigger disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0}>
+                    <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {metadataPlugins.map((p) => (
+                      <SelectItem key={p.namespace} value={p.namespace}>
+                        {p.name} ({p.namespace})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                value={metadataPluginParam}
+                onChange={(e) => onMetadataPluginParamChange?.(e.target.value)}
+                disabled={isSaving || isMetadataPluginRunning}
+                placeholder={t('archive.metadataPluginParamPlaceholder')}
+              />
+              <Button
+                type="button"
+                onClick={() => {
+                  void onRunMetadataPlugin?.();
+                }}
+                disabled={
+                  isSaving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin || !onRunMetadataPlugin
+                }
+              >
+                <Play className="w-4 h-4 mr-2" />
+                {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
+              </Button>
+            </div>
+            {(metadataPluginProgress !== null || metadataPluginMessage) && (
+              <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                <span className="truncate" title={metadataPluginMessage}>
+                  {metadataPluginMessage || ''}
+                </span>
+                {metadataPluginProgress !== null && (
+                  <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
+                )}
+              </div>
+            )}
+            {metadataPlugins.length === 0 && (
+              <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+      <div>
+        <label className="text-sm font-medium">{tagsLabel || t('archive.tags')}</label>
+        <TagInput value={tags} onChange={onTagsChange} placeholder={tagsPlaceholder || t('archive.tagsPlaceholder')} disabled={isSaving} />
+      </div>
+    </div>
+  );
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
-          <DialogBody>
-            <div className="space-y-4">
-              {showAssetFields ? (
-                <MetadataAssetsEditor
-                  t={t}
-                  title={title}
-                  disabled={isSaving || isMetadataPluginRunning}
-                  coverAssetId={assetCoverId}
-                  onCoverAssetIdChange={onAssetCoverIdChange}
-                  backdropAssetId={assetBackdropId}
-                  onBackdropAssetIdChange={onAssetBackdropIdChange}
-                  clearlogoAssetId={assetClearlogoId}
-                  onClearlogoAssetIdChange={onAssetClearlogoIdChange}
-                  coverValue={assetCoverValue}
-                  backdropValue={assetBackdropValue}
-                  clearlogoValue={assetClearlogoValue}
-                  onUploadCover={() => {
-                    void onUploadAssetCover?.();
-                  }}
-                  onUploadBackdrop={() => {
-                    void onUploadAssetBackdrop?.();
-                  }}
-                  onUploadClearlogo={() => {
-                    void onUploadAssetClearlogo?.();
-                  }}
-                  uploadingCover={uploadingAssetCover}
-                  uploadingBackdrop={uploadingAssetBackdrop}
-                  uploadingClearlogo={uploadingAssetClearlogo}
-                />
-              ) : null}
-              <div>
-                <label className="text-sm font-medium">{titleLabel || t('archive.titleField')}</label>
-                <Input value={title} onChange={(e) => onTitleChange(e.target.value)} disabled={isSaving} />
-              </div>
-              <div>
-                <label className="text-sm font-medium">{summaryLabel || t('archive.summary')}</label>
-                <Textarea
-                  value={summary}
-                  onChange={(e) => onSummaryChange(e.target.value)}
-                  placeholder={summaryPlaceholder || t('archive.summaryPlaceholder')}
-                  rows={3}
-                  disabled={isSaving}
-                />
-              </div>
-              {showMetadataPlugin ? (
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
-                  <div className="mt-2 flex flex-col gap-2">
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="sm:w-[220px]">
-                        <Select value={selectedMetadataPlugin} onValueChange={(next) => onSelectedMetadataPluginChange?.(next)}>
-                          <SelectTrigger disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0}>
-                            <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {metadataPlugins.map((p) => (
-                              <SelectItem key={p.namespace} value={p.namespace}>
-                                {p.name} ({p.namespace})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Input
-                        value={metadataPluginParam}
-                        onChange={(e) => onMetadataPluginParamChange?.(e.target.value)}
-                        disabled={isSaving || isMetadataPluginRunning}
-                        placeholder={t('archive.metadataPluginParamPlaceholder')}
-                      />
-                      <Button
-                        type="button"
-                        onClick={() => {
-                          void onRunMetadataPlugin?.();
-                        }}
-                        disabled={
-                          isSaving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin || !onRunMetadataPlugin
-                        }
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
-                      </Button>
-                    </div>
-                    {(metadataPluginProgress !== null || metadataPluginMessage) && (
-                      <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
-                        <span className="truncate" title={metadataPluginMessage}>
-                          {metadataPluginMessage || ''}
-                        </span>
-                        {metadataPluginProgress !== null && (
-                          <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
-                        )}
-                      </div>
-                    )}
-                    {metadataPlugins.length === 0 && (
-                      <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
-                    )}
-                  </div>
+        <DialogContent
+          size={dialogSize}
+          style={showSidebar ? { width: 'min(94vw, 1080px)', maxWidth: '1080px', height: '82vh' } : undefined}
+        >
+          {showSidebar && !isMobile ? (
+            <DialogBody className="h-full min-h-0 flex-1 overflow-hidden p-0">
+              <div className="flex h-full max-h-full min-h-0 gap-0 overflow-hidden">
+                <div className="h-full max-h-full min-h-0 min-w-0 flex-1 overflow-y-scroll px-0 py-5">
+                  {formContent}
                 </div>
-              ) : null}
-              <div>
-                <label className="text-sm font-medium">{tagsLabel || t('archive.tags')}</label>
-                <TagInput value={tags} onChange={onTagsChange} placeholder={tagsPlaceholder || t('archive.tagsPlaceholder')} disabled={isSaving} />
+                <aside className="h-full max-h-full min-h-0 w-80 shrink-0 overflow-y-scroll border-l">
+                  {sidebarContent}
+                </aside>
               </div>
-            </div>
-          </DialogBody>
+            </DialogBody>
+          ) : showSidebar && isMobile ? (
+            <DialogBody className="p-0 overflow-hidden">
+              <div className="flex h-full min-h-0 flex-col">
+                {mobileToggle}
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {mobileView === 'list' ? (
+                    sidebarContent
+                  ) : (
+                    <div className="px-5 py-5">{formContent}</div>
+                  )}
+                </div>
+              </div>
+            </DialogBody>
+          ) : (
+            <DialogBody className="pt-0 space-y-4">
+              {formContent}
+            </DialogBody>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
               {t('common.cancel')}
@@ -276,13 +409,13 @@ export function ArchiveMetadataEditDialog({
                             loading="lazy"
                           />
                         ) : null}
-                        <div className="min-w-0 flex-1 text-left">
-                          <div className="font-medium whitespace-normal wrap-break-word">{opt.label || `候选 ${opt.index + 1}`}</div>
-                          {opt.description ? (
-                            <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
-                          ) : null}
+                          <div className="min-w-0 flex-1 text-left">
+                            <div className="font-medium whitespace-normal wrap-break-word">{opt.label || `候选 ${opt.index + 1}`}</div>
+                            {opt.description ? (
+                              <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
+                            ) : null}
+                          </div>
                         </div>
-                      </div>
                     </Button>
                   ))}
                 </div>

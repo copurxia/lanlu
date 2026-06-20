@@ -83,7 +83,8 @@ const DialogContent: React.FC<{
   size?: DialogSize
   overlayClassName?: string
   showOverlay?: boolean
-}> = ({ className, children, size = 'md', overlayClassName, showOverlay = true }) => {
+  style?: React.CSSProperties
+}> = ({ className, children, size = 'md', overlayClassName, showOverlay = true, style }) => {
   const { open, onOpenChange, titleId, descriptionId } = useDialogContext()
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
@@ -166,6 +167,7 @@ const DialogContent: React.FC<{
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
+        style={style}
         className={cn(
           "relative z-modal-content w-full border border-white/22 dark:border-white/12 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl shadow-[0_18px_45px_rgba(15,23,42,0.18)] overflow-hidden flex flex-col",
           "transition-[transform,opacity] duration-200 ease-out will-change-transform motion-reduce:transition-none",
@@ -195,7 +197,7 @@ const DialogBody: React.FC<{ className?: string; children: React.ReactNode }> = 
   className,
   children
 }) => (
-  <div className={cn("flex-1 overflow-y-auto px-4 sm:px-6 py-5", className)}>
+  <div className={cn("flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-5", className)}>
     {children}
   </div>
 )

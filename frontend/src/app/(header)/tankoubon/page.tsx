@@ -2126,6 +2126,20 @@ function TankoubonDetailContent() {
             onAbort: abortRpcSelect,
             onSubmit: submitRpcSelect,
           }}
+          archives={archives}
+          onArchiveEdit={(archive) => {
+            router.push(
+              archive.arcid.startsWith('source:')
+                ? `/archive?id=${encodeURIComponent(archive.arcid)}`
+                : `/archive?id=${archive.arcid}`
+            );
+          }}
+          onArchiveRemove={(archive) => {
+            setRemoveTarget(archive);
+            setRemoveDialogOpen(true);
+          }}
+          isRemovingArchiveId={removingArcids.size > 0 ? Array.from(removingArcids)[0] : null}
+          archiveMetadataPatches={metadataArchivePatches}
         />
 
         {/* Delete Confirmation Dialog */}
