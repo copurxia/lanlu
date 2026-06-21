@@ -17,9 +17,9 @@ RUN set -eux; \
     libvips-dev libheif-dev librocksdb-dev; \
   rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
+# Install Node.js 24 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
 RUN set -eux; \
-  NODE_VERSION="20.20.0"; \
+  NODE_VERSION="24.14.1"; \
   arch="$(dpkg --print-architecture)"; \
   case "$arch" in \
     amd64) node_arch="x64" ;; \
@@ -32,9 +32,9 @@ RUN set -eux; \
   node -v; \
   npm -v
 
-# Install pnpm via npm (corepack has ESM import bug on Node.js 20.20.0).
+# Install pnpm via npm.
 RUN set -eux; \
-  npm install -g pnpm@10.27.0; \
+  npm install -g pnpm@10.33.0; \
   pnpm -v
 
 # Install xmake using the official installer (tracks upstream; no pinned version).
