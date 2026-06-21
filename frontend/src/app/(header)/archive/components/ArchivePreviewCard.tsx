@@ -324,7 +324,7 @@ export function ArchivePreviewCard({
   }, [metadata.arcid, metadata.archivetype, t]);
 
   return (
-    <div>
+    <div className="min-w-0 overflow-hidden">
       {/* View mode toggles positioned inline */}
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-muted-foreground">{t('archive.paginationInfo')}</span>
@@ -374,7 +374,7 @@ export function ArchivePreviewCard({
         </div>
       </div>
 
-      <CardContent className="!p-0 space-y-4">
+      <CardContent className="!p-0 space-y-4 min-w-0">
         {previewLoading ? (
           <div className="flex items-center justify-center py-0">
             <p className="text-muted-foreground">{t('common.loading')}</p>
@@ -388,7 +388,7 @@ export function ArchivePreviewCard({
             <p className="text-muted-foreground">{t('archive.noPreviewPages')}</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0">
             {previewViewMode === 'thumbnails' ? (
               <MasonryThumbnailGrid
                 pages={pages}
