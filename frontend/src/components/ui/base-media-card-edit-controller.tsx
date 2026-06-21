@@ -73,6 +73,7 @@ export function BaseMediaCardEditController({
   const [metadataPluginMessage, setMetadataPluginMessage] = React.useState('')
   const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<TankoubonMemberMetadataPatch[]>([])
   const [metadataPreviewPages, setMetadataPreviewPages] = React.useState<MetadataPagePatch[]>([])
+  const [archivePages, setArchivePages] = React.useState<MetadataPagePatch[]>([])
   const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
   const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
   const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
@@ -137,11 +138,33 @@ export function BaseMediaCardEditController({
     ;(async () => {
       try {
         if (type === 'archive') {
-          const meta = await ArchiveService.getMetadata(id)
+          const meta = await ArchiveService.getMetadata(id, undefined, { includePages: true })
           if (cancelled) return
           setEditAssetCoverId(String(getCoverAssetId(meta) || ''))
           setEditAssetBackdropId(String(meta.assets?.backdrop || ''))
           setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''))
+          if (meta.pages && meta.pages.length > 0) {
+            const resolvedPages = meta.pages.map((p) => {
+              // Layer 1: page.thumb is a metadata asset reference
+              let thumbUrl = ''
+              const rawThumb = (p.thumb || '').trim()
+              if (rawThumb) {
+                if (/^\d+$/.test(rawThumb)) {
+                  // Pure digits → asset ID
+                  thumbUrl = `/api/assets/${rawThumb}`
+                } else if (rawThumb.startsWith('/api/') || rawThumb.startsWith('http')) {
+                  // Already a valid URL
+                  thumbUrl = rawThumb
+                }
+              }
+              // Layer 2: fallback to entry_path (page file) as image source
+              if (!thumbUrl && p.entry_path) {
+                thumbUrl = ArchiveService.getPageUrl(id, p.entry_path)
+              }
+              return { ...p, thumb: thumbUrl || undefined }
+            })
+            setArchivePages(resolvedPages)
+          }
           return
         }
 
@@ -566,6 +589,12 @@ export function BaseMediaCardEditController({
         onAbort: abortRpcSelect,
         onSubmit: submitRpcSelect,
       }}
+      pages={type === 'archive' ? archivePages : undefined}
+      previewPages={type === 'archive' ? metadataPreviewPages : undefined}
+      onPageEdit={undefined}
+      onPageRemove={type === 'archive' ? (page) => {
+        setMetadataPreviewPages((prev) => prev.filter((p) => p.page_number !== page.page_number && p.title !== page.title))
+      } : undefined}
     />
   )
 }

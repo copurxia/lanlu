@@ -12,10 +12,12 @@ import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTi
 import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
 import { RawImage } from '@/components/ui/raw-image';
 import { TankoubonArchiveListItem } from '@/components/tankoubon/TankoubonArchiveListItem';
+import { PageListItem } from '@/components/archive/PageListItem';
 import { useMediaQuery } from '@/components/ui/unified-menu/hooks/use-media-query';
 import type { Plugin } from '@/lib/services/plugin-service';
 import type { RpcSelectRequest } from '@/types/metadata-plugin';
 import type { Archive } from '@/types/archive';
+import type { MetadataPagePatch } from '@/types/archive';
 import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon';
 export type { RpcSelectOption, RpcSelectRequest } from '@/types/metadata-plugin';
 
@@ -78,6 +80,10 @@ type Props = {
   onArchiveRemove?: (archive: Archive) => void;
   isRemovingArchiveId?: string | null;
   archiveMetadataPatches?: TankoubonMemberMetadataPatch[];
+  pages?: MetadataPagePatch[];
+  previewPages?: MetadataPagePatch[];
+  onPageEdit?: (page: MetadataPagePatch) => void;
+  onPageRemove?: (page: MetadataPagePatch) => void;
 };
 
 const MOBILE_BREAKPOINT = '(max-width: 767px)';
@@ -132,12 +138,18 @@ export function ArchiveMetadataEditDialog({
   onArchiveRemove,
   isRemovingArchiveId,
   archiveMetadataPatches = [],
+  pages,
+  previewPages,
+  onPageEdit,
+  onPageRemove,
 }: Props) {
   const isMobile = useMediaQuery(MOBILE_BREAKPOINT);
   const [mobileView, setMobileView] = useState<'list' | 'form'>('form');
-  const showSidebar = Boolean(
+  const showArchiveSidebar = Boolean(
     archives && archives.length > 0 && (onArchiveEdit || onArchiveRemove)
   );
+  const showPagesSidebar = Boolean(pages && pages.length > 0 && !archives);
+  const showSidebar = showArchiveSidebar || showPagesSidebar;
 
   const displayedArchives = useMemo(() => {
     if (!archives || archives.length === 0) return archives;
@@ -175,7 +187,7 @@ export function ArchiveMetadataEditDialog({
   }, [archives, archiveMetadataPatches]);
   const dialogSize = showSidebar ? 'xl' : 'md';
 
-  const sidebarContent = showSidebar ? (
+  const archiveSidebarContent = showArchiveSidebar ? (
     <div className="flex h-full flex-col">
       <div className="border-b px-4 py-3">
         <h3 className="font-semibold">{t('tankoubon.archiveList')}</h3>
@@ -198,6 +210,38 @@ export function ArchiveMetadataEditDialog({
       </div>
     </div>
   ) : null;
+
+  const pageSidebarContent = showPagesSidebar ? (
+    <div className="flex h-full flex-col">
+      <div className="border-b px-4 py-3">
+        <h3 className="font-semibold">{t('archive.pageMetadata')}</h3>
+        <p className="text-xs text-muted-foreground">
+          {pages!.length} {t('archive.pages').replace('{count}', '')}
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2">
+        <div className="space-y-1">
+          {(() => {
+            const source = previewPages && previewPages.length > 0 ? previewPages : pages!;
+            const sorted = [...source].sort((a, b) => {
+              const aOrder = typeof a.order_index === 'number' ? a.order_index : 999999;
+              const bOrder = typeof b.order_index === 'number' ? b.order_index : 999999;
+              if (aOrder !== bOrder) return aOrder - bOrder;
+              const aNum = typeof a.page_number === 'number' ? a.page_number : 999999;
+              const bNum = typeof b.page_number === 'number' ? b.page_number : 999999;
+              return aNum - bNum;
+            });
+            return sorted.map((page, i) => (
+              <PageListItem key={`${page.page_number ?? i}`} page={page} index={i} onEdit={onPageEdit} onRemove={onPageRemove} />
+            ));
+          })()}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const sidebarContent = showArchiveSidebar ? archiveSidebarContent : pageSidebarContent;
+  const sidebarLabel = showArchiveSidebar ? t('tankoubon.archiveList') : t('archive.pageMetadata');
   const mobileToggle = showSidebar && isMobile ? (
     <Tabs
       value={mobileView}
@@ -209,13 +253,13 @@ export function ArchiveMetadataEditDialog({
           value="list"
           className="h-full flex-1 rounded-sm px-4 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-xs"
         >
-          {t('tankoubon.archiveList')}
+          {sidebarLabel}
         </TabsTrigger>
         <TabsTrigger
           value="form"
           className="h-full flex-1 rounded-sm px-4 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-xs"
         >
-          {t('tankoubon.editTankoubon')}
+          {t('common.edit')}
         </TabsTrigger>
       </TabsList>
     </Tabs>

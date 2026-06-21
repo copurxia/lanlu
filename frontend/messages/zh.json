@@ -268,6 +268,8 @@
     "tagsPlaceholder": "请输入标签，用逗号分隔",
     "summary": "摘要",
     "summaryPlaceholder": "请输入档案摘要",
+    "pageMetadata": "页面元数据",
+    "pageCount": "{count} 页",
     "assets": "资源",
     "assetCoverLabel": "封面",
     "assetBackdropLabel": "背景",

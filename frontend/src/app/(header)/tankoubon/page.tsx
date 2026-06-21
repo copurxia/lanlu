@@ -55,6 +55,7 @@ import { buildReaderPath } from '@/lib/utils/reader';
 import { parseSourceId } from '@/lib/utils/source-id-utils';
 import { cn } from '@/lib/utils/utils';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
+import { BaseMediaCardEditController } from '@/components/ui/base-media-card-edit-controller';
 import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
 import { ArrowLeft, Check, Download, Edit, RotateCcw, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, Square, X, ExternalLink, LayoutGrid, List, Eye, Minus } from 'lucide-react';
 import type { Tankoubon, TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
@@ -386,6 +387,9 @@ function TankoubonDetailContent() {
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Archive | null>(null);
   const [removingArcids, setRemovingArcids] = useState<Set<string>>(new Set());
+
+  // Edit archive state (from collection edit sidebar)
+  const [editingArchive, setEditingArchive] = useState<Archive | null>(null);
 
   // Add archive dialog state
   const [addArchiveDialogOpen, setAddArchiveDialogOpen] = useState(false);
@@ -2127,13 +2131,7 @@ function TankoubonDetailContent() {
             onSubmit: submitRpcSelect,
           }}
           archives={archives}
-          onArchiveEdit={(archive) => {
-            router.push(
-              archive.arcid.startsWith('source:')
-                ? `/archive?id=${encodeURIComponent(archive.arcid)}`
-                : `/archive?id=${archive.arcid}`
-            );
-          }}
+          onArchiveEdit={setEditingArchive}
           onArchiveRemove={(archive) => {
             setRemoveTarget(archive);
             setRemoveDialogOpen(true);
@@ -2141,6 +2139,24 @@ function TankoubonDetailContent() {
           isRemovingArchiveId={removingArcids.size > 0 ? Array.from(removingArcids)[0] : null}
           archiveMetadataPatches={metadataArchivePatches}
         />
+
+        {editingArchive && (
+          <BaseMediaCardEditController
+            id={editingArchive.arcid}
+            type="archive"
+            initialTitle={editingArchive.title}
+            initialSummary={editingArchive.description}
+            initialTags={editingArchive.tags}
+            thumbnailAssetId={getCoverAssetId(editingArchive)}
+            onOpenChange={(open) => {
+              if (!open) setEditingArchive(null);
+            }}
+            onSaved={() => {
+              setEditingArchive(null);
+              fetchArchives();
+            }}
+          />
+        )}
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
