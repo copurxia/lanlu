@@ -966,7 +966,7 @@ function HomePageContent() {
 
               {archives.length > 0 ? (
                 <>
-                  <div className={centeredFeedClassName || undefined}>
+                  <div className={centeredFeedClassName || 'overflow-x-hidden'}>
                     {homeViewMode === 'masonry' ? (
                       <HomeMediaMasonry items={archives} scrollContainerRef={mainScrollRef} {...selectionProps} />
                     ) : homeViewMode === 'list' ? (
