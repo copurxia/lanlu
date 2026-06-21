@@ -20,7 +20,7 @@ export function DetailContentGrid({
 }: DetailContentGridProps) {
   return (
     <div className={cn('detail-content-grid', className)}>
-      <div className={cn('grid gap-7 min-w-0', mainClassName)}>{main}</div>
+      <div className={cn('grid grid-cols-1 gap-7 min-w-0', mainClassName)}>{main}</div>
       <aside
         className={cn(
           'grid gap-6 content-start',

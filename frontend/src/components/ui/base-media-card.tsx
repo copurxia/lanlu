@@ -288,7 +288,6 @@ export function BaseMediaCard({
             : {
                 contentVisibility: 'auto',
                 containIntrinsicSize: '220px 420px',
-                minWidth: 0,
               }),
         }}
         title={hoverTitleParts.length > 0 ? `${displayTitle}\n${hoverTitleParts.join('\n')}` : displayTitle}

@@ -596,7 +596,7 @@ export function ArchiveDetailContent() {
                 ) : null}
 
                 {relatedLoading || relatedArchives.length > 0 ? (
-                  <section className="rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
+                  <section className="rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent min-w-0">
                     <div className="mb-4">
                       <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
                       <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>
