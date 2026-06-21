@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { HomeBatchActionBar, type BatchActionBarItem } from '@/components/home/HomeBatchActionBar';
 import { Button } from '@/components/ui/button';
@@ -12,7 +11,14 @@ import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { DetailHeroLayout } from '@/components/detail/DetailHeroLayout';
+import { DetailContentGrid } from '@/components/detail/DetailContentGrid';
+import { DetailSectionCard } from '@/components/detail/DetailSectionCard';
+import { DetailActionPanel } from '@/components/detail/DetailActionPanel';
+import { CollapsibleTagRow } from '@/components/detail/CollapsibleTagRow';
+import { ArchiveTagGroups } from '@/app/(header)/archive/components/ArchiveTagGroups';
+import { DetailInfoList } from '@/components/detail/DetailInfoList';
+import { TankoubonMobileActions } from '@/components/tankoubon/TankoubonMobileActions';
 import {
   Dialog,
   DialogBody,
@@ -57,7 +63,7 @@ import { cn } from '@/lib/utils/utils';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { BaseMediaCardEditController } from '@/components/ui/base-media-card-edit-controller';
 import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
-import { ArrowLeft, Check, Download, Edit, RotateCcw, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, Square, X, ExternalLink, LayoutGrid, List, Eye, Minus } from 'lucide-react';
+import { ArrowLeft, Check, Download, Edit, RotateCcw, Trash2, Plus, BookOpen, Heart, Search, Square, X, ExternalLink, LayoutGrid, List, Eye, Minus } from 'lucide-react';
 import type { Tankoubon, TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import type { RecommendationItemType } from '@/types/recommendation';
@@ -309,7 +315,8 @@ function TankoubonDetailContent() {
   const { t, language } = useLanguage();
   const { success, error: showError } = useToast();
   const { confirm } = useConfirmContext();
-  const { user } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
   const searchParams = useSearchParams();
   const router = useRouter();
   const tankoubonId = searchParams?.get('id') ?? null;
@@ -325,7 +332,6 @@ function TankoubonDetailContent() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -1621,260 +1627,121 @@ function TankoubonDetailContent() {
     ? `/api/assets/${coverAssetId}`
     : '';
   const backdropUrl = backdropAssetId ? `/api/assets/${backdropAssetId}` : '';
+  const clearlogoAssetId = getArchiveAssetId(tankoubon, 'clearlogo');
+  const clearlogoUrl = clearlogoAssetId ? `/api/assets/${clearlogoAssetId}` : '';
 
   return (
     <div className="relative min-h-dvh bg-background pb-20 lg:pb-0">
-      {backdropUrl ? (
-        <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-          <Image src={backdropUrl} alt="" fill className="object-cover opacity-30" unoptimized />
-          <div className="absolute inset-0 bg-linear-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+      {/* Top-only backdrop, fading into the page background (mirrors the prototype).
+          Falls back to the cover image when no backdrop is available. */}
+      {backdropUrl || coverUrl ? (
+        <div className="detail-backdrop" aria-hidden="true">
+          <Image
+            src={backdropUrl || coverUrl}
+            alt=""
+            fill
+            className="object-cover saturate-110"
+            style={{ filter: 'blur(1px)' }}
+            sizes="100vw"
+            unoptimized
+          />
+          <div className="detail-backdrop-overlay" />
         </div>
       ) : null}
       <main className="relative z-10 container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
-        {/* Header / hero */}
-        <div className="relative mb-8">
-          <div className="relative rounded-2xl border-none bg-transparent shadow-none dark:bg-transparent">
-            <div className="p-0">
-              {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
-              <div className="sm:hidden absolute right-4 top-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 w-9 p-0"
-                  aria-label={t('common.actions')}
-                  onClick={() => setMobileActionsOpen(true)}
-                >
-                  <MoreHorizontal className="w-4 h-4" />
-                </Button>
+        <DetailHeroLayout
+          className="mb-8"
+          cover={
+            coverUrl ? (
+              <Image
+                src={coverUrl}
+                alt={tankoubon.title || ''}
+                fill
+                className="object-cover"
+                sizes="(max-width: 640px) 112px, (max-width: 1024px) 164px, 232px"
+                unoptimized
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                {t('archive.noCover')}
               </div>
-
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div className="flex min-w-0 gap-4">
-                  <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border-none bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
-                    {coverUrl ? (
-                      <Image
-                        src={coverUrl}
-                        alt={tankoubon.title || ''}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
-                        unoptimized
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-                        {t('archive.noCover')}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Badge className="bg-primary">
-                      <BookOpen className="w-3 h-3 mr-1" />
-                      {t('tankoubon.collection')}
-                    </Badge>
-                    <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight wrap-break-word">
-                      {tankoubon.title}
-                    </h1>
-                  </div>
-
-                  {/* Keep stats directly under title on all screen sizes (same as mobile). */}
-                  <div className="mt-2">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      <span className="tabular-nums">
-                        {t('tankoubon.archiveCount')} {archiveCount}
-                      </span>
-                      <span className="text-muted-foreground/60">•</span>
-                      <span className="tabular-nums">
-                        {t('tankoubon.totalPagesLabel')} {totalPages}
-                      </span>
-                      <span className="text-muted-foreground/60">•</span>
-                      <span className="tabular-nums">
-                        {t('tankoubon.progress')} {progressPercent}%
-                      </span>
-                    </div>
-                    {progressPercent > 0 ? (
-                      <Progress className="mt-2 h-1.5" value={progressPercent} />
-                    ) : null}
-                  </div>
-
-                  <div className="hidden sm:inline-flex mt-4 w-fit flex-wrap items-center justify-start gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                      disabled={favoriteLoading}
-                      onClick={handleFavoriteClick}
-                    >
-                      <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      title={t('common.edit')}
-                      onClick={() => setEditDialogOpen(true)}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0 text-destructive"
-                      title={t('common.delete')}
-                      onClick={() => setDeleteDialogOpen(true)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-
-                  {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
-                  <div className="hidden sm:block">
-                    {tankoubon.description ? (
-                      <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-2">
-                        {tankoubon.description}
-                      </p>
-                    ) : null}
-
-                    {allTags.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {allTags.map((tag, index) => renderTagBadge(tag, index))}
-                      </div>
-                    ) : null}
-                  </div>
-                  </div>
+            )
+          }
+          badges={
+            <Badge className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <BookOpen className="w-3 h-3 mr-1" />
+              {t('tankoubon.collection')}
+            </Badge>
+          }
+          title={tankoubon.title}
+          meta={
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="tabular-nums">
+                {t('tankoubon.archiveCount')} {archiveCount}
+              </span>
+              <span className="text-muted-foreground/60">•</span>
+              <span className="tabular-nums">
+                {t('tankoubon.totalPagesLabel')} {totalPages}
+              </span>
+              <span className="text-muted-foreground/60">•</span>
+              <span className="tabular-nums">
+                {t('tankoubon.progress')} {progressPercent}%
+              </span>
+              {progressPercent > 0 ? (
+                <div className="w-full">
+                  <Progress className="mt-2 h-1.5" value={progressPercent} />
                 </div>
-
-                {/* Desktop/tablet actions; mobile actions are in the sheet. */}
-                <div className="hidden">
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                      disabled={favoriteLoading}
-                      onClick={handleFavoriteClick}
-                    >
-                      <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      title={t('common.edit')}
-                      onClick={() => setEditDialogOpen(true)}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0 text-destructive"
-                      title={t('common.delete')}
-                      onClick={() => setDeleteDialogOpen(true)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-
-                </div>
-                </div>
-
-              {/* Mobile: summary/tags span full width (avoid an empty left column under the cover). */}
-              <div className="sm:hidden w-full">
-                {tankoubon.description ? (
-                  <p className="text-sm text-muted-foreground max-w-3xl line-clamp-2">
-                    {tankoubon.description}
-                  </p>
-                ) : null}
-
-                {allTags.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2 w-full">
-                    {allTags.map((tag, index) => renderTagBadge(tag, index))}
-                  </div>
-                ) : null}
-              </div>
-
-
+              ) : null}
             </div>
-          </div>
-        </div>
+          }
+          description={tankoubon.description || undefined}
+          tags={allTags.length > 0 ? <CollapsibleTagRow items={allTags.map((tag, index) => renderTagBadge(tag, index))} /> : undefined}
+          clearlogoUrl={clearlogoUrl || undefined}
+          clearlogoAlt={tankoubon.title || ''}
+          actions={
+            <DetailActionPanel
+              primary={{
+                label: t('tankoubon.addArchive'),
+                icon: <Plus className="w-4 h-4" />,
+                onClick: () => setAddArchiveDialogOpen(true),
+              }}
+              actions={[
+                {
+                  id: 'favorite',
+                  icon: <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />,
+                  title: isFavorite ? t('common.unfavorite') : t('common.favorite'),
+                  onClick: handleFavoriteClick,
+                  disabled: favoriteLoading,
+                  className: isFavorite ? 'text-red-500 border-red-500' : '',
+                },
+                {
+                  id: 'edit',
+                  icon: <Edit className="w-4 h-4" />,
+                  title: t('common.edit'),
+                  onClick: () => setEditDialogOpen(true),
+                },
+                {
+                  id: 'delete',
+                  icon: <Trash2 className="w-4 h-4" />,
+                  title: t('common.delete'),
+                  onClick: () => setDeleteDialogOpen(true),
+                  destructive: true,
+                },
+              ]}
+            />
+          }
+        />
 
-        <Sheet open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
-          <SheetContent
-            side="bottom"
-            className="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-h-[85vh] overflow-y-auto rounded-t-xl sm:hidden"
-          >
-            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" />
-            <SheetHeader className="mb-3">
-              <SheetTitle>{t('common.actions')}</SheetTitle>
-              <div className="text-sm text-muted-foreground line-clamp-2">{tankoubon.title}</div>
-            </SheetHeader>
-
-            <div className="space-y-2">
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => {
-                  setAddArchiveDialogOpen(true);
-                  setMobileActionsOpen(false);
-                }}
+        <DetailContentGrid
+          main={
+            <>
+              <DetailSectionCard
+                title={t('tankoubon.archivesTitle')}
+                variant="transparent"
               >
-                <Plus className="w-4 h-4 mr-2" />
-                {t('tankoubon.addArchive')}
-              </Button>
-
-              <Button
-                variant="outline"
-                className={`w-full justify-start ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                onClick={async () => {
-                  await handleFavoriteClick();
-                  setMobileActionsOpen(false);
-                }}
-                disabled={favoriteLoading}
-              >
-                <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current' : ''}`} />
-                {favoriteLoading ? t('common.loading') : isFavorite ? t('common.unfavorite') : t('common.favorite')}
-              </Button>
-
-              <Button
-                variant="outline"
-                className="w-full justify-start"
-                onClick={() => {
-                  setEditDialogOpen(true);
-                  setMobileActionsOpen(false);
-                }}
-              >
-                <Edit className="w-4 h-4 mr-2" />
-                {t('common.edit')}
-              </Button>
-
-              <Button
-                variant="destructive"
-                className="w-full justify-start"
-                onClick={() => {
-                  setDeleteDialogOpen(true);
-                  setMobileActionsOpen(false);
-                }}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                {t('common.delete')}
-              </Button>
-
-              <Button variant="outline" className="w-full justify-start" onClick={() => setMobileActionsOpen(false)}>
-                <X className="w-4 h-4 mr-2" />
-                {t('common.close')}
-              </Button>
-            </div>
-          </SheetContent>
-        </Sheet>
-
-        {/* Archives section */}
+                {/* Archives toolbar */}
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold">{t('tankoubon.archivesTitle')}</h2>
             <Badge variant="secondary" className="tabular-nums">
               {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
             </Badge>
@@ -1934,7 +1801,7 @@ function TankoubonDetailContent() {
           <div className="space-y-4">
             <div
               ref={archiveGridRef}
-              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4"
+              className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 3xl:grid-cols-5 gap-4"
             >
               {filteredArchives.map((archive, index) => {
                 const isRemoving = removingArcids.has(archive.arcid);
@@ -2021,8 +1888,9 @@ function TankoubonDetailContent() {
             })}
           </div>
         )}
+              </DetailSectionCard>
 
-        {(relatedLoading || relatedTankoubons.length > 0) ? (
+              {(relatedLoading || relatedTankoubons.length > 0) ? (
           <section className="mt-8 rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
             <div className="mb-4">
               <h2 className="text-lg font-semibold">{t('tankoubon.relatedTitle')}</h2>
@@ -2055,6 +1923,39 @@ function TankoubonDetailContent() {
             )}
           </section>
         ) : null}
+            </>
+          }
+          side={
+            <>
+              {allTags.length > 0 ? (
+                <DetailSectionCard title={t('archive.tagsAndMetadata') || '标签与元数据'} variant="glass">
+                  <ArchiveTagGroups tags={allTags} renderTag={(tag) => renderTagBadge(tag, 0)} />
+                </DetailSectionCard>
+              ) : null}
+              <DetailSectionCard title={t('archive.basicInfo')} variant="glass">
+                <DetailInfoList
+                  items={[
+                    { label: t('tankoubon.name'), value: tankoubon.title },
+                    { label: t('tankoubon.archiveCount'), value: archiveCount },
+                    { label: t('tankoubon.totalPagesLabel'), value: totalPages },
+                    {
+                      label: t('archive.createdAt'),
+                      value: tankoubon.created_at
+                        ? new Date(tankoubon.created_at).toLocaleDateString()
+                        : t('archive.unknown'),
+                    },
+                    {
+                      label: t('archive.updatedAt'),
+                      value: tankoubon.updated_at
+                        ? new Date(tankoubon.updated_at).toLocaleDateString()
+                        : t('archive.unknown'),
+                    },
+                  ]}
+                />
+              </DetailSectionCard>
+            </>
+          }
+        />
 
         <ConfirmDialog
           open={removeDialogOpen}
@@ -2266,7 +2167,19 @@ function TankoubonDetailContent() {
         />
       ) : null}
 
-      <MobileBottomNav />
+      <TankoubonMobileActions
+        tankoubon={tankoubon}
+        t={t}
+        isAuthenticated={isAuthenticated}
+        isAdmin={isAdmin}
+        isFavorite={isFavorite}
+        favoriteLoading={favoriteLoading}
+        deleteLoading={deleting}
+        onFavoriteClick={handleFavoriteClick}
+        onEdit={() => setEditDialogOpen(true)}
+        onDelete={handleDelete}
+        onAddArchive={() => setAddArchiveDialogOpen(true)}
+      />
     </div>
   );
 }
@@ -2280,7 +2193,6 @@ export default function TankoubonDetailPage() {
             <Spinner size="lg" />
           </div>
         </main>
-        <MobileBottomNav />
       </div>
     }>
       <TankoubonDetailContent />

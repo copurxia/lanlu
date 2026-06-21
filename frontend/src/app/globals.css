@@ -670,3 +670,125 @@ input[type="range"]::-moz-range-thumb {
     display: none;
   }
 }
+
+/* ==========================================================================
+   Detail page design tokens / utilities (inspired by archive-detail-redesign.html)
+   ========================================================================== */
+
+@layer base {
+  :root {
+    --surface: rgba(255, 255, 255, 0.76);
+    --surface-strong: rgba(255, 255, 255, 0.92);
+    --surface-soft: rgba(248, 250, 252, 0.78);
+    --shadow: rgba(15, 23, 42, 0.12);
+  }
+
+  .dark {
+    --surface: rgba(24, 24, 27, 0.76);
+    --surface-strong: rgba(24, 24, 27, 0.92);
+    --surface-soft: rgba(39, 39, 42, 0.78);
+    --shadow: rgba(0, 0, 0, 0.18);
+  }
+}
+
+@layer utilities {
+  /* Glass card used for the sticky side column on detail pages */
+  .glass-card {
+    border: 1px solid hsl(var(--border) / 0.52);
+    border-radius: 0.875rem;
+    background: hsl(var(--background) / 0.42);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+
+  .dark .glass-card {
+    background: hsl(var(--card) / 0.6);
+  }
+
+  /* Backdrop overlay matching the prototype gradient stack.
+     Used inside a top-only backdrop container (height-limited, not full screen). */
+  .detail-backdrop-overlay {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 18% 18%, hsl(var(--background) / 0.12), transparent 30%),
+      linear-gradient(90deg, hsl(var(--background) / 0.82) 0%, hsl(var(--background) / 0.34) 48%, hsl(var(--background) / 0.78) 100%);
+  }
+
+  .detail-backdrop-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, hsl(var(--background) / 0.04), hsl(var(--background) / 0.52) 64%, hsl(var(--background)));
+  }
+
+  /* Top-only backdrop wrapper (mirrors .backdrop in archive-detail-redesign.html).
+     Sits above the page content, limited height, fades into the page background. */
+  .detail-backdrop {
+    pointer-events: none;
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 500px;
+    overflow: hidden;
+    z-index: 0;
+  }
+
+  @media (max-width: 640px) {
+    .detail-backdrop {
+      height: 560px;
+    }
+  }
+
+  /* Hero grid: cover | meta | actions */
+  .detail-hero-grid {
+    display: grid;
+    gap: 1.5rem;
+    align-items: end;
+  }
+
+  @media (min-width: 1024px) {
+    .detail-hero-grid {
+      grid-template-columns: 232px minmax(0, 1fr) 188px;
+      gap: 1.875rem;
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .detail-hero-grid {
+      grid-template-columns: 164px minmax(0, 1fr);
+      align-items: end;
+    }
+
+    /* On tablet the action panel spans the full row below the hero. */
+    .detail-hero-grid > aside {
+      grid-column: 1 / -1;
+      align-self: stretch;
+    }
+  }
+
+  @media (max-width: 639px) {
+    .detail-hero-grid {
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+
+    /* On mobile the action panel is hidden: the fixed bottom bar takes over. */
+    .detail-hero-grid > aside {
+      display: none;
+    }
+  }
+
+  /* Main / side content grid */
+  .detail-content-grid {
+    display: grid;
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  @media (min-width: 1024px) {
+    .detail-content-grid {
+      grid-template-columns: minmax(0, 1fr) 326px;
+    }
+  }
+}

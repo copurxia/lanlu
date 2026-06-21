@@ -199,6 +199,7 @@
     "metadataPluginRun": "Run",
     "metadataPluginRunning": "Running...",
     "collectionsTitle": "Collections",
+    "tagsAndMetadata": "Tags & Metadata",
     "relatedTitle": "Related Recommendations",
     "relatedDescription": "Based on the current archive's tags, category, and reading affinity",
     "noCollections": "This archive is not in any collection",

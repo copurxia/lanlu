@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { BookOpen, CheckCircle, Download, Edit, Heart, MoreHorizontal, RotateCcw, Trash2, X } from 'lucide-react';
+import { BookOpen, CheckCircle, Download, Edit, FolderPlus, Heart, MoreHorizontal, RotateCcw, Trash2, X } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
@@ -93,9 +93,9 @@ export function ArchiveMobileActions({
   if (isEditing) return null;
 
   return (
-    <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 supports-backdrop-filter:bg-background/70">
+    <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/82 backdrop-blur-lg">
       <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <Link
             href={isSourceMode && sourceNamespace && remoteId
               ? `/reader?source=${encodeURIComponent(sourceNamespace)}&remote_id=${encodeURIComponent(remoteId)}`
@@ -103,14 +103,14 @@ export function ArchiveMobileActions({
             }
             className="flex-1"
           >
-            <Button className="w-full">
+            <Button className="w-full h-11 rounded-xl">
               <BookOpen className="w-4 h-4 mr-2" />
               {t('archive.startReading')}
             </Button>
           </Link>
           <Button
             variant="outline"
-            className="shrink-0"
+            className="shrink-0 h-11 w-11 rounded-xl p-0"
             aria-label={t('common.actions')}
             onClick={() => handleOpenChange(true)}
           >
@@ -209,7 +209,7 @@ export function ArchiveMobileActions({
                   setOpen(false);
                 }}
               >
-                <BookOpen className="w-4 h-4 mr-2" />
+                <FolderPlus className="w-4 h-4 mr-2" />
                 {t('tankoubon.addToCollection')}
               </Button>
             )}

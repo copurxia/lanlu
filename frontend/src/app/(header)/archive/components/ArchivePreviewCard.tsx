@@ -271,51 +271,54 @@ export function ArchivePreviewCard({
     const fileName = pagePathSegments[pagePathSegments.length - 1] || '';
     const subtitle = fileName && fileName !== displayTitle ? fileName : '';
     const pageIcon = page.type === 'video'
-      ? <Film className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      ? <Film className="w-4 h-4 text-muted-foreground shrink-0" />
       : page.type === 'audio'
-        ? <Music className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+        ? <Music className="w-4 h-4 text-muted-foreground shrink-0" />
         : page.type === 'html'
-          ? <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          : <ImageIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />;
+          ? <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+          : <ImageIcon className="w-4 h-4 text-muted-foreground shrink-0" />;
 
     return (
       <Link
         key={index}
         href={`/reader?id=${metadata.arcid}&page=${index + 1}`}
-        className="flex items-center gap-3 rounded-lg p-3 text-left transition-colors group hover:bg-muted"
+        className="relative rounded-lg border-none bg-transparent p-3 sm:p-4 flex items-start gap-3 sm:gap-4 cursor-pointer transition-shadow hover:shadow-xs"
       >
         {thumbSrc ? (
           <MemoizedImage
             src={thumbSrc}
             alt={displayTitle}
-            className="h-10 w-14 shrink-0 rounded-md bg-muted object-cover"
+            className="h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted object-cover"
             decoding="async"
             loading="lazy"
             draggable={false}
           />
         ) : (
-          <span className="flex h-10 w-14 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            {page.type === 'video' ? <Film className="h-4 w-4" /> : null}
-            {page.type === 'audio' ? <Music className="h-4 w-4" /> : null}
-            {page.type === 'html' ? <FileText className="h-4 w-4" /> : null}
-            {page.type === 'image' ? <ImageIcon className="h-4 w-4" /> : null}
+          <span className="flex h-24 w-16 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            {pageIcon}
           </span>
         )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm transition-colors group-hover:text-primary">
+
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold leading-tight line-clamp-2 hover:text-primary transition-colors" title={displayTitle}>
             {displayTitle}
-          </span>
+          </h3>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {t('reader.pageAlt').replace('{page}', String(index + 1))}
+          </div>
+
           {description ? (
-            <span className="block truncate text-[11px] text-muted-foreground">
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={description}>
               {description}
-            </span>
+            </p>
           ) : subtitle ? (
-            <span className="block truncate text-[11px] text-muted-foreground">
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={subtitle}>
               {subtitle}
-            </span>
+            </p>
           ) : null}
-        </span>
-        <span className="shrink-0 opacity-80">{pageIcon}</span>
+        </div>
+
+        <span className="shrink-0 mt-1 opacity-60">{pageIcon}</span>
       </Link>
     );
   }, [metadata.arcid, metadata.archivetype, t]);

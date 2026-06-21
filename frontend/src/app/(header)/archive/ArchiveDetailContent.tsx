@@ -5,11 +5,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArchiveService, type MetadataPagePatchInput } from '@/lib/services/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { parseSourceId } from '@/lib/utils/source-id-utils';
-import { SourcePluginService } from '@/lib/services/source-plugin-service';
-import { CategoryService } from '@/lib/services/category-service';
-
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { RecommendationService } from '@/lib/services/recommendation-service';
 import { TagService } from '@/lib/services/tag-service';
@@ -29,15 +26,30 @@ import { getTvMetaSummary, isTvArchiveMetadata } from '@/lib/utils/tv-media';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
-import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
 import { ArchiveMobileActions } from './components/ArchiveMobileActions';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
 import { BaseMediaCardEditController } from '@/components/ui/base-media-card-edit-controller';
 import { ArchiveSearchTagBadge } from '@/components/archive/ArchiveSearchTagBadge';
 import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
+import { DetailHeroLayout } from '@/components/detail/DetailHeroLayout';
+import { DetailContentGrid } from '@/components/detail/DetailContentGrid';
+import { DetailSectionCard } from '@/components/detail/DetailSectionCard';
+import { DetailActionPanel } from '@/components/detail/DetailActionPanel';
+import { CollapsibleTagRow } from '@/components/detail/CollapsibleTagRow';
+import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
+import { ArchiveTagGroups } from './components/ArchiveTagGroups';
 import type { Archive } from '@/types/archive';
 import type { RecommendationItemType } from '@/types/recommendation';
-import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, FolderPlus } from 'lucide-react';
+import {
+  BookOpen,
+  Download,
+  Edit,
+  Heart,
+  RotateCcw,
+  CheckCircle,
+  Trash2,
+  FolderPlus,
+} from 'lucide-react';
 
 const AddToTankoubonDialog = dynamic(
   () => import('@/components/tankoubon/AddToTankoubonDialog').then((m) => m.AddToTankoubonDialog)
@@ -74,10 +86,13 @@ export function ArchiveDetailContent() {
   const showPreview = true;
   const [relatedArchives, setRelatedArchives] = useState<Archive[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
-  const [metadataPluginPreviewPages, setMetadataPluginPreviewPages] = useState<MetadataPagePatchInput[]>([]);
   const [previewRefreshToken, setPreviewRefreshToken] = useState(0);
-  const { previewLoading, previewError, displayPages } =
-    useArchivePreview({ id, showPreview, t, refreshToken: previewRefreshToken });
+  const { previewLoading, previewError, displayPages } = useArchivePreview({
+    id,
+    showPreview,
+    t,
+    refreshToken: previewRefreshToken,
+  });
 
   const pages = displayPages;
 
@@ -218,26 +233,29 @@ export function ArchiveDetailContent() {
     };
   }, [language, metadataArcid]);
 
-  const trackRelatedInteraction = useCallback(async (
-    interactionType: 'click' | 'open_reader' | 'favorite',
-    itemType: RecommendationItemType,
-    itemId: string
-  ) => {
-    if (!metadataArcid) return;
+  const trackRelatedInteraction = useCallback(
+    async (
+      interactionType: 'click' | 'open_reader' | 'favorite',
+      itemType: RecommendationItemType,
+      itemId: string
+    ) => {
+      if (!metadataArcid) return;
 
-    try {
-      await RecommendationService.recordInteraction({
-        scene: 'archive_related',
-        seed_entity_type: 'archive',
-        seed_entity_id: metadataArcid,
-        item_type: itemType,
-        item_id: itemId,
-        interaction_type: interactionType,
-      });
-    } catch (err) {
-      logger.apiError(`track archive related ${interactionType}`, err);
-    }
-  }, [metadataArcid]);
+      try {
+        await RecommendationService.recordInteraction({
+          scene: 'archive_related',
+          seed_entity_type: 'archive',
+          seed_entity_id: metadataArcid,
+          item_type: itemType,
+          item_id: itemId,
+          interaction_type: interactionType,
+        });
+      } catch (err) {
+        logger.apiError(`track archive related ${interactionType}`, err);
+      }
+    },
+    [metadataArcid]
+  );
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
@@ -337,241 +355,206 @@ export function ArchiveDetailContent() {
   const coverAssetId = getArchiveAssetId(metadata, 'cover');
   const backdropAssetId = getArchiveAssetId(metadata, 'backdrop');
   const backdropUrl = backdropAssetId ? `/api/assets/${backdropAssetId}` : '';
+  const clearlogoAssetId = getArchiveAssetId(metadata, 'clearlogo');
+  const clearlogoUrl = clearlogoAssetId ? `/api/assets/${clearlogoAssetId}` : '';
+  const readerHref =
+    isSourceMode && sourceNamespace && remoteId
+      ? `/reader?source=${encodeURIComponent(sourceNamespace)}&remote_id=${encodeURIComponent(remoteId)}`
+      : `/reader?id=${encodeURIComponent(rawId ?? metadata.arcid)}`;
 
-  return (
-    <div className="relative min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
-      {backdropUrl ? (
-        <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-          <Image src={backdropUrl} alt="" fill className="scale-105 object-cover opacity-30 blur-[2px]" unoptimized />
-          <div className="absolute inset-0 bg-linear-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+  const badges = (
+    <>
+      <Badge className="bg-primary text-primary-foreground hover:bg-primary/90">
+        <BookOpen className="w-3 h-3 mr-1" />
+        {t('archive.archiveLabel')}
+      </Badge>
+      {isTvArchive && tvMetaSummary.season ? (
+        <Badge variant="secondary">S{tvMetaSummary.season.padStart(2, '0')}</Badge>
+      ) : null}
+      {isTvArchive && tvMetaSummary.status ? (
+        <Badge variant="outline" className="capitalize">
+          {tvMetaSummary.status}
+        </Badge>
+      ) : null}
+      {isTvArchive && tvMetaSummary.year ? (
+        <Badge variant="outline">{tvMetaSummary.year}</Badge>
+      ) : null}
+    </>
+  );
+
+  const metaRow = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span className="tabular-nums">
+        {isTvArchive ? t('archive.episodeCount') : t('archive.pageCount')} {metadata.pagecount}
+      </span>
+      <span className="text-muted-foreground/60">•</span>
+      <span className="tabular-nums truncate" title={metadata.release_at}>
+        {t('archive.releaseAt')} {metadata.release_at || t('archive.unknown')}
+      </span>
+      <span className="text-muted-foreground/60">•</span>
+      <span className="tabular-nums truncate" title={metadata.updated_at}>
+        {t('archive.updatedAt')} {metadata.updated_at || t('archive.unknown')}
+      </span>
+      <span className="text-muted-foreground/60">•</span>
+      <span className="tabular-nums">{t('archive.progress')} {progressPercent}%</span>
+      {progressPercent > 0 ? (
+        <div className="w-full">
+          <Progress className="mt-2 h-1.5" value={progressPercent} />
         </div>
       ) : null}
-      {/* Reserve space for the fixed mobile action bar (includes safe-area inset). */}
+    </div>
+  );
+
+  const iconActions = [
+    !isSourceMode
+      ? {
+          id: 'add-to-tankoubon',
+          icon: <FolderPlus className="w-4 h-4" />,
+          title: t('tankoubon.addToCollection'),
+          dialog: (
+            <AddToTankoubonDialog
+              archiveId={metadata.arcid}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-10 w-full rounded-xl"
+                  title={t('tankoubon.addToCollection')}
+                >
+                  <FolderPlus className="w-4 h-4" />
+                </Button>
+              }
+            />
+          ),
+        }
+      : null,
+    {
+      id: 'favorite',
+      icon: <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />,
+      title: isFavorite ? t('common.unfavorite') : t('common.favorite'),
+      onClick: handleFavoriteClick,
+      disabled: !isAuthenticated || favoriteLoading || isSourceMode,
+      className: isFavorite ? 'text-red-500 border-red-500' : '',
+    },
+    {
+      id: 'download',
+      icon: <Download className="w-4 h-4" />,
+      title: t('archive.download'),
+      onClick: async () => {
+        if (isSourceMode && sourceNamespace && remoteId) {
+          try {
+            const sourceId = `source:${sourceNamespace}:${remoteId}`;
+            await ArchiveService.downloadArchive(sourceId);
+            success('下载任务已创建');
+            router.push('/settings/tasks');
+          } catch {
+            showError('创建下载任务失败');
+          }
+          return;
+        }
+        void ArchiveService.downloadArchive(metadata.arcid);
+      },
+    },
+    !isSourceMode
+      ? {
+          id: 'read-status',
+          icon: metadata.isnew ? (
+            <CheckCircle className="w-4 h-4" />
+          ) : (
+            <RotateCcw className="w-4 h-4" />
+          ),
+          title: metadata.isnew ? t('archive.markAsRead') : t('archive.markAsNew'),
+          onClick: metadata.isnew ? handleMarkAsRead : handleMarkAsNew,
+          disabled: !isAuthenticated || isNewStatusLoading,
+        }
+      : null,
+    !isSourceMode
+      ? {
+          id: 'edit',
+          icon: <Edit className="w-4 h-4" />,
+          title: t('common.edit'),
+          onClick: openEditDialog,
+          disabled: !isAuthenticated,
+        }
+      : null,
+    !isSourceMode && isAdmin
+      ? {
+          id: 'delete',
+          icon: <Trash2 className="w-4 h-4" />,
+          title: t('common.delete'),
+          onClick: handleDeleteArchive,
+          disabled: deleteLoading,
+          destructive: true,
+        }
+      : null,
+  ].filter(Boolean) as {
+    id: string;
+    icon: React.ReactNode;
+    title: string;
+    dialog?: React.ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    destructive?: boolean;
+    className?: string;
+  }[];
+
+  return (
+    <div className="relative min-h-dvh bg-background overflow-hidden pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
+      {/* Top-only backdrop, fading into the page background (mirrors the prototype).
+          Falls back to the cover image when no backdrop is available. */}
+      {backdropUrl || coverAssetId ? (
+        <div className="detail-backdrop" aria-hidden="true">
+          <Image
+            src={backdropUrl || `/api/assets/${coverAssetId}`}
+            alt=""
+            fill
+            className="object-cover saturate-110"
+            style={{ filter: 'blur(1px)' }}
+            sizes="100vw"
+            unoptimized
+          />
+          <div className="detail-backdrop-overlay" />
+        </div>
+      ) : null}
+
       <main className="relative z-10 container mx-auto px-4 pt-6 pb-2 sm:pb-6 max-w-7xl">
-        <div className="space-y-6">
-          {/* Header / hero (unified with Tankoubon page) */}
-          <div className="relative">
-            <div className="relative rounded-2xl border-none bg-transparent shadow-none dark:bg-transparent">
-              <div className="p-0">
-                <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                  <div className="flex min-w-0 gap-4">
-                    <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border-none bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
-                      {coverAssetId ? (
-                        <Image
-                          src={`/api/assets/${coverAssetId}`}
-                          alt={metadata.title || ''}
-                          fill
-                          className="object-cover"
-                          sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
-                          unoptimized
-                        />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
-                          {t('archive.noCover')}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Badge className="bg-primary">
-                          <BookOpen className="w-3 h-3 mr-1" />
-                          {t('archive.archiveLabel')}
-                        </Badge>
-                        {isTvArchive && tvMetaSummary.season ? (
-                          <Badge variant="secondary">S{tvMetaSummary.season.padStart(2, '0')}</Badge>
-                        ) : null}
-                        {isTvArchive && tvMetaSummary.status ? (
-                          <Badge variant="outline" className="capitalize">
-                            {tvMetaSummary.status}
-                          </Badge>
-                        ) : null}
-                        {isTvArchive && tvMetaSummary.year ? (
-                          <Badge variant="outline">{tvMetaSummary.year}</Badge>
-                        ) : null}
-                        <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight wrap-break-word">
-                          {metadata.title}
-                        </h1>
-                      </div>
-
-                      {/* Keep stats directly under title on all screen sizes (same as mobile). */}
-                      <div className="mt-2">
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span className="tabular-nums">
-                            {isTvArchive ? t('archive.episodeCount') : t('archive.pageCount')} {metadata.pagecount}
-                          </span>
-                          <span className="text-muted-foreground/60">•</span>
-                          <span className="tabular-nums truncate" title={metadata.release_at}>
-                            {t('archive.releaseAt')} {metadata.release_at || t('archive.unknown')}
-                          </span>
-                          <span className="text-muted-foreground/60">•</span>
-                          <span className="tabular-nums truncate" title={metadata.updated_at}>
-                            {t('archive.updatedAt')} {metadata.updated_at || t('archive.unknown')}
-                          </span>
-                          <span className="text-muted-foreground/60">•</span>
-                          <span className="tabular-nums">
-                            {t('archive.progress')} {progressPercent}%
-                          </span>
-                        </div>
-                        {progressPercent > 0 ? (
-                          <Progress className="mt-2 h-1.5" value={progressPercent} />
-                        ) : null}
-                      </div>
-
-                      {/* Desktop/tablet actions now sit above summary/tags. */}
-                      <div className="hidden sm:inline-flex mt-4 w-fit shrink-0 flex-col items-start gap-3">
-                        <div className="inline-flex flex-wrap items-center justify-start gap-2">
-                          <Link href={`/reader?id=${encodeURIComponent(rawId ?? metadata.arcid)}`}>
-                            <Button size="sm" variant="default" className="h-9">
-                              <BookOpen className="w-4 h-4 mr-2" />
-                              {t('archive.startReading')}
-                            </Button>
-                          </Link>
-
-                          {!isSourceMode && (
-                            <AddToTankoubonDialog
-                              archiveId={metadata.arcid}
-                              trigger={
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-9 w-9 p-0"
-                                  title={t('tankoubon.addToCollection')}
-                                >
-                                  <FolderPlus className="w-4 h-4" />
-                                </Button>
-                              }
-                            />
-                          )}
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                            disabled={!isAuthenticated || favoriteLoading || isSourceMode}
-                            onClick={handleFavoriteClick}
-                          >
-                            <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-9 w-9 p-0"
-                            title={t('archive.download')}
-                            onClick={async () => {
-                              if (isSourceMode && sourceNamespace && remoteId) {
-                                try {
-                                  const sourceId = `source:${sourceNamespace}:${remoteId}`;
-                                  await ArchiveService.downloadArchive(sourceId);
-                                  success('下载任务已创建');
-                                  router.push('/settings/tasks');
-                                } catch {
-                                  showError('创建下载任务失败');
-                                }
-                                return;
-                              }
-                              void ArchiveService.downloadArchive(metadata.arcid);
-                            }}
-                          >
-                            <Download className="w-4 h-4" />
-                          </Button>
-
-                          {!isSourceMode && (
-                            metadata.isnew ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-9 w-9 p-0"
-                                title={t('archive.markAsRead')}
-                                disabled={!isAuthenticated || isNewStatusLoading}
-                                onClick={handleMarkAsRead}
-                              >
-                                <CheckCircle className="w-4 h-4" />
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-9 w-9 p-0"
-                                title={t('archive.markAsNew')}
-                                disabled={!isAuthenticated || isNewStatusLoading}
-                                onClick={handleMarkAsNew}
-                              >
-                                <RotateCcw className="w-4 h-4" />
-                              </Button>
-                            )
-                          )}
-
-                          {!isSourceMode && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 w-9 p-0"
-                              title={t('common.edit')}
-                              disabled={!isAuthenticated}
-                              onClick={openEditDialog}
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                          )}
-
-                          {!isSourceMode && isAdmin ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 w-9 p-0 text-destructive"
-                              title={t('common.delete')}
-                              disabled={deleteLoading}
-                              onClick={handleDeleteArchive}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {/* Summary/tags now follow the action row. */}
-                      <div className="hidden sm:block mt-4">
-                        {metadata.description ? (
-                          <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                            {metadata.description}
-                          </p>
-                        ) : (
-                          <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
-                        )}
-
-                        {tags.length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {tags.map(renderTagBadge)}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Mobile: show summary/tags full width (not constrained to the title column). */}
-                  <div className="sm:hidden w-full">
-                    {metadata.description ? (
-                      <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                        {metadata.description}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
-                    )}
-
-                    {tags.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap gap-2 w-full">
-                        {tags.map(renderTagBadge)}
-                      </div>
-                    ) : null}
-                  </div>
-
+        <div className="space-y-8">
+          <DetailHeroLayout
+            cover={
+              coverAssetId ? (
+                <Image
+                  src={`/api/assets/${coverAssetId}`}
+                  alt={metadata.title || ''}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 640px) 112px, (max-width: 1024px) 164px, 232px"
+                  unoptimized
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                  {t('archive.noCover')}
                 </div>
-              </div>
-            </div>
-          </div>
+              )
+            }
+            badges={badges}
+            title={metadata.title}
+            meta={metaRow}
+            description={metadata.description || undefined}
+            tags={tags.length > 0 ? <CollapsibleTagRow items={tags.map(renderTagBadge)} /> : undefined}
+            clearlogoUrl={clearlogoUrl || undefined}
+            clearlogoAlt={metadata.title || ''}
+            actions={
+              <DetailActionPanel
+                primary={{
+                  label: t('archive.startReading'),
+                  icon: <BookOpen className="w-4 h-4" />,
+                  href: readerHref,
+                }}
+                actions={iconActions}
+              />
+            }
+          />
 
           {editDialogOpen && metadata ? (
             <BaseMediaCardEditController
@@ -579,7 +562,9 @@ export function ArchiveDetailContent() {
               type="archive"
               initialTitle={metadata.title || ''}
               initialSummary={metadata.description || ''}
-              initialTags={Array.isArray(metadata.tags) ? metadata.tags.join(', ') : (metadata.tags || '')}
+              initialTags={
+                Array.isArray(metadata.tags) ? metadata.tags.join(', ') : (metadata.tags || '')
+              }
               thumbnailAssetId={metadata.assets?.cover}
               onOpenChange={setEditDialogOpen}
               onSaved={() => {
@@ -589,59 +574,73 @@ export function ArchiveDetailContent() {
             />
           ) : null}
 
-            <ArchivePreviewCard
-              metadata={metadata}
-              t={t}
-              previewLoading={previewLoading}
-              previewError={previewError}
-              pages={pages}
-            />
-
-          {tankoubonsLoading || tankoubons.length > 0 ? (
-            <ArchiveCollectionsCard
-              t={t}
-              currentArchiveId={metadata.arcid}
-              tankoubons={tankoubons}
-              previewArchivesByTankoubonId={tankoubonPreviewArchives}
-              loading={tankoubonsLoading}
-            />
-          ) : null}
-
-          {(relatedLoading || relatedArchives.length > 0) ? (
-            <section className="rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
-              <div className="mb-4">
-                <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
-                <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>
-              </div>
-
-              {relatedLoading ? (
-                <div className="flex min-h-32 items-center justify-center">
-                  <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-                </div>
-              ) : relatedArchives.length > 0 ? (
-                <RecommendationCardRow
-                  items={relatedArchives}
-                  scene="archive_related"
-                  seedEntityType="archive"
-                  seedEntityId={metadata.arcid}
-                  cardSurfaceClassName="border-none shadow-none bg-transparent"
-                  onOpenReader={(itemType, itemId) => {
-                    void trackRelatedInteraction('open_reader', itemType, itemId);
-                  }}
-                  onOpenDetails={(itemType, itemId) => {
-                    void trackRelatedInteraction('click', itemType, itemId);
-                  }}
-                  onFavorite={(itemType, itemId) => {
-                    void trackRelatedInteraction('favorite', itemType, itemId);
-                  }}
+          <DetailContentGrid
+            main={
+              <>
+                <ArchivePreviewCard
+                  metadata={metadata}
+                  t={t}
+                  previewLoading={previewLoading}
+                  previewError={previewError}
+                  pages={pages}
                 />
-              ) : (
-                <p className="text-sm text-muted-foreground">{t('archive.noRelated')}</p>
-              )}
-            </section>
-          ) : null}
 
-          <ArchiveBasicInfoCard metadata={metadata} t={t} />
+                {tankoubonsLoading || tankoubons.length > 0 ? (
+                  <ArchiveCollectionsCard
+                    t={t}
+                    currentArchiveId={metadata.arcid}
+                    tankoubons={tankoubons}
+                    previewArchivesByTankoubonId={tankoubonPreviewArchives}
+                    loading={tankoubonsLoading}
+                  />
+                ) : null}
+
+                {relatedLoading || relatedArchives.length > 0 ? (
+                  <section className="rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
+                      <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>
+                    </div>
+
+                    {relatedLoading ? (
+                      <div className="flex min-h-32 items-center justify-center">
+                        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+                      </div>
+                    ) : relatedArchives.length > 0 ? (
+                      <RecommendationCardRow
+                        items={relatedArchives}
+                        scene="archive_related"
+                        seedEntityType="archive"
+                        seedEntityId={metadata.arcid}
+                        cardSurfaceClassName="border-none shadow-none bg-transparent"
+                        onOpenReader={(itemType, itemId) => {
+                          void trackRelatedInteraction('open_reader', itemType, itemId);
+                        }}
+                        onOpenDetails={(itemType, itemId) => {
+                          void trackRelatedInteraction('click', itemType, itemId);
+                        }}
+                        onFavorite={(itemType, itemId) => {
+                          void trackRelatedInteraction('favorite', itemType, itemId);
+                        }}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">{t('archive.noRelated')}</p>
+                    )}
+                  </section>
+                ) : null}
+              </>
+            }
+            side={
+              <>
+                {tags.length > 0 ? (
+                  <DetailSectionCard title={t('archive.tagsAndMetadata') || '标签与元数据'} variant="glass">
+                    <ArchiveTagGroups tags={tags} renderTag={renderTagBadge} />
+                  </DetailSectionCard>
+                ) : null}
+                <ArchiveBasicInfoCard metadata={metadata} t={t} />
+              </>
+            }
+          />
         </div>
       </main>
 

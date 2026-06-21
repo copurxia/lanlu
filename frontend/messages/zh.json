@@ -199,6 +199,7 @@
     "metadataPluginRun": "执行",
     "metadataPluginRunning": "执行中...",
     "collectionsTitle": "所属合集",
+    "tagsAndMetadata": "标签与元数据",
     "relatedTitle": "相关推荐",
     "relatedDescription": "基于当前档案的标签、分类与阅读偏好",
     "noCollections": "该档案未加入任何合集",
