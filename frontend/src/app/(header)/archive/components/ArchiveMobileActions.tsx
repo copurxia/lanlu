@@ -94,7 +94,7 @@ export function ArchiveMobileActions({
 
   return (
     <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/82 backdrop-blur-lg">
-      <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="mx-auto max-w-[1400px] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center gap-2.5">
           <Link
             href={isSourceMode && sourceNamespace && remoteId

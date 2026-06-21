@@ -56,7 +56,7 @@ export function TankoubonMobileActions({
 
   return (
     <div className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/82 backdrop-blur-lg">
-      <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      <div className="mx-auto max-w-[1400px] px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center gap-2.5">
           <Button className="flex-1 h-11 rounded-xl" onClick={onAddArchive}>
             <Plus className="w-4 h-4 mr-2" />

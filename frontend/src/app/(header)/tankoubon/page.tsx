@@ -1587,7 +1587,7 @@ function TankoubonDetailContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <main className="container mx-auto px-4 py-8">
+        <main className="mx-auto w-full max-w-[1400px] px-4 py-8">
           <div className="flex justify-center items-center h-64">
             <Spinner size="lg" />
           </div>
@@ -1599,7 +1599,7 @@ function TankoubonDetailContent() {
   if (!tankoubon) {
     return (
       <div className="min-h-screen bg-background">
-        <main className="container mx-auto px-4 py-8">
+        <main className="mx-auto w-full max-w-[1400px] px-4 py-8">
           <div className="text-center py-12">
             <p className="text-muted-foreground">{t('tankoubon.notFound')}</p>
             <Button onClick={() => router.push('/')} className="mt-4">
@@ -1648,7 +1648,7 @@ function TankoubonDetailContent() {
           <div className="detail-backdrop-overlay" />
         </div>
       ) : null}
-      <main className="relative z-10 container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
+      <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 pt-6 pb-4 sm:pb-6">
         <DetailHeroLayout
           className="mb-8"
           cover={
@@ -2197,7 +2197,7 @@ export default function TankoubonDetailPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-background pb-20 lg:pb-0">
-        <main className="container mx-auto px-4 py-8">
+        <main className="mx-auto w-full max-w-[1400px] px-4 py-8">
           <div className="flex items-center justify-center py-12">
             <Spinner size="lg" />
           </div>

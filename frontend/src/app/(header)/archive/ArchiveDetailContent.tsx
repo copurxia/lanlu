@@ -328,7 +328,7 @@ export function ArchiveDetailContent() {
   if (!mounted || loading) {
     return (
       <div className="min-h-dvh">
-        <div className="container mx-auto px-4 py-8">
+        <div className="mx-auto w-full max-w-[1400px] px-4 py-8">
           <div className="text-center py-12">
             <p className="text-muted-foreground">{t('common.loading')}</p>
           </div>
@@ -340,7 +340,7 @@ export function ArchiveDetailContent() {
   if (error || !metadata) {
     return (
       <div className="min-h-dvh">
-        <div className="container mx-auto px-4 py-8">
+        <div className="mx-auto w-full max-w-[1400px] px-4 py-8">
           <div className="text-center py-12">
             <p className="text-red-500 mb-4">{error || t('archive.notFound')}</p>
             <Link href="/">
@@ -518,7 +518,7 @@ export function ArchiveDetailContent() {
         </div>
       ) : null}
 
-      <main className="relative z-10 container mx-auto px-4 pt-6 pb-2 sm:pb-6 max-w-7xl">
+      <main className="relative z-10 mx-auto w-full max-w-[1400px] px-4 pt-6 pb-2 sm:pb-6">
         <div className="space-y-8">
           <DetailHeroLayout
             cover={
