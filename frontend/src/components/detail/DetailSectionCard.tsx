@@ -41,7 +41,7 @@ export function DetailSectionCard({
           headerClassName
         )}
       >
-        <div className="min-w-0">
+        <div className="flex-1 min-w-0">
           <h2
             className={cn(
               'text-base font-semibold tracking-tight lg:text-lg',

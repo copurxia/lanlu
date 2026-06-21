@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, List, Music } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardContent } from '@/components/ui/card';
 import type { ArchiveMetadata } from '@/types/archive';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { MasonryThumbnailGrid } from '@/components/ui/masonry-thumbnail-grid';
@@ -324,61 +324,57 @@ export function ArchivePreviewCard({
   }, [metadata.arcid, metadata.archivetype, t]);
 
   return (
-    <Card className="border-none bg-transparent shadow-none dark:bg-transparent">
-      {/* When collapsed, default CardHeader padding makes the row feel a bit low; tighten it. */}
-      <CardHeader className="!p-0">
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-lg font-semibold lg:text-xl">
-            {t('archive.paginationInfo')}
-          </CardTitle>
-          <div className="inline-flex items-center gap-1 rounded-md bg-muted/60 p-0.5">
-            <button
-              type="button"
-              onClick={() => setPreviewViewMode('thumbnails')}
-              title={t('archive.switchToThumbnailsView')}
-              aria-label={t('archive.switchToThumbnailsView')}
-              aria-pressed={previewViewMode === 'thumbnails'}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                previewViewMode === 'thumbnails'
-                  ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
-                  : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
-              }`}
-            >
-              <ImageIcon className={`h-4 w-4 ${previewViewMode === 'thumbnails' ? 'opacity-100' : 'opacity-70'}`} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPreviewViewMode('list')}
-              title={t('archive.switchToListView')}
-              aria-label={t('archive.switchToListView')}
-              aria-pressed={previewViewMode === 'list'}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                previewViewMode === 'list'
-                  ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
-                  : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
-              }`}
-            >
-              <List className={`h-4 w-4 ${previewViewMode === 'list' ? 'opacity-100' : 'opacity-70'}`} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setPreviewViewMode('tree')}
-              title={t('archive.switchToTreeView')}
-              aria-label={t('archive.switchToTreeView')}
-              aria-pressed={previewViewMode === 'tree'}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                previewViewMode === 'tree'
-                  ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
-                  : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
-              }`}
-            >
-              <Folder className={`h-4 w-4 ${previewViewMode === 'tree' ? 'opacity-100' : 'opacity-70'}`} />
-            </button>
-          </div>
+    <div>
+      {/* View mode toggles positioned inline */}
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">{t('archive.paginationInfo')}</span>
+        <div className="inline-flex items-center gap-1 rounded-md bg-muted/60 p-0.5">
+          <button
+            type="button"
+            onClick={() => setPreviewViewMode('thumbnails')}
+            title={t('archive.switchToThumbnailsView')}
+            aria-label={t('archive.switchToThumbnailsView')}
+            aria-pressed={previewViewMode === 'thumbnails'}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+              previewViewMode === 'thumbnails'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
+                : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
+            }`}
+          >
+            <ImageIcon className={`h-3.5 w-3.5 ${previewViewMode === 'thumbnails' ? 'opacity-100' : 'opacity-70'}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreviewViewMode('list')}
+            title={t('archive.switchToListView')}
+            aria-label={t('archive.switchToListView')}
+            aria-pressed={previewViewMode === 'list'}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+              previewViewMode === 'list'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
+                : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
+            }`}
+          >
+            <List className={`h-3.5 w-3.5 ${previewViewMode === 'list' ? 'opacity-100' : 'opacity-70'}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPreviewViewMode('tree')}
+            title={t('archive.switchToTreeView')}
+            aria-label={t('archive.switchToTreeView')}
+            aria-pressed={previewViewMode === 'tree'}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+              previewViewMode === 'tree'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
+                : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
+            }`}
+          >
+            <Folder className={`h-3.5 w-3.5 ${previewViewMode === 'tree' ? 'opacity-100' : 'opacity-70'}`} />
+          </button>
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="!p-0 mt-3 space-y-4">
+      <CardContent className="!p-0 space-y-4">
         {previewLoading ? (
           <div className="flex items-center justify-center py-0">
             <p className="text-muted-foreground">{t('common.loading')}</p>
@@ -420,6 +416,6 @@ export function ArchivePreviewCard({
           </div>
         )}
       </CardContent>
-    </Card>
+    </div>
   );
 }

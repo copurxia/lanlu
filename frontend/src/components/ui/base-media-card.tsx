@@ -312,7 +312,7 @@ export function BaseMediaCard({
       >
         <Card className={cn('overflow-hidden bg-transparent transition-shadow hover:shadow-lg dark:bg-transparent', surfaceClassName)}>
           <div
-            className="bg-muted relative"
+            className="bg-muted relative group"
             style={coverHeight != null ? { height: `${coverHeight}px` } : { aspectRatio: String(coverNaturalAspectRatio) }}
           >
             {!imageError && hasImage ? (
@@ -320,7 +320,7 @@ export function BaseMediaCard({
                 src={imageSrc}
                 alt={displayTitle}
                 fill
-                className="object-cover select-none"
+                className="object-cover select-none transition-transform duration-300 ease-out group-hover:scale-105"
                 priority={priority}
                 sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                 decoding="async"

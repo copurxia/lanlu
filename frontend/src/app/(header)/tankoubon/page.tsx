@@ -1736,47 +1736,56 @@ function TankoubonDetailContent() {
           main={
             <>
               <DetailSectionCard
-                title={t('tankoubon.archivesTitle')}
+                title={
+                  <div className="flex w-full flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold lg:text-lg">{t('tankoubon.archivesTitle')}</span>
+                    <Badge variant="secondary" className="tabular-nums">
+                      {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
+                    </Badge>
+                    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleArchiveViewModeChange('grid')}
+                        title={t('tankoubon.switchToGridView')}
+                        aria-label={t('tankoubon.switchToGridView')}
+                        aria-pressed={archiveViewMode === 'grid'}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                          archiveViewMode === 'grid'
+                            ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
+                            : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
+                        }`}
+                      >
+                        <LayoutGrid className={`h-4 w-4 ${archiveViewMode === 'grid' ? 'opacity-100' : 'opacity-70'}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleArchiveViewModeChange('list')}
+                        title={t('tankoubon.switchToListView')}
+                        aria-label={t('tankoubon.switchToListView')}
+                        aria-pressed={archiveViewMode === 'list'}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                          archiveViewMode === 'list'
+                            ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
+                            : 'text-muted-foreground/80 hover:bg-background/35 hover:text-foreground'
+                        }`}
+                      >
+                        <List className={`h-4 w-4 ${archiveViewMode === 'list' ? 'opacity-100' : 'opacity-70'}`} />
+                      </button>
+                    </div>
+                    <div className="relative w-48 sm:w-60 ml-auto">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={archiveFilter}
+                        onChange={(e) => setArchiveFilter(e.target.value)}
+                        placeholder={t('tankoubon.filterPlaceholder')}
+                        className="h-9 pl-9 text-sm w-full"
+                      />
+                    </div>
+                  </div>
+                }
                 variant="transparent"
+                headerClassName="!border-b-0"
               >
-                {/* Archives toolbar */}
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="tabular-nums">
-              {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
-            </Badge>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 border-0 shadow-none"
-              onClick={() => handleArchiveViewModeChange(archiveViewMode === 'grid' ? 'list' : 'grid')}
-              title={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
-              aria-label={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
-            >
-              {archiveViewMode === 'grid' ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-              <span className="hidden sm:inline">
-                {archiveViewMode === 'grid' ? t('tankoubon.listView') : t('tankoubon.gridView')}
-              </span>
-            </Button>
-          </div>
-
-          <div className="flex w-full gap-2 sm:w-auto">
-            <div className="relative flex-1 sm:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={archiveFilter}
-                onChange={(e) => setArchiveFilter(e.target.value)}
-                placeholder={t('tankoubon.filterPlaceholder')}
-                className="pl-9"
-              />
-            </div>
-            <Button onClick={() => setAddArchiveDialogOpen(true)} className="shrink-0">
-              <Plus className="w-4 h-4 mr-2" />
-              {t('tankoubon.addArchive')}
-            </Button>
-          </div>
-        </div>
 
         {archivesLoading ? (
           <div className="flex justify-center items-center h-32">
