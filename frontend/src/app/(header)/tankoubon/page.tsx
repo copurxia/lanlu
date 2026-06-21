@@ -1742,7 +1742,7 @@ function TankoubonDetailContent() {
                     <Badge variant="secondary" className="tabular-nums">
                       {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
                     </Badge>
-                    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5">
+                    <div className="inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-background/55 backdrop-blur-sm p-0.5">
                       <button
                         type="button"
                         onClick={() => handleArchiveViewModeChange('grid')}

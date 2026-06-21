@@ -328,7 +328,7 @@ export function ArchivePreviewCard({
       {/* View mode toggles positioned inline */}
       <div className="mb-3 flex items-center gap-2">
         <span className="text-sm text-muted-foreground">{t('archive.paginationInfo')}</span>
-        <div className="inline-flex items-center gap-1 rounded-md bg-muted/60 p-0.5">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-background/55 backdrop-blur-sm p-0.5">
           <button
             type="button"
             onClick={() => setPreviewViewMode('thumbnails')}
