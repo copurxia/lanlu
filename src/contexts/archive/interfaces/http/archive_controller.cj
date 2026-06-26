@@ -1416,9 +1416,8 @@ public class ArchiveController {
                 return
             }
             let filePath = Path(actualPath)
+            let fileSize = FileInfo(filePath).size
             let file = File(filePath, Read)
-            let fileInfo = file.info
-            let fileSize = fileInfo.size
 
             // 统一使用分块流式传输，避免一次性分配 fileSize 大小的 buffer
             downloadArchiveChunked(ctx, file, fileSize, archive.filename)

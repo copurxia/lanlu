@@ -497,16 +497,16 @@ public class AssetUploadController {
             )
             let bodyStream = ctx.requestBody()
             var bytesWritten: Int64 = 0
+            // 使用 ReadWrite + seek 实现幂等写入：重试时始终从 expectedOffset 分片写入，
+            // 避免 Append 模式下幺幺写入导致文件损坏。
+            chunkLogger.debug(
+                "[DBG] uploadChunk opening part file",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("partPath", partPath.toString())
+            )
+            let partFile = File(partPath, OpenMode.ReadWrite)
             try {
-                // 使用 ReadWrite + seek 实现幂等写入：重试时始终从 expectedOffset 分片写入，
-                // 避免 Append 模式下幺幺写入导致文件损坏。
-                chunkLogger.debug(
-                    "[DBG] uploadChunk opening part file",
-                    ("taskId", taskIdStr),
-                    ("chunkIndex", chunkIndex.toString()),
-                    ("partPath", partPath.toString())
-                )
-                let partFile = File(partPath, OpenMode.ReadWrite)
                 partFile.seek(SeekPosition.Begin(expectedOffset))
                 bytesWritten = streamWriteToFile(bodyStream, partFile)
                 chunkLogger.debug(
@@ -518,7 +518,6 @@ public class AssetUploadController {
                 )
                 
                 if (bytesWritten <= 0) {
-                    partFile.close()
                     chunkLogger.warn(
                         "[DBG] uploadChunk empty body",
                         ("taskId", taskIdStr),
@@ -533,7 +532,6 @@ public class AssetUploadController {
                 if (chunkIndex == totalChunks - 1) {
                     partFile.flush()
                 }
-                partFile.close()
             } catch (e: Exception) {
                 chunkLogger.error(
                     "Failed to write chunk to file",
@@ -545,6 +543,8 @@ public class AssetUploadController {
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ResponseView.errorJson(ctx, "Failed to write chunk: ${e.message}", 500)
                 return
+            } finally {
+                partFile.close()
             }
 
             // 大小校验
