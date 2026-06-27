@@ -12,14 +12,12 @@ import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
-import lanlu.shared.config.*
 import lanlu.infrastructure.middleware.*
 import lanlu.infrastructure.archivehandler.*
 import lanlu.infrastructure.kv.*
 import std.fs.*
 import std.convert.*
 import std.collection.*
-import std.database.sql.*
 import std.io.{ByteBuffer, InputStream, readToEnd}
 import stdx.encoding.json.stream.*
 
@@ -1223,7 +1221,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -1764,7 +1762,7 @@ public class ArchiveController {
         } else {
             rangeState
         }
-        logger.info(
+        logger.debug(
             "serve page request",
             ("arcid", id),
             ("entry_path", path),
@@ -2093,40 +2091,7 @@ public class ArchiveController {
     }
 
     /**
-     * 根据 arcid 获取归档的数据库内部ID
-     */
-    private static func getArchiveInternalId(arcid: String): Int64 {
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
-                try {
-                    stmt.set(0, arcid)
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            return rs.getOrNull<Int64>(0) ?? 0
-                        }
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    stmt.close()
-                }
-            } catch (_: Exception) {
-                return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
-            }
-            case None => return 0
-        }
-        return 0
-    }
-
-    /**
-     * 设置归档的isNew标记（PUT /api/archives/{id}/isnew）
+     * 设置归档的 isNew 标记（PUT /api/archives/{id}/isnew）
      * 现在使用用户级别的已读状态
      */
     public static func setIsNew(ctx: Ctx): Unit {
@@ -2168,7 +2133,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -2234,7 +2199,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -2318,7 +2283,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -2391,7 +2356,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -2447,7 +2412,7 @@ public class ArchiveController {
                 }
 
                 // 获取归档的数据库内部ID
-                let archiveIdInt = getArchiveInternalId(id)
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -2544,7 +2509,7 @@ public class ArchiveController {
                 w.writeName("data")
                 w.startArray()
                 for (archive in archives) {
-                    let archiveIdInt = getArchiveInternalId(archive.id)
+                    let archiveIdInt = ArchiveDao.getArchiveInternalId(archive.id)
                     let isNew = if (archiveIdInt > 0) {
                         UserArchiveStatusDao.isNew(userId, archiveIdInt)
                     } else {
@@ -2632,7 +2597,7 @@ public class ArchiveController {
                 w.writeName("data")
                 w.startArray()
                 for (archive in archives) {
-                    let archiveIdInt = getArchiveInternalId(archive.id)
+                    let archiveIdInt = ArchiveDao.getArchiveInternalId(archive.id)
                     let isFavorite = if (archiveIdInt > 0) {
                         UserFavoriteDao.isFavorite(userId, archiveIdInt)
                     } else {

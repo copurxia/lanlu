@@ -2,6 +2,7 @@ package lanlu.contexts.user.infrastructure.persistence
 
 import std.database.sql.*
 import std.collection.*
+import std.time.DateTime
 import lanlu.shared.config.*
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveData
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveDataMappers
@@ -207,23 +208,12 @@ public class UserStatsDao {
                             }
 
                             // 生成所有日期的数据，包括没有阅读记录的日期
+                            // 在应用层用 DateTime 计算日期，避免循环内逐天查询数据库
+                            let today = DateTime.now()
                             for (offset in 0..=days-1) {
                                 let item = ReadingTrendItem()
                                 // 计算日期：从今天往前推 offset 天
-                                let dateStmt = conn.prepareStatement("SELECT (CURRENT_DATE - (? || ' days')::INTERVAL)::DATE")
-                                try {
-                                    dateStmt.set(0, offset)
-                                    let dateRs = dateStmt.query()
-                                    try {
-                                        if (dateRs.next()) {
-                                            item.date = dateRs.getOrNull<String>(0) ?? ""
-                                        }
-                                    } finally {
-                                        dateRs.close()
-                                    }
-                                } finally {
-                                    dateStmt.close()
-                                }
+                                item.date = today.addDays(Int64(0 - offset)).format("yyyy-MM-dd")
                                 // 如果数据库中有该日期的数据则使用，否则为0
                                 item.count = trendMap.get(item.date) ?? 0
                                 result.add(item)

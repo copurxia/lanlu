@@ -4,6 +4,9 @@ import avif_ffi.*
 import std.sync.*
 import vips_ffi.*
 
+// 块拷贝：替代逐字节 CPointer 读写循环，用于将 libvips 的原生内存一次性拷贝到仓颉数组
+foreign func memcpy(dest: CPointer<UInt8>, src: CPointer<UInt8>, n: UIntNative): CPointer<Unit>
+
 /**
  * libvips-based image -> AVIF conversion helpers.
  *
@@ -228,9 +231,7 @@ public class VipsConvertUtils {
                 let handle = acquireArrayRawData(pixels)
                 let src = CPointer<UInt8>(mem)
                 let dst = handle.pointer
-                for (i in 0..n) {
-                    (dst + i).write(src.read(i))
-                }
+                memcpy(dst, src, UIntNative(n))
                 releaseArrayRawData(handle)
             }
         } finally {
@@ -256,6 +257,16 @@ public class VipsConvertUtils {
             case ImageConvertResult<RgbaPixelsData>.Err(err) => return ImageConvertResult<Unit>.Err(err)
         }
 
+        if (!AvifEncoder.encodeRGBAFile(UInt32(rgba.width), UInt32(rgba.height), rgba.pixels, outputPath)) {
+            return ImageConvertResult<Unit>.Err("libavif encode failed")
+        }
+        return ImageConvertResult<Unit>.Ok(())
+    }
+
+    /**
+     * 从已提取的 RGBA 像素编码 AVIF 文件，避免重复调用 writeToMemory/提取像素
+     */
+    private static func encodeAvifFromPixels(rgba: RgbaPixelsData, outputPath: String): ImageConvertResult<Unit> {
         if (!AvifEncoder.encodeRGBAFile(UInt32(rgba.width), UInt32(rgba.height), rgba.pixels, outputPath)) {
             return ImageConvertResult<Unit>.Err("libavif encode failed")
         }
@@ -583,24 +594,27 @@ public class VipsConvertUtils {
                 cropImg
             }
 
-            // Compute thumbhash before writing, from the final pixels.
+            // 提取一次 RGBA 像素，同时用于 thumbhash 计算和 AVIF 编码，避免重复 writeToMemory
             var thumbHash = ""
             var hashErr = ""
-            match (hashRgbaPixelsFromImage(finalImg)) {
-                case ImageConvertResult<String>.Ok(value) => thumbHash = value
-                case ImageConvertResult<String>.Err(err) => hashErr = err
+            let rgbaResult = extractRgbaPixelsFromImage(finalImg)
+            match (rgbaResult) {
+                case ImageConvertResult<RgbaPixelsData>.Ok(rgba) =>
+                    thumbHash = ThumbHashUtils.calculateThumbHashFromRgbaPixels(rgba.pixels)
+                    match (encodeAvifFromPixels(rgba, outputPath)) {
+                        case ImageConvertResult<Unit>.Ok(_) => ()
+                        case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
+                    }
+                case ImageConvertResult<RgbaPixelsData>.Err(err) =>
+                    hashErr = err
+                    // 像素提取失败时仍尝试用 image 路径编码（可能因尺寸限制等不同）
+                    match (encodeAvifFromImage(finalImg, outputPath)) {
+                        case ImageConvertResult<Unit>.Ok(_) => ()
+                        case ImageConvertResult<Unit>.Err(e) => return Some((ProcessResultData(false, "", e), ""))
+                    }
             }
             if (thumbHash.size == 0) {
-                match (encodeAvifFromImage(finalImg, outputPath)) {
-                    case ImageConvertResult<Unit>.Ok(_) => ()
-                    case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
-                }
                 return Some((ProcessResultData(true, outputPath, "thumbhash compute failed: ${hashErr}"), ""))
-            }
-
-            match (encodeAvifFromImage(finalImg, outputPath)) {
-                case ImageConvertResult<Unit>.Ok(_) => ()
-                case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
             }
 
             return Some((ProcessResultData(true, outputPath, ""), thumbHash))

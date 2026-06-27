@@ -72,6 +72,15 @@ public class AuthMiddleware {
      * 如果用户已登录返回 Some(userId)，否则返回 None
      */
     public static func optionalUser(ctx: Ctx): Option<Int64> {
+        // 若上游中间件（requiredAuth/requireUser）已完成鉴权并绑定 actor，直接复用，避免重复查库
+        match (ctx.getLocal("actor")) {
+            case Some(actorStr) =>
+                match (parseUserId(actorStr)) {
+                    case Some(userId) => return Some(userId)
+                    case None => ()
+                }
+            case None => ()
+        }
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 match (getTokenRowByToken(ctx, tokenRaw)) {
@@ -93,6 +102,17 @@ public class AuthMiddleware {
             case None => ()
         }
         return None
+    }
+
+    /**
+     * 将 actor 本地变量解析为 userId，失败返回 None
+     */
+    private static func parseUserId(actorStr: String): Option<Int64> {
+        try {
+            return Some(Int64.parse(actorStr))
+        } catch (_: Exception) {
+            return None
+        }
     }
     
     /**
@@ -132,6 +152,15 @@ public class AuthMiddleware {
      * 需要用户身份（仅用户 token 生效）
      */
     public static func requireUser(ctx: Ctx): Option<Int64> {
+        // 若上游中间件（requiredAuth/requireUser）已完成鉴权并绑定 actor，直接复用，避免重复查库
+        match (ctx.getLocal("actor")) {
+            case Some(actorStr) =>
+                match (parseUserId(actorStr)) {
+                    case Some(userId) => return Some(userId)
+                    case None => ()
+                }
+            case None => ()
+        }
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 match (getTokenRowByToken(ctx, tokenRaw)) {

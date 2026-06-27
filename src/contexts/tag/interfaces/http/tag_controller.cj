@@ -126,9 +126,10 @@ public class TagController {
                     // 构建 tag 集合：所有归档标签（tankoubon 自身标签现在也通过关联表获取，但这里只需要归档标签）
                     let tagSet = HashSet<String>()
 
-                    // 添加所有归档的标签
+                    // 批量获取所有归档的标签，避免逐归档查询（N+1）
+                    let batchTags = TagDao.getBatchArchiveTags(tankoubon.archives)
                     for (archiveArcid in tankoubon.archives) {
-                        let archiveTags = TagDao.getArchiveTags(archiveArcid)
+                        let archiveTags = batchTags.get(archiveArcid) ?? ""
                         if (archiveTags.size > 0) {
                             for (part in archiveTags.split(",")) {
                                 let t = part.trimAscii()
