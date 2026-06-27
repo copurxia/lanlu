@@ -159,7 +159,11 @@ public class CronService {
                     sleep(Duration.millisecond * waitTime)
                 }
             } catch (e: Exception) {
-                logger.error("Error in schedule loop", ("error", e.message))
+                try {
+                    logger.error("Error in schedule loop", ("error", e.message))
+                } catch (_: Exception) {
+                    // 日志写入自身失败时吞掉异常，避免拖垮调度循环
+                }
             }
         }
 

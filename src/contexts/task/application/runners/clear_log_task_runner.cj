@@ -51,7 +51,7 @@ public class ClearLogTaskRunner {
             if (cleanSystemLog) {
                 TaskIO.appendLog(taskId, "Cleaning system log...")
                 TaskModel.updateTaskProgress(taskId, 70, "Cleaning system log")
-                let sysLogResult = cleanSystemLogFile("data/logs/system.log", maxAgeSeconds, dryRun)
+                let sysLogResult = cleanSystemLogFile("data/logs/system", maxAgeSeconds, dryRun)
                 totalDeletedCount += sysLogResult.deletedCount
                 totalDeletedSize += sysLogResult.deletedSize
                 totalSkippedCount += sysLogResult.skippedCount
@@ -268,40 +268,58 @@ public class ClearLogTaskRunner {
     }
 
     /**
-     * 清理系统日志（如果超过指定天数则删除）
+     * 清理系统日志归档（按目录扫描，删除过期的归档文件，不删除活动 system.log）。
+     * logPath 为系统日志所在目录（如 data/logs/system）。
      */
     private static func cleanSystemLogFile(logPath: String, maxAgeSeconds: Int64, dryRun: Bool): CleanResult {
         var result = CleanResult()
 
         try {
-            // 检查文件是否存在
-            if (!TaskRunnerUtils.fileExists(logPath)) {
+            // 目标是目录：扫描其中的归档文件
+            if (!TaskRunnerUtils.directoryExists(logPath)) {
                 return result
             }
 
-            let fileInfo = FileInfo(Path(logPath))
-
             let currentTime = DateTime.now().toUnixTimeStamp().toSeconds()
-            let lastModified = fileInfo.lastModificationTime.toUnixTimeStamp().toSeconds()
-            let ageSeconds = currentTime - lastModified
+            let entries = TaskRunnerUtils.listDirectory(logPath)
 
-            // 系统日志只有在超过指定天数时才清理
-            if (ageSeconds > maxAgeSeconds) {
-                let size = fileInfo.size
+            for (entry in entries) {
+                // 仅处理归档文件 system-*.log；活动文件 system.log 由流自行滚动，不在此删除
+                if (!entry.startsWith("system-") || !entry.endsWith(".log")) {
+                    continue
+                }
 
-                if (dryRun) {
-                    result.skippedCount += 1
-                } else {
-                    if (TaskRunnerUtils.removeFile(logPath)) {
-                        result.deletedCount += 1
-                        result.deletedSize += size
-                    } else {
-                        result.errors.add("Failed to remove system log: ${logPath}")
+                let fullPath = TaskRunnerUtils.joinPath(logPath, entry)
+
+                try {
+                    let fileInfo = FileInfo(Path(fullPath))
+                    if (fileInfo.isDirectory()) {
+                        continue
                     }
+
+                    let lastModified = fileInfo.lastModificationTime.toUnixTimeStamp().toSeconds()
+                    let ageSeconds = currentTime - lastModified
+
+                    if (ageSeconds > maxAgeSeconds) {
+                        let size = fileInfo.size
+
+                        if (dryRun) {
+                            result.skippedCount += 1
+                        } else {
+                            if (TaskRunnerUtils.removeFile(fullPath)) {
+                                result.deletedCount += 1
+                                result.deletedSize += size
+                            } else {
+                                result.errors.add("Failed to remove system log: ${fullPath}")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    result.errors.add("Error processing ${fullPath}: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            result.errors.add("Error processing system log: ${e.message}")
+            result.errors.add("Error accessing system log directory ${logPath}: ${e.message}")
         }
 
         return result
