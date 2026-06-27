@@ -158,8 +158,11 @@ public class AvifEncoder {
 
             try {
                 let f = File(Path(outputPath), Write)
-                f.write(bytes)
-                f.close()
+                try {
+                    f.write(bytes)
+                } finally {
+                    try { f.close() } catch (_: Exception) {}
+                }
                 return true
             } catch (_: Exception) {
                 return false

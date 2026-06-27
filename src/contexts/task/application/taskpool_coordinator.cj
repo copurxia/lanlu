@@ -343,6 +343,8 @@ public class TaskPoolCoordinator {
                 ("task_id", taskId.toString())
             )
         }
+        // 释放该任务常驻的 TaskIO 日志句柄，避免 fd 长期占用
+        TaskIO.closeHandle(taskId)
         logger.debug(
             "TaskPool worker released",
             ("worker", workerId.toString()),

@@ -42,8 +42,11 @@ public class ZipExtractor {
         let tempPath = "/tmp/epub_temp_${timestamp}.epub"
 
         let file = File(Path(tempPath), Write)
-        file.write(data)
-        file.close()
+        try {
+            file.write(data)
+        } finally {
+            try { file.close() } catch (_: Exception) {}
+        }
 
         extractor.archivePath = tempPath
         extractor.tempFilePath = Some(tempPath)

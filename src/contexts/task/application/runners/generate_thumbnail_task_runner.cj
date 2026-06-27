@@ -131,8 +131,10 @@ public class GenerateThumbnailTaskRunner {
         if (readerExitCode == 0) {
             match (readerOpt) {
                 case Some(reader) =>
+                    var outFileOpt: ?File = None
                     try {
                         let outFile = File(Path(tempCoverPath), Write)
+                        outFileOpt = Some(outFile)
                         let bufSize: Int64 = 1024 * 1024
                         var buf = Array<Byte>(bufSize, repeat: 0)
                         var total: Int64 = 0
@@ -144,11 +146,16 @@ public class GenerateThumbnailTaskRunner {
                             outFile.write(buf[0..n])
                             total += n
                         }
-                        outFile.close()
-                        reader.close()
+                        try { outFile.close() } catch (_: Exception) {}
+                        outFileOpt = None
+                        try { reader.close() } catch (_: Exception) {}
                         TaskIO.appendLog(taskId, "Cover media extracted via streaming, size: ${total} bytes")
                     } catch (e: Exception) {
                         try { reader.close() } catch (_: Exception) {}
+                        match (outFileOpt) {
+                            case Some(f) => try { f.close() } catch (_: Exception) {}
+                            case None => ()
+                        }
                         let errorMsg = "Failed to write cover media to temp file (streaming): ${e.message}"
                         TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                         return ProcessResultData(false, "", errorMsg)
@@ -165,8 +172,11 @@ public class GenerateThumbnailTaskRunner {
                     }
                     try {
                         let tempFile = File(Path(tempCoverPath), Write)
-                        tempFile.write(imageData)
-                        tempFile.close()
+                        try {
+                            tempFile.write(imageData)
+                        } finally {
+                            try { tempFile.close() } catch (_: Exception) {}
+                        }
                         TaskIO.appendLog(taskId, "Cover media extracted (fallback), size: ${imageData.size} bytes")
                     } catch (e: Exception) {
                         let errorMsg = "Failed to write cover media to temp file (fallback): ${e.message}"
@@ -186,8 +196,11 @@ public class GenerateThumbnailTaskRunner {
             }
             try {
                 let tempFile = File(Path(tempCoverPath), Write)
-                tempFile.write(imageData)
-                tempFile.close()
+                try {
+                    tempFile.write(imageData)
+                } finally {
+                    try { tempFile.close() } catch (_: Exception) {}
+                }
                 TaskIO.appendLog(taskId, "Cover media extracted (fallback), size: ${imageData.size} bytes")
             } catch (e: Exception) {
                 let errorMsg = "Failed to write cover media to temp file (fallback): ${e.message}"

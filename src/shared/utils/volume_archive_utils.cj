@@ -540,10 +540,7 @@ public class VolumeArchiveUtils {
         try {
             let path = Path(filePath)
             if (!exists(path)) { return 0 }
-            let file = File(path, Read)
-            let size = file.info.size
-            file.close()
-            return size
+            return FileInfo(path).size
         } catch (_: Exception) {
             return 0
         }

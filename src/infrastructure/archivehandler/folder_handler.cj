@@ -361,8 +361,11 @@ public class FolderHandler <: ArchiveHandler {
             }
 
             let destFile = File(Path(outputPath), Write)
-            destFile.write(sourceData)
-            destFile.close()
+            try {
+                destFile.write(sourceData)
+            } finally {
+                try { destFile.close() } catch (_: Exception) {}
+            }
             return true
         } catch (_: Exception) {
             return false

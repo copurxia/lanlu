@@ -339,10 +339,7 @@ public class ArchivePackageIndexStore {
             fingerprint.fileSize = if (info.isDirectory()) {
                 0
             } else {
-                let file = File(Path(actualPath), Read)
-                let size = file.info.size
-                file.close()
-                size
+                info.size
             }
         } catch (_: Exception) {
             fingerprint.modifiedAtMs = 0

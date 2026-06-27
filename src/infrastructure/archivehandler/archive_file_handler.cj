@@ -87,8 +87,11 @@ public class ArchiveFileHandler <: ArchiveHandler {
                 // 写入文件
                 let filePath = Path(outputPath)
                 let file = File(filePath, Write)
-                file.write(stdout)
-                file.close()
+                try {
+                    file.write(stdout)
+                } finally {
+                    try { file.close() } catch (_: Exception) {}
+                }
                 return true
             }
             return false

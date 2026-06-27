@@ -232,10 +232,7 @@ public class ArchiveUtils {
         try {
             let actualPath = FileUtils.resolvePath(filePath)
             let path = Path(actualPath)
-            let file = File(path, Read)
-            let fileInfo = file.info
-            file.close()
-            return fileInfo.size
+            return FileInfo(path).size
         } catch (_: Exception) {
             return 0
         }

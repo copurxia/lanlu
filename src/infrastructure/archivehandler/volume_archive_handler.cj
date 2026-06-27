@@ -235,8 +235,11 @@ public class VolumeArchiveHandler <: ArchiveHandler {
                     Directory.create(Path(outputDir), recursive: true)
                 }
                 let file = File(Path(outputPath), Write)
-                file.write(data)
-                file.close()
+                try {
+                    file.write(data)
+                } finally {
+                    try { file.close() } catch (_: Exception) {}
+                }
                 return true
             } catch (_: Exception) {
                 return false
@@ -372,10 +375,7 @@ public class VolumeArchiveHandler <: ArchiveHandler {
         try {
             let path = Path(filePath)
             if (!exists(path)) { return 0 }
-            let file = File(path, Read)
-            let size = file.info.size
-            file.close()
-            return size
+            return FileInfo(path).size
         } catch (_: Exception) {
             return 0
         }

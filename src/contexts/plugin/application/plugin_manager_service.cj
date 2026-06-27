@@ -143,15 +143,18 @@ public class PluginManagerService {
             if (exists(headersFile)) {
                 try {
                     let f = File(headersFile, Read)
-                    let reader = StringReader<InputStream>(f)
-                    let rawHeaders = reader.readToEnd()
-                    f.close()
-                    let lines = rawHeaders.split("\n")
-                    for (line in lines) {
-                        let trimmed = line.trimAscii()
-                        if (trimmed.toAsciiLower().startsWith("etag:")) {
-                            etag = trimmed[5..].trimAscii()
+                    try {
+                        let reader = StringReader<InputStream>(f)
+                        let rawHeaders = reader.readToEnd()
+                        let lines = rawHeaders.split("\n")
+                        for (line in lines) {
+                            let trimmed = line.trimAscii()
+                            if (trimmed.toAsciiLower().startsWith("etag:")) {
+                                etag = trimmed[5..].trimAscii()
+                            }
                         }
+                    } finally {
+                        try { f.close() } catch (_: Exception) {}
                     }
                 } catch (_: Exception) {}
             }
@@ -198,10 +201,13 @@ public class PluginManagerService {
         try {
             if (!exists(p)) { return "" }
             let f = File(p, Read)
-            let r = StringReader<InputStream>(f)
-            let raw = r.readToEnd()
-            f.close()
-            return raw.trimAscii()
+            try {
+                let r = StringReader<InputStream>(f)
+                let raw = r.readToEnd()
+                return raw.trimAscii()
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {
             return ""
         }
@@ -217,9 +223,12 @@ public class PluginManagerService {
             }
             FileUtils.ensureDirectoryExists(p.parent)
             let f = File(p, Write)
-            f.write(trimmed.toArray())
-            f.flush()
-            f.close()
+            try {
+                f.write(trimmed.toArray())
+                f.flush()
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 

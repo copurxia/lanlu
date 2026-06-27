@@ -27,23 +27,22 @@ public class ThumbHashUtils {
      */
     public static func calculateAvifThumbHashFromFile(imagePath: String): String {
         let filePath = Path(imagePath)
-        let file = File(filePath, Read)
-        let fileInfo = file.info
-        let fileSize = Int64(fileInfo.size)
+        let fileSize = Int64(FileInfo(filePath).size)
         let buffer = Array<Byte>(fileSize, {_ => 0})
-        let bytesRead = file.read(buffer)
-        file.close()
-
-        if (bytesRead <= 0) {
-            throw Exception("Failed to read file: ${imagePath}")
+        let file = File(filePath, Read)
+        try {
+            let bytesRead = file.read(buffer)
+            if (bytesRead <= 0) {
+                throw Exception("Failed to read file: ${imagePath}")
+            }
+            let imageData = buffer[0..bytesRead]
+            if (let Some((_, _, pixels)) <- AvifDecoder.decodeRGBA(imageData)) {
+                return calculateThumbHashFromRgbaPixels(pixels)
+            }
+            throw Exception("AVIF decode failed for: ${imagePath}")
+        } finally {
+            try { file.close() } catch (_: Exception) {}
         }
-
-        let imageData = buffer[0..bytesRead]
-        if (let Some((_, _, pixels)) <- AvifDecoder.decodeRGBA(imageData)) {
-            return calculateThumbHashFromRgbaPixels(pixels)
-        }
-
-        throw Exception("AVIF decode failed for: ${imagePath}")
     }
 
     private static func hashToHex(hash: UInt64): String {

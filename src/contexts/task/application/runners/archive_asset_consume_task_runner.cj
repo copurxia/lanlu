@@ -121,7 +121,12 @@ public class ArchiveAssetConsumeTaskRunner {
             } catch (e: Exception) {
                 if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
                     copy(Path(sourceFilePath), to: finalArchivePath, overwrite: false)
-                    remove(Path(sourceFilePath))
+                    // copy 成功后源文件可能已被并行清理删除，缺失并非错误。
+                    try {
+                        if (exists(Path(sourceFilePath))) {
+                            remove(Path(sourceFilePath))
+                        }
+                    } catch (_: Exception) {}
                 } else {
                     throw e
                 }

@@ -97,8 +97,11 @@ public class EpubHandler <: ArchiveHandler {
 
                 let filePath = Path(outputPath)
                 let file = File(filePath, Write)
-                file.write(data)
-                file.close()
+                try {
+                    file.write(data)
+                } finally {
+                    try { file.close() } catch (_: Exception) {}
+                }
                 return true
             }
             return false

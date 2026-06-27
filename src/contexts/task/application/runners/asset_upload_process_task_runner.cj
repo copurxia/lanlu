@@ -120,7 +120,12 @@ public class AssetUploadProcessTaskRunner {
             } catch (e: Exception) {
                 if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
                     copy(finalPartPath, to: Path(stagingPath), overwrite: false)
-                    remove(finalPartPath)
+                    // copy 成功后源文件可能已被并行清理删除，缺失并非错误。
+                    try {
+                        if (exists(finalPartPath)) {
+                            remove(finalPartPath)
+                        }
+                    } catch (_: Exception) {}
                 } else {
                     throw e
                 }

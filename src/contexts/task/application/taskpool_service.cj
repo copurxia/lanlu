@@ -103,15 +103,20 @@ public class TaskPoolService {
                             false
                         }
                         if (shouldCleanup) {
-                            let dirPath = Path("${cacheTaskDir}/${entry}")
-                            try {
-                                remove(dirPath, recursive: true)
-                                cleanedCount += 1
-                                logger.debug("Cleaned up orphaned upload dir", ("taskId", entry))
-                            } catch (e: Exception) {
-                                logger.warn("Failed to clean upload dir", ("taskId", entry), ("error", e.message))
+                            // 消费链（process → consume → scan）仍可能读取 final.part；
+                            // 仅当同 group 无非终态任务时才清理，避免与落盘竞态。
+                            let groupId = "asset_upload:${entry}"
+                            if (!TaskDao.existsNonTerminalTasksByGroupId(groupId)) {
+                                let dirPath = Path("${cacheTaskDir}/${entry}")
+                                try {
+                                    remove(dirPath, recursive: true)
+                                    cleanedCount += 1
+                                    logger.debug("Cleaned up orphaned upload dir", ("taskId", entry))
+                                } catch (e: Exception) {
+                                    logger.warn("Failed to clean upload dir", ("taskId", entry), ("error", e.message))
+                                }
+                                TaskKVService.getStore().deleteGroup(groupId)
                             }
-                            TaskKVService.getStore().deleteGroup("asset_upload:${entry}")
                         }
                     case None => ()
                 }

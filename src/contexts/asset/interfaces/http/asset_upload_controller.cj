@@ -139,8 +139,11 @@ public class AssetUploadController {
                 let partPath = Path("${uploadDir.toString()}/${UPLOAD_PART_FILE}")
                 if (!exists(partPath)) {
                     let partFile = File(partPath, Write)
-                    partFile.flush()
-                    partFile.close()
+                    try {
+                        partFile.flush()
+                    } finally {
+                        try { partFile.close() } catch (_: Exception) {}
+                    }
                 }
             } catch (e: Exception) {
                 getLogger("asset_upload").warn("初始化上传文件失败", ("taskId", task.id.toString()), ("error", e.message))

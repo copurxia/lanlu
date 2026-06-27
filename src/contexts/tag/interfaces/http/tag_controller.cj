@@ -388,8 +388,11 @@ public class TagController {
 
         try {
             let f = File(Path(inputPath), Write)
-            unsafe { f.write(raw.rawData()) }
-            f.close()
+            try {
+                unsafe { f.write(raw.rawData()) }
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
         } catch (e: Exception) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(500)
@@ -491,8 +494,11 @@ public class TagController {
 
         try {
             let f = File(Path(inputPath), Write)
-            unsafe { f.write(raw.rawData()) }
-            f.close()
+            try {
+                unsafe { f.write(raw.rawData()) }
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
         } catch (_: Exception) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(500)

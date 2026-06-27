@@ -253,8 +253,10 @@ public class PageMetadataTaskRunner {
         if (readerExitCode == 0) {
             match (readerOpt) {
                 case Some(reader) =>
+                    var tempFileOpt: ?File = None
                     try {
                         let tempFile = File(Path(tempImagePath), Write)
+                        tempFileOpt = Some(tempFile)
                         let bufSize: Int64 = 1024 * 1024
                         var buf = Array<Byte>(bufSize, repeat: 0)
                         var total: Int64 = 0
@@ -266,11 +268,16 @@ public class PageMetadataTaskRunner {
                             tempFile.write(buf[0..n])
                             total += n
                         }
-                        tempFile.close()
-                        reader.close()
+                        try { tempFile.close() } catch (_: Exception) {}
+                        tempFileOpt = None
+                        try { reader.close() } catch (_: Exception) {}
                         TaskIO.appendLog(taskId, "Page ${pageNumber}: extracted ${total} bytes")
                     } catch (e: Exception) {
                         try { reader.close() } catch (_: Exception) {}
+                        match (tempFileOpt) {
+                            case Some(f) => try { f.close() } catch (_: Exception) {}
+                            case None => ()
+                        }
                         TaskIO.appendLog(taskId, "WARN: Page ${pageNumber} extraction failed: ${e.message}")
                         return ThumbnailResult(false, 0, "")
                     }
@@ -282,8 +289,11 @@ public class PageMetadataTaskRunner {
                     }
                     try {
                         let tempFile = File(Path(tempImagePath), Write)
-                        tempFile.write(data)
-                        tempFile.close()
+                        try {
+                            tempFile.write(data)
+                        } finally {
+                            try { tempFile.close() } catch (_: Exception) {}
+                        }
                     } catch (e: Exception) {
                         return ThumbnailResult(false, 0, "")
                     }
@@ -295,8 +305,11 @@ public class PageMetadataTaskRunner {
             }
             try {
                 let tempFile = File(Path(tempImagePath), Write)
-                tempFile.write(data)
-                tempFile.close()
+                try {
+                    tempFile.write(data)
+                } finally {
+                    try { tempFile.close() } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 return ThumbnailResult(false, 0, "")
             }
