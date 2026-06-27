@@ -32,7 +32,7 @@ function CollectionPreviewGrid({
   return (
     <div
       ref={containerRef}
-      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4"
+      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-11 gap-4"
     >
       {archives.map((archive, index) => {
         const itemKey = `${tankoubonId}:${archive.arcid}`;

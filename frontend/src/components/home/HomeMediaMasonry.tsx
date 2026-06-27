@@ -37,10 +37,14 @@ function getItemKey(item: Archive | Tankoubon): string {
 
 function getColumnCount(containerWidth: number): number {
   if (containerWidth < 640) return 2;
-  if (containerWidth < 1024) return 3;
-  if (containerWidth < 1280) return 4;
-  if (containerWidth < 1536) return 5;
-  return 6;
+  if (containerWidth < 768) return 3;
+  if (containerWidth < 1024) return 4;
+  if (containerWidth < 1280) return 5;
+  if (containerWidth < 1400) return 6;
+  if (containerWidth < 1920) return 7;
+  if (containerWidth < 2560) return 8;
+  if (containerWidth < 3200) return 10;
+  return 11;
 }
 
 const HomeTankoubonMasonryCard = memo(function HomeTankoubonMasonryCard({
@@ -241,7 +245,7 @@ export const HomeMediaMasonry = memo(function HomeMediaMasonry({
 
   if (!ENABLE_HOME_MASONRY_VIRTUALIZATION) {
     return (
-      <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6">
+      <div className="columns-2 gap-4 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 2xl:columns-7 3xl:columns-8 4xl:columns-10 5xl:columns-11">
         {items.map((item, index) => {
           if (isTankoubonItem(item)) {
             return (

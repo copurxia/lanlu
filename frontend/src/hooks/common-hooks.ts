@@ -231,7 +231,8 @@ export function useBreakpoint() {
     if (width < 1400) return '2xl';
     if (width < 1920) return '3xl';
     if (width < 2560) return '4xl';
-    return '5xl';
+    if (width < 3200) return '5xl';
+    return '6xl';
   }, [width]);
 
   return breakpoint;
@@ -245,16 +246,16 @@ export function useGridColumnCount() {
   const { width } = useWindowSize();
 
   const columnCount = useMemo(() => {
-    // 对应 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9
+    // 对应 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-11
     if (width < 640) return 2;   // default (xs)
     if (width < 768) return 3;   // sm
     if (width < 1024) return 4;  // md
     if (width < 1280) return 5;  // lg
     if (width < 1400) return 6;  // xl
-    if (width < 1920) return 6;  // 2xl
-    if (width < 2560) return 7;  // 3xl
-    if (width < 3200) return 8;  // 4xl
-    return 9;                     // 5xl
+    if (width < 1920) return 7;  // 2xl
+    if (width < 2560) return 8;  // 3xl
+    if (width < 3200) return 10; // 4xl
+    return 11;                     // 5xl/6xl
   }, [width]);
 
   return columnCount;

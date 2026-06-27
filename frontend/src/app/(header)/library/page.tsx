@@ -306,7 +306,7 @@ function LibraryPageContent() {
 
             <TabsContent value="favorites" className="mt-0">
               {favoritesLoading ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-11 gap-4">
                   {Array.from({ length: 10 }).map((_, i) => (
                     <div key={i} className="space-y-2">
                       <Skeleton className="aspect-3/4 w-full" />
@@ -344,7 +344,7 @@ function LibraryPageContent() {
 
             <TabsContent value="history" className="mt-0">
               {historyLoading ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 3xl:grid-cols-8 4xl:grid-cols-10 5xl:grid-cols-11 gap-4">
                   {Array.from({ length: 10 }).map((_, i) => (
                     <div key={i} className="space-y-2">
                       <Skeleton className="aspect-3/4 w-full" />

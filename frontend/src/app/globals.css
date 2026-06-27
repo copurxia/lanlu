@@ -12,6 +12,7 @@
   --breakpoint-3xl: 1920px;
   --breakpoint-4xl: 2560px;
   --breakpoint-5xl: 3200px;
+  --breakpoint-6xl: 3840px;
 
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));

@@ -75,7 +75,7 @@ const ArchiveGrid = dynamic(
   () => import('@/components/archive/ArchiveGrid').then((m) => m.ArchiveGrid),
   {
     loading: () => (
-      <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6">
+      <div className="columns-2 gap-4 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 2xl:columns-7 3xl:columns-8 4xl:columns-10 5xl:columns-11">
         {Array.from({ length: 10 }).map((_, idx) => (
           <div key={idx} className="mb-4 break-inside-avoid">
             <Skeleton className="aspect-3/4 w-full rounded-lg" />
@@ -1037,7 +1037,7 @@ function HomePageContent() {
                   ))}
                 </div>
               ) : (
-                <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6">
+                <div className="columns-2 gap-4 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 2xl:columns-7 3xl:columns-8 4xl:columns-10 5xl:columns-11">
                   {Array.from({ length: 10 }).map((_, idx) => (
                     <div key={idx} className="mb-4 break-inside-avoid">
                       <Skeleton className="aspect-3/4 w-full rounded-lg" />
