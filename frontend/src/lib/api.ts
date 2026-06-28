@@ -88,7 +88,9 @@ function setupInterceptors(client: AxiosInstance, logPrefix: string = 'API'): vo
 export const apiClient = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 10000,
+  // source 档案接口首次未命中 KV 缓存时，需同步执行 WASM 插件 + 远端 API 往返，
+  // 耗时可能超过 10s；提升到 60s 避免首访被前端掐断。命中缓存后仍是毫秒级响应。
+  timeout: 60000,
   withCredentials: true
 });
 

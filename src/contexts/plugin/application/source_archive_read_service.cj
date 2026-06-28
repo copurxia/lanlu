@@ -42,6 +42,10 @@ public class SourceChildItem {
     public var path: String = ""           // 页面资源 key（仅 entity_type=page 时有值）
     public var mediaType: String = "image"
     public var sortOrder: Int64 = 0
+    public var coverAssetId: Int64 = 0     // archive child 可复用合集封面 asset_id
+    /// child 原始 JSON（透传用）：controller 可直接输出，无需逐字段重组，
+    /// 插件在 child 上加任何嵌套字段（如 assets/page_count）都能原样到达前端。
+    public var rawJson: String = ""
 }
 
 public class SourcePageItem {
@@ -391,7 +395,11 @@ public class SourceArchiveReadService {
                 r.skip()
                 continue
             }
-            let child = parseSingleChildFromMetadata(r)
+            // 先捕获 child 原始 JSON（透传用），再用副本解析已知字段
+            let rawBytes = r.readValueBytes()
+            let rawJson = String.fromUtf8(rawBytes)
+            let child = parseSingleChildFromRaw(rawJson)
+            child.rawJson = rawJson
             children.add(child)
         }
         r.endArray()
@@ -399,23 +407,20 @@ public class SourceArchiveReadService {
     }
 
     /**
-     * 解析统一 metadata 的 child 条目。
+     * 解析统一 metadata 的 child 条目（从原始 JSON 字符串）。
      *
-     * 输入格式：
-     * ```json
-     * {
-     *   "entity_type": "archive|page",
-     *   "entity_id": "source:ns:id",
-     *   "title": "...",
-     *   "sort_order": 1,
-     *   "path": "opaque-page-key",
-     *   "media_type": "image",
-     *   "tags": ["tag1", "tag2"]
-     * }
-     * ```
+     * 已知字段（entity_type/entity_id/title/path/media_type/sort_order/description/tags）
+     * 仍被解析到 SourceChildItem 的强类型字段上，供 fetchPages 等内部逻辑使用；
+     * 其余字段（如 assets/cover_asset_id/page_count）由 rawJson 原样透传给前端。
      */
-    private static func parseSingleChildFromMetadata(r: JsonReader): SourceChildItem {
+    private static func parseSingleChildFromRaw(rawJson: String): SourceChildItem {
         let child = SourceChildItem()
+        var buf = ByteBuffer()
+        unsafe { buf.write(rawJson.rawData()) }
+        let r = JsonReader(buf)
+        if (r.peek() != Some(BeginObject)) {
+            return child
+        }
         r.startObject()
         while (r.peek() != EndObject) {
             let name = r.readName()
@@ -435,6 +440,11 @@ public class SourceArchiveReadService {
                 child.description = r.readValue<String>()
             } else if (name == "tags") {
                 child.tags = parseStringArray(r)
+            } else if (name == "assets") {
+                // 解析嵌套 assets.cover（插件在 archive child 上复用合集封面）
+                let bytes = r.readValueBytes()
+                let assetsJson = String.fromUtf8(bytes)
+                child.coverAssetId = extractCoverFromAssets(assetsJson)
             } else {
                 r.skip()
             }
@@ -505,5 +515,29 @@ public class SourceArchiveReadService {
                 return 0
             }
         }
+    }
+
+    /// 从 assets JSON 对象中提取 cover 字段值（asset_id）。
+    /// 插件在 archive child 上输出 "assets": {"cover": 123}，这里解析出 123。
+    private static func extractCoverFromAssets(assetsJson: String): Int64 {
+        let trimmed = assetsJson.trimAscii()
+        if (trimmed.size == 0) { return 0 }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return 0 }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == "cover") {
+                    return readPositiveInt64(r)
+                } else {
+                    r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return 0
     }
 }

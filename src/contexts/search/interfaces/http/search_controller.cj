@@ -551,9 +551,17 @@ public class SearchController {
                     resultW.writeName("archivetype").writeValue("image")
                     resultW.writeName("lastreadtime").writeValue(0)
                     resultW.writeName("size").writeValue(0)
-                    resultW.writeName("assets")
-                    resultW.startObject()
-                    resultW.endObject()
+                    // 档案封面：由 metadata 插件在 archive child 的 assets.cover 上提供（复用合集封面）
+                    if (child.coverAssetId > 0) {
+                        resultW.writeName("assets")
+                        resultW.startObject()
+                        resultW.writeName("cover").writeValue(child.coverAssetId)
+                        resultW.endObject()
+                    } else {
+                        resultW.writeName("assets")
+                        resultW.startObject()
+                        resultW.endObject()
+                    }
                     resultW.writeName("release_at").writeValue("")
                     resultW.writeName("created_at").writeValue("")
                     resultW.writeName("updated_at").writeValue("")

@@ -102,18 +102,16 @@ public class TankoubonController {
                         continue
                     }
                     archiveChildCount += 1
-                    w.startObject()
-                    w.writeName("entity_type").writeValue("archive")
-                    w.writeName("entity_id").writeValue(child.remoteId)
-                    w.writeName("title").writeValue(child.title)
-                    w.writeName("description").writeValue(child.description)
-                    w.writeName("tags")
-                    w.startArray()
-                    for (tag in child.tags) {
-                        w.writeValue(tag)
+                    // 直接透传插件产出的 child 原始 JSON（含 assets/cover 等字段）
+                    if (child.rawJson.trimAscii().size > 0) {
+                        w.jsonValue(child.rawJson)
+                    } else {
+                        w.startObject()
+                        w.writeName("entity_type").writeValue("archive")
+                        w.writeName("entity_id").writeValue(child.remoteId)
+                        w.writeName("title").writeValue(child.title)
+                        w.endObject()
                     }
-                    w.endArray()
-                    w.endObject()
                 }
                 w.endArray()
 
