@@ -31,6 +31,14 @@ public class TaskGroupKVStore <: TaskKVStore {
     private static let maxTxnRetries: Int64 = 8
     private static var instance: Option<TaskGroupKVStore> = None
     private static let instanceMutex: Mutex = Mutex()
+    /**
+     * namespace 作用域 KV 的合成 groupId 前缀。
+     *
+     * 以 __ns: 开头的 groupId 不参与任务派生组的引用计数生命周期：
+     * acquire/release/deleteGroup 不会清理它们，仅靠 TTL 过期——
+     * 因此登录插件可借此跨管线缓存令牌。
+     */
+    public static let namespaceGroupPrefix: String = "__ns:"
 
     private let refCountMutex: Mutex = Mutex()
     private var groupRefCounts: HashMap<String, Int32>
@@ -51,6 +59,24 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
+    /**
+     * 构造插件 namespace 作用域 KV 的合成 groupId。
+     *
+     * 与任务派生 groupId 不同，namespace KV 仅随 TTL 过期，不随组生命周期清理。
+     * 调用方应仅对纯 pluginNamespace 合成组做 get/set/delete/getKeys，绝不对其
+     * acquireGroup/releaseGroup/deleteGroup（releaseGroup/deleteGroup 已内置守卫防止误删）。
+     *
+     * 取插件 namespace 去首尾空白后，将 /、\、空格替换为 _，最终拼成 __ns:<safe>。
+     * sanitize 后为空则返回空字符串——Host Bridge 侧应据此判空拒绝访问。
+     */
+    public static func namespaceGroupId(pluginNamespace: String): String {
+        let safe = pluginNamespace.trimAscii().replace("/", "_").replace("\\", "_").replace(" ", "_")
+        if (safe.size == 0) {
+            return ""
+        }
+        return "${namespaceGroupPrefix}${safe}"
+    }
+
     public func acquireGroup(groupId: String): Unit {
         let normalizedGroupId = normalizeGroupId(groupId)
         if (normalizedGroupId.size == 0) {
@@ -68,6 +94,10 @@ public class TaskGroupKVStore <: TaskKVStore {
     public func releaseGroup(groupId: String): Unit {
         let normalizedGroupId = normalizeGroupId(groupId)
         if (normalizedGroupId.size == 0) {
+            return
+        }
+        // namespace 作用域 KV 不参与组引用计数生命周期，绝不随组释放而删除。
+        if (normalizedGroupId.startsWith(namespaceGroupPrefix)) {
             return
         }
 
@@ -120,6 +150,10 @@ public class TaskGroupKVStore <: TaskKVStore {
     public func deleteGroup(groupId: String): Unit {
         let normalizedGroupId = normalizeGroupId(groupId)
         if (normalizedGroupId.size == 0) {
+            return
+        }
+        // namespace 作用域 KV 仅随 TTL 过期；任何误调 deleteGroup 的路径都不得清空它。
+        if (normalizedGroupId.startsWith(namespaceGroupPrefix)) {
             return
         }
 

@@ -819,6 +819,17 @@ public class WasmHostBridge {
         registerHostMethod("taskKv.delete", { ctx => handleTaskKvDelete(ctx) })
         registerHostMethod("task_kv.list_keys", { ctx => handleTaskKvListKeys(ctx) })
         registerHostMethod("taskKv.listKeys", { ctx => handleTaskKvListKeys(ctx) })
+        // namespace 作用域插件 KV：跨管线留存的凭证/令牌缓存，复用 task_group_kv 列族。
+        // groupId 由 ctx.pluginNamespace 合成（__ns:<namespace>），与任务派生组完全隔离，
+        // 仅靠 TTL 过期，不随任务组生命周期被清理。
+        registerHostMethod("plugin_kv.get", { ctx => handlePluginKvGet(ctx) })
+        registerHostMethod("pluginKv.get", { ctx => handlePluginKvGet(ctx) })
+        registerHostMethod("plugin_kv.set", { ctx => handlePluginKvSet(ctx) })
+        registerHostMethod("pluginKv.set", { ctx => handlePluginKvSet(ctx) })
+        registerHostMethod("plugin_kv.delete", { ctx => handlePluginKvDelete(ctx) })
+        registerHostMethod("pluginKv.delete", { ctx => handlePluginKvDelete(ctx) })
+        registerHostMethod("plugin_kv.list_keys", { ctx => handlePluginKvListKeys(ctx) })
+        registerHostMethod("pluginKv.listKeys", { ctx => handlePluginKvListKeys(ctx) })
         registerHostMethod("ui.select", { ctx => handleUiSelect(ctx) })
         registerHostMethod("asset.install_from_file", { ctx => handleAssetInstallFromFile(ctx) })
         registerHostMethod("asset.allocate", { ctx => handleAssetAllocate(ctx) })
@@ -1802,6 +1813,68 @@ public class WasmHostBridge {
         let groupId = ctx.groupId.trimAscii()
         if (groupId.size == 0) {
             return (false, "{}", "task group unavailable")
+        }
+        let keys = TaskKVService.getStore().getKeys(groupId)
+        return (true, buildTaskKvListKeysResponseJson(keys), "")
+    }
+
+    // namespace 作用域插件 KV：复用 task_group_kv 列族，groupId 合成为 __ns:<pluginNamespace>。
+    // 隔离由 Host Bridge 按 ctx.pluginNamespace 强制——A 插件只能读写自己的 namespace KV。
+    // 权限复用 task_kv.read/write（登录插件已在 info JSON 声明 task_kv.write），无需新增权限或迁移。
+
+    private static func handlePluginKvGet(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.read"], "task_kv.read")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = TaskGroupKVStore.namespaceGroupId(ctx.pluginNamespace)
+        if (groupId.size == 0) {
+            return (false, "{}", "plugin namespace unavailable")
+        }
+        let key = parseTaskKvKey(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        match (TaskKVService.getStore().get(groupId, key)) {
+            case Some(value) => return (true, buildTaskKvValueResponseJson(true, value), "")
+            case None => return (true, buildTaskKvValueResponseJson(false, "null"), "")
+        }
+    }
+
+    private static func handlePluginKvSet(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.write"], "task_kv.write")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = TaskGroupKVStore.namespaceGroupId(ctx.pluginNamespace)
+        if (groupId.size == 0) {
+            return (false, "{}", "plugin namespace unavailable")
+        }
+        let (key, valueRaw, ttlSeconds) = parseTaskKvSetParams(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        let ok = TaskKVService.getStore().set(groupId, key, valueRaw, ttlSeconds)
+        return (true, buildTaskKvMutationResponseJson("stored", ok), "")
+    }
+
+    private static func handlePluginKvDelete(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.write"], "task_kv.write")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = TaskGroupKVStore.namespaceGroupId(ctx.pluginNamespace)
+        if (groupId.size == 0) {
+            return (false, "{}", "plugin namespace unavailable")
+        }
+        let key = parseTaskKvKey(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        let deleted = TaskKVService.getStore().delete(groupId, key)
+        return (true, buildTaskKvMutationResponseJson("deleted", deleted), "")
+    }
+
+    private static func handlePluginKvListKeys(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.read"], "task_kv.read")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = TaskGroupKVStore.namespaceGroupId(ctx.pluginNamespace)
+        if (groupId.size == 0) {
+            return (false, "{}", "plugin namespace unavailable")
         }
         let keys = TaskKVService.getStore().getKeys(groupId)
         return (true, buildTaskKvListKeysResponseJson(keys), "")
