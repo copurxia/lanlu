@@ -4,6 +4,8 @@ import std.collection.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
+import lanlu.infrastructure.kv.TaskGroupKVStore
+import lanlu.shared.utils.*
 
 /**
  * Source 档案读取服务（新架构）。
@@ -55,28 +57,66 @@ public class SourcePagesResult {
 
 public class SourceArchiveReadService {
 
+    private static let logger = getLogger("source_archive_read_service")
+    /**
+     * metadata 命名空间 KV 缓存 TTL（秒）。
+     *
+     * metadata（标题/标签/封面 asset_id/章节列表）变化频率低，缓存 10 分钟可让
+     * 列表、详情、阅读器三类请求在 TTL 窗口内复用同一次 Metadata 插件执行结果，
+     * 避免并发请求各自同步重跑 WASM 插件 + 远端 API 往返。
+     */
+    private static let metadataCacheTtlSeconds: Int64 = 600
+
     /**
      * 通过 Metadata 插件解析 source 详情。
+     *
+     * 命中 namespace 级 KV 缓存时直接复用上次解析结果，跳过同步执行 Metadata 插件；
+     * 缓存未命中或失效（失败响应/损坏）时回退到插件执行，成功后写回缓存。
      *
      * @param sourceId 完整 sourceId 如 "source:ehentaisource:123/token"
      */
     public static func fetchDetail(sourceId: String): SourceDetailResult {
         let result = SourceDetailResult()
 
-        // 1. 执行 Metadata 插件获取统一 metadata
+        // 1. 命中 namespace KV 缓存则直接解析，跳过同步执行 Metadata 插件
+        match (loadCachedMetadata(sourceId)) {
+            case Some(cachedJson) =>
+                if (cachedJson.trimAscii().size > 0) {
+                    try {
+                        let cached = parseMetadataResponse(cachedJson)
+                        if (!cached.hasError()) {
+                            return cached
+                        }
+                    } catch (_: Exception) {
+                        // 缓存损坏：回退到重新解析
+                    }
+                    // 缓存为失败响应或已损坏：清除并回退
+                    invalidateCachedMetadata(sourceId)
+                }
+            case None => ()
+        }
+
+        // 2. 执行 Metadata 插件获取统一 metadata
         let metadataJson = SourcePluginExecutionService.resolveMetadata(sourceId)
         if (metadataJson.trimAscii().size == 0) {
             result.errorMessage = "Metadata plugin returned empty response for ${sourceId}"
             return result
         }
 
-        // 2. 解析 metadata JSON → SourceDetailResult
+        // 3. 解析 metadata JSON → SourceDetailResult
+        let parsed: SourceDetailResult
         try {
-            return parseMetadataResponse(metadataJson)
+            parsed = parseMetadataResponse(metadataJson)
         } catch (e: Exception) {
             result.errorMessage = "Failed to parse metadata response: ${e.message}"
             return result
         }
+
+        // 4. 仅缓存成功响应到 namespace KV（失败响应不缓存，避免 TTL 内持续返回错误）
+        if (!parsed.hasError()) {
+            saveCachedMetadata(sourceId, metadataJson)
+        }
+        return parsed
     }
 
     /**
@@ -131,6 +171,77 @@ public class SourceArchiveReadService {
 
         let sourceId = "source:${namespace}:${remoteId}"
         return SourcePluginExecutionService.resolvePageAsset(sourceId, path)
+    }
+
+    // ─── Metadata namespace KV 缓存 ───
+
+    /**
+     * 从 sourceId 中提取 pluginNamespace。
+     * sourceId 形如 "source:picacgsource:xxx"，namespace 位于第二段。
+     * 用 split 解析，避免 substring 索引类型差异。
+     */
+    private static func extractNamespaceFromSourceId(sourceId: String): String {
+        let parts = sourceId.split(":")
+        if (parts.size >= 2) {
+            return parts[1]
+        }
+        return ""
+    }
+
+    /**
+     * 读取缓存的 metadata JSON（命中且未过期返回 Some，否则 None）。
+     * 缓存作用域为插件 namespace 级（__ns:<namespace>），跨请求、跨 controller 共享。
+     */
+    private static func loadCachedMetadata(sourceId: String): Option<String> {
+        let namespace = extractNamespaceFromSourceId(sourceId)
+        if (namespace.size == 0) {
+            return None
+        }
+        let groupId = TaskGroupKVStore.namespaceGroupId(namespace)
+        if (groupId.size == 0) {
+            return None
+        }
+        let cacheKey = "meta:${sourceId}"
+        let store = TaskGroupKVStore.getInstance()
+        return store.get(groupId, cacheKey)
+    }
+
+    /**
+     * 写入 metadata JSON 到 namespace 级 KV 缓存。
+     * 仅成功响应调用此方法；失败响应不缓存。
+     */
+    private static func saveCachedMetadata(sourceId: String, metadataJson: String): Unit {
+        let namespace = extractNamespaceFromSourceId(sourceId)
+        if (namespace.size == 0) {
+            return
+        }
+        let groupId = TaskGroupKVStore.namespaceGroupId(namespace)
+        if (groupId.size == 0) {
+            return
+        }
+        let cacheKey = "meta:${sourceId}"
+        let store = TaskGroupKVStore.getInstance()
+        let ok = store.set(groupId, cacheKey, metadataJson, metadataCacheTtlSeconds)
+        if (!ok) {
+            logger.warn("metadata cache write failed", ("sourceId", sourceId), ("namespace", namespace))
+        }
+    }
+
+    /**
+     * 使缓存的 metadata 失效（缓存损坏或失败响应时调用）。
+     */
+    private static func invalidateCachedMetadata(sourceId: String): Unit {
+        let namespace = extractNamespaceFromSourceId(sourceId)
+        if (namespace.size == 0) {
+            return
+        }
+        let groupId = TaskGroupKVStore.namespaceGroupId(namespace)
+        if (groupId.size == 0) {
+            return
+        }
+        let cacheKey = "meta:${sourceId}"
+        let store = TaskGroupKVStore.getInstance()
+        let _ = store.delete(groupId, cacheKey)
     }
 
     // ─── Metadata JSON 解析 ───
