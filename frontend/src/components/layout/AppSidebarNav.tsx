@@ -13,14 +13,17 @@ import {
 import {
   BookOpen,
   Calendar,
+  ChevronDown,
   Clock,
   Filter,
   Folder,
   FolderOpen,
+  Globe,
   Search,
   Star,
   Tag,
 } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -31,6 +34,10 @@ import {
   type SmartFilter,
   SmartFilterService,
 } from '@/lib/services/smart-filter-service';
+import {
+  SourcePluginService,
+  type SourcePluginSummary,
+} from '@/lib/services/source-plugin-service';
 import { cn } from '@/lib/utils/utils';
 import { logger } from '@/lib/utils/logger';
 
@@ -159,6 +166,37 @@ function AppSidebarNavContent({
   const [smartFiltersLoading, setSmartFiltersLoading] = useState(true);
   const [internalCategories, setInternalCategories] = useState<Category[]>([]);
   const [internalCategoriesLoading, setInternalCategoriesLoading] = useState(false);
+  const [sourcePlugins, setSourcePlugins] = useState<SourcePluginSummary[]>([]);
+  const [sourcePluginsLoading, setSourcePluginsLoading] = useState(true);
+  const [sourcePluginsOpen, setSourcePluginsOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSourcePlugins = async () => {
+      try {
+        setSourcePluginsLoading(true);
+        const plugins = await SourcePluginService.listSourcePlugins();
+        if (cancelled) return;
+        setSourcePlugins(plugins.filter((p) => p.enabled));
+      } catch (error) {
+        if (!cancelled) logger.apiError('load source plugins', error);
+      } finally {
+        if (!cancelled) setSourcePluginsLoading(false);
+      }
+    };
+
+    void loadSourcePlugins();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enabledSourcePlugins = useMemo(
+    () => sourcePlugins.filter((p) => p.enabled),
+    [sourcePlugins]
+  );
 
   // 使用外部传入的分类数据或内部获取的数据
   const categories = fetchCategories ? internalCategories : externalCategories;
@@ -286,20 +324,68 @@ function AppSidebarNavContent({
               )}
             </SidebarSection>
 
-            <SidebarSection title="在线源">
-              <Link
-                href="/source"
-                onClick={onNavigate}
-                className={cn(
-                  itemClassName,
-                  pathname === '/source'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                <Search className="h-4 w-4" />
-                <span className="min-w-0 flex-1 truncate">浏览在线源</span>
-              </Link>
+            <SidebarSection title={t('navigation.source')}>
+              <Collapsible open={sourcePluginsOpen} onOpenChange={setSourcePluginsOpen}>
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      itemClassName,
+                      'w-full',
+                      pathname === '/source'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    <Search className="h-4 w-4" />
+                    <span className="min-w-0 flex-1 text-left truncate">{t('source.browse')}</span>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 transition-transform',
+                        sourcePluginsOpen && 'rotate-180'
+                      )}
+                    />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pl-4 space-y-1">
+                  <Link
+                    href="/source"
+                    onClick={onNavigate}
+                    className={cn(
+                      itemClassName,
+                      pathname === '/source'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    <Globe className="h-4 w-4" />
+                    <span className="min-w-0 flex-1 truncate">{t('source.browse')}</span>
+                  </Link>
+
+                  {sourcePluginsLoading ? (
+                    <SidebarSkeleton lines={3} />
+                  ) : enabledSourcePlugins.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
+                      {t('source.empty')}
+                    </div>
+                  ) : (
+                    enabledSourcePlugins.map((plugin) => (
+                      <Link
+                        key={plugin.namespace}
+                        href={`/source?plugin=${encodeURIComponent(plugin.namespace)}`}
+                        onClick={onNavigate}
+                        className={cn(
+                          itemClassName,
+                          'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        <Globe className="h-4 w-4" />
+                        <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
+                      </Link>
+                    ))
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
             </SidebarSection>
 
             <SidebarSection

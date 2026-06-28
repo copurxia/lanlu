@@ -69,6 +69,10 @@
     "themeToggle": "Theme Toggle",
     "language": "Language"
   },
+  "source": {
+    "browse": "Browse Online Sources",
+    "empty": "No available sources"
+  },
   "home": {
     "title": "Lanlu",
     "description": "Comic Archive Management System",

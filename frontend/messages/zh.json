@@ -69,6 +69,10 @@
     "themeToggle": "主题切换",
     "language": "语言"
   },
+  "source": {
+    "browse": "浏览在线源",
+    "empty": "暂无可用源"
+  },
   "home": {
     "title": "兰鹿",
     "description": "漫画归档管理系统",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchBar, type SearchBarHandle } from '@/components/search/SearchBar';
 import { RecommendationService } from '@/lib/services/recommendation-service';
@@ -20,6 +20,17 @@ import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { buildReaderPath } from '@/lib/utils/reader';
+import {
+  SourcePluginService,
+  type SourcePluginSummary,
+} from '@/lib/services/source-plugin-service';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export function Header() {
   const { t } = useLanguage();
@@ -37,6 +48,32 @@ export function Header() {
   const isSettingsPage = pathname?.startsWith('/settings');
   const isLibraryPage = pathname?.startsWith('/library');
   const showBackButton = pathname !== '/' && !isSettingsPage && !isLibraryPage;
+
+  const [sourcePlugins, setSourcePlugins] = useState<SourcePluginSummary[]>([]);
+  const [sourcePluginsLoading, setSourcePluginsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    SourcePluginService.listSourcePlugins()
+      .then((data) => {
+        if (cancelled) return;
+        setSourcePlugins(data.filter((p) => p.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setSourcePlugins([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSourcePluginsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enabledSourcePlugins = useMemo(
+    () => sourcePlugins.filter((p) => p.enabled),
+    [sourcePlugins]
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -119,8 +156,9 @@ export function Header() {
   const navigation = [
     { name: t('navigation.home'), href: '/', icon: Home },
     { name: t('navigation.random'), href: '#', icon: Shuffle, action: handleRandomRead },
-    { name: t('navigation.source'), href: '/source', icon: Globe },
   ];
+
+  const isSourceActive = pathname === '/source';
 
   return (
     <header
@@ -277,6 +315,59 @@ export function Header() {
                   </Link>
                 );
               })}
+
+              {/* Online Source dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isSourceActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    <Globe className="h-4 w-4" />
+                    <span>{t('navigation.source')}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[180px]">
+                  <DropdownMenuItem asChild>
+                    <Link
+                      href="/source"
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      <Search className="h-4 w-4" />
+                      <span>{t('source.browse')}</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  {(enabledSourcePlugins.length > 0 || sourcePluginsLoading) && (
+                    <DropdownMenuSeparator />
+                  )}
+                  {sourcePluginsLoading ? (
+                    <DropdownMenuItem disabled>
+                      <span className="text-muted-foreground">{t('common.loading')}</span>
+                    </DropdownMenuItem>
+                  ) : enabledSourcePlugins.length === 0 ? (
+                    <DropdownMenuItem disabled>
+                      <span className="text-muted-foreground">{t('source.empty')}</span>
+                    </DropdownMenuItem>
+                  ) : (
+                    enabledSourcePlugins.map((plugin) => (
+                      <DropdownMenuItem key={plugin.namespace} asChild>
+                        <Link
+                          href={`/source?plugin=${encodeURIComponent(plugin.namespace)}`}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <Globe className="h-4 w-4" />
+                          <span className="truncate">{plugin.name}</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <UserMenu />
             {pathname === '/' && <HomeViewMenu />}
