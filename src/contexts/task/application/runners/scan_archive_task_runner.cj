@@ -301,7 +301,7 @@ public class ScanArchiveTaskRunner {
                     logger.debug("Archive not found in database, processing new file: ${filePath}")
             }
 
-            // 使用 Handler 获取媒体文件数量
+            // 使用 Middleware 获取媒体文件数量
             let pageCount = if (hasFolderScanSummary) { cachedMediaCount } else { handler.getMediaCount(filePath) }
             logger.debug("Archive media count resolved", [
                 ("path", filePath),

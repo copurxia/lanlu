@@ -1,6 +1,6 @@
 package lanlu.contexts.task.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
@@ -23,10 +23,10 @@ public class TaskPoolController {
      * 任务列表 SSE 流
      * GET /api/admin/taskpool/tasks?page=1&pageSize=10&status=running
      */
-    public static func getTasks(ctx: Ctx) {
-        let pageStr = ctx.query("page") ?? "1"
-        let pageSizeStr = ctx.query("pageSize") ?? "10"
-        let statusRaw = (ctx.query("status") ?? "").trimAscii()
+    public static func getTasks(ctx: Context) {
+        let pageStr = ctx.queryParam("page") ?? "1"
+        let pageSizeStr = ctx.queryParam("pageSize") ?? "10"
+        let statusRaw = (ctx.queryParam("status") ?? "").trimAscii()
 
         var page = try {
             Int32.parse(pageStr)
@@ -40,52 +40,55 @@ public class TaskPoolController {
         }
         if (page < 1) { page = 1 }
         if (pageSize < 1) { pageSize = 10 }
+        let ssePage = page
+        let ssePageSize = pageSize
 
         let status = statusRaw
         let hasStatusFilter = status.size > 0 && status != "all"
         if (hasStatusFilter && !isValidTaskStatus(status)) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Invalid status\"}")
             return
         }
 
-        let sse = ctx.sse()
-        let eventHub = TaskEventHub.getInstance()
-        var eventId = 1i64
-        var lastPayload = ""
-        var revision = eventHub.currentListRevision()
+        sse(ctx) { sink =>
+            let eventHub = TaskEventHub.getInstance()
+            let eventIdBox = Array<Int64>(1, { _ => 1i64 })
+            let lastPayloadBox = Array<String>(1, { _ => "" })
+            let revisionBox = Array<Int64>(1, { _ => eventHub.currentListRevision() })
 
-        while (true) {
-            try {
-                let stableRevision = eventHub.currentListRevision()
-                if (stableRevision != revision) {
-                    revision = stableRevision
-                    continue
-                }
+            while (true) {
+                try {
+                    let stableRevision = eventHub.currentListRevision()
+                    if (stableRevision != revisionBox[0]) {
+                        revisionBox[0] = stableRevision
+                        continue
+                    }
 
-                let payload = buildTaskListStreamData(page, pageSize, status, if (eventId == 1) { "snapshot" } else { "task_list_changed" })
-                if (eventId == 1 || payload != lastPayload) {
-                    let eventName = if (eventId == 1) { "snapshot" } else { "tasks" }
-                    sse.sendEvent(payload, event: eventName, id: "${eventId}")
-                    lastPayload = payload
-                    eventId += 1
-                }
+                    let payload = buildTaskListStreamData(ssePage, ssePageSize, status, if (eventIdBox[0] == 1) { "snapshot" } else { "task_list_changed" })
+                    if (eventIdBox[0] == 1 || payload != lastPayloadBox[0]) {
+                        let eventName = if (eventIdBox[0] == 1) { "snapshot" } else { "tasks" }
+                        sendEventWithId(sink, eventName, payload, "${eventIdBox[0]}")
+                        lastPayloadBox[0] = payload
+                        eventIdBox[0] += 1
+                    }
 
-                let waitResult = eventHub.awaitListNext(revision, taskStreamPingMillis)
-                revision = waitResult.revision
-                if (!waitResult.changed) {
-                    sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
-                    eventId += 1
+                    let waitResult = eventHub.awaitListNext(revisionBox[0], taskStreamPingMillis)
+                    revisionBox[0] = waitResult.revision
+                    if (!waitResult.changed) {
+                        sendEventWithId(sink, "ping", "{\"ok\":1}", "${eventIdBox[0]}")
+                        eventIdBox[0] += 1
+                    }
+                } catch (e: Exception) {
+                    getLogger("taskpool_list_stream").debug(
+                        "Task list SSE stream closed",
+                        ("status", status),
+                        ("page", ssePage.toString()),
+                        ("page_size", ssePageSize.toString()),
+                        ("reason", e.message)
+                    )
+                    break
                 }
-            } catch (e: Exception) {
-                getLogger("taskpool_list_stream").debug(
-                    "Task list SSE stream closed",
-                    ("status", status),
-                    ("page", page.toString()),
-                    ("page_size", pageSize.toString()),
-                    ("reason", e.message)
-                )
-                break
             }
         }
     }
@@ -93,19 +96,19 @@ public class TaskPoolController {
     /**
      * 获取任务详情
      */
-    public static func getTaskDetail(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func getTaskDetail(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Invalid task ID\"}")
             return
         }
 
         let task = TaskDao.getTaskDataById(taskId)
         if (task.id == 0) {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"error\":\"Task not found\"}")
             return
         }
@@ -128,89 +131,89 @@ public class TaskPoolController {
      * 任务详情SSE流（替代前端高频HTTP轮询）
      * GET /api/admin/taskpool/{taskId}/stream
      */
-    public static func streamTask(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func streamTask(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Invalid task ID\"}")
             return
         }
 
         let initialTask = loadTaskForStreaming(taskId)
         if (initialTask.id == 0) {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"error\":\"Task not found\"}")
             return
         }
 
-        // 使用 ignite 内置 SSE（自动设置 headers）
-        let sse = ctx.sse()
-        let eventHub = TaskEventHub.getInstance()
-        var eventId = 1i64
-        var lastPayload = ""
-        var lastLogTail = ""
-        var revision = eventHub.currentRevision(taskId)
+        // 使用 ACE SSE（sse(ctx, producer) 闭包驱动）
+        sse(ctx) { sink =>
+            let eventHub = TaskEventHub.getInstance()
+            let eventIdBox = Array<Int64>(1, { _ => 1i64 })
+            let lastPayloadBox = Array<String>(1, { _ => "" })
+            let lastLogTailBox = Array<String>(1, { _ => "" })
+            let revisionBox = Array<Int64>(1, { _ => eventHub.currentRevision(taskId) })
 
-        while (true) {
-            try {
-                let task = loadTaskForStreaming(taskId)
-                if (task.id == 0) {
-                    sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
-                    return
-                }
-
-                // v2 stream payload: send bounded tail + delta to reduce client-side update cost.
-                let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
-                let stableRevision = eventHub.currentRevision(taskId)
-                if (stableRevision != revision) {
-                    revision = stableRevision
-                    continue
-                }
-                let logDelta = computeLogDelta(lastLogTail, logTail)
-                let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1, if (eventId == 1) { "snapshot" } else { "task_changed" })
-                if (eventId == 1 || payload != lastPayload) {
-                    let eventName = if (eventId == 1) { "snapshot" } else { "task" }
-                    sse.sendEvent(payload, event: eventName, id: "${eventId}")
-                    lastPayload = payload
-                    lastLogTail = logTail
-                    eventId += 1
-                }
-
-                if (isTerminalStatus(task.status)) {
-                    sse.sendEvent(payload, event: "done", id: "${eventId}")
-                    return
-                }
-
-                let waitResult = eventHub.awaitNext(taskId, revision, taskStreamPingMillis)
-                revision = waitResult.revision
-                if (!waitResult.changed) {
-                    sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
-                    eventId += 1
-                } else {
-                    let updatedTask = loadTaskForStreaming(taskId)
-                    if (updatedTask.id == 0) {
-                        sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
-                        return
+            while (true) {
+                try {
+                    let task = loadTaskForStreaming(taskId)
+                    if (task.id == 0) {
+                        sendEventWithId(sink, "error", "{\"error\":\"Task not found\"}", "${eventIdBox[0]}")
+                        break
                     }
-                    let updatedLogTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
-                    let updatedLogDelta = computeLogDelta(lastLogTail, updatedLogTail)
-                    let eventPayload = buildTaskStreamData(updatedTask, updatedLogTail, updatedLogDelta, false, waitResult.eventType)
-                    if (eventPayload != lastPayload) {
-                        sse.sendEvent(eventPayload, event: "task", id: "${eventId}")
-                        lastPayload = eventPayload
-                        lastLogTail = updatedLogTail
-                        eventId += 1
+
+                    let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+                    let stableRevision = eventHub.currentRevision(taskId)
+                    if (stableRevision != revisionBox[0]) {
+                        revisionBox[0] = stableRevision
+                        continue
                     }
+                    let logDelta = computeLogDelta(lastLogTailBox[0], logTail)
+                    let payload = buildTaskStreamData(task, logTail, logDelta, eventIdBox[0] == 1, if (eventIdBox[0] == 1) { "snapshot" } else { "task_changed" })
+                    if (eventIdBox[0] == 1 || payload != lastPayloadBox[0]) {
+                        let eventName = if (eventIdBox[0] == 1) { "snapshot" } else { "task" }
+                        sendEventWithId(sink, eventName, payload, "${eventIdBox[0]}")
+                        lastPayloadBox[0] = payload
+                        lastLogTailBox[0] = logTail
+                        eventIdBox[0] += 1
+                    }
+
+                    if (isTerminalStatus(task.status)) {
+                        sendEventWithId(sink, "done", payload, "${eventIdBox[0]}")
+                        break
+                    }
+
+                    let waitResult = eventHub.awaitNext(taskId, revisionBox[0], taskStreamPingMillis)
+                    revisionBox[0] = waitResult.revision
+                    if (!waitResult.changed) {
+                        sendEventWithId(sink, "ping", "{\"ok\":1}", "${eventIdBox[0]}")
+                        eventIdBox[0] += 1
+                    } else {
+                        let updatedTask = loadTaskForStreaming(taskId)
+                        if (updatedTask.id == 0) {
+                            sendEventWithId(sink, "error", "{\"error\":\"Task not found\"}", "${eventIdBox[0]}")
+                            break
+                        }
+                        let updatedLogTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+                        let updatedLogDelta = computeLogDelta(lastLogTailBox[0], updatedLogTail)
+                        let eventPayload = buildTaskStreamData(updatedTask, updatedLogTail, updatedLogDelta, false, waitResult.eventType)
+                        if (eventPayload != lastPayloadBox[0]) {
+                            sendEventWithId(sink, "task", eventPayload, "${eventIdBox[0]}")
+                            lastPayloadBox[0] = eventPayload
+                            lastLogTailBox[0] = updatedLogTail
+                            eventIdBox[0] += 1
+                        }
+                    }
+                } catch (e: Exception) {
+                    getLogger("taskpool_stream").debug(
+                        "SSE stream closed",
+                        ("task_id", taskId.toString()),
+                        ("reason", e.message)
+                    )
+                    break
                 }
-            } catch (e: Exception) {
-                getLogger("taskpool_stream").debug(
-                    "SSE stream closed",
-                    ("task_id", taskId.toString()),
-                    ("reason", e.message)
-                )
-                break
             }
         }
     }
@@ -218,25 +221,25 @@ public class TaskPoolController {
     /**
      * 取消单个任务
      */
-    public static func cancelTask(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func cancelTask(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Invalid task ID\"}")
             return
         }
 
         let task = TaskDao.getTaskDataById(taskId)
         if (task.id == 0) {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"error\":\"Task not found\"}")
             return
         }
 
         if (!task.taskStatus.isCancellable()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Task cannot be cancelled (status: ${task.status})\"}")
             return
         }
@@ -246,7 +249,7 @@ public class TaskPoolController {
         if (success) {
             ctx.json("{\"success\":1,\"message\":\"Task cancelled successfully\"}")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"error\":\"Failed to cancel task\"}")
         }
     }
@@ -254,25 +257,25 @@ public class TaskPoolController {
     /**
      * 重试失败的任务
      */
-    public static func retryTask(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func retryTask(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Invalid task ID\"}")
             return
         }
 
         let task = TaskDao.getTaskDataById(taskId)
         if (task.id == 0) {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"error\":\"Task not found\"}")
             return
         }
 
         if (!task.taskStatus.isRetryable()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"error\":\"Task cannot be retried (status: ${task.status})\"}")
             return
         }
@@ -291,7 +294,7 @@ public class TaskPoolController {
             TaskPoolService.getInstance().notifyTaskAvailable()
             ctx.json("{\"success\":1,\"new_task_id\":${newTask.id}}")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"error\":\"Failed to create retry task\"}")
         }
     }
@@ -301,17 +304,17 @@ public class TaskPoolController {
      * POST /api/admin/taskpool/{taskId}/rpc/select
      * body: { request_id: string, selected_index: number }
      */
-    public static func respondRpcSelect(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func respondRpcSelect(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":0,\"error\":\"Invalid task ID\"}")
             return
         }
 
-        let body = ctx.bodyString().trimAscii()
+        let body = ctx.rawBody() ?? "".trimAscii()
         var requestId = ""
         var selectedIndex = -1i32
         var abort = false
@@ -341,7 +344,7 @@ public class TaskPoolController {
         }
 
         if (requestId.size == 0 || (!abort && selectedIndex < 0)) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":0,\"error\":\"request_id and (selected_index or abort) are required\"}")
             return
         }
@@ -358,7 +361,7 @@ public class TaskPoolController {
             msg = wasmMsg
         }
         if (!ok) {
-            ctx.status(404)
+            ctx.status = 404
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -385,25 +388,25 @@ public class TaskPoolController {
      * PUT /api/admin/taskpool/{taskId}/progress
      * body: { progress: number, message: string }
      */
-    public static func updateTaskProgress(ctx: Ctx) {
-        let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+    public static func updateTaskProgress(ctx: Context) {
+        let taskIdStr = ctx.param("taskId") ?? ""
         let taskId = try {
             Int64.parse(taskIdStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":0,\"error\":\"Invalid task ID\"}")
             return
         }
 
         let task = TaskDao.getTaskDataById(taskId)
         if (task.id == 0) {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":0,\"error\":\"Task not found\"}")
             return
         }
 
         // 解析请求体
-        let body = ctx.bodyString().trimAscii()
+        let body = ctx.rawBody() ?? "".trimAscii()
         var progress: Int32 = 0
         var message = ""
 
@@ -457,7 +460,7 @@ public class TaskPoolController {
             w.flush()
             ctx.json(String.fromUtf8(readToEnd(out)))
         } else {
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -695,6 +698,22 @@ public class TaskPoolController {
             return "task_dependency"
         }
         return "external_signal"
+    }
+
+    /** SSE 发送带 id 的事件帧（ACE SseSink 无 id 重载，用 raw 构造帧）。 */
+    private static func sendEventWithId(sink: SseSink, event: String, data: String, id: String): Unit {
+        var frame = ""
+        if (id.size > 0) {
+            frame += "id: ${id}\n"
+        }
+        if (event.size > 0) {
+            frame += "event: ${event}\n"
+        }
+        for (line in data.split("\n")) {
+            frame += "data: ${line}\n"
+        }
+        frame += "\n"
+        sink.raw(frame.toArray())
     }
 
 }

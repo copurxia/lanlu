@@ -1,6 +1,7 @@
 package lanlu.contexts.system.interfaces.http
 
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import std.fs.*
 import lanlu.shared.utils.*
 
@@ -9,8 +10,8 @@ import lanlu.shared.utils.*
  * 处理前端静态文件服务
  */
 public class FrontendController {
-    private static func resolveRequestPath(ctx: Ctx): (String, String, String) {
-        let path = ctx.paramsOpt("*") ?? ctx.path
+    private static func resolveRequestPath(ctx: Context): (String, String, String) {
+        let path = ctx.param("*") ?? ctx.path
         let cleanPath = if (path.contains("?")) {
             path.split("?")[0]
         } else {
@@ -28,7 +29,7 @@ public class FrontendController {
      * 根据请求路径自动判断是文件还是目录，目录时自动添加index.html
      * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func servePath(ctx: Ctx, baseDir!: String = "frontend/out") {
+    public static func servePath(ctx: Context, baseDir!: String = "frontend/out") {
         try {
             // 获取并清理路径
             let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
@@ -73,39 +74,42 @@ public class FrontendController {
             println("File not found: ${indexPath}")
             FrontendController.serve404(ctx)
         } catch (ex: Exception) {
-            ctx.status(500).sendString("Error serving file: ${ex.message}")
+            ctx.status = 500; ctx.contentType = "text/plain; charset=utf-8"; ctx.body = "Error serving file: ${ex.message}"
         }
     }
 
     /**
-     * 分块读取文件内容并通过 ctx.writer() 写入响应流。
+     * 分块读取文件内容并通过 responseWriterOf(ctx) 写入响应流。
      * 替换全量 File.readFrom() 的方式，避免并发请求时产生不必要的内存峰值。
      * 调用方负责设置 Content-Type / Content-Length 等响应头。
      */
-    private static func sendFileBody(ctx: Ctx, resolvedPath: String, fileSize: Int64): Unit {
-        let f = File(resolvedPath, OpenMode.Read)
-        try {
-            let writer = ctx.writer()
-            let chunkSize: Int64 = 131072 // 128KB
-            let chunkBuffer = Array<UInt8>(chunkSize, repeat: 0)
-            var remaining = fileSize
-            while (remaining > 0) {
-                let bytesRead = f.read(chunkBuffer)
-                if (bytesRead <= 0) {
-                    break
+    private static func sendFileBody(ctx: Context, resolvedPath: String, fileSize: Int64): Unit {
+        // 用 ACE setStreamBody：producer 收到 write 闭包后分块读文件并写出，由 dispatch 统一 chunked 写回。
+        let path = resolvedPath
+        ctx.setStreamBody({ write: (Array<UInt8>) -> Unit =>
+            let f = File(path, OpenMode.Read)
+            try {
+                let chunkSize: Int64 = 131072 // 128KB
+                let chunkBuffer = Array<UInt8>(chunkSize, repeat: 0u8)
+                var remaining = fileSize
+                while (remaining > 0) {
+                    let bytesRead = f.read(chunkBuffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    write(chunkBuffer[0..bytesRead])
+                    remaining -= bytesRead
                 }
-                writer.write(chunkBuffer[0..bytesRead])
-                remaining -= bytesRead
+            } finally {
+                f.close()
             }
-        } finally {
-            f.close()
-        }
+        })
     }
 
     /**
      * 服务文件内容
      */
-    private static func serveFile(ctx: Ctx, filePath: String) {
+    private static func serveFile(ctx: Context, filePath: String) {
         println("Serving file: ${filePath}")
 
         if (!exists(filePath)) {
@@ -131,7 +135,7 @@ public class FrontendController {
             return
         }
 
-        ctx.status(200)
+        ctx.status = 200
         applyCacheHeadersByPolicy(ctx, logicalPath, etag)
         applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
         ctx.setHeader("Content-Type", contentType)
@@ -142,7 +146,7 @@ public class FrontendController {
      * 服务404
      * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func serve404(ctx: Ctx, baseDir!: String = "frontend/out") {
+    public static func serve404(ctx: Context, baseDir!: String = "frontend/out") {
         try {
             // 尝试使用自定义404页面
             let custom404Path = "${baseDir}/404/index.html"
@@ -150,17 +154,17 @@ public class FrontendController {
                 let fileInfo = FileInfo(custom404Path)
                 CacheUtils.setNoCacheHeaders(ctx)
                 ctx.setHeader("Content-Type", "text/html; charset=utf-8")
-                ctx.status(404)
+                ctx.status = 404
                 sendFileBody(ctx, custom404Path, fileInfo.size)
                 return
             }
 
             // 如果自定义404不存在，返回默认错误信息
             CacheUtils.setNoCacheHeaders(ctx)
-            ctx.status(404).sendString("404 - Page not found")
+            ctx.status = 404; ctx.contentType = "text/plain; charset=utf-8"; ctx.body = "404 - Page not found"
         } catch (ex: Exception) {
             CacheUtils.setNoCacheHeaders(ctx)
-            ctx.status(500).sendString("Error serving 404 page: ${ex.message}")
+            ctx.status = 500; ctx.contentType = "text/plain; charset=utf-8"; ctx.body = "Error serving 404 page: ${ex.message}"
         }
     }
 
@@ -215,7 +219,7 @@ public class FrontendController {
      * - 是否返回 Brotli 变体
      * - 是否需要设置 Vary: Accept-Encoding
      */
-    private static func resolveStaticAssetVariant(ctx: Ctx, filePath: String): (String, String, Bool, Bool) {
+    private static func resolveStaticAssetVariant(ctx: Context, filePath: String): (String, String, Bool, Bool) {
         if (!isBrotliNegotiableTextAsset(filePath)) {
             return (filePath, filePath, false, false)
         }
@@ -235,8 +239,8 @@ public class FrontendController {
             normalized.endsWith(".webmanifest")
     }
 
-    private static func clientAcceptsBrotli(ctx: Ctx): Bool {
-        let acceptEncoding = (ctx.header("Accept-Encoding") ?? "").trimAscii().toAsciiLower()
+    private static func clientAcceptsBrotli(ctx: Context): Bool {
+        let acceptEncoding = (ctx.header("accept-encoding") ?? "").trimAscii().toAsciiLower()
         if (acceptEncoding.size == 0) {
             return false
         }
@@ -267,7 +271,7 @@ public class FrontendController {
     }
 
     private static func applyVariantHeaders(
-        ctx: Ctx,
+        ctx: Context,
         isBrotli: Bool,
         varyAcceptEncoding: Bool,
         fileSize: Int64,
@@ -306,7 +310,7 @@ public class FrontendController {
         return false
     }
 
-    private static func applyCacheHeadersByPolicy(ctx: Ctx, filePath: String, etag: String): Unit {
+    private static func applyCacheHeadersByPolicy(ctx: Context, filePath: String, etag: String): Unit {
         if (isImmutableFrontendAsset(filePath)) {
             CacheUtils.setStaticCacheHeaders(ctx, etag)
             return
@@ -318,7 +322,7 @@ public class FrontendController {
         CacheUtils.setDynamicCacheHeaders(ctx, etag)
     }
 
-    private static func sendNotModifiedByPolicy(ctx: Ctx, filePath: String, etag: String): Unit {
+    private static func sendNotModifiedByPolicy(ctx: Context, filePath: String, etag: String): Unit {
         if (isImmutableFrontendAsset(filePath)) {
             CacheUtils.sendNotModified(ctx, etag)
             return
@@ -335,7 +339,7 @@ public class FrontendController {
      * 根据请求路径检查文件是否存在，返回头部信息但不返回内容
      * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func servePathHead(ctx: Ctx, baseDir!: String = "frontend/out") {
+    public static func servePathHead(ctx: Context, baseDir!: String = "frontend/out") {
         try {
             // 获取并清理路径
             let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
@@ -380,7 +384,7 @@ public class FrontendController {
             println("HEAD Request file not found: ${indexPath}")
             FrontendController.serve404Head(ctx)
         } catch (ex: Exception) {
-            ctx.status(500).sendString("Error serving file: ${ex.message}")
+            ctx.status = 500; ctx.contentType = "text/plain; charset=utf-8"; ctx.body = "Error serving file: ${ex.message}"
         }
     }
 
@@ -388,7 +392,7 @@ public class FrontendController {
      * HEAD 请求：服务文件头部信息
      * 检查文件是否存在，设置头部信息，但不返回内容
      */
-    private static func serveFileHead(ctx: Ctx, filePath: String) {
+    private static func serveFileHead(ctx: Context, filePath: String) {
         println("HEAD Request serving file: ${filePath}")
 
         if (!exists(filePath)) {
@@ -415,7 +419,7 @@ public class FrontendController {
         applyCacheHeadersByPolicy(ctx, logicalPath, etag)
         applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, true)
         ctx.setHeader("Content-Type", contentType)
-        ctx.status(200)
+        ctx.status = 200
     }
 
     /**
@@ -423,14 +427,14 @@ public class FrontendController {
      * 返回404状态码和头部信息，但不返回错误页面内容
      * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func serve404Head(ctx: Ctx, baseDir!: String = "frontend/out") {
+    public static func serve404Head(ctx: Context, baseDir!: String = "frontend/out") {
         try {
             // 尝试使用自定义404页面
             let custom404Path = "${baseDir}/404/index.html"
             if (exists(custom404Path)) {
                 CacheUtils.setNoCacheHeaders(ctx)
                 ctx.setHeader("Content-Type", "text/html; charset=utf-8")
-                ctx.status(404)
+                ctx.status = 404
                 // HEAD 请求不返回内容，只返回状态码和头部
                 return
             }
@@ -438,12 +442,12 @@ public class FrontendController {
             // 如果自定义404不存在，返回默认错误头部
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")
-            ctx.status(404)
+            ctx.status = 404
         // HEAD 请求不返回内容
         } catch (ex: Exception) {
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")
-            ctx.status(500)
+            ctx.status = 500
             // HEAD 请求不返回内容
         }
     }

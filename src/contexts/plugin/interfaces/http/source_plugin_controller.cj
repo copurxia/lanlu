@@ -1,6 +1,6 @@
 package lanlu.contexts.plugin.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.collection.*
 import std.convert.*
 import stdx.encoding.json.stream.*
@@ -14,7 +14,7 @@ import lanlu.contexts.task.domain.*
 
 public class SourcePluginController {
 
-    public static func listSourcePlugins(ctx: Ctx) {
+    public static func listSourcePlugins(ctx: Context) {
         let logger = getLogger("source_plugin_controller")
 
         try {
@@ -40,8 +40,8 @@ public class SourcePluginController {
      * 不经过 taskpool/SSE。
      * 其他 action（如 source_download）走原有 taskpool 路径，由 sourceDownload 方法处理。
      */
-    public static func sourceAction(ctx: Ctx) {
-        let action = ctx.paramsOpt("action") ?? ""
+    public static func sourceAction(ctx: Context) {
+        let action = ctx.param("action") ?? ""
 
         let effectiveAction = action.trimAscii()
         if (effectiveAction.size == 0) {
@@ -59,7 +59,7 @@ public class SourcePluginController {
     /**
      * 直连执行浏览类 action，不经过 taskpool。
      */
-    private static func executeBrowseDirect(ctx: Ctx, action: String) {
+    private static func executeBrowseDirect(ctx: Context, action: String) {
         let logger = getLogger("source_plugin_controller")
 
         // 解析请求
@@ -75,13 +75,13 @@ public class SourcePluginController {
                             request
                         )
                         ctx.setHeader("Content-Type", "application/json")
-                        ctx.sendString(json)
+                        ctx.contentType = "text/plain; charset=utf-8"; ctx.body = json
                     case None =>
                         ResponseView.errorJson(ctx, "Source plugin not found or disabled: ${request.namespace}")
                 }
             case None =>
                 logger.error("解析Source请求失败", [
-                    ("namespace", ctx.paramsOpt("namespace") ?? ""),
+                    ("namespace", ctx.param("namespace") ?? ""),
                     ("action", action)
                 ])
                 ResponseView.errorJson(ctx, "Invalid source request: namespace is required")
@@ -89,9 +89,9 @@ public class SourcePluginController {
     }
 
     // 改为通过新的 download_archive 协议执行
-    public static func sourceDownload(ctx: Ctx) {
+    public static func sourceDownload(ctx: Context) {
         let logger = getLogger("source_plugin_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
             return
@@ -102,7 +102,7 @@ public class SourcePluginController {
         var kind = "archive"
 
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let requestMap = JsonCodec.decode<HashMap<String, String>>(body)
                 remoteId = requestMap.get("remote_id") ?? ""

@@ -1,6 +1,6 @@
 package lanlu.contexts.user.interfaces.http
 
-import ignite.*
+import ace_web.*
 import stdx.net.http.HttpStatusCode
 import stdx.encoding.json.stream.*
 import totp_cj.*
@@ -163,13 +163,13 @@ class TotpStatusDataView <: JsonSerializable {
 }
 
 public class TotpController {
-    private static func reply<T>(ctx: Ctx, httpStatus: UInt16, resp: ApiResponse<T>): Unit where T <: JsonSerializable {
-        ctx.status(httpStatus)
+    private static func reply<T>(ctx: Context, httpStatus: UInt16, resp: ApiResponse<T>): Unit where T <: JsonSerializable {
+        ctx.status = httpStatus
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    public static func loginVerify(ctx: Ctx): Unit {
-        let req = try { JsonCodec.decode<TotpLoginVerifyReq>(ctx.bodyString()) } catch (_: Exception) { TotpLoginVerifyReq() }
+    public static func loginVerify(ctx: Context): Unit {
+        let req = try { JsonCodec.decode<TotpLoginVerifyReq>(ctx.rawBody() ?? "") } catch (_: Exception) { TotpLoginVerifyReq() }
         if (req.challengeId.size == 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "challengeId is required", None))
             return
@@ -183,12 +183,12 @@ public class TotpController {
                 let credential = UserTotpCredentialDao.findActiveByUserId(challenge.userId)
                 if (credential.id <= 0) {
                     let _ = TotpAuthService.deleteLoginChallenge(req.challengeId)
-                    AuthSecurityService.clearFailures("auth_login_totp_verify", ctx.ip, req.challengeId)
+                    AuthSecurityService.clearFailures("auth_login_totp_verify", "", req.challengeId)
                     reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "totp is not enabled", None))
                     return
                 }
                 if (!validateAuthFactor(credential, req.code, req.recoveryCode)) {
-                    AuthSecurityService.recordFailure("auth_login_totp_verify", ctx.ip, req.challengeId)
+                    AuthSecurityService.recordFailure("auth_login_totp_verify", "", req.challengeId)
                     AuthSecurityHttpUtils.setAuthFailureReason(ctx, "totp_invalid")
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid totp or recovery code", None))
                     return
@@ -196,7 +196,7 @@ public class TotpController {
                 let row = UserDao.getById(challenge.userId)
                 match (UserTokenDao.createToken(challenge.userId, challenge.tokenName, "session", AuthConfig.tokenPepper)) {
                     case Some(tokenRes) =>
-                        AuthSecurityService.clearFailures("auth_login_totp_verify", ctx.ip, req.challengeId)
+                        AuthSecurityService.clearFailures("auth_login_totp_verify", "", req.challengeId)
                         AuthHttpUtils.setSessionCookie(ctx, tokenRes.token)
                         let _ = TotpAuthService.deleteLoginChallenge(req.challengeId)
                         let user = UserView(row.id, row.username, Some(row.isAdmin), Some(row.avatarAssetId), None)
@@ -210,7 +210,7 @@ public class TotpController {
         }
     }
 
-    public static func enrollStart(ctx: Ctx, userId: Int64): Unit {
+    public static func enrollStart(ctx: Context, userId: Int64): Unit {
         if (!TotpUtils.isConfigured()) {
             reply<String>(ctx, UInt16(503), ApiResponse<String>(503, "totp requires JWT_SECRET or AUTH_TOTP_SECRET_KEY", None))
             return
@@ -220,8 +220,8 @@ public class TotpController {
             reply<String>(ctx, UInt16(409), ApiResponse<String>(409, "totp already enabled", None))
             return
         }
-        let req = if (ctx.bodyString().trimAscii().size > 0) {
-            try { JsonCodec.decode<TotpNameReq>(ctx.bodyString()) } catch (_: Exception) { TotpNameReq() }
+        let req = if ((ctx.rawBody() ?? "").trimAscii().size > 0) {
+            try { JsonCodec.decode<TotpNameReq>(ctx.rawBody() ?? "") } catch (_: Exception) { TotpNameReq() }
         } else {
             TotpNameReq()
         }
@@ -242,8 +242,8 @@ public class TotpController {
         }
     }
 
-    public static func enrollConfirm(ctx: Ctx, userId: Int64): Unit {
-        let req = try { JsonCodec.decode<TotpConfirmReq>(ctx.bodyString()) } catch (_: Exception) { TotpConfirmReq() }
+    public static func enrollConfirm(ctx: Context, userId: Int64): Unit {
+        let req = try { JsonCodec.decode<TotpConfirmReq>(ctx.rawBody() ?? "") } catch (_: Exception) { TotpConfirmReq() }
         if (req.challengeId.size == 0 || req.code.size == 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "challengeId and code are required", None))
             return
@@ -295,7 +295,7 @@ public class TotpController {
         }
     }
 
-    public static func status(ctx: Ctx, userId: Int64): Unit {
+    public static func status(ctx: Context, userId: Int64): Unit {
         let credential = UserTotpCredentialDao.findActiveByUserId(userId)
         if (credential.id <= 0) {
             reply<TotpStatusDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<TotpStatusDataView>(200, "ok", Some(TotpStatusDataView(false, None, None, 0))))
@@ -309,8 +309,8 @@ public class TotpController {
         )
     }
 
-    public static func stepUpVerify(ctx: Ctx, userId: Int64): Unit {
-        let req = try { JsonCodec.decode<TotpCodeReq>(ctx.bodyString()) } catch (_: Exception) { TotpCodeReq() }
+    public static func stepUpVerify(ctx: Context, userId: Int64): Unit {
+        let req = try { JsonCodec.decode<TotpCodeReq>(ctx.rawBody() ?? "") } catch (_: Exception) { TotpCodeReq() }
         let credential = UserTotpCredentialDao.findActiveByUserId(userId)
         if (credential.id <= 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "totp is not enabled", None))
@@ -333,8 +333,8 @@ public class TotpController {
         reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "step up verified", None))
     }
 
-    public static func regenerateRecoveryCodes(ctx: Ctx, userId: Int64): Unit {
-        let req = try { JsonCodec.decode<TotpCodeReq>(ctx.bodyString()) } catch (_: Exception) { TotpCodeReq() }
+    public static func regenerateRecoveryCodes(ctx: Context, userId: Int64): Unit {
+        let req = try { JsonCodec.decode<TotpCodeReq>(ctx.rawBody() ?? "") } catch (_: Exception) { TotpCodeReq() }
         if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
@@ -357,7 +357,7 @@ public class TotpController {
         reply<TotpRecoveryCodesDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<TotpRecoveryCodesDataView>(200, "ok", Some(TotpRecoveryCodesDataView(recoveryCodes))))
     }
 
-    public static func disable(ctx: Ctx, userId: Int64): Unit {
+    public static func disable(ctx: Context, userId: Int64): Unit {
         if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }

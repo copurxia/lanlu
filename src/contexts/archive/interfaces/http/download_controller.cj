@@ -4,7 +4,7 @@ import stdx.log.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import ignite.*
+import ace_web.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.application.*
 import lanlu.shared.utils.*
@@ -19,11 +19,11 @@ public class DownloadController {
      * POST /api/download_url
      * 请求体: { "url": "https://example.com/file.zip" }
      */
-    public static func downloadFromUrl(ctx: Ctx): Unit {
+    public static func downloadFromUrl(ctx: Context): Unit {
         let logger = getLogger("download_controller")
 
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var url = ""
 
             if (requestBody.size > 0) {
@@ -50,11 +50,11 @@ public class DownloadController {
             }
 
             if (url.size == 0) {
-                url = ctx.query("url") ?? ""
+                url = ctx.queryParam("url") ?? ""
             }
 
             if (url.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 let out = ByteBuffer()
                 let w = JsonWriter(out)
                 w.startObject()
@@ -99,7 +99,7 @@ public class DownloadController {
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } catch (e: Exception) {
             getLogger("download_controller").error("下载处理异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()

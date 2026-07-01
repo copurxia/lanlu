@@ -1,7 +1,7 @@
 package lanlu.contexts.tankoubon.interfaces.http
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 
-import ignite.*
+import ace_web.*
 import lanlu.contexts.tankoubon.domain.*
 import lanlu.contexts.plugin.application.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
@@ -19,7 +19,7 @@ public class TankoubonController {
     /**
      * 获取所有单行本
      */
-    public static func getTankoubons(ctx: Ctx) {
+    public static func getTankoubons(ctx: Context) {
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
         let tankoubons = match (userIdOpt) {
             case Some(userId) => TankoubonModel.getAllTankoubonsWithUser(userId)
@@ -45,8 +45,8 @@ public class TankoubonController {
     /**
      * 创建新单行本
      */
-    public static func createTankoubon(ctx: Ctx) {
-        let name = ctx.query("name") ?? ""
+    public static func createTankoubon(ctx: Context) {
+        let name = ctx.queryParam("name") ?? ""
         
         if (name.size == 0) {
             let errorResponse = "{\"error\":\"Tankoubon name not specified.\",\"operation\":\"create_tankoubon\",\"success\":0}"
@@ -60,8 +60,8 @@ public class TankoubonController {
     }
     
 
-    public static func getMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getMetadata(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 复合 ID 检测/转发 → 构建 TankoubonMetadata
         match (SourceRequestResolver.parseFromCompositeId(id)) {
@@ -132,21 +132,21 @@ public class TankoubonController {
             case None => ()
         }
 
-        let lang = (ctx.query("lang") ?? "").trimAscii()
+        let lang = (ctx.queryParam("lang") ?? "").trimAscii()
         if (id.trimAscii().size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ctx.json("{\"error\":\"Tankoubon ID not specified.\",\"operation\":\"get_tankoubon_metadata\",\"success\":0}")
             return
         }
 
-        let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
+        let includePagesRaw = (ctx.queryParam("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
         let tank = match (AuthMiddleware.optionalUser(ctx)) {
             case Some(userId) => TankoubonModel.getTankoubonByIdWithUser(id, userId)
             case None => TankoubonModel.getTankoubonById(id)
         }
         if (tank.id.trimAscii().size == 0) {
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ctx.json("{\"error\":\"Tankoubon not found\",\"operation\":\"get_tankoubon_metadata\",\"success\":0}")
             return
         }
@@ -164,7 +164,7 @@ public class TankoubonController {
         )
         if (!okMetadata) {
             let errorText = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Tankoubon not found" }
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ctx.json("{\"error\":\"${errorText}\",\"operation\":\"get_tankoubon_metadata\",\"success\":0}")
             return
         }
@@ -173,30 +173,30 @@ public class TankoubonController {
 
 
 
-    public static func updateMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
-        let requestBody = (ctx.bodyString()).trimAscii()
+    public static func updateMetadata(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
+        let requestBody = (ctx.rawBody() ?? "").trimAscii()
         if (id.trimAscii().size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ctx.json("{\"error\":\"Tankoubon ID not specified.\",\"operation\":\"update_tankoubon_metadata\",\"success\":0}")
             return
         }
         if (requestBody.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ctx.json("{\"error\":\"Request body is required\",\"operation\":\"update_tankoubon_metadata\",\"success\":0}")
             return
         }
 
         let parsed = MetadataPatchService.parseMetadataObject(requestBody)
         if (!parsed.success) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ctx.json("{\"error\":\"${parsed.error}\",\"operation\":\"update_tankoubon_metadata\",\"success\":0}")
             return
         }
 
         match (TankoubonDao.getTankoubonById(id)) {
             case None =>
-                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                 ctx.json("{\"error\":\"Tankoubon doesn't exist in the database!\",\"operation\":\"update_tankoubon_metadata\",\"success\":0}")
                 return
             case Some(existing) =>
@@ -249,7 +249,7 @@ public class TankoubonController {
                 }
 
                 if (!success) {
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ctx.json("{\"error\":\"Failed to update tankoubon metadata\",\"operation\":\"update_tankoubon_metadata\",\"success\":0}")
                     return
                 }
@@ -272,8 +272,8 @@ public class TankoubonController {
     /**
      * 删除单行本
      */
-    public static func deleteTankoubon(ctx: Ctx) {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func deleteTankoubon(ctx: Context) {
+        let id = ctx.param("id") ?? ""
         let assetIds = HashSet<Int64>()
         match (MetadataDao.getMetadataObject("tankoubon", id)) {
             case Some(metadata) =>
@@ -304,9 +304,9 @@ public class TankoubonController {
     /**
      * 向单行本添加档案
      */
-    public static func addArchiveToTankoubon(ctx: Ctx) {
-        let tankoubonId = ctx.paramsOpt("id") ?? ""
-        let archiveId = ctx.paramsOpt("archive") ?? ""
+    public static func addArchiveToTankoubon(ctx: Context) {
+        let tankoubonId = ctx.param("id") ?? ""
+        let archiveId = ctx.param("archive") ?? ""
         
         let success = TankoubonDao.addArchiveToTankoubonAppend(tankoubonId, archiveId)
         if (success) {
@@ -321,9 +321,9 @@ public class TankoubonController {
     /**
      * 从单行本移除档案
      */
-    public static func removeArchiveFromTankoubon(ctx: Ctx) {
-        let tankoubonId = ctx.paramsOpt("id") ?? ""
-        let archiveId = ctx.paramsOpt("archive") ?? ""
+    public static func removeArchiveFromTankoubon(ctx: Context) {
+        let tankoubonId = ctx.param("id") ?? ""
+        let archiveId = ctx.param("archive") ?? ""
         
         let success = TankoubonDao.removeArchiveFromTankoubon(tankoubonId, archiveId)
         if (success) {
@@ -338,13 +338,13 @@ public class TankoubonController {
     /**
      * 添加收藏（PUT /api/tankoubons/{id}/favorite）
      */
-    public static func addFavorite(ctx: Ctx): Unit {
+    public static func addFavorite(ctx: Context): Unit {
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"No tankoubon ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ctx.json(errorResponse)
                     return
                 }
@@ -352,7 +352,7 @@ public class TankoubonController {
                 let tank = TankoubonModel.getTankoubonById(id)
                 if (tank.id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"Tankoubon not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ctx.json(errorResponse)
                     return
                 }
@@ -363,7 +363,7 @@ public class TankoubonController {
                     ctx.json(result)
                 } else {
                     let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ctx.json(errorResponse)
                 }
             case None => return
@@ -373,13 +373,13 @@ public class TankoubonController {
     /**
      * 取消收藏（DELETE /api/tankoubons/{id}/favorite）
      */
-    public static func removeFavorite(ctx: Ctx): Unit {
+    public static func removeFavorite(ctx: Context): Unit {
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"remove_tankoubon_favorite\",\"error\":\"No tankoubon ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ctx.json(errorResponse)
                     return
                 }
@@ -390,7 +390,7 @@ public class TankoubonController {
                     ctx.json(result)
                 } else {
                     let errorResponse = "{\"operation\":\"remove_tankoubon_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ctx.json(errorResponse)
                 }
             case None => return

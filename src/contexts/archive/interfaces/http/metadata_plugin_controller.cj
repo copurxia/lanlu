@@ -4,7 +4,7 @@ import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import stdx.log.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import ignite.*
+import ace_web.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.plugin.application.PluginTaskService
 import lanlu.contexts.task.domain.*
@@ -86,11 +86,11 @@ public class MetadataPluginController {
      * - write_back=0（默认）：只运行 Metadata 插件，返回 wasm_task 的 job id；不写回 archives/tags
      * - write_back=1：走 metadata_plugin + callback 流程，自动写回 archives/tags
      */
-    public static func runMetadataPlugin(ctx: Ctx): Unit {
+    public static func runMetadataPlugin(ctx: Context): Unit {
         let logger = getLogger("metadata_plugin_controller")
 
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var targetType = ""
             var targetId = ""
             var namespace = ""
@@ -130,11 +130,11 @@ public class MetadataPluginController {
 
             // 兜底支持 query 参数（方便调试）
             if (targetType.size == 0) {
-                targetType = ctx.query("target_type") ?? (ctx.query("targetType") ?? "")
+                targetType = ctx.queryParam("target_type") ?? (ctx.queryParam("targetType") ?? "")
             }
             if (targetId.size == 0) {
-                let q1 = ctx.query("target_id") ?? ""
-                let q2 = ctx.query("targetId") ?? ""
+                let q1 = ctx.queryParam("target_id") ?? ""
+                let q2 = ctx.queryParam("targetId") ?? ""
                 if (q1.size > 0) { targetId = q1 }
                 else if (q2.size > 0) { targetId = q2 }
                 else { targetId = "" }
@@ -143,23 +143,23 @@ public class MetadataPluginController {
                 targetType = "archive"
             }
             if (namespace.size == 0) {
-                namespace = ctx.query("namespace") ?? ""
+                namespace = ctx.queryParam("namespace") ?? ""
             }
             if (param.size == 0) {
-                param = ctx.query("param") ?? ""
+                param = ctx.queryParam("param") ?? ""
             }
             if (metadataJson.size == 0) {
-                let qMeta = ctx.query("metadata") ?? ""
+                let qMeta = ctx.queryParam("metadata") ?? ""
                 metadataJson = normalizeMetadataJson(qMeta)
             }
-            let writeBackQuery = ctx.query("write_back") ?? (ctx.query("writeBack") ?? "")
+            let writeBackQuery = ctx.queryParam("write_back") ?? (ctx.queryParam("writeBack") ?? "")
             if (writeBackQuery.trimAscii().size > 0) {
                 let v = writeBackQuery.trimAscii().toAsciiLower()
                 writeBack = v == "true" || v == "1" || v == "yes" || v == "y"
             }
 
             if (targetId.size == 0 || namespace.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":0,\"error\":\"target_id and namespace are required\"}")
                 return
             }
@@ -170,14 +170,14 @@ public class MetadataPluginController {
                 match (TankoubonDao.getTankoubonById(targetId)) {
                     case Some(_) => ()
                     case None =>
-                        ctx.status(404)
+                        ctx.status = 404
                         ctx.json("{\"success\":0,\"error\":\"tankoubon not found\"}")
                         return
                 }
             } else {
                 let archive = ArchiveDao.getArchiveById(targetId)
                 if (archive.id.size == 0) {
-                    ctx.status(404)
+                    ctx.status = 404
                     ctx.json("{\"success\":0,\"error\":\"archive not found\"}")
                     return
                 }
@@ -229,7 +229,7 @@ public class MetadataPluginController {
 
             let plugin = PluginTaskService.getPluginByNamespace(namespace)
             if (plugin.namespace.size == 0 || plugin.plugin_type != "Metadata") {
-                ctx.status(404)
+                ctx.status = 404
                 ctx.json("{\"success\":0,\"error\":\"metadata plugin not found\"}")
                 return
             }
@@ -272,7 +272,7 @@ public class MetadataPluginController {
             )
 
             if (pluginTask.id <= 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ctx.json("{\"success\":0,\"error\":\"failed to create plugin task\"}")
                 return
             }
@@ -296,7 +296,7 @@ public class MetadataPluginController {
             ctx.json(String.fromUtf8(readToEnd(out2)))
         } catch (e: Exception) {
             logger.error("metadata_plugin 处理异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()

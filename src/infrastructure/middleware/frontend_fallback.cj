@@ -1,34 +1,29 @@
 package lanlu.infrastructure.middleware
 
-import ignite.*
+import ace_web.*
 import lanlu.contexts.system.interfaces.http.FrontendController
 
 public func installFrontendFallbackMiddleware(app: App): Unit {
     app.use(frontendFallbackMiddleware())
 }
 
-public func frontendFallbackMiddleware(baseDir!: String = "frontend/out"): Handler {
-    { ctx =>
-        ctx.next()
-
-        match (ctx.route()) {
-            case Some(_) => return
-            case None => ()
-        }
+public func frontendFallbackMiddleware(baseDir!: String = "frontend/out"): Middleware {
+    { ctx: Context, next: Next =>
+        next()
 
         let method = ctx.method.trimAscii().toAsciiUpper()
         if (method != "GET" && method != "HEAD") {
             return
         }
 
-        if (ctx.responseStatus != 404) {
+        if (ctx.status != 404) {
             return
         }
 
         // 短路：已知非静态资源路径直接返回 404，避免每个探测请求都触发
         // servePath 的多次 exists/FileInfo 文件系统调用风暴，降低 fd 瞬时压力
         if (isKnownNonAssetPath(ctx.path)) {
-            ctx.status(404)
+            ctx.status = 404
             return
         }
 

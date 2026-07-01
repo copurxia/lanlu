@@ -1,6 +1,6 @@
 package lanlu.contexts.user.application
 
-import ignite.security.*
+import totp_crypto.*
 import std.collection.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*

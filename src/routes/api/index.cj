@@ -1,6 +1,7 @@
 package lanlu.routes.api
 
-import ignite.*
+import ace_web.*
+import ace_router.*
 import lanlu.contexts.system.interfaces.http.InfoController
 import lanlu.contexts.system.interfaces.http.SystemSettingsController
 import lanlu.infrastructure.middleware.*
@@ -8,7 +9,7 @@ import lanlu.infrastructure.middleware.*
 /**
  * API路由注册
  */
-public func registerApiRoutes(router: App) {
+public func registerApiRoutes(router: Router) {
     // 注册档案相关路由
     ArchiveRoutes.configure(router)
 
@@ -55,7 +56,7 @@ public func registerApiRoutes(router: App) {
     AssetsRoutes.configure(router)
 
     // 注册服务器信息路由
-    router.get("/api/info", { ctx =>
+    router.get("/api/info", { ctx: Context, next: Next =>
         InfoController.getServerInfo(ctx)
     })
 }
@@ -63,37 +64,38 @@ public func registerApiRoutes(router: App) {
 /**
  * 注册系统设置路由
  */
-private func registerSystemSettingsRoutes(router: App) {
+private func registerSystemSettingsRoutes(router: Router) {
     // Canonical admin paths
     registerSystemSettingsRoutesAt(router, "/api/admin/system/settings")
 }
 
-private func registerSystemSettingsRoutesAt(router: App, basePath: String) {
-    let settings = router.group(basePath)
-    settings.use(AuthMiddleware.requireAdminMiddleware())
+private func registerSystemSettingsRoutesAt(router: Router, basePath: String) {
+    router.group(basePath) { settings =>
+        settings.use(AuthMiddleware.requireAdminMiddleware())
 
-    // 获取所有设置
-    settings.get("", { ctx =>
-        SystemSettingsController.getAllSettings(ctx)
-    })
+        // 获取所有设置
+        settings.get("", { ctx: Context, next: Next =>
+            SystemSettingsController.getAllSettings(ctx)
+        })
 
-    // 更新单个设置
-    settings.put("", audited("system.settings.update", { ctx =>
-        SystemSettingsController.updateSetting(ctx)
-    }, riskLevel: 2))
+        // 更新单个设置
+        settings.put("", audited("system.settings.update", { ctx: Context, next: Next =>
+            SystemSettingsController.updateSetting(ctx)
+        }, riskLevel: 2))
 
-    // 批量更新设置
-    settings.put("/batch", audited("system.settings.batch_update", { ctx =>
-        SystemSettingsController.updateSettings(ctx)
-    }, riskLevel: 2))
+        // 批量更新设置
+        settings.put("/batch", audited("system.settings.batch_update", { ctx: Context, next: Next =>
+            SystemSettingsController.updateSettings(ctx)
+        }, riskLevel: 2))
 
-    // 获取设置分类
-    settings.get("/categories", { ctx =>
-        SystemSettingsController.getCategories(ctx)
-    })
+        // 获取设置分类
+        settings.get("/categories", { ctx: Context, next: Next =>
+            SystemSettingsController.getCategories(ctx)
+        })
 
-    // 重新加载设置缓存
-    settings.post("/reload", audited("system.settings.reload", { ctx =>
-        SystemSettingsController.reloadCache(ctx)
-    }, riskLevel: 2))
+        // 重新加载设置缓存
+        settings.post("/reload", audited("system.settings.reload", { ctx: Context, next: Next =>
+            SystemSettingsController.reloadCache(ctx)
+        }, riskLevel: 2))
+    }
 }

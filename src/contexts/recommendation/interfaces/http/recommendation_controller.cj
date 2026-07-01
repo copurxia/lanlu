@@ -1,6 +1,6 @@
 package lanlu.contexts.recommendation.interfaces.http
 
-import ignite.*
+import ace_web.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.recommendation.application.*
 import lanlu.contexts.tag.infrastructure.persistence.*
@@ -49,10 +49,10 @@ public class RecommendationController {
         return if (parsed > 0) { parsed } else { 0i64 }
     }
 
-    private static func resolveSessionKey(ctx: Ctx): String {
-        let fromHeader = (ctx.header("X-Recommendation-Session") ?? "").trimAscii()
+    private static func resolveSessionKey(ctx: Context): String {
+        let fromHeader = (ctx.header("x-recommendation-session") ?? "").trimAscii()
         if (fromHeader.size > 0) { return fromHeader }
-        return (ctx.query("session_key") ?? "").trimAscii()
+        return (ctx.queryParam("session_key") ?? "").trimAscii()
     }
 
     private static func parseInteractionRequest(body: String): (String, String, String, String, String, String) {
@@ -97,7 +97,7 @@ public class RecommendationController {
         return (scene, seedEntityType, seedEntityId, itemType, itemId, interactionType)
     }
 
-    private static func writeRecommendationItemsJson(ctx: Ctx, scene: String, items: Array<RecommendationResultItem>, lang: String): Unit {
+    private static func writeRecommendationItemsJson(ctx: Context, scene: String, items: Array<RecommendationResultItem>, lang: String): Unit {
         let archiveIds = ArrayList<String>()
         let tankIds = ArrayList<String>()
         for (item in items) {
@@ -287,15 +287,15 @@ public class RecommendationController {
         ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
-    public static func getRecommendations(ctx: Ctx): Unit {
+    public static func getRecommendations(ctx: Context): Unit {
         CacheUtils.setNoCacheHeaders(ctx)
-        let scene = (ctx.query("scene") ?? "").trimAscii().toAsciiLower()
-        let count = parsePositiveInt32(ctx.query("count") ?? "", 12i32)
-        let archiveId = (ctx.query("archive_id") ?? "").trimAscii()
-        let tankoubonId = (ctx.query("tankoubon_id") ?? "").trimAscii()
-        let categoryId = parsePositiveInt64(ctx.query("category_id") ?? (ctx.query("category") ?? ""))
+        let scene = (ctx.queryParam("scene") ?? "").trimAscii().toAsciiLower()
+        let count = parsePositiveInt32(ctx.queryParam("count") ?? "", 12i32)
+        let archiveId = (ctx.queryParam("archive_id") ?? "").trimAscii()
+        let tankoubonId = (ctx.queryParam("tankoubon_id") ?? "").trimAscii()
+        let categoryId = parsePositiveInt64(ctx.queryParam("category_id") ?? (ctx.queryParam("category") ?? ""))
         let sessionKey = resolveSessionKey(ctx)
-        let lang = (ctx.query("lang") ?? "").trimAscii()
+        let lang = (ctx.queryParam("lang") ?? "").trimAscii()
         let userId = match (AuthMiddleware.optionalUser(ctx)) {
             case Some(id) => id
             case None => 0
@@ -309,7 +309,7 @@ public class RecommendationController {
                 items = RecommendationService.getDiscoverRecommendations(userId, sessionKey, categoryId, count)
             case "archive_related" =>
                 if (archiveId.size == 0) {
-                    ctx.status(400)
+                    ctx.status = 400
                     ResponseView.errorJson(ctx, "archive_id is required")
                     return
                 }
@@ -318,7 +318,7 @@ public class RecommendationController {
                 items = RecommendationService.getArchiveRelatedRecommendations(userId, sessionKey, archiveId, count)
             case "tankoubon_related" =>
                 if (tankoubonId.size == 0) {
-                    ctx.status(400)
+                    ctx.status = 400
                     ResponseView.errorJson(ctx, "tankoubon_id is required")
                     return
                 }
@@ -326,7 +326,7 @@ public class RecommendationController {
                 seedEntityId = tankoubonId
                 items = RecommendationService.getTankoubonRelatedRecommendations(userId, sessionKey, tankoubonId, count)
             case _ =>
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "unsupported recommendation scene")
                 return
         }
@@ -335,11 +335,11 @@ public class RecommendationController {
         writeRecommendationItemsJson(ctx, scene, items, lang)
     }
 
-    public static func recordInteraction(ctx: Ctx): Unit {
-        let body = ctx.bodyString()
+    public static func recordInteraction(ctx: Context): Unit {
+        let body = ctx.rawBody() ?? ""
         let (scene, seedEntityType, seedEntityId, itemType, itemId, interactionType) = parseInteractionRequest(body)
         if (scene.size == 0 || itemType.size == 0 || itemId.size == 0 || interactionType.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "scene, item_type, item_id and interaction_type are required")
             return
         }
@@ -360,7 +360,7 @@ public class RecommendationController {
             interactionType
         )
         if (!ok) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "failed to record recommendation interaction")
             return
         }

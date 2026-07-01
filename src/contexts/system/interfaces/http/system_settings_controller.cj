@@ -1,6 +1,6 @@
 package lanlu.contexts.system.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.collection.*
 import stdx.log.*
 import std.io.*
@@ -118,7 +118,7 @@ public class SystemSettingsController {
      * 获取所有设置
      * GET /api/system/settings
      */
-    public static func getAllSettings(ctx: Ctx) {
+    public static func getAllSettings(ctx: Context) {
         let logger = getLogger("system_settings_controller")
         try {
             let settings = SystemSettingsService.filterVisibleSettings(SystemSettingsDao.getAllSettings())
@@ -126,7 +126,7 @@ public class SystemSettingsController {
             ctx.json("{\"success\":true,\"data\":${json}}")
         } catch (e: Exception) {
             logger.error("获取系统设置失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"message\":\"获取系统设置失败: ${e.message}\"}")
         }
     }
@@ -135,12 +135,12 @@ public class SystemSettingsController {
      * 更新单个设置
      * PUT /api/system/settings
      */
-    public static func updateSetting(ctx: Ctx) {
+    public static func updateSetting(ctx: Context) {
         let logger = getLogger("system_settings_controller")
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":false,\"message\":\"请求体不能为空\"}")
                 return
             }
@@ -150,7 +150,7 @@ public class SystemSettingsController {
             let value = req.value
 
             if (key.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":false,\"message\":\"设置键不能为空\"}")
                 return
             }
@@ -163,12 +163,12 @@ public class SystemSettingsController {
                 }
                 ctx.json("{\"success\":true,\"message\":\"更新系统设置成功\"}")
             } else {
-                ctx.status(500)
+                ctx.status = 500
                 ctx.json("{\"success\":false,\"message\":\"更新系统设置失败\"}")
             }
         } catch (e: Exception) {
             logger.error("更新系统设置失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"message\":\"更新系统设置失败: ${e.message}\"}")
         }
     }
@@ -177,12 +177,12 @@ public class SystemSettingsController {
      * 批量更新设置
      * PUT /api/system/settings/batch
      */
-    public static func updateSettings(ctx: Ctx) {
+    public static func updateSettings(ctx: Context) {
         let logger = getLogger("system_settings_controller")
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":false,\"message\":\"请求体不能为空\"}")
                 return
             }
@@ -190,7 +190,7 @@ public class SystemSettingsController {
             let req = JsonCodec.decode<SystemSettingsBatchUpdateReq>(body)
             let settingsMap = req.settings
             if (settingsMap.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":false,\"message\":\"设置数据格式不正确\"}")
                 return
             }
@@ -202,12 +202,12 @@ public class SystemSettingsController {
                 }
                 ctx.json("{\"success\":true,\"message\":\"批量更新系统设置成功\"}")
             } else {
-                ctx.status(500)
+                ctx.status = 500
                 ctx.json("{\"success\":false,\"message\":\"批量更新系统设置失败\"}")
             }
         } catch (e: Exception) {
             logger.error("批量更新系统设置失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"message\":\"批量更新系统设置失败: ${e.message}\"}")
         }
     }
@@ -216,7 +216,7 @@ public class SystemSettingsController {
      * 获取设置分类
      * GET /api/system/settings/categories
      */
-    public static func getCategories(ctx: Ctx) {
+    public static func getCategories(ctx: Context) {
         let logger = getLogger("system_settings_controller")
         try {
             let categories = SystemSettingsService.getCategories()
@@ -235,7 +235,7 @@ public class SystemSettingsController {
             ctx.json(String.fromUtf8(readToEnd(out)))
         } catch (e: Exception) {
             logger.error("获取设置分类失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"message\":\"获取设置分类失败: ${e.message}\"}")
         }
     }
@@ -244,14 +244,14 @@ public class SystemSettingsController {
      * 重新加载设置缓存
      * POST /api/system/settings/reload
      */
-    public static func reloadCache(ctx: Ctx) {
+    public static func reloadCache(ctx: Context) {
         let logger = getLogger("system_settings_controller")
         try {
             SystemSettingsService.reloadCache()
             ctx.json("{\"success\":true,\"message\":\"重新加载设置缓存成功\"}")
         } catch (e: Exception) {
             logger.error("重新加载设置缓存失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"message\":\"重新加载设置缓存失败: ${e.message}\"}")
         }
     }

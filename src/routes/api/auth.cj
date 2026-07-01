@@ -1,13 +1,14 @@
 package lanlu.routes.api
 
-import ignite.*
+import ace_web.*
+import ace_router.*
 import lanlu.contexts.user.interfaces.http.AuthController
 import lanlu.contexts.user.interfaces.http.WebauthnController
 import lanlu.contexts.user.interfaces.http.TotpController
 import lanlu.infrastructure.middleware.*
 
-private func withUser(action: (Ctx, Int64) -> Unit): Handler {
-    { ctx =>
+private func withUser(action: (Context, Int64) -> Unit): Middleware {
+    { ctx: Context, next: Next =>
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) => action(ctx, userId)
             case None => return
@@ -15,8 +16,8 @@ private func withUser(action: (Ctx, Int64) -> Unit): Handler {
     }
 }
 
-private func withAdminUser(action: (Ctx, Int64) -> Unit): Handler {
-    { ctx =>
+private func withAdminUser(action: (Context, Int64) -> Unit): Middleware {
+    { ctx: Context, next: Next =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(userId) => action(ctx, userId)
             case None => return
@@ -24,8 +25,8 @@ private func withAdminUser(action: (Ctx, Int64) -> Unit): Handler {
     }
 }
 
-private func withAdmin(action: (Ctx) -> Unit): Handler {
-    { ctx =>
+private func withAdmin(action: (Context) -> Unit): Middleware {
+    { ctx: Context, next: Next =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => action(ctx)
             case None => return
@@ -33,21 +34,21 @@ private func withAdmin(action: (Ctx) -> Unit): Handler {
     }
 }
 
-public func registerAuthRoutes(router: App) {
-    router.post("/api/auth/login", audited("auth.login", { ctx =>
+public func registerAuthRoutes(router: Router) {
+    router.post("/api/auth/login", audited("auth.login", { ctx: Context, next: Next =>
         AuthController.login(ctx)
     }, riskLevel: 3))
-    router.post("/api/auth/login/totp/verify", audited("auth.login.totp.verify", { ctx =>
+    router.post("/api/auth/login/totp/verify", audited("auth.login.totp.verify", { ctx: Context, next: Next =>
         TotpController.loginVerify(ctx)
     }, riskLevel: 3))
-    router.post("/api/auth/logout", audited("auth.logout", { ctx =>
+    router.post("/api/auth/logout", audited("auth.logout", { ctx: Context, next: Next =>
         let _ = AuthMiddleware.optionalUser(ctx)
         AuthController.logout(ctx)
     }, riskLevel: 2))
-    router.post("/api/auth/webauthn/authenticate/options", audited("auth.webauthn.authenticate.options", { ctx =>
+    router.post("/api/auth/webauthn/authenticate/options", audited("auth.webauthn.authenticate.options", { ctx: Context, next: Next =>
         WebauthnController.authenticateOptions(ctx)
     }, riskLevel: 2))
-    router.post("/api/auth/webauthn/authenticate/verify", audited("auth.webauthn.authenticate.verify", { ctx =>
+    router.post("/api/auth/webauthn/authenticate/verify", audited("auth.webauthn.authenticate.verify", { ctx: Context, next: Next =>
         WebauthnController.authenticateVerify(ctx)
     }, riskLevel: 3))
 
@@ -76,9 +77,9 @@ public func registerAuthRoutes(router: App) {
     router.post("/api/auth/username", audited("auth.username.change", withUser({ ctx, userId => AuthController.changeUsername(ctx, userId) }), riskLevel: 3))
 
     // ===== 用户管理接口（仅管理员可访问）=====
-    router.get("/api/auth/admin/users", withAdmin({ ctx => AuthController.listUsers(ctx) }))
-    router.post("/api/auth/admin/users", audited("auth.admin.user.create", withAdmin({ ctx => AuthController.createUser(ctx) }), riskLevel: 2))
-    router.put("/api/auth/admin/users/:id/role", audited("auth.admin.user.role.update", withAdmin({ ctx => AuthController.updateUserRole(ctx) }), riskLevel: 2))
+    router.get("/api/auth/admin/users", withAdmin({ ctx: Context => AuthController.listUsers(ctx) }))
+    router.post("/api/auth/admin/users", audited("auth.admin.user.create", withAdmin({ ctx: Context => AuthController.createUser(ctx) }), riskLevel: 2))
+    router.put("/api/auth/admin/users/:id/role", audited("auth.admin.user.role.update", withAdmin({ ctx: Context => AuthController.updateUserRole(ctx) }), riskLevel: 2))
     router.delete("/api/auth/admin/users/:id", audited("auth.admin.user.delete", withAdminUser({ ctx, userId => AuthController.deleteUser(ctx, userId) }), riskLevel: 2))
-    router.post("/api/auth/admin/users/:id/reset-password", audited("auth.admin.user.password.reset", withAdmin({ ctx => AuthController.resetUserPassword(ctx) }), riskLevel: 2))
+    router.post("/api/auth/admin/users/:id/reset-password", audited("auth.admin.user.password.reset", withAdmin({ ctx: Context => AuthController.resetUserPassword(ctx) }), riskLevel: 2))
 }

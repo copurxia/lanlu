@@ -1,6 +1,6 @@
 package lanlu.contexts.user.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.convert.*
 import stdx.encoding.json.stream.*
 import lanlu.contexts.user.infrastructure.persistence.*
@@ -72,7 +72,7 @@ public class UserStatsController {
      * GET /api/user/stats
      * 返回: favoriteCount, readCount, totalPagesRead, totalArchives
      */
-    public static func getUserStats(ctx: Ctx): Unit {
+    public static func getUserStats(ctx: Context): Unit {
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
         match (userIdOpt) {
             case Some(userId) =>
@@ -94,11 +94,11 @@ public class UserStatsController {
      * 获取阅读趋势
      * GET /api/user/trend?days=30
      */
-    public static func getTrend(ctx: Ctx): Unit {
+    public static func getTrend(ctx: Context): Unit {
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
         match (userIdOpt) {
             case Some(userId) =>
-                let daysStr = ctx.query("days") ?? "30"
+                let daysStr = ctx.queryParam("days") ?? "30"
                 var days: Int32 = 30
                 try {
                     days = Int32.parse(daysStr)

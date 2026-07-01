@@ -1,6 +1,6 @@
 package lanlu.contexts.smart_filter.interfaces.http
 
-import ignite.*
+import ace_web.*
 import stdx.log.*
 import std.collection.*
 import std.convert.*
@@ -122,7 +122,7 @@ public class SmartFilterController {
      * GET /api/smart_filters
      * 获取所有启用的智能分类（用于前端展示）
      */
-    public static func getEnabledFilters(ctx: Ctx): Unit {
+    public static func getEnabledFilters(ctx: Context): Unit {
         let filters = SmartFilterDao.getEnabledFilters()
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -142,7 +142,7 @@ public class SmartFilterController {
      * GET /api/admin/smart_filters
      * 获取所有智能分类（管理用）
      */
-    public static func adminList(ctx: Ctx): Unit {
+    public static func adminList(ctx: Context): Unit {
         let filters = SmartFilterDao.getAllFilters()
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -162,10 +162,10 @@ public class SmartFilterController {
      * GET /api/admin/smart_filters/:id
      * 获取单个智能分类
      */
-    public static func adminGet(ctx: Ctx): Unit {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func adminGet(ctx: Context): Unit {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "id is required", 400)
             return
         }
@@ -174,7 +174,7 @@ public class SmartFilterController {
         try {
             id = Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
@@ -183,7 +183,7 @@ public class SmartFilterController {
             case Some(filter) =>
                 ResponseView.successJson(ctx, filterToJson(filter), "获取智能分类成功")
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "not found", 404)
         }
     }
@@ -192,12 +192,12 @@ public class SmartFilterController {
      * POST /api/admin/smart_filters
      * 创建智能分类
      */
-    public static func adminCreate(ctx: Ctx): Unit {
+    public static func adminCreate(ctx: Context): Unit {
         let logger = getLogger("smart_filter_controller")
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -218,13 +218,13 @@ public class SmartFilterController {
                 filter.sort_order_num = req.sortOrderNum
                 filter.enabled = req.enabled
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Invalid JSON", 400)
                 return
             }
 
             if (filter.name.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "name is required", 400)
                 return
             }
@@ -238,12 +238,12 @@ public class SmartFilterController {
                     filter.id = id
                     ResponseView.successJson(ctx, "{\"success\":1,\"id\":${id.toString()}}", "创建成功")
                 case None =>
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.errorJson(ctx, "Create failed", 500)
             }
         } catch (e: Exception) {
             logger.error("adminCreate异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -252,12 +252,12 @@ public class SmartFilterController {
      * PUT /api/admin/smart_filters/:id
      * 更新智能分类
      */
-    public static func adminUpdate(ctx: Ctx): Unit {
+    public static func adminUpdate(ctx: Context): Unit {
         let logger = getLogger("smart_filter_controller")
         try {
-            let idStr = ctx.paramsOpt("id") ?? ""
+            let idStr = ctx.param("id") ?? ""
             if (idStr.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "id is required", 400)
                 return
             }
@@ -266,7 +266,7 @@ public class SmartFilterController {
             try {
                 id = Int64.parse(idStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid id", 400)
                 return
             }
@@ -274,15 +274,15 @@ public class SmartFilterController {
             // 检查是否存在
             match (SmartFilterDao.getById(id)) {
                 case None =>
-                    ctx.status(404)
+                    ctx.status = 404
                     ResponseView.errorJson(ctx, "not found", 404)
                     return
                 case Some(_) => ()
             }
 
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -304,13 +304,13 @@ public class SmartFilterController {
                 filter.sort_order_num = req.sortOrderNum
                 filter.enabled = req.enabled
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Invalid JSON", 400)
                 return
             }
 
             if (filter.name.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "name is required", 400)
                 return
             }
@@ -322,12 +322,12 @@ public class SmartFilterController {
             if (SmartFilterDao.update(filter)) {
                 ResponseView.successJson(ctx, "{\"success\":1}", "更新成功")
             } else {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Update failed", 500)
             }
         } catch (e: Exception) {
             logger.error("adminUpdate异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -336,10 +336,10 @@ public class SmartFilterController {
      * DELETE /api/admin/smart_filters/:id
      * 删除智能分类
      */
-    public static func adminDelete(ctx: Ctx): Unit {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func adminDelete(ctx: Context): Unit {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "id is required", 400)
             return
         }
@@ -348,7 +348,7 @@ public class SmartFilterController {
         try {
             id = Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
@@ -356,7 +356,7 @@ public class SmartFilterController {
         if (SmartFilterDao.delete(id)) {
             ResponseView.successJson(ctx, "{\"success\":1}", "删除成功")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Delete failed", 500)
         }
     }
@@ -365,12 +365,12 @@ public class SmartFilterController {
      * POST /api/admin/smart_filters/reorder
      * 批量更新排序顺序
      */
-    public static func adminReorder(ctx: Ctx): Unit {
+    public static func adminReorder(ctx: Context): Unit {
         let logger = getLogger("smart_filter_controller")
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -422,7 +422,7 @@ public class SmartFilterController {
                                         }
                                         r.endArray()
                                     case Some(_) =>
-                                        ctx.status(400)
+                                        ctx.status = 400
                                         ResponseView.errorJson(ctx, "orders must be an array", 400)
                                         return
                                     case None => ()
@@ -432,13 +432,13 @@ public class SmartFilterController {
                     }
                     r.endObject()
                 case _ =>
-                    ctx.status(400)
+                    ctx.status = 400
                     ResponseView.errorJson(ctx, "Invalid JSON", 400)
                     return
             }
 
             if (orders.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "No valid orders provided", 400)
                 return
             }
@@ -446,12 +446,12 @@ public class SmartFilterController {
             if (SmartFilterDao.batchUpdateSortOrder(orders.toArray())) {
                 ResponseView.successJson(ctx, "{\"success\":1}", "排序更新成功")
             } else {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Reorder failed", 500)
             }
         } catch (e: Exception) {
             logger.error("adminReorder异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -460,10 +460,10 @@ public class SmartFilterController {
      * POST /api/admin/smart_filters/:id/toggle
      * 切换启用状态
      */
-    public static func adminToggle(ctx: Ctx): Unit {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func adminToggle(ctx: Context): Unit {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "id is required", 400)
             return
         }
@@ -472,7 +472,7 @@ public class SmartFilterController {
         try {
             id = Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
@@ -480,7 +480,7 @@ public class SmartFilterController {
         if (SmartFilterDao.toggleEnabled(id)) {
             ResponseView.successJson(ctx, "{\"success\":1}", "切换成功")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Toggle failed", 500)
         }
     }

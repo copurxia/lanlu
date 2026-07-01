@@ -1,0 +1,10 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "brotli_middleware"
+  version = "0.1.0"
+  output-type = "static"
+  description = "Brotli HTTP response compression middleware for ACE"
+  link-option = "-lbrotlienc -lbrotlicommon"
+
+[dependencies]
+  ace_web = { path = "../../ref/ACE/ace-web" }

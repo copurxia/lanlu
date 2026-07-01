@@ -1,6 +1,7 @@
 package lanlu.infrastructure.middleware
 
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import stdx.net.http.HttpStatusCode
 import std.time.DateTime
 import std.convert.*
@@ -24,8 +25,8 @@ public class AuthMiddleware {
      * 1. Authorization: Bearer <token>
      * 2. Cookie: auth_token=<token>
      */
-    private static func getBearerToken(ctx: Ctx): Option<String> {
-        let authHeader = ctx.header("Authorization") ?? ""
+    private static func getBearerToken(ctx: Context): Option<String> {
+        let authHeader = ctx.header("authorization") ?? ""
         let trimmed = authHeader.trimAscii()
 
         // 优先读取 Authorization: Bearer <token>
@@ -41,7 +42,7 @@ public class AuthMiddleware {
         }
 
         // 回退到 Cookie: auth_token=<token>
-        let cookieHeader = ctx.header("Cookie") ?? ""
+        let cookieHeader = ctx.header("cookie") ?? ""
         let cookie = cookieHeader.trimAscii()
         if (cookie.size == 0) {
             return None
@@ -71,9 +72,9 @@ public class AuthMiddleware {
      * 可选获取用户ID（不会返回401错误）
      * 如果用户已登录返回 Some(userId)，否则返回 None
      */
-    public static func optionalUser(ctx: Ctx): Option<Int64> {
+    public static func optionalUser(ctx: Context): Option<Int64> {
         // 若上游中间件（requiredAuth/requireUser）已完成鉴权并绑定 actor，直接复用，避免重复查库
-        match (ctx.getLocal("actor")) {
+        match (getLocalStr(ctx, "actor")) {
             case Some(actorStr) =>
                 match (parseUserId(actorStr)) {
                     case Some(userId) => return Some(userId)
@@ -118,7 +119,7 @@ public class AuthMiddleware {
     /**
      * 需要用户身份认证
      */
-    public static func requiredAuth(ctx: Ctx): Bool {
+    public static func requiredAuth(ctx: Context): Bool {
         // Bearer token：按用户 token 校验
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
@@ -143,7 +144,7 @@ public class AuthMiddleware {
         }
 
         ctx.setHeader("X-Auth-Session-Invalid", "1")
-        ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
+        ctx.status = HttpStatusCode.STATUS_UNAUTHORIZED
         ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return false
     }
@@ -151,9 +152,9 @@ public class AuthMiddleware {
     /**
      * 需要用户身份（仅用户 token 生效）
      */
-    public static func requireUser(ctx: Ctx): Option<Int64> {
+    public static func requireUser(ctx: Context): Option<Int64> {
         // 若上游中间件（requiredAuth/requireUser）已完成鉴权并绑定 actor，直接复用，避免重复查库
-        match (ctx.getLocal("actor")) {
+        match (getLocalStr(ctx, "actor")) {
             case Some(actorStr) =>
                 match (parseUserId(actorStr)) {
                     case Some(userId) => return Some(userId)
@@ -183,7 +184,7 @@ public class AuthMiddleware {
         }
 
         ctx.setHeader("X-Auth-Session-Invalid", "1")
-        ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
+        ctx.status = HttpStatusCode.STATUS_UNAUTHORIZED
         ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return None
     }
@@ -191,13 +192,13 @@ public class AuthMiddleware {
     /**
      * 需要管理员身份
      */
-    public static func requireAdmin(ctx: Ctx): Option<Int64> {
+    public static func requireAdmin(ctx: Context): Option<Int64> {
         match (requireUser(ctx)) {
             case Some(userId) =>
                 if (UserDao.isAdmin(userId)) {
                     return Some(userId)
                 } else {
-                    ctx.status(HttpStatusCode.STATUS_FORBIDDEN)
+                    ctx.status = HttpStatusCode.STATUS_FORBIDDEN
                     ResponseView.errorJson(ctx, "Administrator privileges required.", 403)
                     return None
                 }
@@ -208,28 +209,28 @@ public class AuthMiddleware {
     /**
      * 认证中间件（需要登录）
      */
-    public static func requiredAuthMiddleware(): Handler {
-        { ctx =>
+    public static func requiredAuthMiddleware(): Middleware {
+        { ctx: Context, next: Next =>
             if (!requiredAuth(ctx)) {
                 return
             }
-            ctx.next()
+            next()
         }
     }
 
     /**
      * 认证中间件（需要管理员）
      */
-    public static func requireAdminMiddleware(): Handler {
-        { ctx =>
+    public static func requireAdminMiddleware(): Middleware {
+        { ctx: Context, next: Next =>
             match (requireAdmin(ctx)) {
-                case Some(_) => ctx.next()
+                case Some(_) => next()
                 case None => return
             }
         }
     }
 
-    private static func getTokenRowByToken(ctx: Ctx, token: String): Option<UserTokenRow> {
+    private static func getTokenRowByToken(ctx: Context, token: String): Option<UserTokenRow> {
         let trimmed = token.trimAscii()
         if (trimmed.size == 0) {
             return None
@@ -241,8 +242,8 @@ public class AuthMiddleware {
             // 轻量触达，记录 last_used（节流）
             let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
             if (shouldTouchToken(row.id, nowSec)) {
-                let userAgent = ctx.header("User-Agent") ?? ""
-                UserTokenDao.touchUsage(row.id, ctx.ip, userAgent)
+                let userAgent = ctx.header("user-agent") ?? ""
+                UserTokenDao.touchUsage(row.id, "", userAgent)
             }
             return Some(row)
         }
@@ -273,13 +274,13 @@ public class AuthMiddleware {
         return true
     }
 
-    private static func bindActor(ctx: Ctx, userId: Int64): Unit {
-        ctx.setLocal("actor", userId.toString())
+    private static func bindActor(ctx: Context, userId: Int64): Unit {
+        setLocalStr(ctx, "actor", userId.toString())
     }
 
-    private static func bindTokenContext(ctx: Ctx, row: UserTokenRow): Unit {
+    private static func bindTokenContext(ctx: Context, row: UserTokenRow): Unit {
         bindActor(ctx, row.userId)
-        ctx.setLocal("auth_token_id", row.id.toString())
-        ctx.setLocal("auth_token_type", row.tokenType)
+        setLocalStr(ctx, "auth_token_id", row.id.toString())
+        setLocalStr(ctx, "auth_token_type", row.tokenType)
     }
 }

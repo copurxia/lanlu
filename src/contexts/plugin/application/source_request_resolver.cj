@@ -4,7 +4,7 @@ import std.collection.*
 import std.fs.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import ignite.*
+import ace_web.*
 import lanlu.shared.utils.JsonCodec
 
 public class SourceRequest {
@@ -28,8 +28,8 @@ public class SourceRequestResolver {
      * remote_id 是可选的——部分 action（如 source_home、source_search、source_filters）不需要 remote_id。
      * 具体的 action handler 自行校验必需字段。
      */
-    public static func parse(ctx: Ctx): Option<SourceRequest> {
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+    public static func parse(ctx: Context): Option<SourceRequest> {
+        let namespace = ctx.param("namespace") ?? ""
         if (namespace.size == 0) {
             return None
         }
@@ -38,7 +38,7 @@ public class SourceRequestResolver {
         var parentRemoteId = ""
 
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size > 0) {
                 let bodyMap = JsonCodec.decode<HashMap<String, String>>(body)
                 remoteId = bodyMap.get("remote_id") ?? ""
@@ -50,7 +50,7 @@ public class SourceRequestResolver {
         request.namespace = namespace.trimAscii()
         request.remoteId = remoteId.trimAscii()
         request.parentRemoteId = parentRemoteId.trimAscii()
-        request.paramsJson = ctx.bodyString()
+        request.paramsJson = ctx.rawBody() ?? ""
 
         return Some(request)
     }

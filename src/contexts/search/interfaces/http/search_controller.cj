@@ -2,7 +2,7 @@ package lanlu.contexts.search.interfaces.http
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 
-import ignite.*
+import ace_web.*
 import lanlu.contexts.archive.domain.*
 import lanlu.contexts.plugin.application.SourceArchiveReadService
 import lanlu.shared.views.*
@@ -362,36 +362,36 @@ public class SearchController {
     /**
      * 搜索归档
      */
-    public static func searchArchives(ctx: Ctx) {
-        let aggregateBy = (ctx.query("aggregate_by") ?? "").trimAscii().toAsciiLower()
-        var categoryIds = parseCategoryIds(ctx.query("category_ids") ?? "")
+    public static func searchArchives(ctx: Context) {
+        let aggregateBy = (ctx.queryParam("aggregate_by") ?? "").trimAscii().toAsciiLower()
+        var categoryIds = parseCategoryIds(ctx.queryParam("category_ids") ?? "")
         var category = ""
         if (categoryIds.size > 0) {
             category = joinCategoryIds(categoryIds)
         } else {
-            category = normalizeCategoryToken(ctx.query("category") ?? "")
+            category = normalizeCategoryToken(ctx.queryParam("category") ?? "")
             if (category.size == 0) {
-                category = normalizeCategoryToken(ctx.query("category_id") ?? "")
+                category = normalizeCategoryToken(ctx.queryParam("category_id") ?? "")
             }
             if (aggregateBy == "category" && category.size > 0) {
                 categoryIds.add(category)
             }
         }
-        let filter = ctx.query("filter") ?? ""
-        let tankoubonId = ctx.query("tankoubon_id") ?? ""
+        let filter = ctx.queryParam("filter") ?? ""
+        let tankoubonId = ctx.queryParam("tankoubon_id") ?? ""
 
         // 处理分页参数
-        let pageStr = ctx.query("page") ?? "1"
-        let pageSizeStr = ctx.query("pageSize") ?? "20"
-        let sortby = ctx.query("sortby") ?? "title"
-        let order = ctx.query("order") ?? "asc"
+        let pageStr = ctx.queryParam("page") ?? "1"
+        let pageSizeStr = ctx.queryParam("pageSize") ?? "20"
+        let sortby = ctx.queryParam("sortby") ?? "title"
+        let order = ctx.queryParam("order") ?? "asc"
 
         // 处理过滤参数
-        let newOnlyStr = ctx.query("newonly") ?? "false"
-        let untaggedOnlyStr = ctx.query("untaggedonly") ?? "false"
-        let groupByTanksStr = ctx.query("groupby_tanks") ?? "false"  // 默认为false
-        let favoriteOnlyStr = ctx.query("favoriteonly") ?? "false"
-        let favoriteTankoubonsOnlyStr = ctx.query("favorite_tankoubons_only") ?? "false"
+        let newOnlyStr = ctx.queryParam("newonly") ?? "false"
+        let untaggedOnlyStr = ctx.queryParam("untaggedonly") ?? "false"
+        let groupByTanksStr = ctx.queryParam("groupby_tanks") ?? "false"  // 默认为false
+        let favoriteOnlyStr = ctx.queryParam("favoriteonly") ?? "false"
+        let favoriteTankoubonsOnlyStr = ctx.queryParam("favorite_tankoubons_only") ?? "false"
         let newOnly = newOnlyStr == "true" || newOnlyStr == "1"
         let untaggedOnly = untaggedOnlyStr == "true" || untaggedOnlyStr == "1"
         let groupByTanks = groupByTanksStr == "true" || groupByTanksStr == "1"
@@ -399,11 +399,11 @@ public class SearchController {
         let favoriteTankoubonsOnly = favoriteTankoubonsOnlyStr == "true" || favoriteTankoubonsOnlyStr == "1"
 
         // 处理日期范围参数
-        let dateFrom = ctx.query("date_from") ?? ""
-        let dateTo = ctx.query("date_to") ?? ""
+        let dateFrom = ctx.queryParam("date_from") ?? ""
+        let dateTo = ctx.queryParam("date_to") ?? ""
 
         // 处理语言参数（用于标签翻译）
-        let lang = ctx.query("lang") ?? ""
+        let lang = ctx.queryParam("lang") ?? ""
 
         // 解析分页参数
         var page = 1i32
@@ -663,7 +663,7 @@ public class SearchController {
     /**
      * 获取搜索建议
      */
-    public static func getSearchSuggestions(ctx: Ctx) {
+    public static func getSearchSuggestions(ctx: Context) {
         let suggestions = "[\"suggestion1\",\"suggestion2\",\"suggestion3\"]"
         ResponseView.successJson(ctx, suggestions, "获取搜索建议成功")
     }

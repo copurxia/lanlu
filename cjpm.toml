@@ -11,7 +11,12 @@
   link-option = "-larchive -lavif -lvips -lrocksdb -largon2 -lbrotlienc -lbrotlicommon -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s"
 
 [dependencies]
-  ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx"}
+  totp_crypto = { path = "packages/totp_crypto" }
+  brotli_middleware = { path = "packages/brotli_middleware" }
+  ace_web = { path = "ref/ACE/ace-web" }
+  ace_router = { path = "ref/ACE/ace-router" }
+  ace_http = { path = "ref/ACE/ace-http" }
+  ace_observability = { path = "ref/ACE/ace-observability" }
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", branch = "master", output-type = "static"}
   cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
   ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
@@ -23,7 +28,6 @@
   argon2_ffi = { path = "packages/argon2_ffi" }
   avif_ffi = { path = "packages/avif_ffi" }
   vips_ffi = { path = "packages/vips_ffi" }
-  brotli_middleware = { git = "https://gitcode.com/copur/brotli_middleware.git", branch = "stdx" }
   wasmedge_ffi = { git = "https://gitcode.com/copur/wasmedge_ffi.git", branch = "main" }
   semver = { path = "packages/semver" }
   totp_cj = { git = "https://gitcode.com/copur/totp-cj.git", branch = "main" }

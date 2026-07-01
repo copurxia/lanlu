@@ -13,7 +13,9 @@ import lanlu.infrastructure.migrations.extensions.*
 import lanlu.infrastructure.kv.*
 import lanlu.infrastructure.middleware.*
 import std.convert.*
-import ignite.*
+import ace_web.*
+import ace_router.*
+import ace_http.*
 import cjdotenv.load
 import cjpminfo.*
 import std.env.getVariable
@@ -217,26 +219,28 @@ main(): Int64 {
         logger.info("SSL/TLS disabled in system settings")
     }
 
-    // 10MB 分片上传需预留 multipart 包装开销，因此请求体上限略高于 10MB
-    let app = App(config: Config(
-        appName: "lanlu",
-        appVersion: appVersion,
-        serverHeader: "Lanlu",
-        bodyLimit: 12 * 1024 * 1024,
-        enableSwagger: true,
-        enablePrintSwaggerUrl: false,
-        enableBannerSignature: false,
-        enableTlsPrecheck: true,
-        tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
-        tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
-        ))
+    // ACE App + Router：路由注册到 Router，router.routes() 作为中间件挂到 App。
+    let app = App()
+    let router = Router()
 
     installObservabilityMiddleware(app)
     installFrontendFallbackMiddleware(app)
 
     // 注册所有路由
     logger.debug("Application starting... step 15: registering routes")
-    Routes.register(app)
+    Routes.register(router)
+    app.use(router.routes())
+    // 未匹配路由兜底：设 404，交给 frontend_fallback 中间件处理（SPA 回退或 404）
+    app.use({ ctx: Context, next: Next =>
+        next()
+        match (ctx.responseBody()) {
+            case NoBody =>
+                if (ctx.status == 200) {
+                    ctx.status = 404
+                }
+            case _ => ()
+        }
+    })
     logger.info("Application starting... step 16: routes registered")
 
     if (sslEnabled) {
@@ -246,7 +250,13 @@ main(): Int64 {
     }
     // 启动服务器
     logger.debug("Application starting... step 17: starting HTTP server")
-    app.listen(host, port)
+    var opts = ListenOptions()
+    opts.readTimeoutMs = 30000
+    opts.writeTimeoutMs = 30000
+    if (sslEnabled) {
+        opts.tls = tlsFromPemFiles(sslCertFile, sslKeyFile)
+    }
+    listenWith(app, host, port, opts)
 
     return 0
 }

@@ -1,6 +1,6 @@
 package lanlu.contexts.system.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lanlu.contexts.archive.infrastructure.persistence.*
@@ -18,7 +18,7 @@ public class InfoController {
     /**
      * 获取服务器信息
      */
-    public static func getServerInfo(ctx: Ctx) {
+    public static func getServerInfo(ctx: Context) {
         try {
             // 获取档案总数
             let (_, totalArchives) = ArchiveDao.searchArchives("", "", 0, 0, "title", "asc")
@@ -69,7 +69,7 @@ public class InfoController {
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } catch (ex: Exception) {
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()

@@ -1,6 +1,6 @@
 package lanlu.contexts.task.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
@@ -18,7 +18,7 @@ public class CronController {
      * 获取 TaskRunner 支持的任务类型列表
      * GET /api/cron/task-types
      */
-    public static func getTaskTypes(ctx: Ctx) {
+    public static func getTaskTypes(ctx: Context) {
         let types = TaskPoolService.getSupportedTaskTypes()
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -39,9 +39,9 @@ public class CronController {
      * 获取定时任务列表（分页）
      * GET /api/cron/tasks?page=1&pageSize=10
      */
-    public static func getTasks(ctx: Ctx) {
-        let pageStr = ctx.query("page") ?? "1"
-        let pageSizeStr = ctx.query("pageSize") ?? "10"
+    public static func getTasks(ctx: Context) {
+        let pageStr = ctx.queryParam("page") ?? "1"
+        let pageSizeStr = ctx.queryParam("pageSize") ?? "10"
 
         let page = try {
             let p = Int32.parse(pageStr)
@@ -66,10 +66,10 @@ public class CronController {
      * 获取单个定时任务
      * GET /api/cron/tasks/:id
      */
-    public static func getTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func getTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -77,7 +77,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -87,7 +87,7 @@ public class CronController {
             case Some(task) =>
                 ctx.json(task.toJson())
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ctx.json("{\"success\":false,\"error\":\"Task not found\"}")
         }
     }
@@ -97,10 +97,10 @@ public class CronController {
      * POST /api/cron/tasks
      * Body: { name, cronExpression, taskType, taskParameters?, enabled?, priority?, timeoutSeconds? }
      */
-    public static func createTask(ctx: Ctx) {
-        let body = ctx.bodyString()
+    public static func createTask(ctx: Context) {
+        let body = ctx.rawBody() ?? ""
         if (body.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Empty request body\"}")
             return
         }
@@ -115,17 +115,17 @@ public class CronController {
         let timeoutSeconds = extractJsonInt32(body, "timeoutSeconds", 3600)
 
         if (name.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing required field: name\"}")
             return
         }
         if (cronExpression.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing required field: cronExpression\"}")
             return
         }
         if (taskType.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing required field: taskType\"}")
             return
         }
@@ -135,10 +135,10 @@ public class CronController {
             taskParameters: taskParameters, enabled: enabled, priority: priority,
             timeoutSeconds: timeoutSeconds)) {
             case Some(task) =>
-                ctx.status(201)
+                ctx.status = 201
                 ctx.json("{\"success\":true,\"task\":${task.toJson()}}")
             case None =>
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":false,\"error\":\"Failed to create task. Check cron expression.\"}")
         }
     }
@@ -147,10 +147,10 @@ public class CronController {
      * 更新定时任务
      * PUT /api/cron/tasks/:id
      */
-    public static func updateTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func updateTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -158,7 +158,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -167,14 +167,14 @@ public class CronController {
         let existingTask = match (service.getScheduledTask(id)) {
             case Some(t) => t
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ctx.json("{\"success\":false,\"error\":\"Task not found\"}")
                 return
         }
 
-        let body = ctx.bodyString()
+        let body = ctx.rawBody() ?? ""
         if (body.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Empty request body\"}")
             return
         }
@@ -210,7 +210,7 @@ public class CronController {
         if (service.updateScheduledTask(task)) {
             ctx.json("{\"success\":true}")
         } else {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Failed to update task\"}")
         }
     }
@@ -219,10 +219,10 @@ public class CronController {
      * 删除定时任务
      * DELETE /api/cron/tasks/:id
      */
-    public static func deleteTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func deleteTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -230,7 +230,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -239,7 +239,7 @@ public class CronController {
         if (service.deleteScheduledTask(id)) {
             ctx.json("{\"success\":true}")
         } else {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":false,\"error\":\"Task not found or failed to delete\"}")
         }
     }
@@ -248,10 +248,10 @@ public class CronController {
      * 手动触发定时任务
      * POST /api/cron/tasks/:id/trigger
      */
-    public static func triggerTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func triggerTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -259,7 +259,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -268,7 +268,7 @@ public class CronController {
         if (service.triggerTaskNow(id)) {
             ctx.json("{\"success\":true,\"message\":\"Task triggered\"}")
         } else {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":false,\"error\":\"Task not found or failed to trigger\"}")
         }
     }
@@ -277,10 +277,10 @@ public class CronController {
      * 启用定时任务
      * POST /api/cron/tasks/:id/enable
      */
-    public static func enableTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func enableTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -288,7 +288,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -297,7 +297,7 @@ public class CronController {
         if (service.enableScheduledTask(id)) {
             ctx.json("{\"success\":true}")
         } else {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":false,\"error\":\"Task not found or failed to enable\"}")
         }
     }
@@ -306,10 +306,10 @@ public class CronController {
      * 禁用定时任务
      * POST /api/cron/tasks/:id/disable
      */
-    public static func disableTask(ctx: Ctx) {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func disableTask(ctx: Context) {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing task id\"}")
             return
         }
@@ -317,7 +317,7 @@ public class CronController {
         let id = try {
             Int64.parse(idStr)
         } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Invalid task id\"}")
             return
         }
@@ -326,7 +326,7 @@ public class CronController {
         if (service.disableScheduledTask(id)) {
             ctx.json("{\"success\":true}")
         } else {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":false,\"error\":\"Task not found or failed to disable\"}")
         }
     }
@@ -336,17 +336,17 @@ public class CronController {
      * POST /api/cron/validate
      * Body: { expression: "0 * * * *" }
      */
-    public static func validateExpression(ctx: Ctx) {
-        let body = ctx.bodyString()
+    public static func validateExpression(ctx: Context) {
+        let body = ctx.rawBody() ?? ""
         if (body.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Empty request body\"}")
             return
         }
 
         let expression = extractJsonString(body, "expression")
         if (expression.isEmpty()) {
-            ctx.status(400)
+            ctx.status = 400
             ctx.json("{\"success\":false,\"error\":\"Missing expression field\"}")
             return
         }
@@ -360,7 +360,7 @@ public class CronController {
      * 获取CronService状态
      * GET /api/cron/status
      */
-    public static func getStatus(ctx: Ctx) {
+    public static func getStatus(ctx: Context) {
         let service = CronService.getInstance()
         let status = service.getStatus()
         ctx.json(status.toJson())
@@ -370,12 +370,12 @@ public class CronController {
      * 启动CronService
      * POST /api/cron/start
      */
-    public static func startService(ctx: Ctx) {
+    public static func startService(ctx: Context) {
         let service = CronService.getInstance()
         if (service.start()) {
             ctx.json("{\"success\":true,\"message\":\"CronService started\"}")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"error\":\"Failed to start CronService\"}")
         }
     }
@@ -384,12 +384,12 @@ public class CronController {
      * 停止CronService
      * POST /api/cron/stop
      */
-    public static func stopService(ctx: Ctx) {
+    public static func stopService(ctx: Context) {
         let service = CronService.getInstance()
         if (service.stop()) {
             ctx.json("{\"success\":true,\"message\":\"CronService stopped\"}")
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ctx.json("{\"success\":false,\"error\":\"Failed to stop CronService\"}")
         }
     }

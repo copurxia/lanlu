@@ -1,7 +1,8 @@
 package lanlu.contexts.archive.interfaces.http
 
 import stdx.net.http.{HttpStatusCode, HttpResponseWriter}
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import lanlu.contexts.archive.domain.*
 import lanlu.contexts.tankoubon.domain.*
 import lanlu.contexts.plugin.domain.*
@@ -251,8 +252,8 @@ public class ArchiveController {
         return stem.trimAscii()
     }
 
-    private static func parsePositiveIntQuery(ctx: Ctx, name: String): Int32 {
-        let raw = (ctx.query(name) ?? "").trimAscii()
+    private static func parsePositiveIntQuery(ctx: Context, name: String): Int32 {
+        let raw = (ctx.queryParam(name) ?? "").trimAscii()
         if (raw.size == 0) {
             return 0
         }
@@ -479,8 +480,8 @@ public class ArchiveController {
     }
 
     // GET /api/archives/{id}/metadata
-    public static func getMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getMetadata(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 复合 ID 检测/转发 → 构建 ArchiveMetadata
         match (SourceRequestResolver.parseFromCompositeId(id)) {
@@ -490,7 +491,7 @@ public class ArchiveController {
                 // 检查插件返回是否有效，失败时返回明确错误
                 if (detail.hasError() || (detail.title.size == 0 && detail.pageCount <= 0)) {
                     let errMsg = if (detail.hasError()) { detail.errorMessage } else { "plugin returned empty result" }
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.errorJson(ctx, "Failed to fetch source detail: ${errMsg}")
                     return
                 }
@@ -597,14 +598,14 @@ public class ArchiveController {
             case None => ()
         }
 
-        let lang = (ctx.query("lang") ?? "").trimAscii()
-        let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
+        let lang = (ctx.queryParam("lang") ?? "").trimAscii()
+        let includePagesRaw = (ctx.queryParam("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
 
         // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"error\":\"No archive ID specified.\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -643,9 +644,9 @@ public class ArchiveController {
                 "Failed to build archive metadata"
             }
             if (err == "Archive not found") {
-                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             } else {
-                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             }
             ResponseView.json(ctx, "{\"error\":\"${err}\",\"success\":0}")
             return
@@ -656,10 +657,10 @@ public class ArchiveController {
     }
 
     // GET /api/archives/{id}/tankoubons
-    public static func getTankoubonsForArchive(ctx: Ctx): Unit {
-        let arcid = ctx.paramsOpt("id") ?? ""
+    public static func getTankoubonsForArchive(ctx: Context): Unit {
+        let arcid = ctx.param("id") ?? ""
         if (arcid.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx,
                 "{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
             return
@@ -704,13 +705,13 @@ public class ArchiveController {
     }
 
     // PUT /api/archives/{id}/metadata
-    public static func updateMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
-        let requestBody = ctx.bodyString().trimAscii()
+    public static func updateMetadata(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
+        let requestBody = ctx.rawBody() ?? "".trimAscii()
 
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"No archive ID specified.\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -718,7 +719,7 @@ public class ArchiveController {
         // Source: 复合 ID — 在线源元数据只读
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(_) =>
-                ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                ctx.status = HttpStatusCode.STATUS_METHOD_NOT_ALLOWED
                 ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"error\":\"Online source metadata is read-only\",\"success\":0}")
                 return
             case None => ()
@@ -726,7 +727,7 @@ public class ArchiveController {
 
         if (requestBody.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Request body is required\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -734,7 +735,7 @@ public class ArchiveController {
         let archive = ArchiveModel.getArchiveById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Archive not found\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -742,7 +743,7 @@ public class ArchiveController {
         let parsed = MetadataPatchService.parseMetadataObject(requestBody)
         if (!parsed.success) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"${parsed.error}\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -752,7 +753,7 @@ public class ArchiveController {
         let ok = MetadataPatchService.applyArchiveMetadataPatch(0, id, topPatch, pluginNamespace)
         if (!ok) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive metadata\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -761,13 +762,13 @@ public class ArchiveController {
     }
 
     // GET /api/archives/{id}/files
-    public static func getFiles(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getFiles(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 复合 ID 检测/转发
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let tankoubonId = (ctx.query("tankoubon_id") ?? "").trimAscii()
+                let tankoubonId = (ctx.queryParam("tankoubon_id") ?? "").trimAscii()
                 var effectiveRequest = request
 
                 // 如果传了 tankoubon_id，解析单行本的第一个子项作为实际阅读目标
@@ -802,7 +803,7 @@ public class ArchiveController {
                 // 检查插件返回是否有效
                 if (result.hasError() || result.pages.size == 0) {
                     let errMsg = if (result.hasError()) { result.errorMessage } else { "plugin returned empty result" }
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.errorJson(ctx, "Failed to fetch source pages: ${errMsg}")
                     return
                 }
@@ -870,13 +871,13 @@ public class ArchiveController {
         // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"get_file_list\",\"error\":\"No archive ID specified.\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
 
         // 获取查询参数
-        let imagesOnlyParam = ctx.query("images_only")
+        let imagesOnlyParam = ctx.queryParam("images_only")
         let imagesOnlySpecified = match (imagesOnlyParam) {
             case Some(_) => true
             case None => false
@@ -885,10 +886,10 @@ public class ArchiveController {
             case Some(i) => i == "true" || i == "1"
             case None => false
         }
-        let includeMetadataRaw = (ctx.query("include_metadata") ?? "").trimAscii().toAsciiLower()
+        let includeMetadataRaw = (ctx.queryParam("include_metadata") ?? "").trimAscii().toAsciiLower()
         let includeMetadata = includeMetadataRaw != "false" && includeMetadataRaw != "0"
         let limit = parsePositiveIntQuery(ctx, "limit")
-        let offsetRaw = (ctx.query("offset") ?? "").trimAscii()
+        let offsetRaw = (ctx.queryParam("offset") ?? "").trimAscii()
         let offsetParsed = try {
             Int32.parse(offsetRaw)
         } catch (_: Exception) {
@@ -904,7 +905,7 @@ public class ArchiveController {
         let archive = ArchiveDao.getArchiveById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"get_file_list\",\"error\":\"Archive not found\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -912,7 +913,7 @@ public class ArchiveController {
         // 构建归档文件完整路径（从分类获取基础路径）
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
@@ -925,7 +926,7 @@ public class ArchiveController {
         // 对于文件访问，需要解析软链接到实际路径
         let actualPath = FileUtils.resolvePath(fullArchivePath)
 
-        // 使用 Handler 获取文件列表（带标题）
+        // 使用 Middleware 获取文件列表（带标题）
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
         let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
 
@@ -1188,16 +1189,16 @@ public class ArchiveController {
     }
 
     // DELETE /api/archives/{id}
-    public static func deleteArchive(ctx: Ctx): Unit {
+    public static func deleteArchive(ctx: Context): Unit {
         // 检查管理员权限
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -1205,7 +1206,7 @@ public class ArchiveController {
                 // Source: 复合 ID — 在线源不允许删除
                 match (SourceRequestResolver.parseFromCompositeId(id)) {
                     case Some(_) =>
-                        ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                        ctx.status = HttpStatusCode.STATUS_METHOD_NOT_ALLOWED
                         ResponseView.json(ctx, "{\"operation\":\"delete_archive\",\"error\":\"Online source archives cannot be deleted\",\"success\":0}")
                         return
                     case None => ()
@@ -1215,7 +1216,7 @@ public class ArchiveController {
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -1224,7 +1225,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -1326,7 +1327,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Failed to delete archive\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireAdmin 已经设置了错误响应
@@ -1337,14 +1338,14 @@ public class ArchiveController {
     // 下载分块大小：1MB
     private static let CHUNK_SIZE: Int64 = 1024 * 1024
 
-    public static func downloadArchive(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func downloadArchive(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 复合 ID — 档案统一下载端点不负责在线源下载。
         // 在线源下载需要分类等上下文，应走 source-plugins download/action 入口。
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(_) =>
-                ctx.status(HttpStatusCode.STATUS_METHOD_NOT_ALLOWED)
+                ctx.status = HttpStatusCode.STATUS_METHOD_NOT_ALLOWED
                 ResponseView.json(ctx, "{\"operation\":\"download_archive\",\"error\":\"Online source archives cannot be downloaded from this endpoint\",\"success\":0}")
                 return
             case None => ()
@@ -1353,7 +1354,7 @@ public class ArchiveController {
         // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -1362,7 +1363,7 @@ public class ArchiveController {
         let archive = ArchiveModel.getArchiveById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Archive not found\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -1370,7 +1371,7 @@ public class ArchiveController {
         // 构建归档文件完整路径（从分类获取基础路径）
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
@@ -1387,11 +1388,11 @@ public class ArchiveController {
             match (VolumeArchiveUtils.detectVolume(actualPath)) {
                 case Some(volumeInfo) =>
                     if (volumeInfo.isEntry && volumeInfo.parts.size > 1) {
-                        match (ctx.query("part")) {
+                        match (ctx.queryParam("part")) {
                             case Some(partValue) =>
                                 let partIndex = try { Int64.parse(partValue.trimAscii()) } catch (_: Exception) { -1 }
                                 if (partIndex < 0 || partIndex >= volumeInfo.parts.size) {
-                                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                                     ResponseView.json(ctx, "{\"success\":0,\"error\":\"Invalid volume part index\"}")
                                     return
                                 }
@@ -1401,15 +1402,15 @@ public class ArchiveController {
                                 downloadArchiveChunked(ctx, partFile, partInfo.size, ArchiveUtils.getFullFileName(volumeInfo.parts[partIndex]))
                                 return
                             case None =>
-                                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                                ctx.status = HttpStatusCode.STATUS_CONFLICT
                                 ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive is split into multiple volume files; use /download/parts first\"}")
                                 return
                         }
                     }
                 case None => ()
             }
-            if (ctx.query("part").isSome()) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            if (ctx.queryParam("part").isSome()) {
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive is not a multi-volume archive\"}")
                 return
             }
@@ -1421,7 +1422,7 @@ public class ArchiveController {
             downloadArchiveChunked(ctx, file, fileSize, archive.filename)
         } catch (e: Exception) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Failed to read archive file: ${e.message}\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.json(ctx, errorResponse)
         }
     }
@@ -1430,49 +1431,49 @@ public class ArchiveController {
      * 统一流式下载：分块读取文件并写入响应流，避免一次性分配大 buffer。
      * 文件句柄通过 try/finally 确保异常路径也能关闭。
      */
-    private static func downloadArchiveChunked(ctx: Ctx, file: File, fileSize: Int64, filename: String): Unit {
+    private static func downloadArchiveChunked(ctx: Context, file: File, fileSize: Int64, filename: String): Unit {
         ctx.setHeader("Content-Type", "application/octet-stream")
         ctx.setHeader("Content-Disposition", "attachment; filename=\"${filename}\"")
-        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.status = HttpStatusCode.STATUS_OK
 
-        let writer = ctx.writer()
-
-        var remaining = fileSize
-        let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
-
-        try {
-            while (remaining > 0) {
-                let bytesRead = file.read(chunkBuffer)
-                if (bytesRead <= 0) {
-                    break
+        // 用 ACE setStreamBody：producer 收到 write 闭包后分块读文件写出，由 dispatch 统一 chunked 写回。
+        ctx.setStreamBody({ write: (Array<UInt8>) -> Unit =>
+            var remaining = fileSize
+            let chunkBuffer = Array<UInt8>(CHUNK_SIZE, { _ => 0u8 })
+            try {
+                while (remaining > 0) {
+                    let bytesRead = file.read(chunkBuffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    write(chunkBuffer[0..bytesRead])
+                    remaining -= bytesRead
                 }
-                writer.write(chunkBuffer[0..bytesRead])
-                remaining -= bytesRead
+            } finally {
+                file.close()
             }
-        } finally {
-            file.close()
-        }
+        })
     }
 
-    public static func getArchiveDownloadParts(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getArchiveDownloadParts(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         if (id.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"No archive ID specified.\"}")
             return
         }
 
         let archive = ArchiveModel.getArchiveById(id)
         if (archive.id.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Archive not found\"}")
             return
         }
 
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
@@ -1524,19 +1525,19 @@ public class ArchiveController {
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } catch (e: Exception) {
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to build download parts: ${e.message}\"}")
         }
     }
 
     // GET /api/archives/{id}/page?path=...
-    public static func getPage(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getPage(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 复合 ID 检测/转发到 source_page_asset
         match (SourceRequestResolver.parseFromCompositeId(id)) {
             case Some(request) =>
-                let path = (ctx.query("path") ?? "").trimAscii()
+                let path = (ctx.queryParam("path") ?? "").trimAscii()
                 if (path.size > 0) {
                     let result = SourceArchiveReadService.resolvePageAsset(
                         request.namespace, request.remoteId, path
@@ -1548,17 +1549,17 @@ public class ArchiveController {
                             let ct = if (result.contentType.size > 0) { result.contentType } else { "application/octet-stream" }
                             ctx.setHeader("Content-Type", ct)
                             ctx.setHeader("Cache-Control", "private, max-age=3600")
-                            ctx.status(HttpStatusCode.STATUS_OK)
-                            ctx.send(binaryData)
+                            ctx.status = HttpStatusCode.STATUS_OK
+                            ctx.setBodyBytes(binaryData)
                             return
                         case None => ()
                     }
 
                     // 旧协议：302 重定向到 asset
                     if (result.assetId > 0) {
-                        ctx.status(302)
+                        ctx.status = 302
                         ctx.setHeader("Location", "/api/assets/${result.assetId.toString()}")
-                        ctx.sendString("")
+                        ctx.contentType = "text/plain; charset=utf-8"; ctx.body = ""
                     } else {
                         let errorDetail = if (result.errorMessage.size > 0) {
                             result.errorMessage
@@ -1566,7 +1567,7 @@ public class ArchiveController {
                             "Failed to resolve source page asset"
                         }
                         // 504: plugin execution/dependency failure
-                        ctx.status(HttpStatusCode.STATUS_GATEWAY_TIMEOUT)
+                        ctx.status = HttpStatusCode.STATUS_GATEWAY_TIMEOUT
                         ResponseView.errorJson(ctx, errorDetail, 504)
                     }
                 } else {
@@ -1579,25 +1580,25 @@ public class ArchiveController {
         // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No archive ID specified.\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
 
         // 获取查询参数
-        let pathParam = ctx.query("path")
+        let pathParam = ctx.queryParam("path")
         match (pathParam) {
             case Some(path) => getPageInternal(ctx, id, path)
             case None =>
                 let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.json(ctx, errorResponse)
         }
     }
 
     // GET /api/archives/{id}/cover
-    public static func getCover(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id") ?? ""
+    public static func getCover(ctx: Context): Unit {
+        let id = ctx.param("id") ?? ""
 
         // Source: 分配占位 asset + 投递异步任务
         match (SourceRequestResolver.parseFromCompositeId(id)) {
@@ -1638,19 +1639,19 @@ public class ArchiveController {
     /**
      * getPage 内部实现
      */
-    private static func getPageInternal(ctx: Ctx, id: String, path: String): Unit {
+    private static func getPageInternal(ctx: Context, id: String, path: String): Unit {
         let safePath = match (ArchiveEntryPathUtils.normalizeRelativeEntryPath(path)) {
             case Some(value) => value
             case None =>
                 let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Invalid path\",\"success\":0}"
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.json(ctx, errorResponse)
                 return
         }
 
         if (safePath.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Invalid path\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -1659,7 +1660,7 @@ public class ArchiveController {
         let archive = ArchiveDao.getArchiveById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Archive not found\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.status = HttpStatusCode.STATUS_NOT_FOUND
             ResponseView.json(ctx, errorResponse)
             return
         }
@@ -1667,7 +1668,7 @@ public class ArchiveController {
         // 构建归档文件完整路径
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
@@ -1682,7 +1683,7 @@ public class ArchiveController {
             let actualPath = FileUtils.resolvePath(fullArchivePath)
 
             let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
-            // 使用 Handler 获取流式读取器
+            // 使用 Middleware 获取流式读取器
             let (exitCode, readerOpt, errorMsg) = handler.getEntryReader(actualPath, safePath)
 
             if (exitCode == 0) {
@@ -1698,7 +1699,7 @@ public class ArchiveController {
                             ("error", "Reader is null")
                         )
                         CacheUtils.setNoCacheHeaders(ctx)
-                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                        ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                         ResponseView.json(ctx,
                             "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
                 }
@@ -1712,7 +1713,7 @@ public class ArchiveController {
                     ("error", errorMsg)
                 )
                 CacheUtils.setNoCacheHeaders(ctx)
-                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                 ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}")
             }
         } catch (e: Exception) {
@@ -1725,7 +1726,7 @@ public class ArchiveController {
                 ("error", e.message)
             )
             CacheUtils.setNoCacheHeaders(ctx)
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}")
         }
     }
@@ -1734,7 +1735,7 @@ public class ArchiveController {
      * 使用 EntryReader 发送页面数据，支持真正的流式分块传输
      */
     private static func sendPageDataWithReader(
-        ctx: Ctx,
+        ctx: Context,
         id: String,
         path: String,
         archiveType: String,
@@ -1754,8 +1755,8 @@ public class ArchiveController {
         }
 
         // 支持 HTTP Range（仅单区间），用于视频拖动/断点播放
-        let rangeHeader = (ctx.header("Range") ?? "").trimAscii()
-        let ifRangeHeader = (ctx.header("If-Range") ?? "").trimAscii()
+        let rangeHeader = (ctx.header("range") ?? "").trimAscii()
+        let ifRangeHeader = (ctx.header("if-range") ?? "").trimAscii()
         let (rangeState, rangeStart, rangeEnd) = parseRangeHeader(rangeHeader, fileSize)
         let effectiveRangeState = if (rangeState > 0 && ifRangeHeader.size > 0 && ifRangeHeader != etag) {
             0i32
@@ -1771,17 +1772,17 @@ public class ArchiveController {
             ("file_size", fileSize.toString()),
             ("range_header", rangeHeader),
             ("if_range_header", ifRangeHeader),
-            ("has_authorization", if ((ctx.header("Authorization") ?? "").trimAscii().size > 0) {
+            ("has_authorization", if ((ctx.header("authorization") ?? "").trimAscii().size > 0) {
                     "true"
                 } else {
                     "false"
                 }),
-            ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) {
+            ("has_auth_cookie", if ((ctx.header("cookie") ?? "").contains("auth_token=")) {
                     "true"
                 } else {
                     "false"
                 }),
-            ("user_agent", ctx.header("User-Agent") ?? "")
+            ("user_agent", ctx.header("user-agent") ?? "")
         )
         if (effectiveRangeState < 0) {
             logger.warn(
@@ -1816,7 +1817,7 @@ public class ArchiveController {
      * 大文件：使用 chunked 流式传输
      */
     private static func sendPageStreamResponse(
-        ctx: Ctx,
+        ctx: Context,
         reader: EntryReader,
         contentType: String,
         etag: String
@@ -1826,10 +1827,7 @@ public class ArchiveController {
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
-        if (!isHttp2Protocol(ctx.protocol)) {
-            ctx.setHeader("Transfer-Encoding", "chunked")
-        }
-        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.status = HttpStatusCode.STATUS_OK
         writePageEntryBody(ctx, PageEntryBody(reader))
     }
 
@@ -1837,7 +1835,7 @@ public class ArchiveController {
      * Range 请求：按指定区间发送数据（206 Partial Content）
      */
     private static func sendPageRangeResponse(
-        ctx: Ctx,
+        ctx: Context,
         reader: EntryReader,
         contentType: String,
         etag: String,
@@ -1854,8 +1852,10 @@ public class ArchiveController {
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
-        ctx.setHeader("Content-Length", "${rangeLength}")
-        ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
+        // 不设 Content-Length：setStreamBody 路径由 dispatch 统一加 Transfer-Encoding: chunked，
+        // HTTP 规范禁止 Content-Length 与 Transfer-encoding 同时存在（stdx 会抛 HttpException）。
+        // 区间语义已由 Content-Range 表达，206+chunked 合法且客户端可正常播放。
+        ctx.status = HttpStatusCode.STATUS_PARTIAL_CONTENT
         logger.info(
             "serve page response",
             ("arcid", arcid),
@@ -1866,27 +1866,47 @@ public class ArchiveController {
             ("range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}"),
             ("content_length", "${rangeLength}")
         )
-        writePageEntryBody(ctx, PageEntryBody(reader, remaining: rangeLength, skipBytes: rangeStart))
+        writePageRangeBody(ctx, PageEntryBody(reader, remaining: rangeLength, skipBytes: rangeStart))
     }
 
-    private static func writePageEntryBody(ctx: Ctx, body: PageEntryBody): Unit {
-        let writer = HttpResponseWriter(ctx.httpContext())
-        let buffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
-        try {
-            while (true) {
-                let bytesRead = body.read(buffer)
-                if (bytesRead <= 0) {
-                    break
+    /** Range 响应：流式写出指定区间（PageEntryBody 已处理 seek 跳过与 remaining 限长，走 chunked）。 */
+    private static func writePageRangeBody(ctx: Context, body: PageEntryBody): Unit {
+        ctx.setStreamBody({ write: (Array<UInt8>) -> Unit =>
+            let buffer = Array<UInt8>(CHUNK_SIZE, { _ => 0u8 })
+            try {
+                while (true) {
+                    let bytesRead = body.read(buffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    write(buffer[0..bytesRead])
                 }
-                writer.write(buffer[0..bytesRead])
+            } finally {
+                body.close()
             }
-        } finally {
-            body.close()
-        }
+        })
+    }
+
+    private static func writePageEntryBody(ctx: Context, body: PageEntryBody): Unit {
+        // 用 ACE setStreamBody：producer 收到 write 闭包后从 InputStream 分块读出，由 dispatch 统一 chunked 写回。
+        ctx.setStreamBody({ write: (Array<UInt8>) -> Unit =>
+            let buffer = Array<UInt8>(CHUNK_SIZE, { _ => 0u8 })
+            try {
+                while (true) {
+                    let bytesRead = body.read(buffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    write(buffer[0..bytesRead])
+                }
+            } finally {
+                body.close()
+            }
+        })
     }
 
     private static func sendPageHeadResponse(
-        ctx: Ctx,
+        ctx: Context,
         contentType: String,
         etag: String,
         fileSize: Int64,
@@ -1902,7 +1922,7 @@ public class ArchiveController {
             let rangeLength = rangeEnd - rangeStart + 1
             ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
             ctx.setHeader("Content-Length", "${rangeLength}")
-            ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
+            ctx.status = HttpStatusCode.STATUS_PARTIAL_CONTENT
             logger.info(
                 "serve page response",
                 ("status", "206"),
@@ -1913,7 +1933,7 @@ public class ArchiveController {
             return
         }
         ctx.setHeader("Content-Length", "${fileSize}")
-        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.status = HttpStatusCode.STATUS_OK
         logger.info(
             "serve page response",
             ("status", "200"),
@@ -2008,8 +2028,8 @@ public class ArchiveController {
     /**
      * 返回 416 Range Not Satisfiable
      */
-    private static func sendRangeNotSatisfiable(ctx: Ctx, fileSize: Int64, sendBody!: Bool = true): Unit {
-        ctx.status(416)
+    private static func sendRangeNotSatisfiable(ctx: Context, fileSize: Int64, sendBody!: Bool = true): Unit {
+        ctx.status = 416
         ctx.setHeader("Accept-Ranges", "bytes")
         if (fileSize >= 0) {
             ctx.setHeader("Content-Range", "bytes */${fileSize}")
@@ -2021,7 +2041,7 @@ public class ArchiveController {
             ("file_size", fileSize.toString())
         )
         if (sendBody) {
-            ctx.sendString("")
+            ctx.contentType = "text/plain; charset=utf-8"; ctx.body = ""
         }
     }
 
@@ -2094,16 +2114,16 @@ public class ArchiveController {
      * 设置归档的 isNew 标记（PUT /api/archives/{id}/isnew）
      * 现在使用用户级别的已读状态
      */
-    public static func setIsNew(ctx: Ctx): Unit {
+    public static func setIsNew(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2116,7 +2136,7 @@ public class ArchiveController {
                             ResponseView.json(ctx, "{\"operation\":\"set_isnew\",\"success\":1}")
                         } else {
                             let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Failed to set isNew flag\",\"success\":0}"
-                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                             ResponseView.json(ctx, errorResponse)
                         }
                         return
@@ -2127,7 +2147,7 @@ public class ArchiveController {
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2136,7 +2156,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2149,7 +2169,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Failed to set isNew flag\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireUser 已经设置了错误响应
@@ -2160,16 +2180,16 @@ public class ArchiveController {
      * 清除归档的isNew标记（DELETE /api/archives/{id}/isnew）
      * 现在使用用户级别的已读状态
      */
-    public static func clearIsNew(ctx: Ctx): Unit {
+    public static func clearIsNew(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2182,7 +2202,7 @@ public class ArchiveController {
                             ResponseView.json(ctx, "{\"operation\":\"clear_isnew\",\"success\":1}")
                         } else {
                             let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Failed to clear isNew flag\",\"success\":0}"
-                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                             ResponseView.json(ctx, errorResponse)
                         }
                         return
@@ -2193,7 +2213,7 @@ public class ArchiveController {
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2202,7 +2222,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2215,7 +2235,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Failed to clear isNew flag\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireUser 已经设置了错误响应
@@ -2225,24 +2245,24 @@ public class ArchiveController {
     /**
      * 更新用户阅读进度并自动标记为已读（PUT /api/archives/{id}/progress/{page}）
      */
-    public static func updateProgress(ctx: Ctx): Unit {
+    public static func updateProgress(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
-                let pageParam = ctx.paramsOpt("page") ?? ""
+                let id = ctx.param("id") ?? ""
+                let pageParam = ctx.param("page") ?? ""
 
                 // 检查ID和页数参数
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
 
                 if (pageParam.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"No page specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2252,7 +2272,7 @@ public class ArchiveController {
                     Int32.parse(pageParam)
                 } catch (e: Exception) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Invalid page number\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2266,7 +2286,7 @@ public class ArchiveController {
                             ResponseView.json(ctx, result)
                         } else {
                             let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Failed to update progress\",\"success\":0}"
-                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                             ResponseView.json(ctx, errorResponse)
                         }
                         return
@@ -2277,7 +2297,7 @@ public class ArchiveController {
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2286,7 +2306,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2307,7 +2327,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Failed to update progress\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireUser 已经设置了错误响应
@@ -2317,16 +2337,16 @@ public class ArchiveController {
     /**
      * 添加收藏（PUT /api/archives/{id}/favorite）
      */
-    public static func addFavorite(ctx: Ctx): Unit {
+    public static func addFavorite(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2339,7 +2359,7 @@ public class ArchiveController {
                             ResponseView.json(ctx, "{\"operation\":\"add_favorite\",\"success\":1}")
                         } else {
                             let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
-                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                             ResponseView.json(ctx, errorResponse)
                         }
                         return
@@ -2350,7 +2370,7 @@ public class ArchiveController {
                 let archive = ArchiveModel.getArchiveById(id)
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2359,7 +2379,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2372,7 +2392,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireUser 已经设置了错误响应
@@ -2382,16 +2402,16 @@ public class ArchiveController {
     /**
      * 取消收藏（DELETE /api/archives/{id}/favorite）
      */
-    public static func removeFavorite(ctx: Ctx): Unit {
+    public static func removeFavorite(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id") ?? ""
+                let id = ctx.param("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"No archive ID specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2404,7 +2424,7 @@ public class ArchiveController {
                             ResponseView.json(ctx, "{\"operation\":\"remove_favorite\",\"success\":1}")
                         } else {
                             let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
-                            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                             ResponseView.json(ctx, errorResponse)
                         }
                         return
@@ -2415,7 +2435,7 @@ public class ArchiveController {
                 let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                     ResponseView.json(ctx, errorResponse)
                     return
                 }
@@ -2428,7 +2448,7 @@ public class ArchiveController {
                     ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                     ResponseView.json(ctx, errorResponse)
                 }
             case None => return // requireUser 已经设置了错误响应
@@ -2439,7 +2459,7 @@ public class ArchiveController {
      * 获取用户的所有收藏（GET /api/favorites）
      * 返回收藏的 arcid 列表（兼容旧接口）
      */
-    public static func getFavorites(ctx: Ctx): Unit {
+    public static func getFavorites(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
@@ -2466,13 +2486,13 @@ public class ArchiveController {
      * 获取用户收藏的档案详情列表（GET /api/favorites/archives）
      * 支持分页，返回完整的档案信息
      */
-    public static func getFavoriteArchives(ctx: Ctx): Unit {
+    public static func getFavoriteArchives(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
                 // 获取分页参数
-                let startParam = ctx.query("start")
-                let countParam = ctx.query("count")
+                let startParam = ctx.queryParam("start")
+                let countParam = ctx.queryParam("count")
 
                 let start = match (startParam) {
                     case Some(s) => try {
@@ -2554,13 +2574,13 @@ public class ArchiveController {
      * 获取用户已读的档案列表（GET /api/read_archives）
      * 支持分页，返回完整的档案信息
      */
-    public static func getReadArchives(ctx: Ctx): Unit {
+    public static func getReadArchives(ctx: Context): Unit {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
                 // 获取分页参数
-                let startParam = ctx.query("start")
-                let countParam = ctx.query("count")
+                let startParam = ctx.queryParam("start")
+                let countParam = ctx.queryParam("count")
 
                 let start = match (startParam) {
                     case Some(s) => try {

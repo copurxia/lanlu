@@ -2,7 +2,8 @@ package lanlu.contexts.user.interfaces.http
 
 import std.collection.*
 import std.convert.*
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import stdx.net.http.HttpStatusCode
 import lanlu.shared.config.*
 import lanlu.contexts.user.application.*
@@ -363,12 +364,12 @@ class LoginPendingTotpDataView <: JsonSerializable {
 }
 
 public class AuthController {
-    private static func reply<T>(ctx: Ctx, httpStatus: UInt16, resp: ApiResponse<T>): Unit where T <: JsonSerializable {
-        ctx.status(httpStatus)
+    private static func reply<T>(ctx: Context, httpStatus: UInt16, resp: ApiResponse<T>): Unit where T <: JsonSerializable {
+        ctx.status = httpStatus
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    private static func verifyStepUpPassword(ctx: Ctx, userId: Int64, currentPassword: String): Bool {
+    private static func verifyStepUpPassword(ctx: Context, userId: Int64, currentPassword: String): Bool {
         if (currentPassword.trimAscii().size == 0) {
             AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_missing")
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "currentPassword is required", None))
@@ -383,10 +384,10 @@ public class AuthController {
         return true
     }
 
-    public static func login(ctx: Ctx): Unit {
+    public static func login(ctx: Context): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var username = ""
             var password = ""
             var tokenName = "login"
@@ -414,7 +415,7 @@ public class AuthController {
 
             match (UserDao.verifyPassword(username, password, AuthConfig.tokenPepper)) {
                 case Some(userId) =>
-                    AuthSecurityService.clearFailures("auth_login", ctx.ip, loginIdentifier)
+                    AuthSecurityService.clearFailures("auth_login", "", loginIdentifier)
                     let row = UserDao.getById(userId)
                     let activeTotp = UserTotpCredentialDao.findActiveByUserId(userId)
                     if (activeTotp.id > 0) {
@@ -443,7 +444,7 @@ public class AuthController {
                         }
                     }
                 case None =>
-                    AuthSecurityService.recordFailure("auth_login", ctx.ip, loginIdentifier)
+                    AuthSecurityService.recordFailure("auth_login", "", loginIdentifier)
                     AuthSecurityHttpUtils.setAuthFailureReason(ctx, "invalid_credentials")
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid credentials", None))
             }
@@ -453,7 +454,7 @@ public class AuthController {
         }
     }
 
-    public static func me(ctx: Ctx, userId: Int64): Unit {
+    public static func me(ctx: Context, userId: Int64): Unit {
         let row = UserDao.getById(userId)
         let username = if (row.id > 0) { row.username } else { "" }
         let isAdmin = if (row.id > 0) { row.isAdmin } else { false }
@@ -462,7 +463,7 @@ public class AuthController {
         reply<UserDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserDataView>(200, "ok", Some(UserDataView(user))))
     }
 
-    public static func stepUpOptions(ctx: Ctx, userId: Int64): Unit {
+    public static func stepUpOptions(ctx: Context, userId: Int64): Unit {
         let methods = ArrayList<String>()
         methods.add("password")
         let totpCredential = UserTotpCredentialDao.findActiveByUserId(userId)
@@ -476,8 +477,8 @@ public class AuthController {
         reply<StepUpMethodsDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<StepUpMethodsDataView>(200, "ok", Some(StepUpMethodsDataView(methods.toArray()))))
     }
 
-    public static func stepUpVerifyPassword(ctx: Ctx, userId: Int64): Unit {
-        let req = try { JsonCodec.decode<StepUpPasswordReq>(ctx.bodyString()) } catch (_: Exception) { StepUpPasswordReq() }
+    public static func stepUpVerifyPassword(ctx: Context, userId: Int64): Unit {
+        let req = try { JsonCodec.decode<StepUpPasswordReq>(ctx.rawBody() ?? "") } catch (_: Exception) { StepUpPasswordReq() }
         if (!verifyStepUpPassword(ctx, userId, req.password)) {
             return
         }
@@ -494,7 +495,7 @@ public class AuthController {
         reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "step up verified", None))
     }
 
-    public static func listTokens(ctx: Ctx, userId: Int64): Unit {
+    public static func listTokens(ctx: Context, userId: Int64): Unit {
         // 只列出API类型的token
         let tokens = UserTokenDao.listByUserAndType(userId, Some("api"))
         var views = Array<TokenView>()
@@ -520,7 +521,7 @@ public class AuthController {
     }
 
     // 列出登录设备（session类型的token）
-    public static func listSessions(ctx: Ctx, userId: Int64): Unit {
+    public static func listSessions(ctx: Context, userId: Int64): Unit {
         let tokens = UserTokenDao.listByUserAndType(userId, Some("session"))
         let currentSessionId = AuthSecurityHttpUtils.currentTokenId(ctx)
         var views = Array<TokenView>()
@@ -546,8 +547,8 @@ public class AuthController {
         reply<SessionsDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<SessionsDataView>(200, "ok", Some(SessionsDataView(views))))
     }
 
-    public static func createToken(ctx: Ctx, userId: Int64): Unit {
-        let requestBody = ctx.bodyString()
+    public static func createToken(ctx: Context, userId: Int64): Unit {
+        let requestBody = ctx.rawBody() ?? ""
         var tokenName = "token"
         if (requestBody.trimAscii().size > 0) {
             try {
@@ -568,8 +569,8 @@ public class AuthController {
         }
     }
 
-    public static func revokeToken(ctx: Ctx, userId: Int64): Unit {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func revokeToken(ctx: Context, userId: Int64): Unit {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.size == 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "token id required", None))
             return
@@ -587,10 +588,10 @@ public class AuthController {
         }
     }
 
-    public static func changePassword(ctx: Ctx, userId: Int64): Unit {
+    public static func changePassword(ctx: Context, userId: Int64): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var newPassword = ""
 
             if (requestBody.trimAscii().size > 0) {
@@ -636,8 +637,8 @@ public class AuthController {
         }
     }
 
-    public static func logout(ctx: Ctx): Unit {
-        let tokenIdStr = ctx.getLocal("auth_token_id") ?? ""
+    public static func logout(ctx: Context): Unit {
+        let tokenIdStr = getLocalStr(ctx, "auth_token_id") ?? ""
         if (tokenIdStr.size > 0) {
             let tokenId = try { Int64.parse(tokenIdStr) } catch (_: Exception) { 0 }
             if (tokenId > 0) {
@@ -648,8 +649,8 @@ public class AuthController {
         reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "logged out", None))
     }
 
-    public static func revokeSession(ctx: Ctx, userId: Int64): Unit {
-        let idStr = ctx.paramsOpt("id") ?? ""
+    public static func revokeSession(ctx: Context, userId: Int64): Unit {
+        let idStr = ctx.param("id") ?? ""
         if (idStr.size == 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "session id required", None))
             return
@@ -670,7 +671,7 @@ public class AuthController {
         }
     }
 
-    public static func revokeOtherSessions(ctx: Ctx, userId: Int64): Unit {
+    public static func revokeOtherSessions(ctx: Context, userId: Int64): Unit {
         let currentSessionId = AuthSecurityHttpUtils.currentTokenId(ctx)
         if (currentSessionId <= 0) {
             AuthSecurityHttpUtils.replyUnauthorized(ctx, "current session is invalid", failureReason: "reauth_failed")
@@ -684,10 +685,10 @@ public class AuthController {
         }
     }
 
-    public static func changeUsername(ctx: Ctx, userId: Int64): Unit {
+    public static func changeUsername(ctx: Context, userId: Int64): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var newUsername = ""
 
             if (requestBody.trimAscii().size > 0) {
@@ -736,7 +737,7 @@ public class AuthController {
 
     // ===== 用户管理相关接口（仅管理员可访问）=====
 
-    public static func listUsers(ctx: Ctx): Unit {
+    public static func listUsers(ctx: Context): Unit {
         let users = UserDao.listAllUsers()
         var views = Array<UserView>()
         if (users.size > 0) {
@@ -749,10 +750,10 @@ public class AuthController {
         reply<UsersDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UsersDataView>(200, "ok", Some(UsersDataView(views))))
     }
 
-    public static func createUser(ctx: Ctx): Unit {
+    public static func createUser(ctx: Context): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var username = ""
             var isAdmin = false
 
@@ -794,10 +795,10 @@ public class AuthController {
         }
     }
 
-    public static func updateUserRole(ctx: Ctx): Unit {
+    public static func updateUserRole(ctx: Context): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let idStr = ctx.paramsOpt("id") ?? ""
+            let idStr = ctx.param("id") ?? ""
             if (idStr.size == 0) {
                 reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "user id required", None))
                 return
@@ -808,7 +809,7 @@ public class AuthController {
                 return
             }
 
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var isAdmin = false
 
             if (requestBody.trimAscii().size > 0) {
@@ -832,10 +833,10 @@ public class AuthController {
         }
     }
 
-    public static func deleteUser(ctx: Ctx, userId: Int64): Unit {
+    public static func deleteUser(ctx: Context, userId: Int64): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let idStr = ctx.paramsOpt("id") ?? ""
+            let idStr = ctx.param("id") ?? ""
             if (idStr.size == 0) {
                 reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "user id required", None))
                 return
@@ -863,10 +864,10 @@ public class AuthController {
         }
     }
 
-    public static func resetUserPassword(ctx: Ctx): Unit {
+    public static func resetUserPassword(ctx: Context): Unit {
         let logger = getLogger("auth_controller")
         try {
-            let idStr = ctx.paramsOpt("id") ?? ""
+            let idStr = ctx.param("id") ?? ""
             if (idStr.size == 0) {
                 reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "user id required", None))
                 return
@@ -877,7 +878,7 @@ public class AuthController {
                 return
             }
 
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
             var newPassword = ""
 
             if (requestBody.trimAscii().size > 0) {
@@ -899,7 +900,7 @@ public class AuthController {
                 return
             }
 
-            let adminUserId = try { Int64.parse(ctx.getLocal("actor") ?? "0") } catch (_: Exception) { 0 }
+            let adminUserId = try { Int64.parse(getLocalStr(ctx, "actor") ?? "0") } catch (_: Exception) { 0 }
             if (adminUserId <= 0) {
                 AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_missing")
                 reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "administrator session is invalid", None))

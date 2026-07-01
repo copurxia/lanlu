@@ -1,6 +1,7 @@
 package lanlu.contexts.asset.interfaces.http
 
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import stdx.net.http.HttpStatusCode
 import std.fs.*
 import std.time.*
@@ -49,15 +50,15 @@ public class AssetUploadController {
     /**
      * POST /api/assets/upload/init
      */
-    public static func initUpload(ctx: Ctx, userId: Int64): Unit {
+    public static func initUpload(ctx: Context, userId: Int64): Unit {
         if (userId <= 0) {
-            ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
+            ctx.status = HttpStatusCode.STATUS_UNAUTHORIZED
             ResponseView.errorJson(ctx, "unauthorized", 401)
             return
         }
 
         try {
-            let requestBody = ctx.bodyString()
+            let requestBody = ctx.rawBody() ?? ""
 
             let payload = parseInitJson(requestBody)
             var filename = payload.filename
@@ -72,24 +73,24 @@ public class AssetUploadController {
 
             targetType = normalizeTargetType(targetType)
             if (!isSupportedTargetType(targetType)) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "unsupported target_type", 400)
                 return
             }
 
             if (chunkSize <= 0 || totalChunks <= 0 || fileSize <= 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "invalid upload meta", 400)
                 return
             }
             if (chunkSize > MAX_UPLOAD_CHUNK_SIZE) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "chunk_size exceeds 10MB", 400)
                 return
             }
 
             if (filename.trimAscii().size == 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "filename is required", 400)
                 return
             }
@@ -122,7 +123,7 @@ public class AssetUploadController {
             )
 
             if (task.id == 0) {
-                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                 ResponseView.errorJson(ctx, "创建任务失败", 500)
                 return
             }
@@ -165,7 +166,7 @@ public class AssetUploadController {
 
             ResponseView.successJson(ctx, "{\"taskId\":\"${task.id}\"}", "ok")
         } catch (e: Exception) {
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.errorJson(ctx, e.message, 500)
         }
     }
@@ -173,21 +174,21 @@ public class AssetUploadController {
     /**
      * PUT /api/assets/upload/chunk
      */
-    public static func uploadChunk(ctx: Ctx): Unit {
+    public static func uploadChunk(ctx: Context): Unit {
         try {
             let chunkLogger = getLogger("asset_upload")
-            let taskIdStr = ctx.query("taskId") ?? ""
-            let chunkIndexStr = ctx.query("chunkIndex") ?? ""
-            let totalChunksStr = ctx.query("totalChunks") ?? ""
+            let taskIdStr = ctx.queryParam("taskId") ?? ""
+            let chunkIndexStr = ctx.queryParam("chunkIndex") ?? ""
+            let totalChunksStr = ctx.queryParam("totalChunks") ?? ""
 
             chunkLogger.debug(
                 "[DBG] uploadChunk controller entered",
                 ("taskId", taskIdStr),
                 ("chunkIndex", chunkIndexStr),
                 ("totalChunksQuery", totalChunksStr),
-                ("contentType", ctx.header("Content-Type") ?? ""),
-                ("contentLength", ctx.header("Content-Length") ?? ""),
-                ("transferEncoding", ctx.header("Transfer-Encoding") ?? "")
+                ("contentType", ctx.header("content-type") ?? ""),
+                ("contentLength", ctx.header("content-length") ?? ""),
+                ("transferEncoding", ctx.header("transfer-encoding") ?? "")
             )
 
             if (taskIdStr.size == 0 || chunkIndexStr.size == 0 || totalChunksStr.size == 0) {
@@ -197,7 +198,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndexStr),
                     ("totalChunksQuery", totalChunksStr)
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Missing required parameters: taskId, chunkIndex, totalChunks", 400)
                 return
             }
@@ -212,7 +213,7 @@ public class AssetUploadController {
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr)
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid taskId", 400)
                 return
             }
@@ -239,7 +240,7 @@ public class AssetUploadController {
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr)
                 )
-                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                 ResponseView.errorJson(ctx, "Task not found", 404)
                 return
             }
@@ -249,7 +250,7 @@ public class AssetUploadController {
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr)
                 )
-                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                ctx.status = HttpStatusCode.STATUS_CONFLICT
                 ResponseView.errorJson(ctx, "任务正在排队，请等待调度", 409)
                 return
             }
@@ -260,7 +261,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndexStr),
                     ("status", task.status)
                 )
-                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                ctx.status = HttpStatusCode.STATUS_CONFLICT
                 ResponseView.errorJson(ctx, "任务状态异常: ${task.status}", 409)
                 return
             }
@@ -273,7 +274,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndexStr),
                     ("dir", uploadDir.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Upload directory not found for taskId ${taskIdStr}", 400)
                 return
             }
@@ -360,7 +361,7 @@ public class AssetUploadController {
                     ("totalChunks", totalChunks.toString()),
                     ("metaValuesSize", metaValues.size.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid upload meta (kv)", 400)
                 return
             }
@@ -381,7 +382,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndex.toString()),
                     ("chunkSize", chunkSize.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "chunk_size exceeds 10MB", 400)
                 return
             }
@@ -393,7 +394,7 @@ public class AssetUploadController {
                     ("queryTotalChunks", totalChunksFromQuery.toString()),
                     ("kvTotalChunks", totalChunks.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "totalChunks mismatch", 400)
                 return
             }
@@ -404,7 +405,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndex.toString()),
                     ("totalChunks", totalChunks.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid chunkIndex", 400)
                 return
             }
@@ -428,7 +429,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndex.toString()),
                     ("uploadedCount", uploadedCount.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                ctx.status = HttpStatusCode.STATUS_CONFLICT
                 ResponseView.errorJson(
                     ctx,
                     "Out of order chunk: expected ${uploadedCount.toString()} got ${chunkIndex.toString()}",
@@ -467,7 +468,7 @@ public class AssetUploadController {
                     }
                 }
                 if (!recovered) {
-                    ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                    ctx.status = HttpStatusCode.STATUS_CONFLICT
                     ResponseView.errorJson(
                         ctx,
                         "Upload offset mismatch: expected ${expectedOffset.toString()} got ${currentOffset.toString()}",
@@ -486,7 +487,7 @@ public class AssetUploadController {
                     ("chunkIndex", chunkIndex.toString()),
                     ("partPath", partPath.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Upload part file not found", 400)
                 return
             }
@@ -498,7 +499,7 @@ public class AssetUploadController {
                 ("expectedOffset", expectedOffset.toString()),
                 ("partPath", partPath.toString())
             )
-            let bodyStream = ctx.requestBody()
+            let bodyStream = requestBodyOf(ctx)
             var bytesWritten: Int64 = 0
             // 使用 ReadWrite + seek 实现幂等写入：重试时始终从 expectedOffset 分片写入，
             // 避免 Append 模式下幺幺写入导致文件损坏。
@@ -526,7 +527,7 @@ public class AssetUploadController {
                         ("taskId", taskIdStr),
                         ("chunkIndex", chunkIndex.toString())
                     )
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                     ResponseView.errorJson(ctx, "Empty body", 400)
                     return
                 }
@@ -543,7 +544,7 @@ public class AssetUploadController {
                     ("expectedOffset", expectedOffset.toString()),
                     ("error", e.message)
                 )
-                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
                 ResponseView.errorJson(ctx, "Failed to write chunk: ${e.message}", 500)
                 return
             } finally {
@@ -559,7 +560,7 @@ public class AssetUploadController {
                     ("expectedOffset", expectedOffset.toString()),
                     ("fileSize", fileSize.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid chunk offset", 400)
                 return
             }
@@ -572,7 +573,7 @@ public class AssetUploadController {
                     ("bytesWritten", bytesWritten.toString()),
                     ("fileSize", fileSize.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Chunk exceeds file size", 400)
                 return
             }
@@ -585,7 +586,7 @@ public class AssetUploadController {
                     ("expectedChunkSize", chunkSize.toString()),
                     ("totalChunks", totalChunks.toString())
                 )
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid chunk size", 400)
                 return
             }
@@ -702,7 +703,7 @@ public class AssetUploadController {
 
             ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")
         } catch (e: Exception) {
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.errorJson(ctx, e.message, 500)
         }
     }
@@ -710,11 +711,11 @@ public class AssetUploadController {
     /**
      * DELETE /api/assets/upload/:taskId
      */
-    public static func cancelUpload(ctx: Ctx): Unit {
+    public static func cancelUpload(ctx: Context): Unit {
         try {
-            let taskIdStr = ctx.paramsOpt("taskId") ?? ""
+            let taskIdStr = ctx.param("taskId") ?? ""
             if (taskIdStr.size == 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Task ID is required", 400)
                 return
             }
@@ -722,7 +723,7 @@ public class AssetUploadController {
             let taskId = try {
                 Int64.parse(taskIdStr)
             } catch (_: Exception) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "Invalid taskId", 400)
                 return
             }
@@ -741,7 +742,7 @@ public class AssetUploadController {
             TaskKVService.getStore().deleteGroup("asset_upload:${taskIdStr}")
             ResponseView.successJson(ctx, "{}", "ok")
         } catch (e: Exception) {
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.status = HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR
             ResponseView.errorJson(ctx, e.message, 500)
         }
     }
@@ -845,7 +846,7 @@ public class AssetUploadController {
     }
 
     private static func validateInitTarget(
-        ctx: Ctx,
+        ctx: Context,
         userId: Int64,
         targetType: String,
         targetId: String,
@@ -855,7 +856,7 @@ public class AssetUploadController {
     ): Bool {
         if (targetType == "archive") {
             if (categoryId.trimAscii().size == 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "category_id is required", 400)
                 return false
             }
@@ -870,12 +871,12 @@ public class AssetUploadController {
                     case Some(cat) =>
                         let targetPath = Path("${cat.scanPath}/${filename}")
                         if (exists(targetPath)) {
-                            ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                            ctx.status = HttpStatusCode.STATUS_CONFLICT
                             ResponseView.errorJson(ctx, "文件已存在: ${filename}", 409)
                             return false
                         }
                     case None =>
-                        ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                        ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                         ResponseView.errorJson(ctx, "category not found", 400)
                         return false
                 }
@@ -885,19 +886,19 @@ public class AssetUploadController {
 
         if (targetType == "tag_icon" || targetType == "tag_background") {
             if (!UserDao.isAdmin(userId)) {
-                ctx.status(HttpStatusCode.STATUS_FORBIDDEN)
+                ctx.status = HttpStatusCode.STATUS_FORBIDDEN
                 ResponseView.errorJson(ctx, "Administrator privileges required.", 403)
                 return false
             }
             var tagId: Int64 = 0
             try { tagId = Int64.parse(targetId) } catch (_: Exception) { tagId = 0 }
             if (tagId <= 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "target_id(tag id) is required", 400)
                 return false
             }
             if (TagDao.getById(tagId).isNone()) {
-                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                 ResponseView.errorJson(ctx, "tag not found", 404)
                 return false
             }
@@ -914,18 +915,18 @@ public class AssetUploadController {
 
         if (targetType == "plugin") {
             if (!UserDao.isAdmin(userId)) {
-                ctx.status(HttpStatusCode.STATUS_FORBIDDEN)
+                ctx.status = HttpStatusCode.STATUS_FORBIDDEN
                 ResponseView.errorJson(ctx, "Administrator privileges required.", 403)
                 return false
             }
             if (!filename.toAsciiLower().endsWith(".wasm")) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.status = HttpStatusCode.STATUS_BAD_REQUEST
                 ResponseView.errorJson(ctx, "plugin upload must be .wasm", 400)
                 return false
             }
             let namespace = targetId.trimAscii()
             if (namespace.size > 0 && !PluginDao.exists(namespace)) {
-                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.status = HttpStatusCode.STATUS_NOT_FOUND
                 ResponseView.errorJson(ctx, "target plugin namespace not found", 404)
                 return false
             }

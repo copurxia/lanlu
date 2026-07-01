@@ -1,6 +1,6 @@
 package lanlu.contexts.category.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.convert.*
 import std.time.*
 import std.fs.*
@@ -109,7 +109,7 @@ public class CategoryController {
     /**
      * GET /api/categories - 获取所有分类
      */
-    public static func getCategories(ctx: Ctx) {
+    public static func getCategories(ctx: Context) {
         let categories = CategoryDao.getAllCategories()
 
         let out = ByteBuffer()
@@ -131,9 +131,9 @@ public class CategoryController {
     /**
      * POST /api/categories - 创建分类
      */
-    public static func createCategory(ctx: Ctx) {
+    public static func createCategory(ctx: Context) {
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             let req = if (body.trimAscii().size > 0) { JsonCodec.decode<CategoryUpsertReq>(body) } else { CategoryUpsertReq() }
             let name = req.name
             let scanPath = req.scanPath
@@ -144,13 +144,13 @@ public class CategoryController {
             let plugins = req.plugins
 
             if (name.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":0,\"error\":\"name is required\"}")
                 return
             }
 
             if (scanPath.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":0,\"error\":\"scan_path is required\"}")
                 return
             }
@@ -158,7 +158,7 @@ public class CategoryController {
             // 验证路径是否存在
             let pathExists = exists(Path(scanPath))
             if (!pathExists) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":0,\"error\":\"scan_path does not exist: ${scanPath}\"}")
                 return
             }
@@ -189,12 +189,12 @@ public class CategoryController {
                     w.flush()
                     ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 case None =>
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create category\"}")
             }
         } catch (e: Exception) {
             getLogger("category_controller").error("创建分类失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -209,13 +209,13 @@ public class CategoryController {
     /**
      * PUT /api/categories/{id} - 更新分类
      */
-    public static func updateCategory(ctx: Ctx) {
-        let catid = ctx.paramsOpt("id") ?? ""
+    public static func updateCategory(ctx: Context) {
+        let catid = ctx.param("id") ?? ""
 
         let existingOpt = CategoryDao.getCategoryById(catid)
         if (let Some(existing) <- existingOpt) {
             try {
-                let body = ctx.bodyString()
+                let body = ctx.rawBody() ?? ""
                 var name = existing.name
                 var scanPath = existing.scanPath
                 var description = existing.description
@@ -236,7 +236,7 @@ public class CategoryController {
             }
 
             if (name.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ctx.json("{\"success\":0,\"error\":\"name is required\"}")
                 return
             }
@@ -245,7 +245,7 @@ public class CategoryController {
             if (scanPath != existing.scanPath) {
                 let pathExists = exists(Path(scanPath))
                 if (!pathExists) {
-                    ctx.status(400)
+                    ctx.status = 400
                     ctx.json("{\"success\":0,\"error\":\"scan_path does not exist: ${scanPath}\"}")
                     return
                 }
@@ -263,12 +263,12 @@ public class CategoryController {
             if (CategoryDao.updateCategory(catid, data)) {
                 ResponseView.json(ctx, "{\"operation\":\"update_category\",\"success\":1}")
             } else {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to update category\"}")
             }
         } catch (e: Exception) {
             getLogger("category_controller").error("更新分类失败", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -279,7 +279,7 @@ public class CategoryController {
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         }
         } else {
-            ctx.status(404)
+            ctx.status = 404
             ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
             return
         }
@@ -288,8 +288,8 @@ public class CategoryController {
     /**
      * DELETE /api/categories/{id} - 删除分类
      */
-    public static func deleteCategory(ctx: Ctx) {
-        let catid = ctx.paramsOpt("id") ?? ""
+    public static func deleteCategory(ctx: Context) {
+        let catid = ctx.param("id") ?? ""
 
         let (ok, deletedArchives, err) = CategoryDao.deleteCategory(catid)
         if (ok) {
@@ -306,12 +306,12 @@ public class CategoryController {
         }
 
         if (err == "Category not found") {
-            ctx.status(404)
+            ctx.status = 404
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
             return
         }
 
-        ctx.status(500)
+        ctx.status = 500
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -325,7 +325,7 @@ public class CategoryController {
     /**
      * POST /api/categories/scan - 扫描媒体库（触发所有分类扫描）
      */
-    public static func scanAllCategories(ctx: Ctx) {
+    public static func scanAllCategories(ctx: Context) {
         let result = CronService.getInstance().scanArchives()
         if (result.taskId > 0) {
             getLogger("category_controller").info("创建扫描所有分类任务", ("task_id", result.taskId.toString()))
@@ -339,7 +339,7 @@ public class CategoryController {
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } else {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create scan task\"}")
         }
     }
@@ -347,8 +347,8 @@ public class CategoryController {
     /**
      * POST /api/categories/{id}/scan - 触发分类扫描
      */
-    public static func scanCategory(ctx: Ctx) {
-        let catid = ctx.paramsOpt("id") ?? ""
+    public static func scanCategory(ctx: Context) {
+        let catid = ctx.param("id") ?? ""
 
         match (CategoryDao.getCategoryById(catid)) {
             case Some(cat) =>
@@ -376,11 +376,11 @@ public class CategoryController {
                     w.flush()
                     ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 } else {
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create scan task\"}")
                 }
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
         }
     }

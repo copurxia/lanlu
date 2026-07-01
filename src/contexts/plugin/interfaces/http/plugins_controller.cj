@@ -1,6 +1,6 @@
 package lanlu.contexts.plugin.interfaces.http
 
-import ignite.*
+import ace_web.*
 import std.collection.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
@@ -36,7 +36,7 @@ public class PluginsController {
      * 获取所有插件详情
      * GET /api/plugins
      */
-    public static func getAllPlugins(ctx: Ctx) {
+    public static func getAllPlugins(ctx: Context) {
         let logger = getLogger("plugins_controller")
 
         try {
@@ -60,9 +60,9 @@ public class PluginsController {
      * 根据类型获取插件
      * GET /api/plugins/:type
      */
-    public static func getPluginsByType(ctx: Ctx) {
+    public static func getPluginsByType(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let pluginType = ctx.paramsOpt("type") ?? ""
+        let pluginType = ctx.param("type") ?? ""
 
         if (pluginType.size == 0) {
             ResponseView.errorJson(ctx, "Plugin type is required")
@@ -90,9 +90,9 @@ public class PluginsController {
      * 根据namespace获取插件详情
      * GET /api/plugins/:namespace/details
      */
-    public static func getPluginDetails(ctx: Ctx) {
+    public static func getPluginDetails(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -114,9 +114,9 @@ public class PluginsController {
      * 获取插件配置
      * GET /api/plugins/:namespace/config
      */
-    public static func getPluginConfig(ctx: Ctx) {
+    public static func getPluginConfig(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -140,9 +140,9 @@ public class PluginsController {
      * 更新插件配置
      * PUT /api/plugins/:namespace/config
      */
-    public static func updatePluginConfig(ctx: Ctx) {
+    public static func updatePluginConfig(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -157,7 +157,7 @@ public class PluginsController {
 
         // 直接接收 parameters 字段
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let requestObj = JsonCodec.decode<HashMap<String, String>>(body)
                 // 如果请求中包含 parameters 字段，直接使用
@@ -193,9 +193,9 @@ public class PluginsController {
      * 启用或禁用插件
      * PUT /api/plugins/:namespace/enabled
      */
-    public static func setPluginEnabled(ctx: Ctx) {
+    public static func setPluginEnabled(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -206,7 +206,7 @@ public class PluginsController {
         var enabled: Bool = false
 
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let requestMap = JsonCodec.decode<HashMap<String, String>>(body)
                 let enabledStr = requestMap.get("enabled") ?? "false"
@@ -280,8 +280,8 @@ public class PluginsController {
      * 获取插件配置Schema
      * GET /api/plugins/:namespace/schema
      */
-    public static func getPluginSchema(ctx: Ctx) {
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+    public static func getPluginSchema(ctx: Context) {
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -310,16 +310,16 @@ public class PluginsController {
         jsonResponse += "\"parameters\": ${plugin.parameters}"
         jsonResponse += "}"
         ctx.setHeader("Content-Type", "application/json")
-        ctx.sendString(jsonResponse)
+        ctx.contentType = "text/plain; charset=utf-8"; ctx.body = jsonResponse
     }
 
     /**
      * 删除插件
      * DELETE /api/plugins/:namespace
      */
-    public static func deletePlugin(ctx: Ctx) {
+    public static func deletePlugin(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -341,14 +341,14 @@ public class PluginsController {
      * POST /api/plugins/install
      * 只需要提供 URL，类型从插件元数据中自动获取
      */
-    public static func installPlugin(ctx: Ctx) {
+    public static func installPlugin(ctx: Context) {
         let logger = getLogger("plugins_controller")
 
         // 解析请求体
         var url: String = ""
 
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let requestMap = JsonCodec.decode<HashMap<String, String>>(body)
                 url = requestMap.get("url") ?? ""
@@ -402,9 +402,9 @@ public class PluginsController {
      * POST /api/plugins/:namespace/update
      * 使用插件声明的 update_url 更新
      */
-    public static func updatePlugin(ctx: Ctx) {
+    public static func updatePlugin(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -414,7 +414,7 @@ public class PluginsController {
         // Optional request body: { "force": true }
         var force = false
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let m = JsonCodec.decode<HashMap<String, String>>(body)
                 let v = (m.get("force") ?? "").trimAscii().toAsciiLower()
@@ -453,9 +453,9 @@ public class PluginsController {
      * POST /api/plugins/:namespace/check_update
      * 可选: {force:true}（跳过 ETag 条件请求/版本保护）
      */
-    public static func checkUpdatePlugin(ctx: Ctx) {
+    public static func checkUpdatePlugin(ctx: Context) {
         let logger = getLogger("plugins_controller")
-        let namespace = ctx.paramsOpt("namespace") ?? ""
+        let namespace = ctx.param("namespace") ?? ""
 
         if (namespace.size == 0) {
             ResponseView.errorJson(ctx, "Plugin namespace is required")
@@ -464,7 +464,7 @@ public class PluginsController {
 
         var force = false
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.size > 0) {
                 let m = JsonCodec.decode<HashMap<String, String>>(body)
                 let v = (m.get("force") ?? "").trimAscii().toAsciiLower()

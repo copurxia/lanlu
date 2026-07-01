@@ -1,6 +1,7 @@
 package lanlu.routes.api
 
-import ignite.*
+import ace_web.*
+import ace_router.*
 import lanlu.contexts.search.interfaces.http.SearchController
 import lanlu.infrastructure.middleware.*
 
@@ -12,13 +13,14 @@ public class SearchRoutes {
     /**
      * 配置 API 搜索相关路由
      */
-    public static func configure(router: App) {
-        let search = router.group("/api/search")
-        search.use(AuthMiddleware.requiredAuthMiddleware())
+    public static func configure(router: Router) {
+        router.group("/api/search") { search =>
+            search.use(AuthMiddleware.requiredAuthMiddleware())
 
-        // 搜索归档
-        search.get("", { ctx =>
-            SearchController.searchArchives(ctx)
-        })
+            // 搜索归档
+            search.get("", { ctx: Context, next: Next =>
+                SearchController.searchArchives(ctx)
+            })
+        }
     }
 }

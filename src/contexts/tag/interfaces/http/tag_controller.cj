@@ -3,7 +3,8 @@ import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
 
-import ignite.*
+import ace_web.*
+import lanlu.shared.http_ext.*
 import stdx.log.*
 import std.time.DateTime
 import std.collection.*
@@ -28,8 +29,8 @@ public class TagController {
     private static let CACHE_DIR = "./data/cache"
     private static let IMPORT_CHUNK_SIZE: Int64 = 1536 * 1024 // 1.5MB
 
-    private static func langFromQuery(ctx: Ctx): String {
-        let lang = (ctx.query("lang") ?? "").trimAscii()
+    private static func langFromQuery(ctx: Context): String {
+        let lang = (ctx.queryParam("lang") ?? "").trimAscii()
         if (lang.size == 0) { return "zh" }
         return lang
     }
@@ -76,10 +77,10 @@ public class TagController {
      * 如果提供 arcid，则只返回该档案相关的 tag 翻译
      * 如果提供 tankoubon_id，则返回该合集相关的所有 tag 翻译（合集自身标签 + 所有归档标签）
      */
-    public static func getTranslations(ctx: Ctx): Unit {
+    public static func getTranslations(ctx: Context): Unit {
         let lang = langFromQuery(ctx)
-        let arcid = (ctx.query("arcid") ?? "").trimAscii()
-        let tankoubonId = (ctx.query("tankoubon_id") ?? "").trimAscii()
+        let arcid = (ctx.queryParam("arcid") ?? "").trimAscii()
+        let tankoubonId = (ctx.queryParam("tankoubon_id") ?? "").trimAscii()
 
         var translationsMap = HashMap<String, String>()
 
@@ -183,11 +184,11 @@ public class TagController {
      * GET /api/tags?namespace=...&q=...&limit=...&offset=...
      * 返回: { items: [...], total, limit, offset }
      */
-    public static func list(ctx: Ctx): Unit {
-        let namespaceStr = (ctx.query("namespace") ?? "").trimAscii()
-        let q = (ctx.query("q") ?? "").trimAscii()
-        let limitStr = (ctx.query("limit") ?? "100").trimAscii()
-        let offsetStr = (ctx.query("offset") ?? "0").trimAscii()
+    public static func list(ctx: Context): Unit {
+        let namespaceStr = (ctx.queryParam("namespace") ?? "").trimAscii()
+        let q = (ctx.queryParam("q") ?? "").trimAscii()
+        let limitStr = (ctx.queryParam("limit") ?? "100").trimAscii()
+        let offsetStr = (ctx.queryParam("offset") ?? "0").trimAscii()
 
         var limit: Int64 = 100
         var offset: Int64 = 0
@@ -243,17 +244,17 @@ public class TagController {
     /**
      * GET /api/tags/{id}
      */
-    public static func getById(ctx: Ctx): Unit {
-        let idStr = (ctx.paramsOpt("id") ?? "").trimAscii()
+    public static func getById(ctx: Context): Unit {
+        let idStr = (ctx.param("id") ?? "").trimAscii()
         if (idStr.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "id is required", 400)
             return
         }
 
         var id: Int64 = 0
         try { id = Int64.parse(idStr) } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
@@ -285,7 +286,7 @@ public class TagController {
                 w.flush()
                 ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签成功")
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "tag not found", 404)
         }
     }
@@ -294,10 +295,10 @@ public class TagController {
      * GET /api/tags/by-name?tag=namespace:name
      * 也支持: ?namespace=...&name=...
      */
-    public static func getByName(ctx: Ctx): Unit {
-        let tagStr = (ctx.query("tag") ?? "").trimAscii()
-        let namespaceQ = (ctx.query("namespace") ?? "").trimAscii()
-        let nameQ = (ctx.query("name") ?? "").trimAscii()
+    public static func getByName(ctx: Context): Unit {
+        let tagStr = (ctx.queryParam("tag") ?? "").trimAscii()
+        let namespaceQ = (ctx.queryParam("namespace") ?? "").trimAscii()
+        let nameQ = (ctx.queryParam("name") ?? "").trimAscii()
 
         var namespace = namespaceQ
         var name = nameQ
@@ -308,7 +309,7 @@ public class TagController {
         }
 
         if (name.trimAscii().size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "tag/name is required", 400)
             return
         }
@@ -340,7 +341,7 @@ public class TagController {
                 w.flush()
                 ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签成功")
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "tag not found", 404)
         }
     }
@@ -349,18 +350,18 @@ public class TagController {
      * PUT /api/admin/tags/{id}/icon
      * Body: raw image bytes
      */
-    public static func adminUploadIcon(ctx: Ctx, adminUserId: Int64): Unit {
-        let idStr = (ctx.paramsOpt("id") ?? "").trimAscii()
+    public static func adminUploadIcon(ctx: Context, adminUserId: Int64): Unit {
+        let idStr = (ctx.param("id") ?? "").trimAscii()
         var id: Int64 = 0
         try { id = Int64.parse(idStr) } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
 
-        let raw = ctx.bodyString()
+        let raw = ctx.rawBody() ?? ""
         if (raw.size <= 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "empty body", 400)
             return
         }
@@ -368,7 +369,7 @@ public class TagController {
         let tag = match (TagDao.getById(id)) {
             case Some(value) => value
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "tag not found", 404)
                 return
         }
@@ -378,7 +379,7 @@ public class TagController {
         FileUtils.ensureDirectoryExists(Path(cacheRoot))
         FileUtils.ensureDirectoryExists(Path(assetRoot))
 
-        let filename = (ctx.header("X-Filename") ?? "tag_icon").trimAscii()
+        let filename = (ctx.header("x-filename") ?? "tag_icon").trimAscii()
         let inferredExt = ArchiveUtils.getFileExtension(filename)
 
         let ts = DateTime.now().toUnixTimeStamp().toSeconds()
@@ -396,7 +397,7 @@ public class TagController {
             }
         } catch (e: Exception) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "failed to write temp file", 500)
             return
         }
@@ -405,7 +406,7 @@ public class TagController {
         let (convertRes, thumbHashFromConvert) = ArchiveUtils.convertAvatarToAvifWithThumbHash(inputPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            ctx.status(422)
+            ctx.status = 422
             ResponseView.errorJson(ctx, "icon conversion failed", 422)
             return
         }
@@ -430,14 +431,14 @@ public class TagController {
                     FileUtils.safeReplaceFile(Path(finalPath), Path(outputAvifPath))
                 } catch (e: Exception) {
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.errorJson(ctx, "failed to store icon", 500)
                     return
                 }
 
                 if (!TagDao.updateIconAssetId(id, assetId)) {
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.errorJson(ctx, "failed to update tag icon", 500)
                     return
                 }
@@ -446,7 +447,7 @@ public class TagController {
                 ResponseView.successJson(ctx, "{\"success\":1,\"iconAssetId\":${assetId.toString()}}", "更新成功")
             case None =>
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "failed to create asset record", 500)
         }
     }
@@ -455,18 +456,18 @@ public class TagController {
      * PUT /api/admin/tags/{id}/background
      * Body: raw image bytes
      */
-    public static func adminUploadBackground(ctx: Ctx, adminUserId: Int64): Unit {
-        let idStr = (ctx.paramsOpt("id") ?? "").trimAscii()
+    public static func adminUploadBackground(ctx: Context, adminUserId: Int64): Unit {
+        let idStr = (ctx.param("id") ?? "").trimAscii()
         var id: Int64 = 0
         try { id = Int64.parse(idStr) } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
 
-        let raw = ctx.bodyString()
+        let raw = ctx.rawBody() ?? ""
         if (raw.size <= 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "empty body", 400)
             return
         }
@@ -474,7 +475,7 @@ public class TagController {
         let tag = match (TagDao.getById(id)) {
             case Some(value) => value
             case None =>
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "tag not found", 404)
                 return
         }
@@ -484,7 +485,7 @@ public class TagController {
         FileUtils.ensureDirectoryExists(Path(cacheRoot))
         FileUtils.ensureDirectoryExists(Path(assetRoot))
 
-        let filename = (ctx.header("X-Filename") ?? "tag_background").trimAscii()
+        let filename = (ctx.header("x-filename") ?? "tag_background").trimAscii()
         let inferredExt = ArchiveUtils.getFileExtension(filename)
 
         let ts = DateTime.now().toUnixTimeStamp().toSeconds()
@@ -502,7 +503,7 @@ public class TagController {
             }
         } catch (_: Exception) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "failed to write temp file", 500)
             return
         }
@@ -510,7 +511,7 @@ public class TagController {
         let (convertRes, thumbHashFromConvert2) = ArchiveUtils.convertTagBackgroundToAvifWithThumbHash(inputPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            ctx.status(422)
+            ctx.status = 422
             ResponseView.errorJson(ctx, "background conversion failed", 422)
             return
         }
@@ -535,14 +536,14 @@ public class TagController {
                     FileUtils.safeReplaceFile(Path(finalPath), Path(outputAvifPath))
                 } catch (_: Exception) {
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.errorJson(ctx, "failed to store background", 500)
                     return
                 }
 
                 if (!TagDao.updateBackgroundAssetId(id, assetId)) {
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
-                    ctx.status(500)
+                    ctx.status = 500
                     ResponseView.errorJson(ctx, "failed to update tag background", 500)
                     return
                 }
@@ -551,7 +552,7 @@ public class TagController {
                 ResponseView.successJson(ctx, "{\"success\":1,\"backgroundAssetId\":${assetId.toString()}}", "更新成功")
             case None =>
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "failed to create asset record", 500)
         }
     }
@@ -560,7 +561,7 @@ public class TagController {
      * GET /api/tags/namespaces
      * 返回所有命名空间
      */
-    public static func listNamespaces(ctx: Ctx): Unit {
+    public static func listNamespaces(ctx: Context): Unit {
         let namespaces = TagDao.listNamespaces()
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -580,11 +581,11 @@ public class TagController {
      * GET /api/tags/autocomplete?q=...&lang=zh|en&limit=10[&require_bound=0|1]
      * 返回自动补全建议列表
      */
-    public static func autocomplete(ctx: Ctx): Unit {
-        let query = (ctx.query("q") ?? "").trimAscii()
+    public static func autocomplete(ctx: Context): Unit {
+        let query = (ctx.queryParam("q") ?? "").trimAscii()
         let lang = langFromQuery(ctx)
-        let limitStr = (ctx.query("limit") ?? "10").trimAscii()
-        let requireBoundStr = (ctx.query("require_bound") ?? "1").trimAscii()
+        let limitStr = (ctx.queryParam("limit") ?? "10").trimAscii()
+        let requireBoundStr = (ctx.queryParam("require_bound") ?? "1").trimAscii()
 
         var limit: Int64 = 10
         try { limit = Int64.parse(limitStr) } catch (_: Exception) {}
@@ -630,9 +631,9 @@ public class TagController {
      * GET /api/tags/cloud?lang=...&limit=...
      * 返回: { items: [{ tag, display, count }], total }
      */
-    public static func cloud(ctx: Ctx): Unit {
-        let lang = (ctx.query("lang") ?? "zh").trimAscii()
-        let limitStr = (ctx.query("limit") ?? "200").trimAscii()
+    public static func cloud(ctx: Context): Unit {
+        let lang = (ctx.queryParam("lang") ?? "zh").trimAscii()
+        let limitStr = (ctx.queryParam("limit") ?? "200").trimAscii()
         var limit: Int64 = 200
         try { limit = Int64.parse(limitStr) } catch (_: Exception) {}
         if (limit <= 0) { limit = 200 }
@@ -663,7 +664,7 @@ public class TagController {
      * GET /api/admin/tags/names
      * 返回所有标签名（用于自动补全）
      */
-    public static func adminListTagNames(ctx: Ctx): Unit {
+    public static func adminListTagNames(ctx: Context): Unit {
         let tags = TagDao.listAllTagNames()
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -683,12 +684,12 @@ public class TagController {
      * POST /api/admin/tags
      * body: { namespace, name, translations: { zh: {text, intro}, en: {...} }, links }
      */
-    public static func adminCreate(ctx: Ctx): Unit {
+    public static func adminCreate(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -722,21 +723,21 @@ public class TagController {
             }
 
             if (name.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "name is required", 400)
                 return
             }
 
             let id = TagDao.create(namespace, name, translations, links)
             if (id == 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Create failed", 500)
                 return
             }
             ResponseView.successJson(ctx, "{\"success\":1,\"id\":${id.toString()}}", "创建成功")
         } catch (e: Exception) {
             logger.error("adminCreate异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -745,26 +746,26 @@ public class TagController {
      * PUT /api/admin/tags/{id}
      * body: { translations: {...}, links }
      */
-    public static func adminUpdate(ctx: Ctx): Unit {
+    public static func adminUpdate(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
-            let idStr = (ctx.paramsOpt("id") ?? "").trimAscii()
+            let idStr = (ctx.param("id") ?? "").trimAscii()
             if (idStr.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "id is required", 400)
                 return
             }
 
             var id: Int64 = 0
             try { id = Int64.parse(idStr) } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid id", 400)
                 return
             }
 
-            let body = ctx.bodyString()
+            let body = ctx.rawBody() ?? ""
             if (body.trimAscii().size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -795,14 +796,14 @@ public class TagController {
 
             let ok = TagDao.update(id, translations, links)
             if (!ok) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Update failed", 500)
                 return
             }
             ResponseView.successJson(ctx, "{\"success\":1}", "更新成功")
         } catch (e: Exception) {
             logger.error("adminUpdate异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -810,24 +811,24 @@ public class TagController {
     /**
      * DELETE /api/admin/tags/{id}
      */
-    public static func adminDelete(ctx: Ctx): Unit {
-        let idStr = (ctx.paramsOpt("id") ?? "").trimAscii()
+    public static func adminDelete(ctx: Context): Unit {
+        let idStr = (ctx.param("id") ?? "").trimAscii()
         if (idStr.size == 0) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "id is required", 400)
             return
         }
 
         var id: Int64 = 0
         try { id = Int64.parse(idStr) } catch (_: Exception) {
-            ctx.status(400)
+            ctx.status = 400
             ResponseView.errorJson(ctx, "invalid id", 400)
             return
         }
 
         let ok = TagDao.delete(id)
         if (!ok) {
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Delete failed", 500)
             return
         }
@@ -838,7 +839,7 @@ public class TagController {
      * GET /api/admin/tags/export
      * 返回: { tags: [...], generated_at }
      */
-    public static func adminExport(ctx: Ctx): Unit {
+    public static func adminExport(ctx: Context): Unit {
         let rows = TagDao.list(None, None, 200000, 0)
         let now = DateTime.nowUTC().toString()
         let out = ByteBuffer()
@@ -874,7 +875,7 @@ public class TagController {
      * POST /api/admin/tags/import
      * 支持 EhTagTranslation 格式和简化格式
      */
-    public static func adminImport(ctx: Ctx): Unit {
+    public static func adminImport(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
             let taskData = TaskData()
@@ -886,7 +887,7 @@ public class TagController {
             taskData.parameters = ""
             let created = TaskDao.createTaskData(taskData)
             if (!created || taskData.id == 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Create task failed", 500)
                 return
             }
@@ -897,7 +898,7 @@ public class TagController {
                 Directory.create(taskDir, recursive: true)
             }
             let jsonFile = Path("${taskDir}/tag_import.json")
-            let bodyStream = ctx.requestBody()
+            let bodyStream = requestBodyOf(ctx)
             let fileDataList = ArrayList<UInt8>()
             let tmp = Array<UInt8>(8192, repeat: 0)
             while (true) {
@@ -916,7 +917,7 @@ public class TagController {
 
             let size = FileInfo(jsonFile).size
             if (size <= 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -930,7 +931,7 @@ public class TagController {
             ResponseView.successJson(ctx, data, "已入队导入任务")
         } catch (e: Exception) {
             logger.error("adminImport异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -938,7 +939,7 @@ public class TagController {
     /**
      * POST /api/admin/tags/import/init
      */
-    public static func adminImportInit(ctx: Ctx): Unit {
+    public static func adminImportInit(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
             let taskData = TaskData()
@@ -950,7 +951,7 @@ public class TagController {
             taskData.parameters = ""
             let created = TaskDao.createTaskData(taskData)
             if (!created || taskData.id == 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "Create task failed", 500)
                 return
             }
@@ -969,7 +970,7 @@ public class TagController {
             ResponseView.successJson(ctx, data, "已创建导入任务")
         } catch (e: Exception) {
             logger.error("adminImportInit异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -977,14 +978,14 @@ public class TagController {
     /**
      * PUT /api/admin/tags/import/chunk?job=...&chunkIndex=...&totalChunks=...
      */
-    public static func adminImportUploadChunk(ctx: Ctx): Unit {
+    public static func adminImportUploadChunk(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
-            let jobStr = (ctx.query("job") ?? "").trimAscii()
-            let chunkIndexStr = (ctx.query("chunkIndex") ?? "").trimAscii()
-            let totalChunksStr = (ctx.query("totalChunks") ?? "").trimAscii()
+            let jobStr = (ctx.queryParam("job") ?? "").trimAscii()
+            let chunkIndexStr = (ctx.queryParam("chunkIndex") ?? "").trimAscii()
+            let totalChunksStr = (ctx.queryParam("totalChunks") ?? "").trimAscii()
             if (jobStr.size == 0 || chunkIndexStr.size == 0 || totalChunksStr.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "job, chunkIndex and totalChunks are required", 400)
                 return
             }
@@ -992,7 +993,7 @@ public class TagController {
             let jobId = try {
                 Int64.parse(jobStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid job", 400)
                 return
             }
@@ -1000,7 +1001,7 @@ public class TagController {
             let chunkIndex = try {
                 Int64.parse(chunkIndexStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid chunkIndex", 400)
                 return
             }
@@ -1008,33 +1009,33 @@ public class TagController {
             let totalChunks = try {
                 Int64.parse(totalChunksStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid totalChunks", 400)
                 return
             }
 
             if (chunkIndex < 0 || totalChunks <= 0 || chunkIndex >= totalChunks) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid chunk range", 400)
                 return
             }
 
             let taskData = TaskDao.getTaskDataById(jobId)
             if (taskData.id == 0 || taskData.taskType != "tag_import") {
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "job not found", 404)
                 return
             }
 
             if (taskData.status != "waiting_upload") {
-                ctx.status(409)
+                ctx.status = 409
                 ResponseView.errorJson(ctx, "job is not ready for upload", 409)
                 return
             }
 
             let jsonPathStr = taskData.parameters.trimAscii()
             if (jsonPathStr.size == 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "job has no upload path", 500)
                 return
             }
@@ -1046,7 +1047,7 @@ public class TagController {
             }
 
             let chunkFile = Path("${parent.toString()}/chunk_${chunkIndex.toString()}.bin")
-            let bodyStream = ctx.requestBody()
+            let bodyStream = requestBodyOf(ctx)
             let bodyBytes = ArrayList<UInt8>()
             let tmp = Array<UInt8>(8192, repeat: 0)
             while (true) {
@@ -1064,7 +1065,7 @@ public class TagController {
 
             let size = FileInfo(chunkFile).size
             if (size <= 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty body", 400)
                 return
             }
@@ -1075,7 +1076,7 @@ public class TagController {
             ResponseView.successJson(ctx, data, "已上传分片")
         } catch (e: Exception) {
             logger.error("adminImportUploadChunk异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
@@ -1135,13 +1136,13 @@ public class TagController {
     /**
      * POST /api/admin/tags/import/complete?job=...&totalChunks=...
      */
-    public static func adminImportUploadComplete(ctx: Ctx): Unit {
+    public static func adminImportUploadComplete(ctx: Context): Unit {
         let logger = getLogger("tag_controller")
         try {
-            let jobStr = (ctx.query("job") ?? "").trimAscii()
-            let totalChunksStr = (ctx.query("totalChunks") ?? "").trimAscii()
+            let jobStr = (ctx.queryParam("job") ?? "").trimAscii()
+            let totalChunksStr = (ctx.queryParam("totalChunks") ?? "").trimAscii()
             if (jobStr.size == 0 || totalChunksStr.size == 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "job and totalChunks are required", 400)
                 return
             }
@@ -1149,7 +1150,7 @@ public class TagController {
             let jobId = try {
                 Int64.parse(jobStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid job", 400)
                 return
             }
@@ -1157,31 +1158,31 @@ public class TagController {
             let totalChunks = try {
                 Int64.parse(totalChunksStr)
             } catch (_: Exception) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid totalChunks", 400)
                 return
             }
             if (totalChunks <= 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "invalid totalChunks", 400)
                 return
             }
 
             let taskData = TaskDao.getTaskDataById(jobId)
             if (taskData.id == 0 || taskData.taskType != "tag_import") {
-                ctx.status(404)
+                ctx.status = 404
                 ResponseView.errorJson(ctx, "job not found", 404)
                 return
             }
             if (taskData.status != "waiting_upload") {
-                ctx.status(409)
+                ctx.status = 409
                 ResponseView.errorJson(ctx, "job is not ready for complete", 409)
                 return
             }
 
             let jsonPathStr = taskData.parameters.trimAscii()
             if (jsonPathStr.size == 0) {
-                ctx.status(500)
+                ctx.status = 500
                 ResponseView.errorJson(ctx, "job has no upload path", 500)
                 return
             }
@@ -1192,7 +1193,7 @@ public class TagController {
             for (i in 0..totalChunks) {
                 let chunkFile = Path("${chunkDir.toString()}/chunk_${Int64(i).toString()}.bin")
                 if (!exists(chunkFile)) {
-                    ctx.status(400)
+                    ctx.status = 400
                     ResponseView.errorJson(ctx, "missing chunk ${i.toString()}", 400)
                     return
                 }
@@ -1202,7 +1203,7 @@ public class TagController {
 
             let size = FileInfo(jsonFile).size
             if (size <= 0) {
-                ctx.status(400)
+                ctx.status = 400
                 ResponseView.errorJson(ctx, "Empty file", 400)
                 return
             }
@@ -1220,7 +1221,7 @@ public class TagController {
             ResponseView.successJson(ctx, data, "已合并分片并入队导入")
         } catch (e: Exception) {
             logger.error("adminImportUploadComplete异常", ("error", e.message))
-            ctx.status(500)
+            ctx.status = 500
             ResponseView.errorJson(ctx, "Internal error", 500)
         }
     }
