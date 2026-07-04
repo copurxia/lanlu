@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -16,20 +16,20 @@ public class V007_TankoubonArchivesOrderIndex <: Migration {
         return "Add composite index on tankoubon_archives(tankoubon_id, archive_id, sort_order)"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "tankoubon_archives")) {
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.tableExists(drv, "tankoubon_archives")) {
             logger.warn("tankoubon_archives table missing; skipping V007")
             return true
         }
 
         let indexName = "idx_tankoubon_archives_tank_archive_order"
-        if (MigrationHelpers.indexExists(conn, indexName)) {
+        if (MigrationHelpers.indexExists(drv, indexName)) {
             logger.debug("Index ${indexName} already exists")
             return true
         }
 
         logger.info("Creating index ${indexName} on tankoubon_archives(tankoubon_id, archive_id, sort_order)")
-        return MigrationHelpers.execUpdate(conn,
+        return MigrationHelpers.execUpdate(drv,
             "CREATE INDEX ${indexName} ON tankoubon_archives (tankoubon_id, archive_id, sort_order)"
         )
     }

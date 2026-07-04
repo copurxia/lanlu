@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -19,84 +19,84 @@ public class V001_InitialSchema <: Migration {
         return "Initial database schema with all core tables"
     }
 
-    public func up(conn: Connection): Bool {
+    public func up(drv: Driver): Bool {
         // 按依赖顺序创建所有表
 
         // 1. users 表
-        if (!createUsersTable(conn)) { return false }
+        if (!createUsersTable(drv)) { return false }
 
         // 2. user_tokens 表
-        if (!createUserTokensTable(conn)) { return false }
+        if (!createUserTokensTable(drv)) { return false }
 
         // 3. plugins 表
-        if (!createPluginsTable(conn)) { return false }
+        if (!createPluginsTable(drv)) { return false }
 
         // 4. categories 表
-        if (!createCategoriesTable(conn)) { return false }
+        if (!createCategoriesTable(drv)) { return false }
 
         // 5. archives 表（依赖 categories）
-        if (!createArchivesTable(conn)) { return false }
+        if (!createArchivesTable(drv)) { return false }
 
         // 6. tags 表
-        if (!createTagsTable(conn)) { return false }
+        if (!createTagsTable(drv)) { return false }
 
         // 7. archive_tags 表（依赖 archives, tags）
-        if (!createArchiveTagsTable(conn)) { return false }
+        if (!createArchiveTagsTable(drv)) { return false }
 
         // 8. user_archive_status 表（依赖 users, archives）
-        if (!createUserArchiveStatusTable(conn)) { return false }
+        if (!createUserArchiveStatusTable(drv)) { return false }
 
         // 9. user_favorites 表（依赖 users, archives）
-        if (!createUserFavoritesTable(conn)) { return false }
+        if (!createUserFavoritesTable(drv)) { return false }
 
         // 10. smart_filters 表
-        if (!createSmartFiltersTable(conn)) { return false }
+        if (!createSmartFiltersTable(drv)) { return false }
 
         // 11. tankoubons 表
-        if (!createTankoubonsTable(conn)) { return false }
+        if (!createTankoubonsTable(drv)) { return false }
 
         // 12. tankoubon_archives 表（依赖 tankoubons, archives）
-        if (!createTankoubonArchivesTable(conn)) { return false }
+        if (!createTankoubonArchivesTable(drv)) { return false }
 
         // 13. tankoubon_tags 表（依赖 tankoubons, tags）
-        if (!createTankoubonTagsTable(conn)) { return false }
+        if (!createTankoubonTagsTable(drv)) { return false }
 
         // 14. user_tankoubon_favorites 表（依赖 users, tankoubons）
-        if (!createUserTankoubonFavoritesTable(conn)) { return false }
+        if (!createUserTankoubonFavoritesTable(drv)) { return false }
 
         // 15. tasks 表
-        if (!createTasksTable(conn)) { return false }
+        if (!createTasksTable(drv)) { return false }
 
         // 16. scheduled_tasks 表
-        if (!createScheduledTasksTable(conn)) { return false }
+        if (!createScheduledTasksTable(drv)) { return false }
 
         // 17. assets 表（通用资源表）
-        if (!createAssetsTable(conn)) { return false }
+        if (!createAssetsTable(drv)) { return false }
 
         // 18. system_settings 表
-        if (!createSystemSettingsTable(conn)) { return false }
+        if (!createSystemSettingsTable(drv)) { return false }
 
         // 19. archives_with_tags 视图
-        if (!createArchivesWithTagsView(conn)) { return false }
+        if (!createArchivesWithTagsView(drv)) { return false }
 
         return true
     }
 
     // ========== 表创建方法 ==========
 
-    private func createUsersTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "users")) {
+    private func createUsersTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "users")) {
             logger.debug("users table already exists, checking columns")
-            MigrationHelpers.addColumnIfNotExists(conn, "users", "password_salt", "VARCHAR(64) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "users", "password_hash_version", "VARCHAR(32) NOT NULL DEFAULT 'sha256_v1'")
-            MigrationHelpers.addColumnIfNotExists(conn, "users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "users", "avatar_asset_id", "BIGINT")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
+            MigrationHelpers.addColumnIfNotExists(drv, "users", "password_salt", "VARCHAR(64) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "users", "password_hash_version", "VARCHAR(32) NOT NULL DEFAULT 'sha256_v1'")
+            MigrationHelpers.addColumnIfNotExists(drv, "users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(drv, "users", "avatar_asset_id", "BIGINT")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
             return true
         }
 
         logger.debug("Creating users table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(64) NOT NULL UNIQUE,
@@ -111,27 +111,27 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
         return true
     }
 
-    private func createUserTokensTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "user_tokens")) {
+    private func createUserTokensTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "user_tokens")) {
             logger.debug("user_tokens table already exists, checking columns")
             // 添加可能缺失的列
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "token_type", "VARCHAR(50) NOT NULL DEFAULT 'session'")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "token_prefix", "VARCHAR(16) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "token_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "last_used_at", "TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "revoked_at", "TIMESTAMP")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tokens_user_id", "user_tokens", "user_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tokens_token_hash", "user_tokens", "token_hash")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "token_type", "VARCHAR(50) NOT NULL DEFAULT 'session'")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "token_prefix", "VARCHAR(16) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "token_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "last_used_at", "TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_tokens", "revoked_at", "TIMESTAMP")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tokens_user_id", "user_tokens", "user_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tokens_token_hash", "user_tokens", "token_hash")
             return true
         }
 
         logger.debug("Creating user_tokens table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE user_tokens (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -147,13 +147,13 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tokens_user_id", "user_tokens", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tokens_token_hash", "user_tokens", "token_hash")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tokens_user_id", "user_tokens", "user_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tokens_token_hash", "user_tokens", "token_hash")
         return true
     }
 
-    private func createPluginsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "plugins")) {
+    private func createPluginsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "plugins")) {
             logger.debug("plugins table already exists, checking columns")
             // 添加可能缺失的列
             let columnsToAdd = [
@@ -178,13 +178,13 @@ public class V001_InitialSchema <: Migration {
                 ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             ]
             for ((col, def) in columnsToAdd) {
-                MigrationHelpers.addColumnIfNotExists(conn, "plugins", col, def)
+                MigrationHelpers.addColumnIfNotExists(drv, "plugins", col, def)
             }
             return true
         }
 
         logger.debug("Creating plugins table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE plugins (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -215,18 +215,18 @@ public class V001_InitialSchema <: Migration {
         return true
     }
 
-    private func createCategoriesTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "categories")) {
+    private func createCategoriesTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "categories")) {
             logger.debug("categories table already exists, checking columns")
-            MigrationHelpers.addColumnIfNotExists(conn, "categories", "plugins", "TEXT DEFAULT '[]'")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_catid", "categories", "catid")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_enabled", "categories", "enabled")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_sort_order", "categories", "sort_order")
+            MigrationHelpers.addColumnIfNotExists(drv, "categories", "plugins", "TEXT DEFAULT '[]'")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_catid", "categories", "catid")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_enabled", "categories", "enabled")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_sort_order", "categories", "sort_order")
             return true
         }
 
         logger.debug("Creating categories table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE categories (
                 id SERIAL PRIMARY KEY,
                 catid VARCHAR(255) NOT NULL UNIQUE,
@@ -243,20 +243,20 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_catid", "categories", "catid")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_enabled", "categories", "enabled")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_sort_order", "categories", "sort_order")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_catid", "categories", "catid")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_enabled", "categories", "enabled")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_categories_sort_order", "categories", "sort_order")
         return true
     }
 
-    private func createArchivesTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "archives")) {
+    private func createArchivesTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "archives")) {
             logger.debug("archives table already exists, checking columns and indexes")
-            MigrationHelpers.addColumnIfNotExists(conn, "archives", "cover_asset_id", "BIGINT")
+            MigrationHelpers.addColumnIfNotExists(drv, "archives", "cover_asset_id", "BIGINT")
             // 添加 title_tsv 列（全文搜索）
-            if (!MigrationHelpers.columnExists(conn, "archives", "title_tsv")) {
+            if (!MigrationHelpers.columnExists(drv, "archives", "title_tsv")) {
                 try {
-                    MigrationHelpers.execUpdate(conn, """
+                    MigrationHelpers.execUpdate(drv, """
                         ALTER TABLE archives ADD COLUMN title_tsv tsvector
                         GENERATED ALWAYS AS (
                             setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
@@ -266,18 +266,18 @@ public class V001_InitialSchema <: Migration {
                 } catch (_: Exception) {}
             }
             // 创建索引
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_category_id", "archives", "category_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
-            if (!MigrationHelpers.indexExists(conn, "idx_archives_title_tsv")) {
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_archives_category_id", "archives", "category_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
+            if (!MigrationHelpers.indexExists(drv, "idx_archives_title_tsv")) {
                 try {
-                    MigrationHelpers.execUpdate(conn, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
+                    MigrationHelpers.execUpdate(drv, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
                 } catch (_: Exception) {}
             }
             return true
         }
 
         logger.debug("Creating archives table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE archives (
                 id SERIAL PRIMARY KEY,
                 arcid VARCHAR(255) NOT NULL UNIQUE,
@@ -301,7 +301,7 @@ public class V001_InitialSchema <: Migration {
 
         // 添加 title_tsv 列
         try {
-            MigrationHelpers.execUpdate(conn, """
+            MigrationHelpers.execUpdate(drv, """
                 ALTER TABLE archives ADD COLUMN title_tsv tsvector
                 GENERATED ALWAYS AS (
                     setweight(to_tsvector('simple', coalesce(title, '')), 'A') ||
@@ -311,29 +311,29 @@ public class V001_InitialSchema <: Migration {
         } catch (_: Exception) {}
 
         // 创建索引
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_category_id", "archives", "category_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_archives_category_id", "archives", "category_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
         try {
-            MigrationHelpers.execUpdate(conn, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
+            MigrationHelpers.execUpdate(drv, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
         } catch (_: Exception) {}
 
         return true
     }
 
-    private func createTagsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "tags")) {
+    private func createTagsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "tags")) {
             logger.debug("tags table already exists")
-            MigrationHelpers.addColumnIfNotExists(conn, "tags", "icon_asset_id", "BIGINT")
-            MigrationHelpers.addColumnIfNotExists(conn, "tags", "background_asset_id", "BIGINT")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_namespace", "tags", "namespace")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_name", "tags", "name")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_background_asset_id", "tags", "background_asset_id")
+            MigrationHelpers.addColumnIfNotExists(drv, "tags", "icon_asset_id", "BIGINT")
+            MigrationHelpers.addColumnIfNotExists(drv, "tags", "background_asset_id", "BIGINT")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_namespace", "tags", "namespace")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_name", "tags", "name")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_background_asset_id", "tags", "background_asset_id")
             return true
         }
 
         logger.debug("Creating tags table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE tags (
                 id SERIAL PRIMARY KEY,
                 namespace VARCHAR(64) NOT NULL DEFAULT '',
@@ -349,23 +349,23 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_namespace", "tags", "namespace")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_name", "tags", "name")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_background_asset_id", "tags", "background_asset_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_namespace", "tags", "namespace")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_name", "tags", "name")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tags_background_asset_id", "tags", "background_asset_id")
         return true
     }
 
-    private func createArchiveTagsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "archive_tags")) {
+    private func createArchiveTagsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "archive_tags")) {
             logger.debug("archive_tags table already exists")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_archive_tags_archive_id", "archive_tags", "archive_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_archive_tags_tag_id", "archive_tags", "tag_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_archive_tags_archive_id", "archive_tags", "archive_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_archive_tags_tag_id", "archive_tags", "tag_id")
             return true
         }
 
         logger.debug("Creating archive_tags table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE archive_tags (
                 archive_id INTEGER NOT NULL,
                 tag_id INTEGER NOT NULL,
@@ -376,23 +376,23 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_archive_tags_archive_id", "archive_tags", "archive_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_archive_tags_tag_id", "archive_tags", "tag_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_archive_tags_archive_id", "archive_tags", "archive_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_archive_tags_tag_id", "archive_tags", "tag_id")
         return true
     }
 
-    private func createUserArchiveStatusTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "user_archive_status")) {
+    private func createUserArchiveStatusTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "user_archive_status")) {
             logger.debug("user_archive_status table already exists")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_archive_status", "progress", "INTEGER DEFAULT 0")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_user_id", "user_archive_status", "user_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_archive_id", "user_archive_status", "archive_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_progress", "user_archive_status", "progress")
+            MigrationHelpers.addColumnIfNotExists(drv, "user_archive_status", "progress", "INTEGER DEFAULT 0")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_user_id", "user_archive_status", "user_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_archive_id", "user_archive_status", "archive_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_progress", "user_archive_status", "progress")
             return true
         }
 
         logger.debug("Creating user_archive_status table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE user_archive_status (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -408,23 +408,23 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_user_id", "user_archive_status", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_archive_id", "user_archive_status", "archive_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_progress", "user_archive_status", "progress")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_user_id", "user_archive_status", "user_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_archive_id", "user_archive_status", "archive_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_archive_status_progress", "user_archive_status", "progress")
         return true
     }
 
-    private func createUserFavoritesTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "user_favorites")) {
+    private func createUserFavoritesTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "user_favorites")) {
             logger.debug("user_favorites table already exists")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_user_id", "user_favorites", "user_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_archive_id", "user_favorites", "archive_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_created_at", "user_favorites", "created_at")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_user_id", "user_favorites", "user_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_archive_id", "user_favorites", "archive_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_created_at", "user_favorites", "created_at")
             return true
         }
 
         logger.debug("Creating user_favorites table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE user_favorites (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -437,20 +437,20 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_user_id", "user_favorites", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_archive_id", "user_favorites", "archive_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_created_at", "user_favorites", "created_at")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_user_id", "user_favorites", "user_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_archive_id", "user_favorites", "archive_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_favorites_created_at", "user_favorites", "created_at")
         return true
     }
 
-    private func createSmartFiltersTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "smart_filters")) {
+    private func createSmartFiltersTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "smart_filters")) {
             logger.debug("smart_filters table already exists")
             return true
         }
 
         logger.debug("Creating smart_filters table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE smart_filters (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -473,31 +473,31 @@ public class V001_InitialSchema <: Migration {
         }
 
         // 插入默认的智能分类
-        MigrationHelpers.execUpdate(conn, """
+        MigrationHelpers.execUpdate(drv, """
             INSERT INTO smart_filters (name, translations, icon, newonly, sort_order_num)
             VALUES ('未读档案', '{"en": {"text": "Unread Archives"}}', 'BookOpen', true, 1)
         """)
-        MigrationHelpers.execUpdate(conn, """
+        MigrationHelpers.execUpdate(drv, """
             INSERT INTO smart_filters (name, translations, icon, untaggedonly, sort_order_num)
             VALUES ('无标签档案', '{"en": {"text": "Untagged Archives"}}', 'Tag', true, 2)
         """)
-        MigrationHelpers.execUpdate(conn, """
+        MigrationHelpers.execUpdate(drv, """
             INSERT INTO smart_filters (name, translations, icon, date_from, sort_by, sort_order, sort_order_num)
             VALUES ('最近一周', '{"en": {"text": "Last Week"}}', 'Calendar', '-7', 'date_added', 'desc', 3)
         """)
         return true
     }
 
-    private func createTankoubonsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "tankoubons")) {
+    private func createTankoubonsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "tankoubons")) {
             logger.debug("tankoubons table already exists")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubons_tankoubon_id", "tankoubons", "tankoubon_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubons_name", "tankoubons", "name")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubons_tankoubon_id", "tankoubons", "tankoubon_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubons_name", "tankoubons", "name")
             return true
         }
 
         logger.debug("Creating tankoubons table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE tankoubons (
                 id SERIAL PRIMARY KEY,
                 tankoubon_id VARCHAR(255) NOT NULL UNIQUE,
@@ -509,22 +509,22 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubons_tankoubon_id", "tankoubons", "tankoubon_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubons_name", "tankoubons", "name")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubons_tankoubon_id", "tankoubons", "tankoubon_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubons_name", "tankoubons", "name")
         return true
     }
 
-    private func createTankoubonArchivesTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "tankoubon_archives")) {
+    private func createTankoubonArchivesTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "tankoubon_archives")) {
             logger.debug("tankoubon_archives table already exists")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_tankoubon_id", "tankoubon_archives", "tankoubon_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_archive_id", "tankoubon_archives", "archive_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_sort_order", "tankoubon_archives", "sort_order")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_tankoubon_id", "tankoubon_archives", "tankoubon_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_archive_id", "tankoubon_archives", "archive_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_sort_order", "tankoubon_archives", "sort_order")
             return true
         }
 
         logger.debug("Creating tankoubon_archives table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE tankoubon_archives (
                 id SERIAL PRIMARY KEY,
                 tankoubon_id INTEGER NOT NULL,
@@ -538,22 +538,22 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_tankoubon_id", "tankoubon_archives", "tankoubon_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_archive_id", "tankoubon_archives", "archive_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_sort_order", "tankoubon_archives", "sort_order")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_tankoubon_id", "tankoubon_archives", "tankoubon_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_archive_id", "tankoubon_archives", "archive_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_archives_sort_order", "tankoubon_archives", "sort_order")
         return true
     }
 
-    private func createTankoubonTagsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "tankoubon_tags")) {
+    private func createTankoubonTagsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "tankoubon_tags")) {
             logger.debug("tankoubon_tags table already exists")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_tags_tankoubon_id", "tankoubon_tags", "tankoubon_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_tags_tag_id", "tankoubon_tags", "tag_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_tags_tankoubon_id", "tankoubon_tags", "tankoubon_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_tags_tag_id", "tankoubon_tags", "tag_id")
             return true
         }
 
         logger.debug("Creating tankoubon_tags table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE tankoubon_tags (
                 tankoubon_id INTEGER NOT NULL,
                 tag_id INTEGER NOT NULL,
@@ -564,19 +564,19 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_tags_tankoubon_id", "tankoubon_tags", "tankoubon_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_tags_tag_id", "tankoubon_tags", "tag_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_tags_tankoubon_id", "tankoubon_tags", "tankoubon_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubon_tags_tag_id", "tankoubon_tags", "tag_id")
         return true
     }
 
-    private func createUserTankoubonFavoritesTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "user_tankoubon_favorites")) {
+    private func createUserTankoubonFavoritesTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "user_tankoubon_favorites")) {
             logger.debug("user_tankoubon_favorites table already exists")
             return true
         }
 
         logger.debug("Creating user_tankoubon_favorites table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE user_tankoubon_favorites (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -589,30 +589,30 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tankoubon_favorites_user_id", "user_tankoubon_favorites", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tankoubon_favorites_tankoubon_id", "user_tankoubon_favorites", "tankoubon_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tankoubon_favorites_user_id", "user_tankoubon_favorites", "user_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_user_tankoubon_favorites_tankoubon_id", "user_tankoubon_favorites", "tankoubon_id")
         return true
     }
 
-    private func createTasksTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "tasks")) {
+    private func createTasksTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "tasks")) {
             logger.debug("tasks table already exists, checking columns")
             // 添加可能缺失的列
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "message", "TEXT")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "priority", "INTEGER NOT NULL DEFAULT 50")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "group_id", "VARCHAR(255)")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "timeout_at", "TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "trigger_source", "VARCHAR(50)")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "wait_for_task_id", "BIGINT DEFAULT NULL")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "phase", "VARCHAR(80)")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "waiting_reason", "VARCHAR(80)")
-            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "active_key", "VARCHAR(255)")
-            createTasksIndexes(conn)
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "message", "TEXT")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "priority", "INTEGER NOT NULL DEFAULT 50")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "group_id", "VARCHAR(255)")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "timeout_at", "TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "trigger_source", "VARCHAR(50)")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "wait_for_task_id", "BIGINT DEFAULT NULL")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "phase", "VARCHAR(80)")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "waiting_reason", "VARCHAR(80)")
+            MigrationHelpers.addColumnIfNotExists(drv, "tasks", "active_key", "VARCHAR(255)")
+            createTasksIndexes(drv)
             return true
         }
 
         logger.debug("Creating tasks table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE tasks (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -638,59 +638,59 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        createTasksIndexes(conn)
+        createTasksIndexes(drv)
         return true
     }
 
-    private func createTasksIndexes(conn: Connection): Unit {
+    private func createTasksIndexes(drv: Driver): Unit {
         // TaskPool 领取 pending：WHERE status='pending' ORDER BY priority, created_at, id
         MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_tasks_status_priority_created_id",
             "tasks",
             "status, priority, created_at, id"
         )
         // 依赖任务：WHERE wait_for_task_id=? AND status='waiting'
         MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_tasks_wait_for_status",
             "tasks",
             "wait_for_task_id, status"
         )
         // group 查询：WHERE group_id=? ORDER BY created_at
         MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_tasks_group_created_at",
             "tasks",
             "group_id, created_at"
         )
         MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_tasks_active_key_status",
             "tasks",
             "active_key, status"
         )
     }
 
-    private func createScheduledTasksTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "scheduled_tasks")) {
+    private func createScheduledTasksTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "scheduled_tasks")) {
             logger.debug("scheduled_tasks table already exists, checking columns")
             // 添加可能缺失的列
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "task_parameters", "TEXT")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "priority", "INTEGER NOT NULL DEFAULT 50")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "timeout_seconds", "INTEGER NOT NULL DEFAULT 3600")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "last_run_status", "VARCHAR(20)")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "last_error", "TEXT")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "run_count", "INTEGER NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "success_count", "INTEGER NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "failure_count", "INTEGER NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "created_by", "VARCHAR(100)")
-            MigrationHelpers.addColumnIfNotExists(conn, "scheduled_tasks", "updated_by", "VARCHAR(100)")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "task_parameters", "TEXT")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "priority", "INTEGER NOT NULL DEFAULT 50")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "timeout_seconds", "INTEGER NOT NULL DEFAULT 3600")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "last_run_status", "VARCHAR(20)")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "last_error", "TEXT")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "run_count", "INTEGER NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "success_count", "INTEGER NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "failure_count", "INTEGER NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "created_by", "VARCHAR(100)")
+            MigrationHelpers.addColumnIfNotExists(drv, "scheduled_tasks", "updated_by", "VARCHAR(100)")
             return true
         }
 
         logger.debug("Creating scheduled_tasks table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE scheduled_tasks (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -718,24 +718,24 @@ public class V001_InitialSchema <: Migration {
         return true
     }
 
-    private func createAssetsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "assets")) {
+    private func createAssetsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "assets")) {
             logger.debug("assets table already exists, checking columns")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "owner_user_id", "BIGINT")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "kind", "VARCHAR(50) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "original_filename", "VARCHAR(1024) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "content_type", "VARCHAR(255) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "file_ext", "VARCHAR(32) NOT NULL DEFAULT 'bin'")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "byte_size", "BIGINT NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "thumbhash", "TEXT NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "assets", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_owner_user_id", "assets", "owner_user_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_kind", "assets", "kind")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "owner_user_id", "BIGINT")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "kind", "VARCHAR(50) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "original_filename", "VARCHAR(1024) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "content_type", "VARCHAR(255) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "file_ext", "VARCHAR(32) NOT NULL DEFAULT 'bin'")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "byte_size", "BIGINT NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "thumbhash", "TEXT NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "assets", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_assets_owner_user_id", "assets", "owner_user_id")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_assets_kind", "assets", "kind")
             return true
         }
 
         logger.debug("Creating assets table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE assets (
                 id SERIAL PRIMARY KEY,
                 owner_user_id BIGINT,
@@ -750,26 +750,26 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_owner_user_id", "assets", "owner_user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_kind", "assets", "kind")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_assets_owner_user_id", "assets", "owner_user_id")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_assets_kind", "assets", "kind")
         return true
     }
 
-    private func createSystemSettingsTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "system_settings")) {
+    private func createSystemSettingsTable(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "system_settings")) {
             logger.debug("system_settings table already exists, checking columns")
             // 添加可能缺失的列
-            MigrationHelpers.addColumnIfNotExists(conn, "system_settings", "value_type", "VARCHAR(50) NOT NULL DEFAULT 'string'")
-            MigrationHelpers.addColumnIfNotExists(conn, "system_settings", "category", "VARCHAR(100) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "system_settings", "description", "JSONB DEFAULT '{}'")
-            MigrationHelpers.addColumnIfNotExists(conn, "system_settings", "is_encrypted", "BOOLEAN DEFAULT false")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_system_settings_category", "system_settings", "category")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_system_settings_key", "system_settings", "key")
+            MigrationHelpers.addColumnIfNotExists(drv, "system_settings", "value_type", "VARCHAR(50) NOT NULL DEFAULT 'string'")
+            MigrationHelpers.addColumnIfNotExists(drv, "system_settings", "category", "VARCHAR(100) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(drv, "system_settings", "description", "JSONB DEFAULT '{}'")
+            MigrationHelpers.addColumnIfNotExists(drv, "system_settings", "is_encrypted", "BOOLEAN DEFAULT false")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_system_settings_category", "system_settings", "category")
+            MigrationHelpers.createIndexIfNotExists(drv, "idx_system_settings_key", "system_settings", "key")
             return true
         }
 
         logger.debug("Creating system_settings table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE system_settings (
                 id SERIAL PRIMARY KEY,
                 key VARCHAR(255) NOT NULL UNIQUE,
@@ -784,20 +784,20 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_system_settings_category", "system_settings", "category")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_system_settings_key", "system_settings", "key")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_system_settings_category", "system_settings", "category")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_system_settings_key", "system_settings", "key")
         return true
     }
 
-    private func createArchivesWithTagsView(conn: Connection): Bool {
+    private func createArchivesWithTagsView(drv: Driver): Bool {
         // 总是重建视图以确保结构正确
-        if (MigrationHelpers.viewExists(conn, "archives_with_tags")) {
+        if (MigrationHelpers.viewExists(drv, "archives_with_tags")) {
             logger.debug("Dropping existing archives_with_tags view")
-            MigrationHelpers.execUpdate(conn, "DROP VIEW archives_with_tags")
+            MigrationHelpers.execUpdate(drv, "DROP VIEW archives_with_tags")
         }
 
         logger.debug("Creating archives_with_tags view")
-        return MigrationHelpers.execUpdate(conn, """
+        return MigrationHelpers.execUpdate(drv, """
             CREATE VIEW archives_with_tags AS
             SELECT
                 a.id,

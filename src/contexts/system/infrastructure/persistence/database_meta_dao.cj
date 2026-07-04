@@ -1,6 +1,6 @@
 package lanlu.contexts.system.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -15,33 +15,18 @@ public class DatabaseMetaDao {
      */
     public static func getInstalledExtensions(): HashMap<String, String> {
         var out: HashMap<String, String> = HashMap<String, String>()
-
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("SELECT extname, extversion FROM pg_extension ORDER BY extname")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let name = rs.getOrNull<String>(0) ?? ""
-                                let version = rs.getOrNull<String>(1) ?? ""
-                                if (name.size > 0) {
-                                    out[name] = version
-                                }
-                            }
-                        } finally { rs.close() }
-                    } finally { stmt.close() }
-                } catch (e: Exception) {
-                    getLogger("db_meta_dao").warn("Failed to query pg_extension", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT extname, extversion FROM pg_extension ORDER BY extname", [])
+            for (r in rows) {
+                let name = r.getText("extname")
+                let version = r.getText("extversion")
+                if (name.size > 0) {
+                    out[name] = version
                 }
-            case None =>
-                getLogger("db_meta_dao").warn("Cannot get DB connection")
+            }
+        } catch (e: Exception) {
+            getLogger("db_meta_dao").warn("Failed to query pg_extension", ("error", e.message))
         }
-
         return out
     }
 }

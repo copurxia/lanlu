@@ -1,6 +1,6 @@
 package lanlu.contexts.smart_filter.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -37,37 +37,18 @@ public class SmartFilterDao {
      * 获取所有启用的智能分类（按排序顺序）
      */
     public static func getEnabledFilters(): Array<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var filters: ArrayList<SmartFilterData> = ArrayList<SmartFilterData>()
-                try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters WHERE enabled = true ORDER BY sort_order_num ASC, id ASC")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let filter = readFilterFromResultSet(rs)
-                                filters.add(filter)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return filters.toArray()
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
-                    return Array<SmartFilterData>()
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return Array<SmartFilterData>()
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters WHERE enabled = true ORDER BY sort_order_num ASC, id ASC", [])
+            var filters = ArrayList<SmartFilterData>()
+            for (r in rows) {
+                let filter = readFilterFromRow(r)
+                filters.add(filter)
+            }
+            return filters.toArray()
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
+            return Array<SmartFilterData>()
         }
     }
 
@@ -75,37 +56,18 @@ public class SmartFilterDao {
      * 获取所有智能分类（管理用）
      */
     public static func getAllFilters(): Array<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var filters: ArrayList<SmartFilterData> = ArrayList<SmartFilterData>()
-                try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters ORDER BY sort_order_num ASC, id ASC")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let filter = readFilterFromResultSet(rs)
-                                filters.add(filter)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return filters.toArray()
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
-                    return Array<SmartFilterData>()
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return Array<SmartFilterData>()
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters ORDER BY sort_order_num ASC, id ASC", [])
+            var filters = ArrayList<SmartFilterData>()
+            for (r in rows) {
+                let filter = readFilterFromRow(r)
+                filters.add(filter)
+            }
+            return filters.toArray()
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
+            return Array<SmartFilterData>()
         }
     }
 
@@ -113,36 +75,17 @@ public class SmartFilterDao {
      * 根据 ID 获取智能分类
      */
     public static func getById(id: Int64): Option<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return Some(readFilterFromResultSet(rs))
-                            }
-                            return None
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
-                    return None
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters WHERE id = $1",
+                [DbInt(id)])
+            if (rows.size > 0) {
+                return Some(readFilterFromRow(rows[0]))
+            }
+            return None
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
+            return None
         }
     }
 
@@ -150,48 +93,18 @@ public class SmartFilterDao {
      * 创建智能分类
      */
     public static func create(filter: SmartFilterData): Option<Int64> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO smart_filters (name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled) VALUES (?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
-                    try {
-                        stmt.set(0, filter.name)
-                        stmt.set(1, filter.translations)
-                        stmt.set(2, filter.icon)
-                        stmt.set(3, filter.query)
-                        stmt.set(4, filter.sort_by)
-                        stmt.set(5, filter.sort_order)
-                        stmt.set(6, filter.date_from)
-                        stmt.set(7, filter.date_to)
-                        stmt.set(8, filter.newonly)
-                        stmt.set(9, filter.untaggedonly)
-                        stmt.set(10, filter.sort_order_num)
-                        stmt.set(11, filter.enabled)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let id = rs.getOrNull<Int64>(0) ?? 0
-                                return Some(id)
-                            }
-                            return None
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("创建智能分类失败", ("error", e.message))
-                    return None
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "INSERT INTO smart_filters (name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
+                [DbText(filter.name), DbText(filter.translations), DbText(filter.icon), DbText(filter.query), DbText(filter.sort_by), DbText(filter.sort_order), DbText(filter.date_from), DbText(filter.date_to), DbBool(filter.newonly), DbBool(filter.untaggedonly), DbInt(Int64(filter.sort_order_num)), DbBool(filter.enabled)])
+            if (rows.size > 0) {
+                let id = rows[0].getInt("id")
+                return Some(id)
+            }
+            return None
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("创建智能分类失败", ("error", e.message))
+            return None
         }
     }
 
@@ -199,41 +112,14 @@ public class SmartFilterDao {
      * 更新智能分类
      */
     public static func update(filter: SmartFilterData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement(
-                        "UPDATE smart_filters SET name = ?, translations = ?::jsonb, icon = ?, query = ?, sort_by = ?, sort_order = ?, date_from = ?, date_to = ?, newonly = ?, untaggedonly = ?, sort_order_num = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        stmt.set(0, filter.name)
-                        stmt.set(1, filter.translations)
-                        stmt.set(2, filter.icon)
-                        stmt.set(3, filter.query)
-                        stmt.set(4, filter.sort_by)
-                        stmt.set(5, filter.sort_order)
-                        stmt.set(6, filter.date_from)
-                        stmt.set(7, filter.date_to)
-                        stmt.set(8, filter.newonly)
-                        stmt.set(9, filter.untaggedonly)
-                        stmt.set(10, filter.sort_order_num)
-                        stmt.set(11, filter.enabled)
-                        stmt.set(12, filter.id)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("更新智能分类失败", ("error", e.message))
-                    return false
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return false
+        try {
+            DatabaseConfig.driver().exec(
+                "UPDATE smart_filters SET name = $1, translations = $2::jsonb, icon = $3, query = $4, sort_by = $5, sort_order = $6, date_from = $7, date_to = $8, newonly = $9, untaggedonly = $10, sort_order_num = $11, enabled = $12, updated_at = CURRENT_TIMESTAMP WHERE id = $13",
+                [DbText(filter.name), DbText(filter.translations), DbText(filter.icon), DbText(filter.query), DbText(filter.sort_by), DbText(filter.sort_order), DbText(filter.date_from), DbText(filter.date_to), DbBool(filter.newonly), DbBool(filter.untaggedonly), DbInt(Int64(filter.sort_order_num)), DbBool(filter.enabled), DbInt(filter.id)])
+            return true
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("更新智能分类失败", ("error", e.message))
+            return false
         }
     }
 
@@ -241,28 +127,12 @@ public class SmartFilterDao {
      * 删除智能分类
      */
     public static func delete(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("DELETE FROM smart_filters WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("删除智能分类失败", ("error", e.message))
-                    return false
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return false
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM smart_filters WHERE id = $1", [DbInt(id)])
+            return true
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("删除智能分类失败", ("error", e.message))
+            return false
         }
     }
 
@@ -270,32 +140,16 @@ public class SmartFilterDao {
      * 批量更新排序顺序
      */
     public static func batchUpdateSortOrder(orders: Array<(Int64, Int32)>): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    for ((id, sortOrder) in orders) {
-                        let stmt = conn.prepareStatement(
-                            "UPDATE smart_filters SET sort_order_num = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                        try {
-                            stmt.set(0, sortOrder)
-                            stmt.set(1, id)
-                            stmt.update()
-                        } finally {
-                            stmt.close()
-                        }
-                    }
-                    return true
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("批量更新排序顺序失败", ("error", e.message))
-                    return false
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return false
+        try {
+            for ((id, sortOrder) in orders) {
+                DatabaseConfig.driver().exec(
+                    "UPDATE smart_filters SET sort_order_num = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+                    [DbInt(Int64(sortOrder)), DbInt(id)])
+            }
+            return true
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("批量更新排序顺序失败", ("error", e.message))
+            return false
         }
     }
 
@@ -303,52 +157,43 @@ public class SmartFilterDao {
      * 切换启用状态
      */
     public static func toggleEnabled(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement(
-                        "UPDATE smart_filters SET enabled = NOT enabled, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("smart_filter_dao").error("切换智能分类状态失败", ("error", e.message))
-                    return false
-                } finally {
-                    conn.close()
-                }
-            case None =>
-                getLogger("smart_filter_dao").error("无法连接到数据库")
-                return false
+        try {
+            DatabaseConfig.driver().exec(
+                "UPDATE smart_filters SET enabled = NOT enabled, updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+                [DbInt(id)])
+            return true
+        } catch (e: Exception) {
+            getLogger("smart_filter_dao").error("切换智能分类状态失败", ("error", e.message))
+            return false
         }
     }
 
     /**
-     * 从 ResultSet 读取智能分类数据
+     * 从 Row 读取智能分类数据
      */
-    private static func readFilterFromResultSet(rs: QueryResult): SmartFilterData {
+    private static func readFilterFromRow(r: Row): SmartFilterData {
         let filter = SmartFilterData()
-        filter.id = rs.getOrNull<Int64>(0) ?? 0
-        filter.name = rs.getOrNull<String>(1) ?? ""
-        filter.translations = rs.getOrNull<String>(2) ?? "{}"
-        filter.icon = rs.getOrNull<String>(3) ?? ""
-        filter.query = rs.getOrNull<String>(4) ?? ""
-        filter.sort_by = rs.getOrNull<String>(5) ?? ""
-        filter.sort_order = rs.getOrNull<String>(6) ?? "desc"
-        filter.date_from = rs.getOrNull<String>(7) ?? ""
-        filter.date_to = rs.getOrNull<String>(8) ?? ""
-        filter.newonly = rs.getOrNull<Bool>(9) ?? false
-        filter.untaggedonly = rs.getOrNull<Bool>(10) ?? false
-        filter.sort_order_num = rs.getOrNull<Int32>(11) ?? 0
-        filter.enabled = rs.getOrNull<Bool>(12) ?? true
-        filter.created_at = rs.getOrNull<String>(13) ?? ""
-        filter.updated_at = rs.getOrNull<String>(14) ?? ""
+        filter.id = r.getInt("id")
+        filter.name = r.getText("name")
+        filter.translations = r.getJson("translations")
+        if (filter.translations.size == 0) {
+            filter.translations = "{}"
+        }
+        filter.icon = r.getText("icon")
+        filter.query = r.getText("query")
+        filter.sort_by = r.getText("sort_by")
+        filter.sort_order = r.getText("sort_order")
+        if (filter.sort_order.size == 0) {
+            filter.sort_order = "desc"
+        }
+        filter.date_from = r.getText("date_from")
+        filter.date_to = r.getText("date_to")
+        filter.newonly = r.getBool("newonly")
+        filter.untaggedonly = r.getBool("untaggedonly")
+        filter.sort_order_num = Int32(r.getInt("sort_order_num"))
+        filter.enabled = r.getBool("enabled")
+        filter.created_at = r.getText("created_at")
+        filter.updated_at = r.getText("updated_at")
         return filter
     }
 }

@@ -1,10 +1,11 @@
 package lanlu.contexts.recommendation.infrastructure.persistence
 
+import ace_orm.*
 import std.collection.*
-import std.database.sql.*
 import lanlu.contexts.recommendation.domain.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import stdx.log.*
 
 public class RecommendationArchiveCandidateRow {
     public var arcid: String = ""
@@ -83,47 +84,47 @@ public class RecommendationImpressionWriteRow {
 public class RecommendationDao {
     private static let logger = getLogger("recommendation_dao")
 
-    private static func mapArchiveCandidateRow(rs: QueryResult): RecommendationArchiveCandidateRow {
+    private static func mapArchiveCandidateRow(r: Row): RecommendationArchiveCandidateRow {
         let row = RecommendationArchiveCandidateRow()
-        row.arcid = rs.getOrNull<String>(0) ?? ""
-        row.archiveInternalId = rs.getOrNull<Int64>(1) ?? 0
-        row.categoryId = rs.getOrNull<Int64>(2) ?? 0
-        row.title = rs.getOrNull<String>(3) ?? ""
-        row.filename = rs.getOrNull<String>(4) ?? ""
-        row.summary = rs.getOrNull<String>(5) ?? ""
-        row.tags = rs.getOrNull<String>(6) ?? ""
-        row.pagecount = rs.getOrNull<Int32>(7) ?? 0
-        row.coverAssetId = rs.getOrNull<Int64>(8) ?? 0
-        row.createdAt = rs.getOrNull<String>(9) ?? ""
-        row.updatedAt = rs.getOrNull<String>(10) ?? ""
-        row.releaseAt = rs.getOrNull<String>(11) ?? ""
-        row.overlapCount = rs.getOrNull<Int32>(12) ?? 0
+        row.arcid = r.getText("arcid")
+        row.archiveInternalId = r.getInt("id")
+        row.categoryId = r.getInt("category_id")
+        row.title = r.getText("title")
+        row.filename = r.getText("filename")
+        row.summary = r.getText("summary")
+        row.tags = r.getText("tags")
+        row.pagecount = Int32(r.getInt("pagecount"))
+        row.coverAssetId = r.getInt("cover_asset_id")
+        row.createdAt = r.getText("created_at")
+        row.updatedAt = r.getText("updated_at")
+        row.releaseAt = r.getText("release_at")
+        row.overlapCount = Int32(r.getInt("overlap_count"))
         return row
     }
 
-    private static func mapTankoubonCandidateRow(rs: QueryResult): RecommendationTankoubonCandidateRow {
+    private static func mapTankoubonCandidateRow(r: Row): RecommendationTankoubonCandidateRow {
         let row = RecommendationTankoubonCandidateRow()
-        row.tankoubonId = rs.getOrNull<String>(0) ?? ""
-        row.title = rs.getOrNull<String>(1) ?? ""
-        row.summary = rs.getOrNull<String>(2) ?? ""
-        row.tags = rs.getOrNull<String>(3) ?? ""
-        row.pagecount = rs.getOrNull<Int32>(4) ?? 0
-        row.archiveCount = rs.getOrNull<Int32>(5) ?? 0
-        row.coverAssetId = rs.getOrNull<Int64>(6) ?? 0
-        row.assetsRaw = rs.getOrNull<String>(7) ?? "{}"
-        row.categoryId = rs.getOrNull<Int64>(8) ?? 0
-        row.createdAt = rs.getOrNull<String>(9) ?? ""
-        row.updatedAt = rs.getOrNull<String>(10) ?? ""
-        row.releaseAt = rs.getOrNull<String>(11) ?? ""
-        row.overlapCount = rs.getOrNull<Int32>(12) ?? 0
+        row.tankoubonId = r.getText("tankoubon_id")
+        row.title = r.getText("title")
+        row.summary = r.getText("summary")
+        row.tags = r.getText("tags")
+        row.pagecount = Int32(r.getInt("pagecount"))
+        row.archiveCount = Int32(r.getInt("archive_count"))
+        row.coverAssetId = r.getInt("cover_asset_id")
+        row.assetsRaw = r.getText("assets_raw")
+        row.categoryId = r.getInt("category_id")
+        row.createdAt = r.getText("created_at")
+        row.updatedAt = r.getText("updated_at")
+        row.releaseAt = r.getText("release_at")
+        row.overlapCount = Int32(r.getInt("overlap_count"))
         return row
     }
 
-    private static func buildInClause(values: Array<String>): String {
+    private static func buildInClause(values: Array<String>, start: Int64): String {
         var placeholders = ""
         for (i in 0..values.size) {
             if (i > 0) { placeholders += "," }
-            placeholders += "?"
+            placeholders += "$${start + Int64(i)}"
         }
         return placeholders
     }
@@ -136,91 +137,60 @@ public class RecommendationDao {
         lookbackHours: Int32
     ): HashSet<String> {
         let result = HashSet<String>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result
-            case Some(conn) =>
-                try {
-                    var sql = """
-                        SELECT item_id
-                        FROM recommendation_impressions
-                        WHERE scene = ? AND item_type = ?
-                          AND shown_at > CURRENT_TIMESTAMP - INTERVAL '${lookbackHours} hours'
-                    """
-                    let normalizedSession = sessionKey.trimAscii()
-                    if (userId > 0) {
-                        sql += " AND user_id = ?"
-                    } else if (normalizedSession.size > 0) {
-                        sql += " AND session_key = ?"
-                    } else {
-                        return result
-                    }
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, scene)
-                        stmt.set(1, itemType)
-                        if (userId > 0) {
-                            stmt.set(2, userId)
-                        } else {
-                            stmt.set(2, normalizedSession)
-                        }
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let itemId = (rs.getOrNull<String>(0) ?? "").trimAscii()
-                                if (itemId.size > 0) {
-                                    result.add(itemId)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取最近推荐曝光失败", ("scene", scene), ("itemType", itemType), ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+        try {
+            var sql = """
+                SELECT item_id
+                FROM recommendation_impressions
+                WHERE scene = $1 AND item_type = $2
+                  AND shown_at > CURRENT_TIMESTAMP - ($3 * INTERVAL '1 hour')
+            """
+            let normalizedSession = sessionKey.trimAscii()
+            let params = ArrayList<DbValue>()
+            params.add(DbText(scene))
+            params.add(DbText(itemType))
+            params.add(DbInt(Int64(lookbackHours)))
+            if (userId > 0) {
+                sql += " AND user_id = $4"
+                params.add(DbInt(userId))
+            } else if (normalizedSession.size > 0) {
+                sql += " AND session_key = $4"
+                params.add(DbText(normalizedSession))
+            } else {
+                return result
+            }
+            let rows = DatabaseConfig.driver().query(sql, params.toArray())
+            for (r in rows) {
+                let itemId = r.getText("item_id").trimAscii()
+                if (itemId.size > 0) {
+                    result.add(itemId)
                 }
+            }
+        } catch (e: Exception) {
+            logger.error("获取最近推荐曝光失败", ("scene", scene), ("itemType", itemType), ("error", e.message))
         }
         return result
     }
 
     public static func clearImpressions(userId: Int64, sessionKey: String, scene: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    var sql = "DELETE FROM recommendation_impressions WHERE scene = ?"
-                    let normalizedSession = sessionKey.trimAscii()
-                    if (userId > 0) {
-                        sql += " AND user_id = ?"
-                    } else if (normalizedSession.size > 0) {
-                        sql += " AND session_key = ?"
-                    } else {
-                        return false
-                    }
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, scene)
-                        if (userId > 0) {
-                            stmt.set(1, userId)
-                        } else {
-                            stmt.set(1, normalizedSession)
-                        }
-                        let result = stmt.update()
-                        return result.rowCount >= 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("清理推荐曝光失败", ("scene", scene), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            var sql = "DELETE FROM recommendation_impressions WHERE scene = $1"
+            let normalizedSession = sessionKey.trimAscii()
+            let params = ArrayList<DbValue>()
+            params.add(DbText(scene))
+            if (userId > 0) {
+                sql += " AND user_id = $2"
+                params.add(DbInt(userId))
+            } else if (normalizedSession.size > 0) {
+                sql += " AND session_key = $2"
+                params.add(DbText(normalizedSession))
+            } else {
+                return false
+            }
+            DatabaseConfig.driver().exec(sql, params.toArray())
+            return true
+        } catch (e: Exception) {
+            logger.error("清理推荐曝光失败", ("scene", scene), ("error", e.message))
+            return false
         }
     }
 
@@ -230,62 +200,43 @@ public class RecommendationDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT tag, SUM(weight)::INT AS total_weight
-                        FROM (
-                            SELECT mt.tag AS tag, 2 AS weight
-                            FROM user_archive_status uas
-                            JOIN archives a ON a.id = uas.archive_id
-                            JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
-                            JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                            WHERE uas.user_id = ?
-                              AND uas.updated_at > CURRENT_TIMESTAMP - INTERVAL '30 days'
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT tag, SUM(weight)::INT AS total_weight
+                FROM (
+                    SELECT mt.tag AS tag, 2 AS weight
+                    FROM user_archive_status uas
+                    JOIN archives a ON a.id = uas.archive_id
+                    JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+                    JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                    WHERE uas.user_id = $1
+                      AND uas.updated_at > CURRENT_TIMESTAMP - INTERVAL '30 days'
 
-                            UNION ALL
+                    UNION ALL
 
-                            SELECT mt.tag AS tag, 3 AS weight
-                            FROM user_favorites uf
-                            JOIN archives a ON a.id = uf.archive_id
-                            JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
-                            JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                            WHERE uf.user_id = ?
-                              AND uf.created_at > CURRENT_TIMESTAMP - INTERVAL '90 days'
-                        ) tag_weights
-                        GROUP BY tag
-                        ORDER BY total_weight DESC, tag
-                        LIMIT ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, userId)
-                        stmt.set(2, limit)
-                        let rs = stmt.query()
-                        try {
-                            let ordered = ArrayList<String>()
-                            while (rs.next()) {
-                                let tag = (rs.getOrNull<String>(0) ?? "").trimAscii()
-                                let weight = rs.getOrNull<Int32>(1) ?? 0
-                                if (tag.size == 0 || weight <= 0) { continue }
-                                ordered.add(tag)
-                                result.weights[tag] = weight
-                            }
-                            result.orderedTags = ordered.toArray()
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取用户推荐标签画像失败", ("userId", userId.toString()), ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+                    SELECT mt.tag AS tag, 3 AS weight
+                    FROM user_favorites uf
+                    JOIN archives a ON a.id = uf.archive_id
+                    JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+                    JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                    WHERE uf.user_id = $2
+                      AND uf.created_at > CURRENT_TIMESTAMP - INTERVAL '90 days'
+                ) tag_weights
+                GROUP BY tag
+                ORDER BY total_weight DESC, tag
+                LIMIT $3
+            """, [DbInt(userId), DbInt(userId), DbInt(Int64(limit))])
+            let ordered = ArrayList<String>()
+            for (r in rows) {
+                let tag = r.getText("tag").trimAscii()
+                let weight = Int32(r.getInt("total_weight"))
+                if (tag.size == 0 || weight <= 0) { continue }
+                ordered.add(tag)
+                result.weights[tag] = weight
+            }
+            result.orderedTags = ordered.toArray()
+        } catch (e: Exception) {
+            logger.error("获取用户推荐标签画像失败", ("userId", userId.toString()), ("error", e.message))
         }
 
         return result
@@ -293,75 +244,56 @@ public class RecommendationDao {
 
     public static func getDiscoverRandomArchiveCandidates(categoryId: Int64, userId: Int64, limit: Int32): Array<RecommendationArchiveCandidateRow> {
         let result = ArrayList<RecommendationArchiveCandidateRow>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result.toArray()
-            case Some(conn) =>
-                try {
-                    var sql = """
-                        SELECT
-                            aws.arcid,
-                            aws.id,
-                            aws.category_id,
-                            aws.title,
-                            aws.filename,
-                            aws.summary,
-                            aws.tags,
-                            aws.pagecount,
-                            aws.cover_asset_id,
-                            COALESCE(aws.created_at::TEXT, ''),
-                            COALESCE(aws.updated_at::TEXT, ''),
-                            COALESCE(aws.release_at::TEXT, ''),
-                            0::INT AS overlap_count
-                        FROM archive_metadata_search aws
-                        WHERE EXISTS (
-                            SELECT 1 FROM categories c
-                            WHERE c.id = aws.category_id AND c.enabled = true
-                        )
-                    """
-                    if (categoryId > 0) {
-                        sql += " AND aws.category_id = ?"
-                    }
-                    if (userId > 0) {
-                        sql += """
-                             AND NOT EXISTS (
-                                SELECT 1
-                                FROM user_archive_status uas
-                                WHERE uas.user_id = ?
-                                  AND uas.archive_id = aws.id
-                                  AND uas.is_new = false
-                             )
-                        """
-                    }
-                    sql += " ORDER BY RANDOM() LIMIT ?"
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        var index = 0
-                        if (categoryId > 0) {
-                            stmt.set(index, categoryId)
-                            index += 1
-                        }
-                        if (userId > 0) {
-                            stmt.set(index, userId)
-                            index += 1
-                        }
-                        stmt.set(index, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                result.add(mapArchiveCandidateRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取 discover 随机候选失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            var sql = """
+                SELECT
+                    aws.arcid,
+                    aws.id,
+                    aws.category_id,
+                    aws.title,
+                    aws.filename,
+                    aws.summary,
+                    aws.tags,
+                    aws.pagecount,
+                    aws.cover_asset_id,
+                    COALESCE(aws.created_at::TEXT, ''),
+                    COALESCE(aws.updated_at::TEXT, ''),
+                    COALESCE(aws.release_at::TEXT, ''),
+                    0::INT AS overlap_count
+                FROM archive_metadata_search aws
+                WHERE EXISTS (
+                    SELECT 1 FROM categories c
+                    WHERE c.id = aws.category_id AND c.enabled = true
+                )
+            """
+            let params = ArrayList<DbValue>()
+            var idx = Int64(1)
+            if (categoryId > 0) {
+                sql += " AND aws.category_id = $${idx}"
+                params.add(DbInt(categoryId))
+                idx += 1
+            }
+            if (userId > 0) {
+                sql += """
+                     AND NOT EXISTS (
+                        SELECT 1
+                        FROM user_archive_status uas
+                        WHERE uas.user_id = $${idx}
+                          AND uas.archive_id = aws.id
+                          AND uas.is_new = false
+                     )
+                """
+                params.add(DbInt(userId))
+                idx += 1
+            }
+            sql += " ORDER BY RANDOM() LIMIT $${idx}"
+            params.add(DbInt(Int64(limit)))
+            let rows = DatabaseConfig.driver().query(sql, params.toArray())
+            for (r in rows) {
+                result.add(mapArchiveCandidateRow(r))
+            }
+        } catch (e: Exception) {
+            logger.error("获取 discover 随机候选失败", ("error", e.message))
         }
         return result.toArray()
     }
@@ -370,71 +302,53 @@ public class RecommendationDao {
         let result = ArrayList<RecommendationArchiveCandidateRow>()
         if (tags.size == 0) { return result.toArray() }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result.toArray()
-            case Some(conn) =>
-                try {
-                    let tagInClause = buildInClause(tags)
-                    var sql = """
-                        SELECT
-                            aws.arcid,
-                            aws.id,
-                            aws.category_id,
-                            aws.title,
-                            aws.filename,
-                            aws.summary,
-                            aws.tags,
-                            aws.pagecount,
-                            aws.cover_asset_id,
-                            COALESCE(aws.created_at::TEXT, ''),
-                            COALESCE(aws.updated_at::TEXT, ''),
-                            COALESCE(aws.release_at::TEXT, ''),
-                            COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
-                        JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
-                        JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                        WHERE mt.tag IN (${tagInClause})
-                    """
-                    if (categoryId > 0) {
-                        sql += " AND aws.category_id = ?"
-                    }
-                    sql += """
-                        GROUP BY
-                            aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
-                            aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
-                            aws.created_at, aws.updated_at, aws.release_at
-                        ORDER BY overlap_count DESC, aws.updated_at DESC
-                        LIMIT ?
-                    """
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        var index = 0
-                        for (tag in tags) {
-                            stmt.set(index, tag)
-                            index += 1
-                        }
-                        if (categoryId > 0) {
-                            stmt.set(index, categoryId)
-                            index += 1
-                        }
-                        stmt.set(index, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                result.add(mapArchiveCandidateRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取 discover 标签候选失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            let tagInClause = buildInClause(tags, 1)
+            var sql = """
+                SELECT
+                    aws.arcid,
+                    aws.id,
+                    aws.category_id,
+                    aws.title,
+                    aws.filename,
+                    aws.summary,
+                    aws.tags,
+                    aws.pagecount,
+                    aws.cover_asset_id,
+                    COALESCE(aws.created_at::TEXT, ''),
+                    COALESCE(aws.updated_at::TEXT, ''),
+                    COALESCE(aws.release_at::TEXT, ''),
+                    COUNT(DISTINCT mt.tag)::INT AS overlap_count
+                FROM archive_metadata_search aws
+                JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
+                JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                WHERE mt.tag IN (${tagInClause})
+            """
+            let params = ArrayList<DbValue>()
+            for (tag in tags) {
+                params.add(DbText(tag))
+            }
+            var idx = Int64(tags.size) + 1
+            if (categoryId > 0) {
+                sql += " AND aws.category_id = $${idx}"
+                params.add(DbInt(categoryId))
+                idx += 1
+            }
+            sql += """
+                GROUP BY
+                    aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
+                    aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
+                    aws.created_at, aws.updated_at, aws.release_at
+                ORDER BY overlap_count DESC, aws.updated_at DESC
+                LIMIT $${idx}
+            """
+            params.add(DbInt(Int64(limit)))
+            let rows = DatabaseConfig.driver().query(sql, params.toArray())
+            for (r in rows) {
+                result.add(mapArchiveCandidateRow(r))
+            }
+        } catch (e: Exception) {
+            logger.error("获取 discover 标签候选失败", ("error", e.message))
         }
         return result.toArray()
     }
@@ -444,79 +358,59 @@ public class RecommendationDao {
         let normalizedSeed = seedArchiveId.trimAscii()
         if (normalizedSeed.size == 0) { return result.toArray() }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result.toArray()
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        WITH seed AS (
-                            SELECT aws.arcid, aws.category_id
-                            FROM archive_metadata_search aws
-                            WHERE aws.arcid = ?
-                        ),
-                        seed_tags AS (
-                            SELECT DISTINCT mt.tag
-                            FROM metadata_objects mo
-                            JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                            WHERE mo.entity_type = 'archive' AND mo.entity_id = ?
-                        )
-                        SELECT
-                            aws.arcid,
-                            aws.id,
-                            aws.category_id,
-                            aws.title,
-                            aws.filename,
-                            aws.summary,
-                            aws.tags,
-                            aws.pagecount,
-                            aws.cover_asset_id,
-                            COALESCE(aws.created_at::TEXT, ''),
-                            COALESCE(aws.updated_at::TEXT, ''),
-                            COALESCE(aws.release_at::TEXT, ''),
-                            COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
-                        JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
-                        JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                        CROSS JOIN seed s
-                        WHERE aws.arcid <> ?
-                          AND EXISTS (
-                              SELECT 1
-                              FROM seed_tags st
-                              WHERE st.tag = mt.tag
-                          )
-                        GROUP BY
-                            aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
-                            aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
-                            aws.created_at, aws.updated_at, aws.release_at,
-                            s.category_id
-                        ORDER BY
-                            CASE WHEN aws.category_id = s.category_id THEN 1 ELSE 0 END DESC,
-                            overlap_count DESC,
-                            aws.updated_at DESC
-                        LIMIT ?
-                    """)
-                    try {
-                        stmt.set(0, normalizedSeed)
-                        stmt.set(1, normalizedSeed)
-                        stmt.set(2, normalizedSeed)
-                        stmt.set(3, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                result.add(mapArchiveCandidateRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取 archive_related 候选失败", ("seedArchiveId", normalizedSeed), ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                WITH seed AS (
+                    SELECT aws.arcid, aws.category_id
+                    FROM archive_metadata_search aws
+                    WHERE aws.arcid = $1
+                ),
+                seed_tags AS (
+                    SELECT DISTINCT mt.tag
+                    FROM metadata_objects mo
+                    JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                    WHERE mo.entity_type = 'archive' AND mo.entity_id = $2
+                )
+                SELECT
+                    aws.arcid,
+                    aws.id,
+                    aws.category_id,
+                    aws.title,
+                    aws.filename,
+                    aws.summary,
+                    aws.tags,
+                    aws.pagecount,
+                    aws.cover_asset_id,
+                    COALESCE(aws.created_at::TEXT, ''),
+                    COALESCE(aws.updated_at::TEXT, ''),
+                    COALESCE(aws.release_at::TEXT, ''),
+                    COUNT(DISTINCT mt.tag)::INT AS overlap_count
+                FROM archive_metadata_search aws
+                JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
+                JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                CROSS JOIN seed s
+                WHERE aws.arcid <> $3
+                  AND EXISTS (
+                      SELECT 1
+                      FROM seed_tags st
+                      WHERE st.tag = mt.tag
+                  )
+                GROUP BY
+                    aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
+                    aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
+                    aws.created_at, aws.updated_at, aws.release_at,
+                    s.category_id
+                ORDER BY
+                    CASE WHEN aws.category_id = s.category_id THEN 1 ELSE 0 END DESC,
+                    overlap_count DESC,
+                    aws.updated_at DESC
+                LIMIT $4
+            """, [DbText(normalizedSeed), DbText(normalizedSeed), DbText(normalizedSeed), DbInt(Int64(limit))])
+            for (r in rows) {
+                result.add(mapArchiveCandidateRow(r))
+            }
+        } catch (e: Exception) {
+            logger.error("获取 archive_related 候选失败", ("seedArchiveId", normalizedSeed), ("error", e.message))
         }
         return result.toArray()
     }
@@ -524,57 +418,39 @@ public class RecommendationDao {
     public static func getTagBasedCandidates(tags: Array<String>, limit: Int32): Array<RecommendationArchiveCandidateRow> {
         let result = ArrayList<RecommendationArchiveCandidateRow>()
         if (tags.size == 0 || limit <= 0) { return result.toArray() }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result.toArray()
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT
-                            aws.arcid,
-                            aws.id,
-                            aws.category_id,
-                            aws.title,
-                            aws.filename,
-                            aws.summary,
-                            aws.tags,
-                            aws.pagecount,
-                            aws.cover_asset_id,
-                            COALESCE(aws.created_at::TEXT, ''),
-                            COALESCE(aws.updated_at::TEXT, ''),
-                            COALESCE(aws.release_at::TEXT, ''),
-                            COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
-                        JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
-                        JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                        WHERE mt.tag = ANY(?::text[])
-                        GROUP BY
-                            aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
-                            aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
-                            aws.created_at, aws.updated_at, aws.release_at
-                        ORDER BY overlap_count DESC, aws.updated_at DESC
-                        LIMIT ?
-                    """)
-                    try {
-                        DatabaseConfig.setTextArray(stmt, 0, tags)
-                        stmt.set(1, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                result.add(mapArchiveCandidateRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    let logger = getLogger("recommendation_dao")
-                    logger.error("获取 tag-based 候选失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT
+                    aws.arcid,
+                    aws.id,
+                    aws.category_id,
+                    aws.title,
+                    aws.filename,
+                    aws.summary,
+                    aws.tags,
+                    aws.pagecount,
+                    aws.cover_asset_id,
+                    COALESCE(aws.created_at::TEXT, ''),
+                    COALESCE(aws.updated_at::TEXT, ''),
+                    COALESCE(aws.release_at::TEXT, ''),
+                    COUNT(DISTINCT mt.tag)::INT AS overlap_count
+                FROM archive_metadata_search aws
+                JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
+                JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                WHERE mt.tag = ANY($1::text[])
+                GROUP BY
+                    aws.arcid, aws.id, aws.category_id, aws.title, aws.filename,
+                    aws.summary, aws.tags, aws.pagecount, aws.cover_asset_id,
+                    aws.created_at, aws.updated_at, aws.release_at
+                ORDER BY overlap_count DESC, aws.updated_at DESC
+                LIMIT $2
+            """, [DbArray(Array<DbValue>(tags.size, { k => DbText(tags[k]) })), DbInt(Int64(limit))])
+            for (r in rows) {
+                result.add(mapArchiveCandidateRow(r))
+            }
+        } catch (e: Exception) {
+            let logger = getLogger("recommendation_dao")
+            logger.error("获取 tag-based 候选失败", ("error", e.message))
         }
         return result.toArray()
     }
@@ -583,30 +459,27 @@ public class RecommendationDao {
         let result = HashMap<String, String>()
         if (archiveIds.size == 0) { return result }
 
-        let _ = DatabaseConfig.withPooledConnection<Bool>("recommendation_dao", "获取归档主合集映射失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT DISTINCT ON (a.arcid)
                     a.arcid,
                     t.tankoubon_id
                 FROM archives a
                 JOIN tankoubon_archives ta ON ta.archive_id = a.id
                 JOIN tankoubons t ON t.id = ta.tankoubon_id
-                WHERE a.arcid = ANY(?::text[])
+                WHERE a.arcid = ANY($1::text[])
                 ORDER BY a.arcid, ta.sort_order, ta.id, t.id
-            """, { stmt =>
-                DatabaseConfig.setTextArray(stmt, 0, archiveIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let arcid = (rs.getOrNull<String>(0) ?? "").trimAscii()
-                        let tankoubonId = (rs.getOrNull<String>(1) ?? "").trimAscii()
-                        if (arcid.size > 0 && tankoubonId.size > 0) {
-                            result[arcid] = tankoubonId
-                        }
-                    }
-                    return true
-                })
-            })
-        })
+            """, [DbArray(Array<DbValue>(archiveIds.size, { k => DbText(archiveIds[k]) }))])
+            for (r in rows) {
+                let arcid = r.getText("arcid").trimAscii()
+                let tankoubonId = r.getText("tankoubon_id").trimAscii()
+                if (arcid.size > 0 && tankoubonId.size > 0) {
+                    result[arcid] = tankoubonId
+                }
+            }
+        } catch (e: Exception) {
+            getLogger("recommendation_dao").error("获取归档主合集映射失败", ("error", e.message))
+        }
         return result
     }
 
@@ -615,121 +488,91 @@ public class RecommendationDao {
         let normalizedSeed = seedTankoubonId.trimAscii()
         if (normalizedSeed.size == 0) { return result.toArray() }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return result.toArray()
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        WITH seed_tags AS (
-                            SELECT DISTINCT mt.tag
-                            FROM metadata_objects mo
-                            JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                            WHERE mo.entity_type = 'tankoubon' AND mo.entity_id = ?
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                WITH seed_tags AS (
+                    SELECT DISTINCT mt.tag
+                    FROM metadata_objects mo
+                    JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                    WHERE mo.entity_type = 'tankoubon' AND mo.entity_id = $1
 
-                            UNION
+                    UNION
 
-                            SELECT DISTINCT mt.tag
-                            FROM tankoubons t
-                            JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
-                            JOIN archives a ON a.id = ta.archive_id
-                            JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
-                            JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                            WHERE t.tankoubon_id = ?
-                        ),
-                        candidate_tags AS (
-                            SELECT
-                                t.tankoubon_id,
-                                COALESCE(string_agg(DISTINCT mt.tag, ','), '') AS tags,
-                                COUNT(DISTINCT CASE WHEN mt.tag IN (SELECT tag FROM seed_tags) THEN mt.tag END)::INT AS overlap_count,
-                                MIN(a.category_id) AS category_id
-                            FROM tankoubons t
-                            JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
-                            JOIN archives a ON a.id = ta.archive_id
-                            LEFT JOIN metadata_objects mo_archive ON mo_archive.entity_type = 'archive' AND mo_archive.entity_id = a.arcid
-                            LEFT JOIN metadata_tags mt ON mt.metadata_id = mo_archive.id
-                            WHERE t.tankoubon_id <> ?
-                            GROUP BY t.tankoubon_id
-                        )
-                        SELECT
-                            t.tankoubon_id,
-                            COALESCE(mo.title, '') AS title,
-                            COALESCE(mo.description, '') AS summary,
-                            COALESCE(ct.tags, '') AS tags,
-                            COALESCE(SUM(a.pagecount), 0)::INT AS pagecount,
-                            COUNT(a.id)::INT AS archive_count,
-                            COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id,
+                    SELECT DISTINCT mt.tag
+                    FROM tankoubons t
+                    JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
+                    JOIN archives a ON a.id = ta.archive_id
+                    JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+                    JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                    WHERE t.tankoubon_id = $2
+                ),
+                candidate_tags AS (
+                    SELECT
+                        t.tankoubon_id,
+                        COALESCE(string_agg(DISTINCT mt.tag, ','), '') AS tags,
+                        COUNT(DISTINCT CASE WHEN mt.tag IN (SELECT tag FROM seed_tags) THEN mt.tag END)::INT AS overlap_count,
+                        MIN(a.category_id) AS category_id
+                    FROM tankoubons t
+                    JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
+                    JOIN archives a ON a.id = ta.archive_id
+                    LEFT JOIN metadata_objects mo_archive ON mo_archive.entity_type = 'archive' AND mo_archive.entity_id = a.arcid
+                    LEFT JOIN metadata_tags mt ON mt.metadata_id = mo_archive.id
+                    WHERE t.tankoubon_id <> $3
+                    GROUP BY t.tankoubon_id
+                )
+                SELECT
+                    t.tankoubon_id,
+                    COALESCE(mo.title, '') AS title,
+                    COALESCE(mo.description, '') AS summary,
+                    COALESCE(ct.tags, '') AS tags,
+                    COALESCE(SUM(a.pagecount), 0)::INT AS pagecount,
+                    COUNT(a.id)::INT AS archive_count,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id,
+                    COALESCE(
+                        CAST(
                             COALESCE(
-                                CAST(
-                                    COALESCE(
-                                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
-                                            FILTER (WHERE ma.asset_id > 0),
-                                        '{}'::jsonb
-                                    ) AS TEXT
-                                ),
-                                '{}'
-                            ) AS assets_raw,
-                            COALESCE(ct.category_id, 0) AS category_id,
-                            COALESCE(mo.created_at::TEXT, '') AS created_at,
-                            COALESCE(mo.updated_at::TEXT, '') AS updated_at,
-                            COALESCE(mo.release_at::TEXT, '') AS release_at,
-                            COALESCE(ct.overlap_count, 0) AS overlap_count
-                        FROM tankoubons t
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
-                        JOIN archives a ON a.id = ta.archive_id
-                        LEFT JOIN metadata_assets ma ON ma.metadata_id = mo.id
-                        JOIN candidate_tags ct ON ct.tankoubon_id = t.tankoubon_id
-                        WHERE t.tankoubon_id <> ?
-                          AND ct.overlap_count > 0
-                        GROUP BY
-                            t.tankoubon_id, mo.title, mo.description, ct.tags, ct.category_id,
-                            mo.created_at, mo.updated_at, mo.release_at, ct.overlap_count
-                        ORDER BY ct.overlap_count DESC, mo.updated_at DESC
-                        LIMIT ?
-                    """)
-                    try {
-                        stmt.set(0, normalizedSeed)
-                        stmt.set(1, normalizedSeed)
-                        stmt.set(2, normalizedSeed)
-                        stmt.set(3, normalizedSeed)
-                        stmt.set(4, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                result.add(mapTankoubonCandidateRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("获取 tankoubon_related 候选失败", ("seedTankoubonId", normalizedSeed), ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+                                jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                                    FILTER (WHERE ma.asset_id > 0),
+                                '{}'::jsonb
+                            ) AS TEXT
+                        ),
+                        '{}'
+                    ) AS assets_raw,
+                    COALESCE(ct.category_id, 0) AS category_id,
+                    COALESCE(mo.created_at::TEXT, '') AS created_at,
+                    COALESCE(mo.updated_at::TEXT, '') AS updated_at,
+                    COALESCE(mo.release_at::TEXT, '') AS release_at,
+                    COALESCE(ct.overlap_count, 0) AS overlap_count
+                FROM tankoubons t
+                LEFT JOIN metadata_objects mo
+                       ON mo.entity_type = 'tankoubon'
+                      AND mo.entity_id = t.tankoubon_id
+                JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
+                JOIN archives a ON a.id = ta.archive_id
+                LEFT JOIN metadata_assets ma ON ma.metadata_id = mo.id
+                JOIN candidate_tags ct ON ct.tankoubon_id = t.tankoubon_id
+                WHERE t.tankoubon_id <> $4
+                  AND ct.overlap_count > 0
+                GROUP BY
+                    t.tankoubon_id, mo.title, mo.description, ct.tags, ct.category_id,
+                    mo.created_at, mo.updated_at, mo.release_at, ct.overlap_count
+                ORDER BY ct.overlap_count DESC, mo.updated_at DESC
+                LIMIT $5
+            """, [DbText(normalizedSeed), DbText(normalizedSeed), DbText(normalizedSeed), DbText(normalizedSeed), DbInt(Int64(limit))])
+            for (r in rows) {
+                result.add(mapTankoubonCandidateRow(r))
+            }
+        } catch (e: Exception) {
+            logger.error("获取 tankoubon_related 候选失败", ("seedTankoubonId", normalizedSeed), ("error", e.message))
         }
         return result.toArray()
     }
 
     public static func insertImpressions(rows: Array<RecommendationImpressionWriteRow>): Bool {
         if (rows.size == 0) { return true }
-        let binds = ArrayList<(Statement) -> Unit>()
+        let binds = ArrayList<Array<DbValue>>()
         for (row in rows) {
-            binds.add({ stmt =>
-                stmt.set(0, row.userId)
-                stmt.set(1, row.sessionKey)
-                stmt.set(2, row.scene)
-                stmt.set(3, row.seedEntityType)
-                stmt.set(4, row.seedEntityId)
-                stmt.set(5, row.itemType)
-                stmt.set(6, row.itemId)
-                stmt.set(7, row.position)
-            })
+            binds.add([DbInt(row.userId), DbText(row.sessionKey), DbText(row.scene), DbText(row.seedEntityType), DbText(row.seedEntityId), DbText(row.itemType), DbText(row.itemId), DbInt(Int64(row.position))])
         }
         let affected = DatabaseConfig.executeBatch(
             "recommendation_dao",
@@ -739,7 +582,7 @@ public class RecommendationDao {
                     user_id, session_key, scene, seed_entity_type, seed_entity_id,
                     item_type, item_id, position
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
             binds.toArray()
         )
@@ -756,38 +599,18 @@ public class RecommendationDao {
         itemId: String,
         interactionType: String
     ): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO recommendation_interactions (
-                            user_id, session_key, scene, seed_entity_type, seed_entity_id,
-                            item_type, item_id, interaction_type
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, sessionKey)
-                        stmt.set(2, scene)
-                        stmt.set(3, seedEntityType)
-                        stmt.set(4, seedEntityId)
-                        stmt.set(5, itemType)
-                        stmt.set(6, itemId)
-                        stmt.set(7, interactionType)
-                        let _ = stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("写入推荐交互失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        try {
+            DatabaseConfig.driver().exec("""
+                INSERT INTO recommendation_interactions (
+                    user_id, session_key, scene, seed_entity_type, seed_entity_id,
+                    item_type, item_id, interaction_type
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """, [DbInt(userId), DbText(sessionKey), DbText(scene), DbText(seedEntityType), DbText(seedEntityId), DbText(itemType), DbText(itemId), DbText(interactionType)])
+            return true
+        } catch (e: Exception) {
+            logger.error("写入推荐交互失败", ("error", e.message))
+            return false
         }
     }
 }

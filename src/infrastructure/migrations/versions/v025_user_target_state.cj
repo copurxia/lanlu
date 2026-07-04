@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 
 /**
@@ -15,8 +15,8 @@ public class V025_UserTargetState <: Migration {
         return "Create user_target_status and user_target_favorites tables for generalized user-target state persistence"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.createTableIfNotExists(conn, "user_target_status", """
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.createTableIfNotExists(drv, "user_target_status", """
             CREATE TABLE IF NOT EXISTS user_target_status (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -34,7 +34,7 @@ public class V025_UserTargetState <: Migration {
         }
 
         if (!MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_user_target_status_user_type_id",
             "user_target_status",
             "user_id, target_type, target_id"
@@ -42,7 +42,7 @@ public class V025_UserTargetState <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.createTableIfNotExists(conn, "user_target_favorites", """
+        if (!MigrationHelpers.createTableIfNotExists(drv, "user_target_favorites", """
             CREATE TABLE IF NOT EXISTS user_target_favorites (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -56,7 +56,7 @@ public class V025_UserTargetState <: Migration {
         }
 
         if (!MigrationHelpers.createIndexIfNotExists(
-            conn,
+            drv,
             "idx_user_target_favorites_user_type_id",
             "user_target_favorites",
             "user_id, target_type, target_id"

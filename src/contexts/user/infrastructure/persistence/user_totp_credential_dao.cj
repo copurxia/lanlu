@@ -1,6 +1,6 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
 
 public class UserTotpCredentialRow {
@@ -34,38 +34,21 @@ public class UserTotpRecoveryCodeRow {
 
 public class UserTotpCredentialDao {
     public static func findActiveByUserId(userId: Int64): UserTotpCredentialRow {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, user_id, name, secret_b32, secret_hash, digits, period_seconds, algorithm, issuer,
-                               created_at::text, COALESCE(verified_at::text, ''), last_used_step,
-                               COALESCE(revoked_at::text, ''), updated_at::text
-                        FROM user_totp_credentials
-                        WHERE user_id = ? AND revoked_at IS NULL
-                        ORDER BY id DESC
-                        LIMIT 1
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return readCredential(rs)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return UserTotpCredentialRow()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, user_id, name, secret_b32, secret_hash, digits, period_seconds, algorithm, issuer,
+                       created_at::text, COALESCE(verified_at::text, ''), last_used_step,
+                       COALESCE(revoked_at::text, ''), updated_at::text
+                FROM user_totp_credentials
+                WHERE user_id = $1 AND revoked_at IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+            """, [DbInt(userId)])
+            if (rows.size > 0) {
+                return readCredential(rows[0])
+            }
+        } catch (_: Exception) {
+            return UserTotpCredentialRow()
         }
         return UserTotpCredentialRow()
     }
@@ -80,208 +63,100 @@ public class UserTotpCredentialDao {
         algorithm: String,
         issuer: String
     ): Option<Int64> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let revokeStmt = conn.prepareStatement("""
-                        UPDATE user_totp_credentials
-                        SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        revokeStmt.set(0, userId)
-                        revokeStmt.update()
-                    } finally {
-                        revokeStmt.close()
-                    }
+        try {
+            DatabaseConfig.driver().exec("""
+                UPDATE user_totp_credentials
+                SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = $1 AND revoked_at IS NULL
+            """, [DbInt(userId)])
 
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_totp_credentials (
-                            user_id, name, secret_b32, secret_hash, digits, period_seconds, algorithm, issuer, verified_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        RETURNING id
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, normalizeName(name))
-                        stmt.set(2, encryptedSecret)
-                        stmt.set(3, secretHash)
-                        stmt.set(4, digits)
-                        stmt.set(5, periodSeconds)
-                        stmt.set(6, algorithm.trimAscii().toAsciiUpper())
-                        stmt.set(7, issuer.trimAscii())
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let id = rs.getOrNull<Int64>(0) ?? 0
-                                if (id > 0) {
-                                    return Some(id)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO user_totp_credentials (
+                    user_id, name, secret_b32, secret_hash, digits, period_seconds, algorithm, issuer, verified_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+                RETURNING id
+            """, [DbInt(userId), DbText(normalizeName(name)), DbText(encryptedSecret), DbText(secretHash),
+                  DbInt(digits), DbInt(periodSeconds), DbText(algorithm.trimAscii().toAsciiUpper()), DbText(issuer.trimAscii())])
+            if (rows.size > 0) {
+                let id = rows[0].getInt("id")
+                if (id > 0) {
+                    return Some(id)
                 }
-            case None => ()
+            }
+        } catch (_: Exception) {
+            return None
         }
         return None
     }
 
     public static func touchStep(credentialId: Int64, matchedStep: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_totp_credentials
-                        SET last_used_step = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, matchedStep)
-                        stmt.set(1, credentialId)
-                        let updated = stmt.update()
-                        return updated.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let affected = DatabaseConfig.driver().exec("""
+                UPDATE user_totp_credentials
+                SET last_used_step = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND revoked_at IS NULL
+            """, [DbInt(matchedStep), DbInt(credentialId)])
+            return affected > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
     public static func revoke(userId: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_totp_credentials
-                        SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let updated = stmt.update()
-                        return updated.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let affected = DatabaseConfig.driver().exec("""
+                UPDATE user_totp_credentials
+                SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = $1 AND revoked_at IS NULL
+            """, [DbInt(userId)])
+            return affected > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
     public static func replaceRecoveryCodes(credentialId: Int64, codeHashes: Array<String>): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let deleteStmt = conn.prepareStatement("DELETE FROM user_totp_recovery_codes WHERE credential_id = ?")
-                    try {
-                        deleteStmt.set(0, credentialId)
-                        deleteStmt.update()
-                    } finally {
-                        deleteStmt.close()
-                    }
-
-                    for (hash in codeHashes) {
-                        let insertStmt = conn.prepareStatement("""
-                            INSERT INTO user_totp_recovery_codes (credential_id, code_hash)
-                            VALUES (?, ?)
-                        """)
-                        try {
-                            insertStmt.set(0, credentialId)
-                            insertStmt.set(1, hash)
-                            insertStmt.update()
-                        } finally {
-                            insertStmt.close()
-                        }
-                    }
-                    return true
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM user_totp_recovery_codes WHERE credential_id = $1", [DbInt(credentialId)])
+            for (hash in codeHashes) {
+                DatabaseConfig.driver().exec("""
+                    INSERT INTO user_totp_recovery_codes (credential_id, code_hash)
+                    VALUES ($1, $2)
+                """, [DbInt(credentialId), DbText(hash)])
+            }
+            return true
+        } catch (_: Exception) {
+            return false
         }
     }
 
     public static func countUnusedRecoveryCodes(credentialId: Int64): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(*)
-                        FROM user_totp_recovery_codes
-                        WHERE credential_id = ? AND used_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, credentialId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT COUNT(*)
+                FROM user_totp_recovery_codes
+                WHERE credential_id = $1 AND used_at IS NULL
+            """, [DbInt(credentialId)])
+            if (rows.size > 0) {
+                return rows[0].getInt("count")
+            }
+        } catch (_: Exception) {
+            return 0
         }
         return 0
     }
 
     public static func consumeRecoveryCode(credentialId: Int64, codeHash: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_totp_recovery_codes
-                        SET used_at = CURRENT_TIMESTAMP
-                        WHERE credential_id = ? AND code_hash = ? AND used_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, credentialId)
-                        stmt.set(1, codeHash)
-                        let updated = stmt.update()
-                        return updated.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let affected = DatabaseConfig.driver().exec("""
+                UPDATE user_totp_recovery_codes
+                SET used_at = CURRENT_TIMESTAMP
+                WHERE credential_id = $1 AND code_hash = $2 AND used_at IS NULL
+            """, [DbInt(credentialId), DbText(codeHash)])
+            return affected > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -290,22 +165,22 @@ public class UserTotpCredentialDao {
         return if (trimmed.size > 0) { trimmed } else { "Authenticator App" }
     }
 
-    private static func readCredential(rs: QueryResult): UserTotpCredentialRow {
+    private static func readCredential(r: Row): UserTotpCredentialRow {
         let row = UserTotpCredentialRow()
-        row.id = rs.getOrNull<Int64>(0) ?? 0
-        row.userId = rs.getOrNull<Int64>(1) ?? 0
-        row.name = rs.getOrNull<String>(2) ?? ""
-        row.encryptedSecret = rs.getOrNull<String>(3) ?? ""
-        row.secretHash = rs.getOrNull<String>(4) ?? ""
-        row.digits = rs.getOrNull<Int64>(5) ?? 6
-        row.periodSeconds = rs.getOrNull<Int64>(6) ?? 30
-        row.algorithm = rs.getOrNull<String>(7) ?? "SHA1"
-        row.issuer = rs.getOrNull<String>(8) ?? "Lanlu"
-        row.createdAt = rs.getOrNull<String>(9) ?? ""
-        row.verifiedAt = rs.getOrNull<String>(10) ?? ""
-        row.lastUsedStep = rs.getOrNull<Int64>(11) ?? -1
-        row.revokedAt = rs.getOrNull<String>(12) ?? ""
-        row.updatedAt = rs.getOrNull<String>(13) ?? ""
+        row.id = r.getInt("id")
+        row.userId = r.getInt("user_id")
+        row.name = r.getText("name")
+        row.encryptedSecret = r.getText("secret_b32")
+        row.secretHash = r.getText("secret_hash")
+        row.digits = r.getInt("digits")
+        row.periodSeconds = r.getInt("period_seconds")
+        row.algorithm = r.getText("algorithm")
+        row.issuer = r.getText("issuer")
+        row.createdAt = r.getText("created_at")
+        row.verifiedAt = r.getText("verified_at")
+        row.lastUsedStep = r.getInt("last_used_step")
+        row.revokedAt = r.getText("revoked_at")
+        row.updatedAt = r.getText("updated_at")
         return row
     }
 }

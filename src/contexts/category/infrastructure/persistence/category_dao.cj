@@ -1,6 +1,6 @@
 package lanlu.contexts.category.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.kv.*
@@ -57,30 +57,30 @@ public class CategoryDao {
         FROM categories
     """
 
-    private static func readCategoryFromResultSet(rs: QueryResult): CategoryData {
+    private static func readCategoryFromRow(r: Row): CategoryData {
         let cat = CategoryData()
-        cat.id = rs.getOrNull<Int64>(0) ?? 0
-        cat.catid = rs.getOrNull<String>(1) ?? ""
-        cat.name = rs.getOrNull<String>(2) ?? ""
-        cat.scanPath = rs.getOrNull<String>(3) ?? ""
-        cat.description = rs.getOrNull<String>(4) ?? ""
-        cat.icon = rs.getOrNull<String>(5) ?? ""
-        cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
-        cat.enabled = rs.getOrNull<Bool>(7) ?? true
-        cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-        cat.coverAssetId = rs.getOrNull<Int64>(9) ?? 0
-        cat.createdAt = rs.getOrNull<String>(10) ?? ""
-        cat.updatedAt = rs.getOrNull<String>(11) ?? ""
-        cat.archiveCount = rs.getOrNull<Int64>(12) ?? 0
+        cat.id = r.getInt("id")
+        cat.catid = r.getText("catid")
+        cat.name = r.getText("name")
+        cat.scanPath = r.getText("scan_path")
+        cat.description = r.getText("description")
+        cat.icon = r.getText("icon")
+        cat.sortOrder = Int32(r.getInt("sort_order"))
+        cat.enabled = r.getBool("enabled")
+        cat.plugins = r.getText("plugins")
+        cat.coverAssetId = r.getInt("cover_asset_id")
+        cat.createdAt = r.getText("created_at")
+        cat.updatedAt = r.getText("updated_at")
+        cat.archiveCount = r.getInt("archive_count")
         return cat
     }
 
-    private static func readCategoryLiteFromResultSet(rs: QueryResult): CategoryData {
+    private static func readCategoryLiteFromRow(r: Row): CategoryData {
         let cat = CategoryData()
-        cat.id = rs.getOrNull<Int64>(0) ?? 0
-        cat.catid = rs.getOrNull<String>(1) ?? ""
-        cat.scanPath = rs.getOrNull<String>(2) ?? ""
-        cat.plugins = rs.getOrNull<String>(3) ?? "[]"
+        cat.id = r.getInt("id")
+        cat.catid = r.getText("catid")
+        cat.scanPath = r.getText("scan_path")
+        cat.plugins = r.getText("plugins")
         return cat
     }
 
@@ -91,32 +91,16 @@ public class CategoryDao {
         let trimmedCatid = catid.trimAscii()
         if (trimmedCatid.size == 0) { return false }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE categories
-                        SET cover_asset_id = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE catid = ?
-                    """)
-                    try {
-                        stmt.set(0, coverAssetId)
-                        stmt.set(1, trimmedCatid)
-                        let result = stmt.update()
-                        return result.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("更新分类封面资源ID失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return false
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE categories
+                SET cover_asset_id = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE catid = $2
+            """, [DbInt(coverAssetId), DbText(trimmedCatid)])
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新分类封面资源ID失败", ("error", e.message))
+            return false
         }
     }
 
@@ -124,35 +108,16 @@ public class CategoryDao {
      * 获取所有分类
      */
     public static func getAllCategories(): Array<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var categories = ArrayList<CategoryData>()
-                try {
-                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                categories.add(readCategoryFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return categories.toArray()
-                } catch (e: Exception) {
-                    logger.error("查询分类失败", ("error", e.message))
-                    return Array<CategoryData>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return Array<CategoryData>()
+        try {
+            let rows = DatabaseConfig.driver().query("${CATEGORY_SELECT_WITH_COUNT}\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id", [])
+            var categories = ArrayList<CategoryData>()
+            for (r in rows) {
+                categories.add(readCategoryFromRow(r))
+            }
+            return categories.toArray()
+        } catch (e: Exception) {
+            logger.error("查询分类失败", ("error", e.message))
+            return Array<CategoryData>()
         }
     }
 
@@ -160,37 +125,17 @@ public class CategoryDao {
      * 获取启用的分类
      */
     public static func getEnabledCategories(): Array<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var categories = ArrayList<CategoryData>()
-                try {
-                    let stmt = conn.prepareStatement(
-                        "${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.enabled = true\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id"
-                    )
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                categories.add(readCategoryFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return categories.toArray()
-                } catch (e: Exception) {
-                    logger.error("查询启用分类失败", ("error", e.message))
-                    return Array<CategoryData>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return Array<CategoryData>()
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.enabled = true\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id", [])
+            var categories = ArrayList<CategoryData>()
+            for (r in rows) {
+                categories.add(readCategoryFromRow(r))
+            }
+            return categories.toArray()
+        } catch (e: Exception) {
+            logger.error("查询启用分类失败", ("error", e.message))
+            return Array<CategoryData>()
         }
     }
 
@@ -198,35 +143,15 @@ public class CategoryDao {
      * 根据 catid 获取分类
      */
     public static func getCategoryById(catid: String): Option<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.catid = ?\n${CATEGORY_GROUP_BY}")
-                    try {
-                        stmt.set(0, catid)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return Some(readCategoryFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
-                } catch (e: Exception) {
-                    logger.error("查询分类失败", ("error", e.message))
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.catid = $1\n${CATEGORY_GROUP_BY}", [DbText(catid)])
+            if (rows.size > 0) {
+                return Some(readCategoryFromRow(rows[0]))
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("查询分类失败", ("error", e.message))
+            return None
         }
     }
 
@@ -234,35 +159,15 @@ public class CategoryDao {
      * 根据内部 ID 获取分类
      */
     public static func getCategoryByInternalId(id: Int64): Option<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.id = ?\n${CATEGORY_GROUP_BY}")
-                    try {
-                        stmt.set(0, id)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return Some(readCategoryFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
-                } catch (e: Exception) {
-                    logger.error("查询分类失败", ("error", e.message))
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.id = $1\n${CATEGORY_GROUP_BY}", [DbInt(id)])
+            if (rows.size > 0) {
+                return Some(readCategoryFromRow(rows[0]))
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("查询分类失败", ("error", e.message))
+            return None
         }
     }
 
@@ -270,35 +175,15 @@ public class CategoryDao {
      * 根据 catid 获取分类（轻量字段：id/catid/scan_path/plugins）
      */
     public static func getCategoryByIdLite(catid: String): Option<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-
-                try {
-                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_LITE}\nWHERE catid = ?")
-                    try {
-                        stmt.set(0, catid)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return Some(readCategoryLiteFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
-                } catch (e: Exception) {
-                    logger.error("查询分类轻量字段失败", ("error", e.message))
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query("${CATEGORY_SELECT_LITE}\nWHERE catid = $1", [DbText(catid)])
+            if (rows.size > 0) {
+                return Some(readCategoryLiteFromRow(rows[0]))
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("查询分类轻量字段失败", ("error", e.message))
+            return None
         }
     }
 
@@ -306,35 +191,15 @@ public class CategoryDao {
      * 根据内部 ID 获取分类（轻量字段：id/catid/scan_path/plugins）
      */
     public static func getCategoryByInternalIdLite(id: Int64): Option<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-
-                try {
-                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_LITE}\nWHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return Some(readCategoryLiteFromResultSet(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
-                } catch (e: Exception) {
-                    logger.error("查询分类轻量字段失败", ("error", e.message))
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query("${CATEGORY_SELECT_LITE}\nWHERE id = $1", [DbInt(id)])
+            if (rows.size > 0) {
+                return Some(readCategoryLiteFromRow(rows[0]))
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("查询分类轻量字段失败", ("error", e.message))
+            return None
         }
     }
 
@@ -342,51 +207,25 @@ public class CategoryDao {
      * 创建分类
      */
     public static func createCategory(data: CategoryData): Option<CategoryData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO categories (catid, name, scan_path, description, icon, sort_order, enabled, plugins)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        RETURNING id, created_at, updated_at
-                    """)
-                    try {
-                        stmt.set(0, data.catid)
-                        stmt.set(1, data.name)
-                        stmt.set(2, data.scanPath)
-                        stmt.set(3, data.description)
-                        stmt.set(4, data.icon)
-                        stmt.set(5, data.sortOrder)
-                        stmt.set(6, data.enabled)
-                        stmt.set(7, data.plugins)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                data.id = rs.getOrNull<Int64>(0) ?? 0
-                                data.createdAt = rs.getOrNull<String>(1) ?? ""
-                                data.updatedAt = rs.getOrNull<String>(2) ?? ""
-                                data.archiveCount = 0
-                                invalidateArchiveBasePath("categoryCreate:${data.catid}")
-                                return Some(data)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
-                } catch (e: Exception) {
-                    logger.error("创建分类失败", ("error", e.message))
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return None
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO categories (catid, name, scan_path, description, icon, sort_order, enabled, plugins)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, created_at, updated_at
+            """, [DbText(data.catid), DbText(data.name), DbText(data.scanPath), DbText(data.description), DbText(data.icon), DbInt(Int64(data.sortOrder)), DbBool(data.enabled), DbText(data.plugins)])
+            if (rows.size > 0) {
+                let r = rows[0]
+                data.id = r.getInt("id")
+                data.createdAt = r.getText("created_at")
+                data.updatedAt = r.getText("updated_at")
+                data.archiveCount = 0
+                invalidateArchiveBasePath("categoryCreate:${data.catid}")
+                return Some(data)
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("创建分类失败", ("error", e.message))
+            return None
         }
     }
 
@@ -394,43 +233,20 @@ public class CategoryDao {
      * 更新分类
      */
     public static func updateCategory(catid: String, data: CategoryData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE categories
-                        SET name = ?, scan_path = ?, description = ?, icon = ?,
-                            sort_order = ?, enabled = ?, plugins = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE catid = ?
-                    """)
-                    try {
-                        stmt.set(0, data.name)
-                        stmt.set(1, data.scanPath)
-                        stmt.set(2, data.description)
-                        stmt.set(3, data.icon)
-                        stmt.set(4, data.sortOrder)
-                        stmt.set(5, data.enabled)
-                        stmt.set(6, data.plugins)
-                        stmt.set(7, catid)
-                        let result = stmt.update()
-                        if (result.rowCount > 0) {
-                            invalidateArchiveBasePath("categoryUpdate:${catid}")
-                        }
-                        return result.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("更新分类失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return false
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE categories
+                SET name = $1, scan_path = $2, description = $3, icon = $4,
+                    sort_order = $5, enabled = $6, plugins = $7, updated_at = CURRENT_TIMESTAMP
+                WHERE catid = $8
+            """, [DbText(data.name), DbText(data.scanPath), DbText(data.description), DbText(data.icon), DbInt(Int64(data.sortOrder)), DbBool(data.enabled), DbText(data.plugins), DbText(catid)])
+            if (result > 0) {
+                invalidateArchiveBasePath("categoryUpdate:${catid}")
+            }
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新分类失败", ("error", e.message))
+            return false
         }
     }
 
@@ -438,62 +254,27 @@ public class CategoryDao {
      * 删除分类（同时从数据库删除该分类下的档案记录；不删除原始档案文件，仅清理缩略图缓存）
      */
     public static func deleteCategory(catid: String): (Bool, Int64, String) {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    // 先获取分类内部ID
-                    let getStmt = conn.prepareStatement("SELECT id FROM categories WHERE catid = ?")
-                    var categoryInternalId: Int64 = 0
-                    try {
-                        getStmt.set(0, catid)
-                        let rs = getStmt.query()
-                        try {
-                            if (!rs.next()) {
-                                return (false, 0, "Category not found")
-                            }
-                            categoryInternalId = rs.getOrNull<Int64>(0) ?? 0
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        getStmt.close()
-                    }
+        try {
+            // 先获取分类内部ID
+            let idRows = DatabaseConfig.driver().query("SELECT id FROM categories WHERE catid = $1", [DbText(catid)])
+            if (idRows.size == 0) {
+                return (false, 0, "Category not found")
+            }
+            let categoryInternalId = idRows[0].getInt("id")
 
-                    // 先删除该分类下的档案记录（依赖 DB 约束级联清理关联表：收藏/状态/标签/合集关联等）
-                    var deletedArchives: Int64 = 0
-                    let delArchivesStmt = conn.prepareStatement("DELETE FROM archives WHERE category_id = ?")
-                    try {
-                        delArchivesStmt.set(0, categoryInternalId)
-                        let result = delArchivesStmt.update()
-                        deletedArchives = result.rowCount
-                    } finally {
-                        delArchivesStmt.close()
-                    }
+            // 先删除该分类下的档案记录（依赖 DB 约束级联清理关联表：收藏/状态/标签/合集关联等）
+            let deletedArchives = DatabaseConfig.driver().exec("DELETE FROM archives WHERE category_id = $1", [DbInt(categoryInternalId)])
 
-                    // 删除分类本身（不删除磁盘文件）
-                    let delCatStmt = conn.prepareStatement("DELETE FROM categories WHERE id = ?")
-                    try {
-                        delCatStmt.set(0, categoryInternalId)
-                        let result = delCatStmt.update()
-                        if (result.rowCount <= 0) {
-                            return (false, deletedArchives, "Failed to delete category")
-                        }
-                    invalidateArchiveBasePath("categoryDelete:${catid}")
-                    return (true, deletedArchives, "")
-                    } finally {
-                        delCatStmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("删除分类失败", ("error", e.message))
-                    return (false, 0, e.message)
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return (false, 0, "Unable to connect to database")
+            // 删除分类本身（不删除磁盘文件）
+            let delResult = DatabaseConfig.driver().exec("DELETE FROM categories WHERE id = $1", [DbInt(categoryInternalId)])
+            if (delResult <= 0) {
+                return (false, deletedArchives, "Failed to delete category")
+            }
+            invalidateArchiveBasePath("categoryDelete:${catid}")
+            return (true, deletedArchives, "")
+        } catch (e: Exception) {
+            logger.error("删除分类失败", ("error", e.message))
+            return (false, 0, e.message)
         }
     }
 
@@ -501,35 +282,15 @@ public class CategoryDao {
      * 获取分类的档案数量
      */
     public static func getArchiveCount(categoryId: Int64): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM archives WHERE category_id = ?")
-                    try {
-                        stmt.set(0, categoryId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return 0
-                } catch (e: Exception) {
-                    logger.error("获取档案数量失败", ("error", e.message))
-                    return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return 0
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT COUNT(*) FROM archives WHERE category_id = $1", [DbInt(categoryId)])
+            if (rows.size > 0) {
+                return rows[0].getInt("count")
+            }
+            return 0
+        } catch (e: Exception) {
+            logger.error("获取档案数量失败", ("error", e.message))
+            return 0
         }
     }
 
@@ -537,37 +298,18 @@ public class CategoryDao {
      * 获取所有分类的扫描路径
      */
     public static func getAllScanPaths(): Array<(Int64, String)> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var paths = ArrayList<(Int64, String)>()
-                try {
-                    let stmt = conn.prepareStatement("SELECT id, scan_path FROM categories WHERE enabled = true ORDER BY sort_order, id")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let id = rs.getOrNull<Int64>(0) ?? 0
-                                let path = rs.getOrNull<String>(1) ?? ""
-                                paths.add((id, path))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return paths.toArray()
-                } catch (e: Exception) {
-                    logger.error("获取扫描路径失败", ("error", e.message))
-                    return Array<(Int64, String)>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return Array<(Int64, String)>()
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT id, scan_path FROM categories WHERE enabled = true ORDER BY sort_order, id", [])
+            var paths = ArrayList<(Int64, String)>()
+            for (r in rows) {
+                let id = r.getInt("id")
+                let path = r.getText("scan_path")
+                paths.add((id, path))
+            }
+            return paths.toArray()
+        } catch (e: Exception) {
+            logger.error("获取扫描路径失败", ("error", e.message))
+            return Array<(Int64, String)>()
         }
     }
 
@@ -575,35 +317,15 @@ public class CategoryDao {
      * 根据 catid 获取内部 ID
      */
     public static func getInternalId(catid: String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("SELECT id FROM categories WHERE catid = ?")
-                    try {
-                        stmt.set(0, catid)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return 0
-                } catch (e: Exception) {
-                    logger.error("获取分类内部ID失败", ("error", e.message))
-                    return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return 0
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT id FROM categories WHERE catid = $1", [DbText(catid)])
+            if (rows.size > 0) {
+                return rows[0].getInt("id")
+            }
+            return 0
+        } catch (e: Exception) {
+            logger.error("获取分类内部ID失败", ("error", e.message))
+            return 0
         }
     }
 

@@ -1,6 +1,6 @@
 package lanlu.contexts.task.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import std.collection.*
 import std.time.*
 import std.convert.*
@@ -16,115 +16,57 @@ public class TaskGroupKVDao {
         return DateTime.now().toUnixTimeStamp().toSeconds()
     }
 
-    private static func readNumericValue(conn: Connection, groupId: String, key: String): Int64 {
-        let stmt = conn.prepareStatement("SELECT v FROM task_group_kv WHERE group_id=? AND k=?")
+    private static func readNumericValue(groupId: String, key: String): Int64 {
         try {
-            stmt.set(0, groupId)
-            stmt.set(1, key)
-            let rs = stmt.query()
-            try {
-                if (rs.next()) {
-                    let valueStr = rs.getOrNull<String>(0) ?? ""
-                    return Int64.parse(valueStr)
-                }
-            } finally {
-                rs.close()
+            let rows = DatabaseConfig.driver().query("SELECT v FROM task_group_kv WHERE group_id=$1 AND k=$2", [DbText(groupId), DbText(key)])
+            if (rows.size > 0) {
+                let valueStr = rows[0].getText("v")
+                return Int64.parse(valueStr)
             }
         } catch (_: Exception) {
             return -1
-        } finally {
-            stmt.close()
         }
         return -1
     }
 
-    private static func getAnyConnection(): Option<Connection> {
-        // Prefer pooled connections; fall back to direct connections if pool isn't ready yet.
-        let pooled = DatabaseConfig.getPooledConnection()
-        if (!pooled.isNone()) {
-            return pooled
-        }
-        return DatabaseConfig.createConnection()
-    }
-
     public static func cleanupExpiredGroup(groupId: String): Unit {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        DELETE FROM task_group_kv
-                        WHERE group_id=?
-                          AND ttl_seconds > 0
-                          AND (? - created_at) > ttl_seconds
-                    """)
-                    try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, nowSeconds())
-                        stmt.update()
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    // best-effort
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        try {
+            DatabaseConfig.driver().exec("""
+                DELETE FROM task_group_kv
+                WHERE group_id=$1
+                  AND ttl_seconds > 0
+                  AND ($2 - created_at) > ttl_seconds
+            """, [DbText(groupId), DbInt(nowSeconds())])
+        } catch (_: Exception) {
+            // best-effort
         }
     }
 
     public static func upsert(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    // Best-effort cleanup of expired entries in this group.
-                    cleanupExpiredGroup(groupId)
+        try {
+            // Best-effort cleanup of expired entries in this group.
+            cleanupExpiredGroup(groupId)
 
-                    let stmt = conn.prepareStatement("""
-                        UPDATE task_group_kv
-                        SET v = ?,
-                            created_at = ?,
-                            ttl_seconds = ?
-                        WHERE group_id = ? AND k = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        SELECT ?, ?, ?, ?, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
-                        )
-                    """)
-                    try {
-                        let currentSeconds = nowSeconds()
-                        stmt.set(0, value)
-                        stmt.set(1, currentSeconds)
-                        stmt.set(2, ttlSeconds)
-                        stmt.set(3, groupId)
-                        stmt.set(4, key)
-                        let updated = stmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, groupId)
-                            insertStmt.set(1, key)
-                            insertStmt.set(2, value)
-                            insertStmt.set(3, currentSeconds)
-                            insertStmt.set(4, ttlSeconds)
-                            insertStmt.set(5, groupId)
-                            insertStmt.set(6, key)
-                            insertStmt.update()
-                        }
-                        return true
-                    } finally {
-                        stmt.close()
-                        insertStmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+            let currentSeconds = nowSeconds()
+            let updated = DatabaseConfig.driver().exec("""
+                UPDATE task_group_kv
+                SET v = $1,
+                    created_at = $2,
+                    ttl_seconds = $3
+                WHERE group_id = $4 AND k = $5
+            """, [DbText(value), DbInt(currentSeconds), DbInt(ttlSeconds), DbText(groupId), DbText(key)])
+            if (updated <= 0) {
+                DatabaseConfig.driver().exec("""
+                    INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
+                    SELECT $1, $2, $3, $4, $5
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM task_group_kv WHERE group_id = $6 AND k = $7
+                    )
+                """, [DbText(groupId), DbText(key), DbText(value), DbInt(currentSeconds), DbInt(ttlSeconds), DbText(groupId), DbText(key)])
+            }
+            return true
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -132,37 +74,18 @@ public class TaskGroupKVDao {
      * Insert only when the key is absent. Returns true if inserted.
      */
     public static func insertIfAbsent(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    cleanupExpiredGroup(groupId)
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        SELECT ?, ?, ?, ?, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
-                        )
-                    """)
-                    try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, key)
-                        stmt.set(2, value)
-                        stmt.set(3, nowSeconds())
-                        stmt.set(4, ttlSeconds)
-                        stmt.set(5, groupId)
-                        stmt.set(6, key)
-                        let updateResult = stmt.update()
-                        return updateResult.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            cleanupExpiredGroup(groupId)
+            let updateResult = DatabaseConfig.driver().exec("""
+                INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
+                SELECT $1, $2, $3, $4, $5
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM task_group_kv WHERE group_id = $6 AND k = $7
+                )
+            """, [DbText(groupId), DbText(key), DbText(value), DbInt(nowSeconds()), DbInt(ttlSeconds), DbText(groupId), DbText(key)])
+            return updateResult > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -170,178 +93,92 @@ public class TaskGroupKVDao {
      * Increment a numeric value stored in v. Returns the new value, or -1 on failure.
      */
     public static func increment(groupId: String, key: String, delta: Int64, ttlSeconds: Int64): Int64 {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    cleanupExpiredGroup(groupId)
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE task_group_kv
-                        SET v = (CAST(v AS BIGINT) + ?)::text,
-                            created_at = ?,
-                            ttl_seconds = ?
-                        WHERE group_id = ? AND k = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        SELECT ?, ?, ?, ?, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
-                        )
-                    """)
-                    try {
-                        let currentSeconds = nowSeconds()
-                        updateStmt.set(0, delta)
-                        updateStmt.set(1, currentSeconds)
-                        updateStmt.set(2, ttlSeconds)
-                        updateStmt.set(3, groupId)
-                        updateStmt.set(4, key)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount > 0) {
-                            return readNumericValue(conn, groupId, key)
-                        }
-                        insertStmt.set(0, groupId)
-                        insertStmt.set(1, key)
-                        insertStmt.set(2, delta.toString())
-                        insertStmt.set(3, currentSeconds)
-                        insertStmt.set(4, ttlSeconds)
-                        insertStmt.set(5, groupId)
-                        insertStmt.set(6, key)
-                        let inserted = insertStmt.update()
-                        if (inserted.rowCount > 0) {
-                            return delta
-                        }
-                        return readNumericValue(conn, groupId, key)
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
-                    }
-                } catch (_: Exception) {
-                    return -1
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return -1
+        try {
+            cleanupExpiredGroup(groupId)
+            let currentSeconds = nowSeconds()
+            let updated = DatabaseConfig.driver().exec("""
+                UPDATE task_group_kv
+                SET v = (CAST(v AS BIGINT) + $1)::text,
+                    created_at = $2,
+                    ttl_seconds = $3
+                WHERE group_id = $4 AND k = $5
+            """, [DbInt(delta), DbInt(currentSeconds), DbInt(ttlSeconds), DbText(groupId), DbText(key)])
+            if (updated > 0) {
+                return readNumericValue(groupId, key)
+            }
+            let inserted = DatabaseConfig.driver().exec("""
+                INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
+                SELECT $1, $2, $3, $4, $5
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM task_group_kv WHERE group_id = $6 AND k = $7
+                )
+            """, [DbText(groupId), DbText(key), DbText(delta.toString()), DbInt(currentSeconds), DbInt(ttlSeconds), DbText(groupId), DbText(key)])
+            if (inserted > 0) {
+                return delta
+            }
+            return readNumericValue(groupId, key)
+        } catch (_: Exception) {
+            return -1
         }
     }
 
     public static func get(groupId: String, key: String): Option<String> {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT v, created_at, ttl_seconds FROM task_group_kv WHERE group_id=? AND k=?"
-                    )
-                    try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, key)
-                        let rs = stmt.query()
-                        try {
-                            if (!rs.next()) {
-                                return Option.None
-                            }
-                            let v = rs.getOrNull<String>(0) ?? ""
-                            let createdAt = rs.getOrNull<Int64>(1) ?? 0
-                            let ttl = rs.getOrNull<Int64>(2) ?? 0
-                            if (ttl > 0 && (nowSeconds() - createdAt) > ttl) {
-                                // Expired: delete and treat as missing.
-                                let _ = delete(groupId, key)
-                                return Option.None
-                            }
-                            return Option<String>.Some(v)
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return Option.None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return Option.None
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "SELECT v, created_at, ttl_seconds FROM task_group_kv WHERE group_id=$1 AND k=$2",
+                [DbText(groupId), DbText(key)]
+            )
+            if (rows.size == 0) {
+                return Option.None
+            }
+            let r = rows[0]
+            let v = r.getText("v")
+            let createdAt = r.getInt("created_at")
+            let ttl = r.getInt("ttl_seconds")
+            if (ttl > 0 && (nowSeconds() - createdAt) > ttl) {
+                // Expired: delete and treat as missing.
+                let _ = delete(groupId, key)
+                return Option.None
+            }
+            return Option<String>.Some(v)
+        } catch (_: Exception) {
+            return Option.None
         }
     }
 
     public static func delete(groupId: String, key: String): Bool {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("DELETE FROM task_group_kv WHERE group_id=? AND k=?")
-                    try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, key)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM task_group_kv WHERE group_id=$1 AND k=$2", [DbText(groupId), DbText(key)])
+            return true
+        } catch (_: Exception) {
+            return false
         }
     }
 
     public static func deleteGroup(groupId: String): Unit {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("DELETE FROM task_group_kv WHERE group_id=?")
-                    try {
-                        stmt.set(0, groupId)
-                        stmt.update()
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    // best-effort
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM task_group_kv WHERE group_id=$1", [DbText(groupId)])
+        } catch (_: Exception) {
+            // best-effort
         }
     }
 
     public static func getKeys(groupId: String): Array<String> {
-        let connOpt = getAnyConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    // Best-effort cleanup to avoid returning expired keys.
-                    cleanupExpiredGroup(groupId)
+        try {
+            // Best-effort cleanup to avoid returning expired keys.
+            cleanupExpiredGroup(groupId)
 
-                    let stmt = conn.prepareStatement("SELECT k FROM task_group_kv WHERE group_id=? ORDER BY k")
-                    try {
-                        stmt.set(0, groupId)
-                        let rs = stmt.query()
-                        try {
-                            var keys = ArrayList<String>()
-                            while (rs.next()) {
-                                let k = rs.getOrNull<String>(0) ?? ""
-                                if (k.size > 0) {
-                                    keys.add(k)
-                                }
-                            }
-                            return keys.toArray()
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return Array<String>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+            let rows = DatabaseConfig.driver().query("SELECT k FROM task_group_kv WHERE group_id=$1 ORDER BY k", [DbText(groupId)])
+            var keys = ArrayList<String>()
+            for (r in rows) {
+                let k = r.getText("k")
+                if (k.size > 0) {
+                    keys.add(k)
                 }
-            case None => return Array<String>()
+            }
+            return keys.toArray()
+        } catch (_: Exception) {
+            return Array<String>()
         }
     }
 }

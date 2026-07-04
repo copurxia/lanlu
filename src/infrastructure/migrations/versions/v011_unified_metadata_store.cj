@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,8 +18,8 @@ public class V011_UnifiedMetadataStore <: Migration {
         return "Create unified metadata tables and backfill archive/page/tankoubon metadata"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE IF NOT EXISTS metadata_objects (
                 id BIGSERIAL PRIMARY KEY,
                 entity_type VARCHAR(32) NOT NULL,
@@ -42,7 +42,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE IF NOT EXISTS metadata_tags (
                 metadata_id BIGINT NOT NULL,
                 tag TEXT NOT NULL,
@@ -54,7 +54,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE IF NOT EXISTS metadata_assets (
                 metadata_id BIGINT NOT NULL,
                 slot VARCHAR(32) NOT NULL,
@@ -68,20 +68,20 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_objects_parent", "metadata_objects", "parent_entity_type, parent_entity_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_objects_parent", "metadata_objects", "parent_entity_type, parent_entity_id")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_objects_type_order", "metadata_objects", "entity_type, parent_entity_id, order_index, page_number")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_objects_type_order", "metadata_objects", "entity_type, parent_entity_id, order_index, page_number")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_tags_tag", "metadata_tags", "tag")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_tags_tag", "metadata_tags", "tag")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_assets_asset_id", "metadata_assets", "asset_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_assets_asset_id", "metadata_assets", "asset_id")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_pages_parent_path
             ON metadata_objects (entity_type, parent_entity_id, entry_path)
             WHERE entity_type = 'page'
@@ -89,7 +89,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -103,7 +103,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -117,7 +117,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type,
                 entity_id,
@@ -180,7 +180,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_tags (metadata_id, tag)
             SELECT mo.id,
                    CASE WHEN tg.namespace != '' AND tg.namespace IS NOT NULL
@@ -205,7 +205,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_tags (metadata_id, tag)
             SELECT mo.id,
                    CASE WHEN tg.namespace != '' AND tg.namespace IS NOT NULL
@@ -230,7 +230,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_assets ma
             SET asset_id = src.asset_id,
                 updated_at = CURRENT_TIMESTAMP
@@ -249,7 +249,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
             SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             FROM (
@@ -270,7 +270,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_assets ma
             SET asset_id = src.asset_id,
                 updated_at = CURRENT_TIMESTAMP
@@ -289,7 +289,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
             SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             FROM (
@@ -310,7 +310,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_assets ma
             SET asset_id = src.asset_id,
                 updated_at = src.updated_at
@@ -329,7 +329,7 @@ public class V011_UnifiedMetadataStore <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
             SELECT src.metadata_id, src.slot, src.asset_id, src.updated_at, src.updated_at
             FROM (

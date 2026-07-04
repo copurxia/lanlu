@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 
 /**
@@ -15,10 +15,10 @@ public class V016_DropTaskGroupKv <: Migration {
         return "Drop legacy task_group_kv table"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "task_group_kv")) {
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.tableExists(drv, "task_group_kv")) {
             return true
         }
-        return MigrationHelpers.execUpdate(conn, "DROP TABLE IF EXISTS task_group_kv")
+        return MigrationHelpers.execUpdate(drv, "DROP TABLE IF EXISTS task_group_kv")
     }
 }

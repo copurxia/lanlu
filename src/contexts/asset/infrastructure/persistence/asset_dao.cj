@@ -1,8 +1,10 @@
 package lanlu.contexts.asset.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
+import lanlu.shared.utils.*
 import lanlu.contexts.asset.domain.*
+import stdx.log.*
 
 public class AssetRow {
     public var id: Int64 = 0
@@ -37,82 +39,79 @@ public class AssetDao {
         byteSize: Int64,
         thumbhash: String
     ): Option<Int64> {
-        return DatabaseConfig.withPooledConnection<Option<Int64>>("asset_dao", "create asset failed", None, { conn =>
-            DatabaseConfig.withStatement<Option<Int64>>(conn, """
+        let logger = getLogger("asset_dao")
+        let ownerParam: DbValue = match (ownerUserId) {
+            case Some(uid) => DbInt(uid)
+            case None => DbNull
+        }
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 INSERT INTO assets (owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id
-            """, { stmt =>
-                match (ownerUserId) {
-                    case Some(uid) => stmt.set(0, uid)
-                    case None => stmt.setNull(0)
-                }
-                stmt.set(1, kind)
-                stmt.set(2, originalFilename)
-                stmt.set(3, contentType)
-                stmt.set(4, fileExt)
-                stmt.set(5, byteSize)
-                stmt.set(6, thumbhash)
-                DatabaseConfig.withQueryResult<Option<Int64>>(stmt, { rs =>
-                    if (rs.next()) {
-                        let id = rs.getOrNull<Int64>(0) ?? 0
-                        if (id > 0) { return Some(id) }
-                    }
-                    return None
-                })
-            })
-        })
+            """, [ownerParam, DbText(kind), DbText(originalFilename), DbText(contentType), DbText(fileExt), DbInt(byteSize), DbText(thumbhash)])
+            if (rows.size > 0) {
+                let id = rows[0].getInt("id")
+                if (id > 0) { return Some(id) }
+            }
+            return None
+        } catch (e: Exception) {
+            logger.error("create asset failed", ("error", e.message))
+            return None
+        }
     }
 
     public static func getById(id: Int64): AssetRow {
         if (id <= 0) { return AssetRow() }
-        return DatabaseConfig.withPooledConnection<AssetRow>("asset_dao", "get asset failed", AssetRow(), { conn =>
-            DatabaseConfig.withStatement<AssetRow>(conn, """
+        let logger = getLogger("asset_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT id, owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash, created_at
                 FROM assets
-                WHERE id = ?
-            """, { stmt =>
-                stmt.set(0, id)
-                DatabaseConfig.withQueryResult<AssetRow>(stmt, { rs =>
-                    if (rs.next()) {
-                        let row = AssetRow()
-                        row.id = rs.getOrNull<Int64>(0) ?? 0
-                        row.ownerUserId = rs.getOrNull<Int64>(1) ?? 0
-                        row.kind = rs.getOrNull<String>(2) ?? ""
-                        row.originalFilename = rs.getOrNull<String>(3) ?? ""
-                        row.contentType = rs.getOrNull<String>(4) ?? ""
-                        row.fileExt = rs.getOrNull<String>(5) ?? ""
-                        row.byteSize = rs.getOrNull<Int64>(6) ?? 0
-                        row.thumbhash = rs.getOrNull<String>(7) ?? ""
-                        row.createdAt = rs.getOrNull<String>(8) ?? ""
-                        return row
-                    }
-                    return AssetRow()
-                })
-            })
-        })
+                WHERE id = $1
+            """, [DbInt(id)])
+            if (rows.size > 0) {
+                let r = rows[0]
+                let row = AssetRow()
+                row.id = r.getInt("id")
+                row.ownerUserId = r.getInt("owner_user_id")
+                row.kind = r.getText("kind")
+                row.originalFilename = r.getText("original_filename")
+                row.contentType = r.getText("content_type")
+                row.fileExt = r.getText("file_ext")
+                row.byteSize = r.getInt("byte_size")
+                row.thumbhash = r.getText("thumbhash")
+                row.createdAt = r.getText("created_at")
+                return row
+            }
+            return AssetRow()
+        } catch (e: Exception) {
+            logger.error("get asset failed", ("error", e.message))
+            return AssetRow()
+        }
     }
 
     public static func updateThumbhash(id: Int64, thumbhash: String): Bool {
         if (id <= 0) { return false }
-        return DatabaseConfig.withPooledConnection<Bool>("asset_dao", "update thumbhash failed", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, "UPDATE assets SET thumbhash = ? WHERE id = ?", { stmt =>
-                stmt.set(0, thumbhash)
-                stmt.set(1, id)
-                stmt.update()
-                return true
-            })
-        })
+        let logger = getLogger("asset_dao")
+        try {
+            DatabaseConfig.driver().exec("UPDATE assets SET thumbhash = $1 WHERE id = $2", [DbText(thumbhash), DbInt(id)])
+            return true
+        } catch (e: Exception) {
+            logger.error("update thumbhash failed", ("error", e.message))
+            return false
+        }
     }
 
     public static func deleteById(id: Int64): Bool {
         if (id <= 0) { return true }
-        return DatabaseConfig.withPooledConnection<Bool>("asset_dao", "delete asset failed", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, "DELETE FROM assets WHERE id = ?", { stmt =>
-                stmt.set(0, id)
-                stmt.update()
-                return true
-            })
-        })
+        let logger = getLogger("asset_dao")
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM assets WHERE id = $1", [DbInt(id)])
+            return true
+        } catch (e: Exception) {
+            logger.error("delete asset failed", ("error", e.message))
+            return false
+        }
     }
 }

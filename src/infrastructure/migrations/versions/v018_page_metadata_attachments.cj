@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,8 +18,8 @@ public class V018_PageMetadataAttachments <: Migration {
         return "Create page metadata attachment table and migrate legacy lyrics asset references"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, """
             CREATE TABLE IF NOT EXISTS metadata_page_assets (
                 id BIGSERIAL PRIMARY KEY,
                 metadata_id BIGINT NOT NULL,
@@ -40,48 +40,48 @@ public class V018_PageMetadataAttachments <: Migration {
         }
 
         // Repair legacy/partially migrated schemas where table already exists but misses new columns.
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "metadata_id", "BIGINT NOT NULL DEFAULT 0")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "metadata_id", "BIGINT NOT NULL DEFAULT 0")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "slot", "VARCHAR(32) NOT NULL DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "slot", "VARCHAR(32) NOT NULL DEFAULT ''")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "asset_id", "BIGINT NOT NULL DEFAULT 0")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "asset_id", "BIGINT NOT NULL DEFAULT 0")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "name", "TEXT NOT NULL DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "name", "TEXT NOT NULL DEFAULT ''")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "mime_type", "TEXT NOT NULL DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "mime_type", "TEXT NOT NULL DEFAULT ''")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "kind", "VARCHAR(32) NOT NULL DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "kind", "VARCHAR(32) NOT NULL DEFAULT ''")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "language", "VARCHAR(32) NOT NULL DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "language", "VARCHAR(32) NOT NULL DEFAULT ''")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "order_index", "INT NOT NULL DEFAULT 0")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "order_index", "INT NOT NULL DEFAULT 0")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_page_assets", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")) {
-            return false
-        }
-
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_page_assets_metadata", "metadata_page_assets", "metadata_id")) {
-            return false
-        }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_page_assets_asset", "metadata_page_assets", "asset_id")) {
-            return false
-        }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_page_assets_slot", "metadata_page_assets", "slot")) {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_page_assets", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_page_assets_metadata", "metadata_page_assets", "metadata_id")) {
+            return false
+        }
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_page_assets_asset", "metadata_page_assets", "asset_id")) {
+            return false
+        }
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_page_assets_slot", "metadata_page_assets", "slot")) {
+            return false
+        }
+
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_page_assets (
                 metadata_id, slot, asset_id, name, mime_type, kind, language, order_index, created_at, updated_at
             )
@@ -111,7 +111,7 @@ public class V018_PageMetadataAttachments <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_objects
             SET extra_data = CASE
                 WHEN jsonb_exists(COALESCE(extra_data, '{}'::jsonb), 'lyrics_asset_id')

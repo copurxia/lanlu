@@ -1,7 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
-import stdx.log.*
+import ace_orm.*
+import std.collection.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 
@@ -21,47 +21,49 @@ public class UserRow {
 public class UserDao {
     // 注意：表创建已由迁移系统处理，createTable() 方法已移除
 
-    private static func mapUserRow(rs: QueryResult): UserRow {
+    private static func mapUserRow(r: Row): UserRow {
         let row = UserRow()
-        row.id = DatabaseConfig.getInt64OrZero(rs, 0)
-        row.username = DatabaseConfig.getStringOrEmpty(rs, 1)
-        row.passwordSalt = DatabaseConfig.getStringOrEmpty(rs, 2)
-        row.passwordHash = DatabaseConfig.getStringOrEmpty(rs, 3)
-        row.passwordHashVersion = DatabaseConfig.getStringOrEmpty(rs, 4)
-        row.isAdmin = DatabaseConfig.getBoolOrFalse(rs, 5)
-        row.avatarAssetId = DatabaseConfig.getInt64OrZero(rs, 6)
-        row.createdAt = DatabaseConfig.getStringOrEmpty(rs, 7)
+        row.id = r.getInt("id")
+        row.username = r.getText("username")
+        row.passwordSalt = r.getText("password_salt")
+        row.passwordHash = r.getText("password_hash")
+        row.passwordHashVersion = r.getText("password_hash_version")
+        row.isAdmin = r.getBool("is_admin")
+        row.avatarAssetId = r.getInt("avatar_asset_id")
+        row.createdAt = r.getText("created_at")
         return row
     }
 
     public static func getByUsername(username: String): UserRow {
-        return DatabaseConfig.queryOne<UserRow>(
-            "user_dao",
-            "查询用户失败",
-            """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT id, username, password_salt, password_hash, password_hash_version, is_admin, avatar_asset_id, created_at
                 FROM users
-                WHERE username = ?
-            """,
-            UserRow(),
-            { stmt => stmt.set(0, username) },
-            { rs => mapUserRow(rs) }
-        )
+                WHERE username = $1
+            """, [DbText(username)])
+            if (rows.size > 0) {
+                return mapUserRow(rows[0])
+            }
+        } catch (e: Exception) {
+            getLogger("user_dao").error("查询用户失败", ("username", username), ("error", e.message))
+        }
+        return UserRow()
     }
 
     public static func getById(id: Int64): UserRow {
-        return DatabaseConfig.queryOne<UserRow>(
-            "user_dao",
-            "查询用户失败",
-            """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT id, username, password_salt, password_hash, password_hash_version, is_admin, avatar_asset_id, created_at
                 FROM users
-                WHERE id = ?
-            """,
-            UserRow(),
-            { stmt => stmt.set(0, id) },
-            { rs => mapUserRow(rs) }
-        )
+                WHERE id = $1
+            """, [DbInt(id)])
+            if (rows.size > 0) {
+                return mapUserRow(rows[0])
+            }
+        } catch (e: Exception) {
+            getLogger("user_dao").error("查询用户失败", ("id", id.toString()), ("error", e.message))
+        }
+        return UserRow()
     }
 
     public static func createUser(username: String, password: String, pepper: String, isAdmin: Bool): Option<Int64> {
@@ -81,22 +83,26 @@ public class UserDao {
                 return None
         }
 
-        return DatabaseConfig.executeReturningId(
-            "user_dao",
-            "创建用户失败",
-            """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 INSERT INTO users (username, password_salt, password_hash, password_hash_version, is_admin)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
-            """,
-            { stmt =>
-                stmt.set(0, trimmed)
-                stmt.set(1, passwordRecord.salt)
-                stmt.set(2, passwordRecord.hash)
-                stmt.set(3, passwordRecord.version)
-                stmt.set(4, isAdmin)
+            """, [
+                DbText(trimmed),
+                DbText(passwordRecord.salt),
+                DbText(passwordRecord.hash),
+                DbText(passwordRecord.version),
+                DbBool(isAdmin)
+            ])
+            if (rows.size > 0) {
+                return Some(rows[0].getInt("id"))
             }
-        )
+            return None
+        } catch (e: Exception) {
+            logger.error("创建用户失败", ("error", e.message))
+            return None
+        }
     }
 
     /**
@@ -105,18 +111,18 @@ public class UserDao {
     public static func isEmpty(): Bool {
         let logger = getLogger("user_dao")
         logger.debug("开始查询用户表记录数量")
-        return DatabaseConfig.queryOne<Bool>(
-            "user_dao",
-            "查询用户表记录数量时发生异常",
-            "SELECT COUNT(*) FROM users",
-            true,
-            { _ => () },
-            { rs =>
-                let count = DatabaseConfig.getInt64OrZero(rs, 0)
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT COUNT(*) AS cnt FROM users", [])
+            if (rows.size > 0) {
+                let count = rows[0].getInt("cnt")
                 logger.debug("用户表记录数量: ${count}")
                 return count == 0
             }
-        )
+        } catch (e: Exception) {
+            logger.error("查询用户表记录数量时发生异常", ("error", e.message))
+            return true
+        }
+        return false
     }
 
     public static func verifyPassword(username: String, password: String, pepper: String): Option<Int64> {
@@ -153,83 +159,93 @@ public class UserDao {
      * 返回值为用户名是否可用（未被其他用户使用）
      */
     public static func changeUsername(userId: Int64, newUsername: String): Bool {
+        let logger = getLogger("user_dao")
         let trimmed = newUsername.trimAscii()
         if (trimmed.size < 3 || trimmed.size > 64) {
             return false
         }
 
-        return DatabaseConfig.withPooledConnection<Bool>("user_dao", "修改用户名失败", false, { conn =>
-            let occupied = DatabaseConfig.withStatement<Bool>(conn, "SELECT id FROM users WHERE username = ? AND id <> ?", { stmt =>
-                stmt.set(0, trimmed)
-                stmt.set(1, userId)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs => rs.next() })
-            })
-            if (occupied) {
+        try {
+            let occupiedRows = DatabaseConfig.driver().query(
+                "SELECT id FROM users WHERE username = $1 AND id <> $2",
+                [DbText(trimmed), DbInt(userId)]
+            )
+            if (occupiedRows.size > 0) {
                 return false
             }
-            return DatabaseConfig.withStatement<Bool>(conn, "UPDATE users SET username = ? WHERE id = ?", { stmt =>
-                stmt.set(0, trimmed)
-                stmt.set(1, userId)
-                return stmt.update().rowCount > 0
-            })
-        })
+            return DatabaseConfig.driver().exec(
+                "UPDATE users SET username = $1 WHERE id = $2",
+                [DbText(trimmed), DbInt(userId)]
+            ) > 0
+        } catch (e: Exception) {
+            logger.error("修改用户名失败", ("userId", userId.toString()), ("error", e.message))
+            return false
+        }
     }
 
     /**
      * 检查用户是否为管理员
      */
     public static func isAdmin(userId: Int64): Bool {
-        return DatabaseConfig.queryOne<Bool>(
-            "user_dao",
-            "检查管理员角色失败",
-            "SELECT is_admin FROM users WHERE id = ?",
-            false,
-            { stmt => stmt.set(0, userId) },
-            { rs => DatabaseConfig.getBoolOrFalse(rs, 0) }
-        )
+        try {
+            let rows = DatabaseConfig.driver().query(
+                "SELECT is_admin FROM users WHERE id = $1",
+                [DbInt(userId)]
+            )
+            if (rows.size > 0) {
+                return rows[0].getBool("is_admin")
+            }
+        } catch (e: Exception) {
+            getLogger("user_dao").error("检查管理员角色失败", ("userId", userId.toString()), ("error", e.message))
+        }
+        return false
     }
 
     /**
      * 获取所有用户列表
      */
     public static func listAllUsers(): Array<UserRow> {
-        return DatabaseConfig.queryList<UserRow>(
-            "user_dao",
-            "获取用户列表失败",
-            """
+        let out = ArrayList<UserRow>()
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT id, username, is_admin, created_at
                 FROM users
                 ORDER BY created_at DESC
-            """,
-            { _ => () },
-            { rs =>
+            """, [])
+            for (r in rows) {
                 let row = UserRow()
-                row.id = DatabaseConfig.getInt64OrZero(rs, 0)
-                row.username = DatabaseConfig.getStringOrEmpty(rs, 1)
-                row.isAdmin = DatabaseConfig.getBoolOrFalse(rs, 2)
-                row.createdAt = DatabaseConfig.getStringOrEmpty(rs, 3)
-                return row
+                row.id = r.getInt("id")
+                row.username = r.getText("username")
+                row.isAdmin = r.getBool("is_admin")
+                row.createdAt = r.getText("created_at")
+                out.add(row)
             }
-        )
+        } catch (e: Exception) {
+            getLogger("user_dao").error("获取用户列表失败", ("error", e.message))
+        }
+        return out.toArray()
     }
 
     /**
      * 删除用户
      */
     public static func deleteUser(userId: Int64): Bool {
-        return DatabaseConfig.withTransaction("user_dao", "删除用户失败", { conn =>
-            let exists = DatabaseConfig.withStatement<Bool>(conn, "SELECT id FROM users WHERE id = ?", { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs => rs.next() })
-            })
-            if (!exists) {
+        return DatabaseConfig.withTransaction("user_dao", "删除用户失败", { =>
+            let existsRows = DatabaseConfig.driver().query(
+                "SELECT id FROM users WHERE id = $1",
+                [DbInt(userId)]
+            )
+            if (existsRows.size == 0) {
                 return false
             }
-            DatabaseConfig.executeOnConnection(conn, "DELETE FROM user_tokens WHERE user_id = ?", { stmt => stmt.set(0, userId) })
-            return DatabaseConfig.withStatement<Bool>(conn, "DELETE FROM users WHERE id = ?", { stmt =>
-                stmt.set(0, userId)
-                return stmt.update().rowCount > 0
-            })
+            DatabaseConfig.driver().exec(
+                "DELETE FROM user_tokens WHERE user_id = $1",
+                [DbInt(userId)]
+            )
+            return DatabaseConfig.driver().exec(
+                "DELETE FROM users WHERE id = $1",
+                [DbInt(userId)]
+            ) > 0
         })
     }
 
@@ -237,13 +253,15 @@ public class UserDao {
      * 更新用户管理员角色
      */
     public static func updateUserRole(userId: Int64, isAdmin: Bool): Bool {
-        return DatabaseConfig.withPooledConnection<Bool>("user_dao", "更新用户角色失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, "UPDATE users SET is_admin = ? WHERE id = ?", { stmt =>
-                stmt.set(0, isAdmin)
-                stmt.set(1, userId)
-                return stmt.update().rowCount > 0
-            })
-        })
+        try {
+            return DatabaseConfig.driver().exec(
+                "UPDATE users SET is_admin = $1 WHERE id = $2",
+                [DbBool(isAdmin), DbInt(userId)]
+            ) > 0
+        } catch (e: Exception) {
+            getLogger("user_dao").error("更新用户角色失败", ("userId", userId.toString()), ("error", e.message))
+            return false
+        }
     }
 
     /**
@@ -285,35 +303,40 @@ public class UserDao {
                 return false
         }
 
-        return DatabaseConfig.withPooledConnection<Bool>("user_dao", errorMessage, false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
+        try {
+            return DatabaseConfig.driver().exec("""
                 UPDATE users
-                SET password_salt = ?, password_hash = ?, password_hash_version = ?
-                WHERE id = ?
-            """, { stmt =>
-                stmt.set(0, passwordRecord.salt)
-                stmt.set(1, passwordRecord.hash)
-                stmt.set(2, passwordRecord.version)
-                stmt.set(3, userId)
-                return stmt.update().rowCount > 0
-            })
-        })
+                SET password_salt = $1, password_hash = $2, password_hash_version = $3
+                WHERE id = $4
+            """, [
+                DbText(passwordRecord.salt),
+                DbText(passwordRecord.hash),
+                DbText(passwordRecord.version),
+                DbInt(userId)
+            ]) > 0
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return false
+        }
     }
 
     public static func updateAvatarAssetId(userId: Int64, avatarAssetId: Int64): Bool {
         if (userId <= 0) { return false }
-        return DatabaseConfig.execute(
-            "user_dao",
-            "updateAvatarAssetId failed",
-            "UPDATE users SET avatar_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            { stmt =>
-                if (avatarAssetId > 0) {
-                    stmt.set(0, avatarAssetId)
-                } else {
-                    stmt.setNull(0)
-                }
-                stmt.set(1, userId)
-            }
-        )
+        let logger = getLogger("user_dao")
+        let params: Array<DbValue> = if (avatarAssetId > 0) {
+            [DbInt(avatarAssetId), DbInt(userId)]
+        } else {
+            [DbNull, DbInt(userId)]
+        }
+        try {
+            DatabaseConfig.driver().exec(
+                "UPDATE users SET avatar_asset_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+                params
+            )
+            return true
+        } catch (e: Exception) {
+            logger.error("updateAvatarAssetId failed", ("userId", userId.toString()), ("error", e.message))
+            return false
+        }
     }
 }

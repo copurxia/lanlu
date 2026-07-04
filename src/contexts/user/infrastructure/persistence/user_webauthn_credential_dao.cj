@@ -1,7 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 
 import std.collection.*
-import std.database.sql.*
+import ace_orm.*
 import std.io.{ByteBuffer, readToEnd}
 import lanlu.shared.config.*
 import stdx.encoding.json.stream.*
@@ -45,124 +45,64 @@ public class UserWebauthnCredentialRow {
 
 public class UserWebauthnCredentialDao {
     public static func listActiveByUser(userId: Int64): Array<UserWebauthnCredentialRow> {
-        var out = ArrayList<UserWebauthnCredentialRow>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
-                               transports_json, user_verified, backup_eligible, backup_state, attestation_format,
-                               created_at::text, COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
-                        FROM user_webauthn_credentials
-                        WHERE user_id = ? AND revoked_at IS NULL
-                        ORDER BY id DESC
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                out.add(readRow(rs))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    ()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        let out = ArrayList<UserWebauthnCredentialRow>()
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
+                       transports_json, user_verified, backup_eligible, backup_state, attestation_format,
+                       created_at::text, COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
+                FROM user_webauthn_credentials
+                WHERE user_id = $1 AND revoked_at IS NULL
+                ORDER BY id DESC
+            """, [DbInt(userId)])
+            for (r in rows) {
+                out.add(readRow(r))
+            }
+        } catch (_: Exception) {
+            ()
         }
         return out.toArray()
     }
 
     public static func findActiveByCredentialId(credentialId: String): UserWebauthnCredentialRow {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
-                               transports_json, user_verified, backup_eligible, backup_state, attestation_format,
-                               created_at::text, COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
-                        FROM user_webauthn_credentials
-                        WHERE credential_id_b64url = ? AND revoked_at IS NULL
-                        LIMIT 1
-                    """)
-                    try {
-                        stmt.set(0, credentialId.trimAscii())
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return readRow(rs)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return UserWebauthnCredentialRow()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
+                       transports_json, user_verified, backup_eligible, backup_state, attestation_format,
+                       created_at::text, COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
+                FROM user_webauthn_credentials
+                WHERE credential_id_b64url = $1 AND revoked_at IS NULL
+                LIMIT 1
+            """, [DbText(credentialId.trimAscii())])
+            if (rows.size > 0) {
+                return readRow(rows[0])
+            }
+        } catch (_: Exception) {
+            return UserWebauthnCredentialRow()
         }
         return UserWebauthnCredentialRow()
     }
 
     public static func create(userId: Int64, name: String, passkey: Passkey): Option<Int64> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_webauthn_credentials (
-                            user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
-                            transports_json, user_verified, backup_eligible, backup_state, attestation_format
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        RETURNING id
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, normalizeName(name))
-                        stmt.set(2, passkey.credentialId)
-                        stmt.set(3, passkey.algorithm)
-                        stmt.set(4, passkey.publicKey)
-                        stmt.set(5, passkey.counter)
-                        stmt.set(6, passkey.aaguid)
-                        stmt.set(7, toJsonStringArray(passkey.transports))
-                        stmt.set(8, passkey.userVerified)
-                        stmt.set(9, passkey.backupEligible)
-                        stmt.set(10, passkey.backupState)
-                        stmt.set(11, passkey.attestationFormat)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let insertedId = rs.getOrNull<Int64>(0) ?? 0
-                                if (insertedId > 0) {
-                                    return Some(insertedId)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO user_webauthn_credentials (
+                    user_id, name, credential_id_b64url, algorithm, public_key_b64, sign_count, aaguid,
+                    transports_json, user_verified, backup_eligible, backup_state, attestation_format
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING id
+            """, [DbInt(userId), DbText(normalizeName(name)), DbText(passkey.credentialId), DbText(passkey.algorithm),
+                  DbText(passkey.publicKey), DbInt(passkey.counter), DbText(passkey.aaguid), DbText(toJsonStringArray(passkey.transports)),
+                  DbBool(passkey.userVerified), DbBool(passkey.backupEligible), DbBool(passkey.backupState), DbText(passkey.attestationFormat)])
+            if (rows.size > 0) {
+                let insertedId = rows[0].getInt("id")
+                if (insertedId > 0) {
+                    return Some(insertedId)
                 }
-            case None => ()
+            }
+        } catch (_: Exception) {
+            return None
         }
         return None
     }
@@ -174,80 +114,49 @@ public class UserWebauthnCredentialDao {
         backupEligible: Bool,
         backupState: Bool
     ): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_webauthn_credentials
-                        SET sign_count = ?, backup_eligible = ?, backup_state = ?, last_used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND credential_id_b64url = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, signCount)
-                        stmt.set(1, backupEligible)
-                        stmt.set(2, backupState)
-                        stmt.set(3, userId)
-                        stmt.set(4, credentialId.trimAscii())
-                        let updated = stmt.update()
-                        return updated.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let affected = DatabaseConfig.driver().exec("""
+                UPDATE user_webauthn_credentials
+                SET sign_count = $1, backup_eligible = $2, backup_state = $3, last_used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = $4 AND credential_id_b64url = $5 AND revoked_at IS NULL
+            """, [DbInt(signCount), DbBool(backupEligible), DbBool(backupState), DbInt(userId), DbText(credentialId.trimAscii())])
+            return affected > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
     public static func revoke(userId: Int64, id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_webauthn_credentials
-                        SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND user_id = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, id)
-                        stmt.set(1, userId)
-                        let updated = stmt.update()
-                        return updated.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let affected = DatabaseConfig.driver().exec("""
+                UPDATE user_webauthn_credentials
+                SET revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+            """, [DbInt(id), DbInt(userId)])
+            return affected > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
-    private static func readRow(rs: QueryResult): UserWebauthnCredentialRow {
+    private static func readRow(r: Row): UserWebauthnCredentialRow {
         let row = UserWebauthnCredentialRow()
-        row.id = rs.getOrNull<Int64>(0) ?? 0
-        row.userId = rs.getOrNull<Int64>(1) ?? 0
-        row.name = rs.getOrNull<String>(2) ?? ""
-        row.credentialIdB64Url = rs.getOrNull<String>(3) ?? ""
-        row.algorithm = rs.getOrNull<String>(4) ?? "ES256"
-        row.publicKeyB64 = rs.getOrNull<String>(5) ?? ""
-        row.signCount = rs.getOrNull<Int64>(6) ?? 0
-        row.aaguid = rs.getOrNull<String>(7) ?? ""
-        row.transportsJson = rs.getOrNull<String>(8) ?? "[]"
-        row.userVerified = rs.getOrNull<Bool>(9) ?? false
-        row.backupEligible = rs.getOrNull<Bool>(10) ?? false
-        row.backupState = rs.getOrNull<Bool>(11) ?? false
-        row.attestationFormat = rs.getOrNull<String>(12) ?? "none"
-        row.createdAt = rs.getOrNull<String>(13) ?? ""
-        row.lastUsedAt = rs.getOrNull<String>(14) ?? ""
-        row.revokedAt = rs.getOrNull<String>(15) ?? ""
+        row.id = r.getInt("id")
+        row.userId = r.getInt("user_id")
+        row.name = r.getText("name")
+        row.credentialIdB64Url = r.getText("credential_id_b64url")
+        row.algorithm = r.getText("algorithm")
+        row.publicKeyB64 = r.getText("public_key_b64")
+        row.signCount = r.getInt("sign_count")
+        row.aaguid = r.getText("aaguid")
+        row.transportsJson = r.getText("transports_json")
+        row.userVerified = r.getBool("user_verified")
+        row.backupEligible = r.getBool("backup_eligible")
+        row.backupState = r.getBool("backup_state")
+        row.attestationFormat = r.getText("attestation_format")
+        row.createdAt = r.getText("created_at")
+        row.lastUsedAt = r.getText("last_used_at")
+        row.revokedAt = r.getText("revoked_at")
         return row
     }
 

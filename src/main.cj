@@ -91,6 +91,18 @@ main(): Int64 {
     MigrationRegistry.register(V026_AddSourceIdRegexToPlugins())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
+
+    // 初始化数据源(ACE-ORM PostgresDriver + 连接池),迁移与 DAO 均依赖此。
+    // 必须在迁移之前初始化(迁移系统用 DatabaseConfig.driver() 经此连接)。
+    logger.debug("Application starting... step 9-pool: initializing data source")
+    let poolInitialized = DatabaseConfig.initializePool()
+    if (poolInitialized) {
+        logger.info("Data source initialized successfully")
+    } else {
+        logger.error("Failed to initialize data source")
+        return 1
+    }
+
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {
@@ -105,16 +117,6 @@ main(): Int64 {
         logger.info("Extension migrations completed successfully")
     } else {
         logger.error("Failed to run extension migrations")
-        return 1
-    }
-
-    // 初始化数据库连接池
-    logger.debug("Application starting... step 9-pool: initializing connection pool")
-    let poolInitialized = DatabaseConfig.initializePool()
-    if (poolInitialized) {
-        logger.info("Connection pool initialized successfully")
-    } else {
-        logger.error("Failed to initialize connection pool")
         return 1
     }
 
@@ -253,6 +255,9 @@ main(): Int64 {
     var opts = ListenOptions()
     opts.readTimeoutMs = 30000
     opts.writeTimeoutMs = 30000
+    // 请求体/请求头大小上限:32MB(超限 stdx 自动返回 413/431)。
+    opts.maxRequestBodySize = 32 * 1024 * 1024
+    opts.maxRequestHeaderSize = 1024 * 1024
     if (sslEnabled) {
         opts.tls = tlsFromPemFiles(sslCertFile, sslKeyFile)
     }

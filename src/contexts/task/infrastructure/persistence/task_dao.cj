@@ -1,6 +1,6 @@
 package lanlu.contexts.task.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.contexts.task.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -60,104 +60,104 @@ public class TaskDao {
     // 注意：表创建已由迁移系统处理，createTable() 方法已移除
 
     /**
+     * 从 Row 映射到 TaskData（标准 19 列：id, name, task_type, status, progress, message,
+     * plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source,
+     * created_at, started_at, completed_at, phase, waiting_reason, active_key）
+     */
+    private static func mapRowToTaskData(r: Row): TaskData {
+        let data = TaskData()
+        data.id = r.getInt("id")
+        data.name = r.getText("name")
+        data.taskType = r.getText("task_type")
+        data.status = r.getText("status")
+        data.progress = Int32(r.getInt("progress"))
+        data.message = r.getText("message")
+        data.pluginNamespace = r.getText("plugin_namespace")
+        data.parameters = r.getText("parameters")
+        data.result = r.getText("result")
+        data.priority = Int32(r.getInt("priority"))
+        data.groupId = r.getText("group_id")
+        data.timeoutAt = r.getText("timeout_at")
+        data.triggerSource = r.getText("trigger_source")
+        data.createdAt = r.getText("created_at")
+        data.startedAt = r.getText("started_at")
+        data.completedAt = r.getText("completed_at")
+        data.phase = r.getText("phase")
+        data.waitingReason = r.getText("waiting_reason")
+        data.activeKey = r.getText("active_key")
+        return data
+    }
+
+    /**
+     * 从 Row 映射到 TaskData（含 wait_for_task_id，20 列）
+     */
+    private static func mapRowToTaskDataWithWaitFor(r: Row): TaskData {
+        let data = TaskData()
+        data.id = r.getInt("id")
+        data.name = r.getText("name")
+        data.taskType = r.getText("task_type")
+        data.status = r.getText("status")
+        data.progress = Int32(r.getInt("progress"))
+        data.message = r.getText("message")
+        data.pluginNamespace = r.getText("plugin_namespace")
+        data.parameters = r.getText("parameters")
+        data.result = r.getText("result")
+        data.priority = Int32(r.getInt("priority"))
+        data.groupId = r.getText("group_id")
+        data.timeoutAt = r.getText("timeout_at")
+        data.triggerSource = r.getText("trigger_source")
+        data.waitForTaskId = r.getInt("wait_for_task_id")
+        data.createdAt = r.getText("created_at")
+        data.startedAt = r.getText("started_at")
+        data.completedAt = r.getText("completed_at")
+        data.phase = r.getText("phase")
+        data.waitingReason = r.getText("waiting_reason")
+        data.activeKey = r.getText("active_key")
+        return data
+    }
+
+    /**
      * 创建任务（含扩展字段）
      */
     public static func createTaskData(data: TaskData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                if (data.phase.size == 0) {
-                    data.phase = defaultPhaseForStatus(data.status)
-                }
-                let stmt = conn.prepareStatement(
-                    """
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-                    """)
-                try {
-                    stmt.set(0, data.name)
-                    stmt.set(1, data.taskType)
-                    stmt.set(2, data.status)
-                    stmt.set(3, data.progress)
-                    stmt.set(4, data.message)
-                    stmt.set(5, data.pluginNamespace)
-                    stmt.set(6, data.parameters)
-                    stmt.set(7, data.result)
-                    stmt.set(8, data.priority)
-                    if (data.groupId.size > 0) {
-                        stmt.set(9, data.groupId)
-                    } else {
-                        stmt.setNull(9)
-                    }
-                    if (data.timeoutAt.size > 0) {
-                        stmt.set(10, data.timeoutAt)
-                    } else {
-                        stmt.setNull(10)
-                    }
-                    if (data.triggerSource.size > 0) {
-                        stmt.set(11, data.triggerSource)
-                    } else {
-                        stmt.setNull(11)
-                    }
-                    if (data.startedAt.size > 0) {
-                        stmt.set(12, data.startedAt)
-                    } else {
-                        stmt.setNull(12)
-                    }
-                    if (data.completedAt.size > 0) {
-                        stmt.set(13, data.completedAt)
-                    } else {
-                        stmt.setNull(13)
-                    }
-                    if (data.phase.size > 0) {
-                        stmt.set(14, data.phase)
-                    } else {
-                        stmt.setNull(14)
-                    }
-                    if (data.waitingReason.size > 0) {
-                        stmt.set(15, data.waitingReason)
-                    } else {
-                        stmt.setNull(15)
-                    }
-                    if (data.activeKey.size > 0) {
-                        stmt.set(16, data.activeKey)
-                    } else {
-                        stmt.setNull(16)
-                    }
-
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            getLogger("task_dao").info("创建任务", ("id", data.id.toString()))
-                            return true
-                        } else {
-                            getLogger("task_dao").error("获取自增ID失败")
-                            return false
-                        }
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("创建任务失败", ("id", data.id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("释放连接失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            if (data.phase.size == 0) {
+                data.phase = defaultPhaseForStatus(data.status)
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id
+            """, [
+                DbText(data.name),
+                DbText(data.taskType),
+                DbText(data.status),
+                DbInt(Int64(data.progress)),
+                DbText(data.message),
+                DbText(data.pluginNamespace),
+                DbText(data.parameters),
+                DbText(data.result),
+                DbInt(Int64(data.priority)),
+                if (data.groupId.size > 0) { DbText(data.groupId) } else { DbNull },
+                if (data.timeoutAt.size > 0) { DbText(data.timeoutAt) } else { DbNull },
+                if (data.triggerSource.size > 0) { DbText(data.triggerSource) } else { DbNull },
+                if (data.startedAt.size > 0) { DbText(data.startedAt) } else { DbNull },
+                if (data.completedAt.size > 0) { DbText(data.completedAt) } else { DbNull },
+                if (data.phase.size > 0) { DbText(data.phase) } else { DbNull },
+                if (data.waitingReason.size > 0) { DbText(data.waitingReason) } else { DbNull },
+                if (data.activeKey.size > 0) { DbText(data.activeKey) } else { DbNull }
+            ])
+            if (rows.size > 0) {
+                data.id = rows[0].getInt("id")
+                logger.info("创建任务", ("id", data.id.toString()))
+                return true
+            } else {
+                logger.error("获取自增ID失败")
                 return false
+            }
+        } catch (e: Exception) {
+            logger.error("创建任务失败", ("id", data.id), ("error", e.message))
+            return false
         }
     }
 
@@ -176,53 +176,31 @@ public class TaskDao {
         triggerSource: String
     ): Option<Int64> {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let phase = defaultPhaseForStatus(status)
-                let stmt = conn.prepareStatement(
-                    """
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
-                        VALUES (?, ?, ?, ?, ?, '', ?, '', ?, NULL, NULL, ?, NULL, NULL, ?, NULL, NULL) RETURNING id
-                    """)
-                try {
-                    stmt.set(0, name)
-                    stmt.set(1, taskType)
-                    stmt.set(2, status)
-                    stmt.set(3, progress)
-                    stmt.set(4, message)
-                    stmt.set(5, parameters)
-                    stmt.set(6, priority)
-                    stmt.set(7, triggerSource)
-                    stmt.set(8, phase)
-
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            let id = rs.getOrNull<Int64>(0) ?? 0
-                            logger.debug("创建完整任务", ("id", id.toString()))
-                            return Some(id)
-                        }
-                        return None
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("创建完整任务失败", ("error", e.message))
-                return None
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let phase = defaultPhaseForStatus(status)
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
+                VALUES ($1, $2, $3, $4, $5, '', $6, '', $7, NULL, NULL, $8, NULL, NULL, $9, NULL, NULL) RETURNING id
+            """, [
+                DbText(name),
+                DbText(taskType),
+                DbText(status),
+                DbInt(Int64(progress)),
+                DbText(message),
+                DbText(parameters),
+                DbInt(Int64(priority)),
+                DbText(triggerSource),
+                DbText(phase)
+            ])
+            if (rows.size > 0) {
+                let id = rows[0].getInt("id")
+                logger.debug("创建完整任务", ("id", id.toString()))
+                return Some(id)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return None
+            return None
+        } catch (e: Exception) {
+            logger.error("创建完整任务失败", ("error", e.message))
+            return None
         }
     }
 
@@ -230,73 +208,22 @@ public class TaskDao {
      * 根据ID获取任务
      */
     public static func getTaskDataById(id: Int64): TaskData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
-                               priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks WHERE id = ?
-                    """)
-                try {
-                    stmt.set(0, id)
-                    let rs = stmt.query()
-
-                    try {
-                        if (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.createdAt = rs.getOrNull<String>(13) ?? ""
-                            data.startedAt = rs.getOrNull<String>(14) ?? ""
-                            data.completedAt = rs.getOrNull<String>(15) ?? ""
-                            data.phase = rs.getOrNull<String>(16) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                            data.activeKey = rs.getOrNull<String>(18) ?? ""
-                            return data
-                        } else {
-                            return TaskData()
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            getLogger("task_dao").warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("查询任务失败", ("id", id), ("error", e.message))
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                       priority, group_id, timeout_at, trigger_source,
+                       created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks WHERE id = $1
+            """, [DbInt(id)])
+            if (rows.size > 0) {
+                return mapRowToTaskData(rows[0])
+            } else {
                 return TaskData()
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return TaskData()
+        } catch (e: Exception) {
+            logger.error("查询任务失败", ("id", id), ("error", e.message))
+            return TaskData()
         }
     }
 
@@ -304,50 +231,22 @@ public class TaskDao {
      * 更新任务状态
      */
     public static func updateTaskStatus(id: Int64, status: String, message: String, progress: Int32): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let phase = defaultPhaseForStatus(status)
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks SET status = ?, message = ?, progress = ?, phase = ?,
-                            waiting_reason = CASE WHEN ? = 'waiting' THEN waiting_reason ELSE NULL END
-                        WHERE id = ?
-                    """)
-                try {
-                    stmt.set(0, status)
-                    stmt.set(1, message)
-                    stmt.set(2, progress)
-                    stmt.set(3, phase)
-                    stmt.set(4, status)
-                    stmt.set(5, id)
-
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        TaskEventHub.getInstance().publishTaskChanged(id)
-                    }
-                    getLogger("task_dao").debug("更新任务状态", ("id", id), ("status", status))
-                    return result.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("更新任务状态失败", ("id", id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            let phase = defaultPhaseForStatus(status)
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks SET status = $1, message = $2, progress = $3, phase = $4,
+                    waiting_reason = CASE WHEN $5 = 'waiting' THEN waiting_reason ELSE NULL END
+                WHERE id = $6
+            """, [DbText(status), DbText(message), DbInt(Int64(progress)), DbText(phase), DbText(status), DbInt(id)])
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(id)
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+            logger.debug("更新任务状态", ("id", id), ("status", status))
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务状态失败", ("id", id), ("error", e.message))
+            return false
         }
     }
 
@@ -355,49 +254,24 @@ public class TaskDao {
      * 更新任务进度与消息，但保留当前主状态。
      */
     public static func updateTaskProgressPreserveStatus(id: Int64, progress: Int32, message: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET message = ?, progress = ?
-                        WHERE id = ?
-                    """)
-                try {
-                    stmt.set(0, message)
-                    stmt.set(1, progress)
-                    stmt.set(2, id)
-
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        let eventHub = TaskEventHub.getInstance()
-                        eventHub.publishTaskChanged(id)
-                        eventHub.publishTaskProgress(id)
-                    }
-                    getLogger("task_dao").debug("更新任务进度(保留状态)",
-                        [("id", id.toString()), ("progress", progress.toString())])
-                    return result.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("更新任务进度失败", ("id", id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks
+                SET message = $1, progress = $2
+                WHERE id = $3
+            """, [DbText(message), DbInt(Int64(progress)), DbInt(id)])
+            if (result > 0) {
+                let eventHub = TaskEventHub.getInstance()
+                eventHub.publishTaskChanged(id)
+                eventHub.publishTaskProgress(id)
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+            logger.debug("更新任务进度(保留状态)",
+                [("id", id.toString()), ("progress", progress.toString())])
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务进度失败", ("id", id), ("error", e.message))
+            return false
         }
     }
 
@@ -406,49 +280,26 @@ public class TaskDao {
      */
     public static func updateTaskWaitingState(id: Int64, message: String, progress: Int32, phase: String,
         waitingReason: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET status = 'waiting',
-                            message = ?,
-                            progress = ?,
-                            phase = ?,
-                            waiting_reason = ?
-                        WHERE id = ?
-                    """)
-                try {
-                    stmt.set(0, message)
-                    stmt.set(1, progress)
-                    stmt.set(2, phase)
-                    stmt.set(3, waitingReason)
-                    stmt.set(4, id)
-
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        let eventHub = TaskEventHub.getInstance()
-                        eventHub.publishTaskChanged(id)
-                        eventHub.publishTaskWaiting(id)
-                    }
-                    return result.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("更新等待任务状态失败", ("id", id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        let logger = getLogger("task_dao")
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks
+                SET status = 'waiting',
+                    message = $1,
+                    progress = $2,
+                    phase = $3,
+                    waiting_reason = $4
+                WHERE id = $5
+            """, [DbText(message), DbInt(Int64(progress)), DbText(phase), DbText(waitingReason), DbInt(id)])
+            if (result > 0) {
+                let eventHub = TaskEventHub.getInstance()
+                eventHub.publishTaskChanged(id)
+                eventHub.publishTaskWaiting(id)
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新等待任务状态失败", ("id", id), ("error", e.message))
+            return false
         }
     }
 
@@ -461,36 +312,16 @@ public class TaskDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET timeout_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second')
-                        WHERE id = ? AND status = 'running'
-                    """)
-                try {
-                    stmt.set(0, Int64(timeoutSeconds))
-                    stmt.set(1, id)
-                    let updateResult = stmt.update()
-                    return updateResult.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("延长任务超时失败", ("id", id.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
-            }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks
+                SET timeout_at = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 second')
+                WHERE id = $2 AND status = 'running'
+            """, [DbInt(Int64(timeoutSeconds)), DbInt(id)])
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("延长任务超时失败", ("id", id.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -520,43 +351,21 @@ public class TaskDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET timeout_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second'),
-                            message = ?,
-                            progress = ?
-                        WHERE id = ? AND status = 'running'
-                    """)
-                try {
-                    stmt.set(0, Int64(timeoutSeconds))
-                    stmt.set(1, message)
-                    stmt.set(2, progress)
-                    stmt.set(3, id)
-                    let updateResult = stmt.update()
-                    if (updateResult.rowCount > 0) {
-                        TaskEventHub.getInstance().publishTaskChanged(id)
-                    }
-                    return updateResult.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("延长超时并更新进度失败", ("id", id.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks
+                SET timeout_at = CURRENT_TIMESTAMP + ($1 * INTERVAL '1 second'),
+                    message = $2,
+                    progress = $3
+                WHERE id = $4 AND status = 'running'
+            """, [DbInt(Int64(timeoutSeconds)), DbText(message), DbInt(Int64(progress)), DbInt(id)])
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(id)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("延长超时并更新进度失败", ("id", id.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -565,60 +374,36 @@ public class TaskDao {
      */
     public static func failTimedOutUploadTasks(): Int64 {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET status = 'failed',
-                            message = '上传任务超时：10分钟内未完成',
-                            completed_at = CURRENT_TIMESTAMP,
-                            phase = 'failed'
-                        WHERE task_type IN ('upload', 'asset_upload', 'asset_upload_process', 'archive_asset_consume', 'tag_asset_consume', 'avatar_asset_consume', 'metadata_asset_consume', 'plugin_asset_consume')
-                          AND status = 'running'
-                          AND timeout_at IS NOT NULL
-                          AND timeout_at <= CURRENT_TIMESTAMP
-                        RETURNING id
-                    """)
-                try {
-                    let rs = stmt.query()
-                    let timedOutIds = ArrayList<Int64>()
-                    try {
-                        while (rs.next()) {
-                            timedOutIds.add(rs.getOrNull<Int64>(0) ?? 0)
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (_: Exception) {}
-                    }
-                    let rowCount = Int64(timedOutIds.size)
-                    for (taskId in timedOutIds) {
-                        if (taskId > 0) {
-                            TaskEventHub.getInstance().publishTaskChanged(taskId)
-                        }
-                    }
-                    if (rowCount > 0) {
-                        logger.warn("超时上传任务已标记失败", ("count", rowCount.toString()))
-                    }
-                    return rowCount
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("清理超时上传任务失败", ("error", e.message))
-                return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                UPDATE tasks
+                SET status = 'failed',
+                    message = '上传任务超时：10分钟内未完成',
+                    completed_at = CURRENT_TIMESTAMP,
+                    phase = 'failed'
+                WHERE task_type IN ('upload', 'asset_upload', 'asset_upload_process', 'archive_asset_consume', 'tag_asset_consume', 'avatar_asset_consume', 'metadata_asset_consume', 'plugin_asset_consume')
+                  AND status = 'running'
+                  AND timeout_at IS NOT NULL
+                  AND timeout_at <= CURRENT_TIMESTAMP
+                RETURNING id
+            """, [])
+            let timedOutIds = ArrayList<Int64>()
+            for (r in rows) {
+                timedOutIds.add(r.getInt("id"))
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return 0
+            let rowCount = Int64(timedOutIds.size)
+            for (taskId in timedOutIds) {
+                if (taskId > 0) {
+                    TaskEventHub.getInstance().publishTaskChanged(taskId)
+                }
+            }
+            if (rowCount > 0) {
+                logger.warn("超时上传任务已标记失败", ("count", rowCount.toString()))
+            }
+            return rowCount
+        } catch (e: Exception) {
+            logger.error("清理超时上传任务失败", ("error", e.message))
+            return 0
         }
     }
 
@@ -626,99 +411,46 @@ public class TaskDao {
      * 更新任务完整信息
      */
     public static func updateTaskData(data: TaskData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                if (data.phase.size == 0) {
-                    data.phase = defaultPhaseForStatus(data.status)
-                }
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks SET
-                            name = ?, task_type = ?, status = ?, progress = ?, message = ?,
-                            plugin_namespace = ?, parameters = ?, result = ?, priority = ?, group_id = ?,
-                            timeout_at = ?, trigger_source = ?, started_at = ?, completed_at = ?,
-                            phase = ?, waiting_reason = ?, active_key = ?
-                        WHERE id = ?
-                    """)
-                try {
-                    stmt.set(0, data.name)
-                    stmt.set(1, data.taskType)
-                    stmt.set(2, data.status)
-                    stmt.set(3, data.progress)
-                    stmt.set(4, data.message)
-                    stmt.set(5, data.pluginNamespace)
-                    stmt.set(6, data.parameters)
-                    stmt.set(7, data.result)
-                    stmt.set(8, data.priority)
-                    if (data.groupId.size > 0) {
-                        stmt.set(9, data.groupId)
-                    } else {
-                        stmt.setNull(9)
-                    }
-                    if (data.timeoutAt.size > 0) {
-                        stmt.set(10, data.timeoutAt)
-                    } else {
-                        stmt.setNull(10)
-                    }
-                    if (data.triggerSource.size > 0) {
-                        stmt.set(11, data.triggerSource)
-                    } else {
-                        stmt.setNull(11)
-                    }
-                    if (data.startedAt.size > 0) {
-                        stmt.set(12, data.startedAt)
-                    } else {
-                        stmt.setNull(12)
-                    }
-                    if (data.completedAt.size > 0) {
-                        stmt.set(13, data.completedAt)
-                    } else {
-                        stmt.setNull(13)
-                    }
-                    if (data.phase.size > 0) {
-                        stmt.set(14, data.phase)
-                    } else {
-                        stmt.setNull(14)
-                    }
-                    if (data.waitingReason.size > 0) {
-                        stmt.set(15, data.waitingReason)
-                    } else {
-                        stmt.setNull(15)
-                    }
-                    if (data.activeKey.size > 0) {
-                        stmt.set(16, data.activeKey)
-                    } else {
-                        stmt.setNull(16)
-                    }
-                    stmt.set(17, data.id)
-
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        TaskEventHub.getInstance().publishTaskChanged(data.id)
-                    }
-                    getLogger("task_dao").debug("更新任务", ("id", data.id))
-                    return result.rowCount > 0
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("更新任务失败", ("id", data.id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            if (data.phase.size == 0) {
+                data.phase = defaultPhaseForStatus(data.status)
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks SET
+                    name = $1, task_type = $2, status = $3, progress = $4, message = $5,
+                    plugin_namespace = $6, parameters = $7, result = $8, priority = $9, group_id = $10,
+                    timeout_at = $11, trigger_source = $12, started_at = $13, completed_at = $14,
+                    phase = $15, waiting_reason = $16, active_key = $17
+                WHERE id = $18
+            """, [
+                DbText(data.name),
+                DbText(data.taskType),
+                DbText(data.status),
+                DbInt(Int64(data.progress)),
+                DbText(data.message),
+                DbText(data.pluginNamespace),
+                DbText(data.parameters),
+                DbText(data.result),
+                DbInt(Int64(data.priority)),
+                if (data.groupId.size > 0) { DbText(data.groupId) } else { DbNull },
+                if (data.timeoutAt.size > 0) { DbText(data.timeoutAt) } else { DbNull },
+                if (data.triggerSource.size > 0) { DbText(data.triggerSource) } else { DbNull },
+                if (data.startedAt.size > 0) { DbText(data.startedAt) } else { DbNull },
+                if (data.completedAt.size > 0) { DbText(data.completedAt) } else { DbNull },
+                if (data.phase.size > 0) { DbText(data.phase) } else { DbNull },
+                if (data.waitingReason.size > 0) { DbText(data.waitingReason) } else { DbNull },
+                if (data.activeKey.size > 0) { DbText(data.activeKey) } else { DbNull },
+                DbInt(data.id)
+            ])
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(data.id)
+            }
+            logger.debug("更新任务", ("id", data.id))
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务失败", ("id", data.id), ("error", e.message))
+            return false
         }
     }
 
@@ -726,35 +458,14 @@ public class TaskDao {
      * 删除任务
      */
     public static func deleteTask(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement("DELETE FROM tasks WHERE id = ?")
-                try {
-                    stmt.set(0, id)
-                    stmt.update()
-                    getLogger("task_dao").info("删除任务", ("id", id))
-                    return true
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("删除任务失败", ("id", id), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
-            }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+        let logger = getLogger("task_dao")
+        try {
+            DatabaseConfig.driver().exec("DELETE FROM tasks WHERE id = $1", [DbInt(id)])
+            logger.info("删除任务", ("id", id))
+            return true
+        } catch (e: Exception) {
+            logger.error("删除任务失败", ("id", id), ("error", e.message))
+            return false
         }
     }
 
@@ -762,48 +473,18 @@ public class TaskDao {
      * 检查任务是否存在
      */
     public static func taskExists(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement("SELECT COUNT(*) FROM tasks WHERE id = ?")
-                try {
-                    stmt.set(0, id)
-                    let rs = stmt.query()
-
-                    try {
-                        if (rs.next()) {
-                            let count = rs.getOrNull<Int32>(0) ?? 0
-                            return count > 0
-                        } else {
-                            return false
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            getLogger("task_dao").warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("检查任务存在性失败", ("id", id), ("error", e.message))
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT COUNT(*) FROM tasks WHERE id = $1", [DbInt(id)])
+            if (rows.size > 0) {
+                let count = rows[0].getInt("count")
+                return count > 0
+            } else {
                 return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return false
+        } catch (e: Exception) {
+            logger.error("检查任务存在性失败", ("id", id), ("error", e.message))
+            return false
         }
     }
 
@@ -811,39 +492,17 @@ public class TaskDao {
      * 获取任务总数
      */
     public static func getTaskCount(): Int32 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement("SELECT COUNT(*) FROM tasks")
-                let rs = stmt.query()
-
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<Int32>(0) ?? 0
-                    } else {
-                        return 0
-                    }
-                } finally {
-                    try {
-                        rs.close()
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("获取任务总数失败", ("error", e.message))
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT COUNT(*) FROM tasks", [])
+            if (rows.size > 0) {
+                return Int32(rows[0].getInt("count"))
+            } else {
                 return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return 0
+        } catch (e: Exception) {
+            logger.error("获取任务总数失败", ("error", e.message))
+            return 0
         }
     }
 
@@ -851,40 +510,17 @@ public class TaskDao {
      * 获取指定状态的任务总数
      */
     public static func getTaskCountByStatus(status: String): Int32 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement("SELECT COUNT(*) FROM tasks WHERE status = ?")
-                stmt.set(0, status)
-                let rs = stmt.query()
-
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<Int32>(0) ?? 0
-                    } else {
-                        return 0
-                    }
-                } finally {
-                    try {
-                        rs.close()
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("获取指定状态任务总数失败", ("status", status), ("error", e.message))
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT COUNT(*) FROM tasks WHERE status = $1", [DbText(status)])
+            if (rows.size > 0) {
+                return Int32(rows[0].getInt("count"))
+            } else {
                 return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return 0
+        } catch (e: Exception) {
+            logger.error("获取指定状态任务总数失败", ("status", status), ("error", e.message))
+            return 0
         }
     }
 
@@ -895,87 +531,22 @@ public class TaskDao {
      * @return 任务数据数组
      */
     public static func getTasksWithPagination(offset: Int32, limit: Int32): Array<TaskData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks
-                        ORDER BY id DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                try {
-                    stmt.set(0, limit)
-                    stmt.set(1, offset)
-                    let rs = stmt.query()
-
-                    // 使用ArrayList来收集结果
-                    var taskList = ArrayList<TaskData>()
-                    try {
-                        while (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.createdAt = rs.getOrNull<String>(13) ?? ""
-                            data.startedAt = rs.getOrNull<String>(14) ?? ""
-                            data.completedAt = rs.getOrNull<String>(15) ?? ""
-                            data.phase = rs.getOrNull<String>(16) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                            data.activeKey = rs.getOrNull<String>(18) ?? ""
-
-                            taskList.add(data)
-                        }
-                        // 转换 ArrayList 为 Array
-                        let size = taskList.size
-                        if (size > 0) {
-                            var result = Array<TaskData>(size, {_ => TaskData()})
-                            for (i in 0..size) {
-                                result[i] = taskList[i]
-                            }
-                            return result
-                        } else {
-                            return Array<TaskData>()
-                        }
-                    } catch (e: Exception) {
-                        getLogger("task_dao").error("分页查询任务失败", ("error", e.message))
-                        return Array<TaskData>()
-                    } finally {
-                        try {
-                            rs.close()
-                            stmt.close()
-                        } catch (closeError: Exception) {
-                            getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    getLogger("task_dao").error("分页查询任务失败", ("error", e.message))
-                    return Array<TaskData>()
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("分页查询任务失败", ("error", e.message))
-                return Array<TaskData>()
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks
+                ORDER BY id DESC
+                LIMIT $1 OFFSET $2
+            """, [DbInt(Int64(limit)), DbInt(Int64(offset))])
+            let taskList = ArrayList<TaskData>()
+            for (r in rows) {
+                taskList.add(mapRowToTaskData(r))
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return Array<TaskData>()
+            return taskList.toArray()
+        } catch (e: Exception) {
+            logger.error("分页查询任务失败", ("error", e.message))
+            return Array<TaskData>()
         }
     }
 
@@ -986,88 +557,23 @@ public class TaskDao {
      * @param status 任务状态
      */
     public static func getTasksWithPaginationByStatus(offset: Int32, limit: Int32, status: String): Array<TaskData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks
-                        WHERE status = ?
-                        ORDER BY id DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                try {
-                    stmt.set(0, status)
-                    stmt.set(1, limit)
-                    stmt.set(2, offset)
-                    let rs = stmt.query()
-
-                    var taskList = ArrayList<TaskData>()
-                    try {
-                        while (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.createdAt = rs.getOrNull<String>(13) ?? ""
-                            data.startedAt = rs.getOrNull<String>(14) ?? ""
-                            data.completedAt = rs.getOrNull<String>(15) ?? ""
-                            data.phase = rs.getOrNull<String>(16) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                            data.activeKey = rs.getOrNull<String>(18) ?? ""
-
-                            taskList.add(data)
-                        }
-
-                        let size = taskList.size
-                        if (size > 0) {
-                            var result = Array<TaskData>(size, {_ => TaskData()})
-                            for (i in 0..size) {
-                                result[i] = taskList[i]
-                            }
-                            return result
-                        } else {
-                            return Array<TaskData>()
-                        }
-                    } catch (e: Exception) {
-                        getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
-                        return Array<TaskData>()
-                    } finally {
-                        try {
-                            rs.close()
-                            stmt.close()
-                        } catch (closeError: Exception) {
-                            getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
-                    return Array<TaskData>()
-                }
-            } catch (e: Exception) {
-                getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
-                return Array<TaskData>()
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
-                }
+        let logger = getLogger("task_dao")
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks
+                WHERE status = $1
+                ORDER BY id DESC
+                LIMIT $2 OFFSET $3
+            """, [DbText(status), DbInt(Int64(limit)), DbInt(Int64(offset))])
+            let taskList = ArrayList<TaskData>()
+            for (r in rows) {
+                taskList.add(mapRowToTaskData(r))
             }
-            case None =>
-                getLogger("task_dao").error("无法创建数据库连接")
-                return Array<TaskData>()
+            return taskList.toArray()
+        } catch (e: Exception) {
+            logger.error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
+            return Array<TaskData>()
         }
     }
 
@@ -1076,40 +582,16 @@ public class TaskDao {
      */
     public static func updateTaskParameters(id: Int64, parameters: String): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let sql = "UPDATE tasks SET parameters = ? WHERE id = ?"
-                let pstmt = conn.prepareStatement(sql)
-                pstmt.set(0, parameters)
-                pstmt.set(1, id)
-
-                let result = pstmt.update()
-                logger.debug("更新任务参数", ("id", id.toString()), ("parameters", parameters))
-                if (result.rowCount > 0) {
-                    TaskEventHub.getInstance().publishTaskChanged(id)
-                }
-
-                try {
-                    pstmt.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                }
-
-                return result.rowCount > 0
-            } catch (e: Exception) {
-                logger.error("更新任务参数失败", ("id", id.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let result = DatabaseConfig.driver().exec("UPDATE tasks SET parameters = $1 WHERE id = $2", [DbText(parameters), DbInt(id)])
+            logger.debug("更新任务参数", ("id", id.toString()), ("parameters", parameters))
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(id)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务参数失败", ("id", id.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -1118,37 +600,15 @@ public class TaskDao {
      */
     public static func updateTaskType(id: Int64, taskType: String): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let sql = "UPDATE tasks SET task_type = ? WHERE id = ?"
-                let pstmt = conn.prepareStatement(sql)
-                pstmt.set(0, taskType)
-                pstmt.set(1, id)
-
-                let result = pstmt.update()
-                if (result.rowCount > 0) {
-                    TaskEventHub.getInstance().publishTaskChanged(id)
-                }
-                try {
-                    pstmt.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                }
-                return result.rowCount > 0
-            } catch (e: Exception) {
-                logger.error("更新任务类型失败", ("id", id.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let result = DatabaseConfig.driver().exec("UPDATE tasks SET task_type = $1 WHERE id = $2", [DbText(taskType), DbInt(id)])
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(id)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务类型失败", ("id", id.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -1157,36 +617,15 @@ public class TaskDao {
      */
     public static func updateTaskPluginNamespace(id: Int64, pluginNamespace: String): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let sql = "UPDATE tasks SET plugin_namespace = ? WHERE id = ?"
-                let pstmt = conn.prepareStatement(sql)
-                pstmt.set(0, pluginNamespace)
-                pstmt.set(1, id)
-                let result = pstmt.update()
-                if (result.rowCount > 0) {
-                    TaskEventHub.getInstance().publishTaskChanged(id)
-                }
-                try {
-                    pstmt.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                }
-                return result.rowCount > 0
-            } catch (e: Exception) {
-                logger.error("更新任务插件命名空间失败", ("id", id.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let result = DatabaseConfig.driver().exec("UPDATE tasks SET plugin_namespace = $1 WHERE id = $2", [DbText(pluginNamespace), DbInt(id)])
+            if (result > 0) {
+                TaskEventHub.getInstance().publishTaskChanged(id)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return result > 0
+        } catch (e: Exception) {
+            logger.error("更新任务插件命名空间失败", ("id", id.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -1196,60 +635,31 @@ public class TaskDao {
      */
     public static func recoverOrphanedTasks(): Int64 {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                // 更新所有非终态任务为失败状态
-                let updateSql = """
-                        UPDATE tasks
-                        SET status = 'failed',
-                            message = '服务端重启，任务未完成',
-                            progress = 0,
-                            completed_at = CURRENT_TIMESTAMP
-                        WHERE status NOT IN ('completed', 'failed', 'stopped')
-                        RETURNING id
-                    """
-                let stmt = conn.prepareStatement(updateSql)
-                try {
-                    let rs = stmt.query()
-                    let recoveredIds = ArrayList<Int64>()
-                    try {
-                        while (rs.next()) {
-                            recoveredIds.add(rs.getOrNull<Int64>(0) ?? 0)
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (_: Exception) {}
-                    }
-                    let rowCount = Int64(recoveredIds.size)
-                    for (taskId in recoveredIds) {
-                        if (taskId > 0) {
-                            TaskEventHub.getInstance().publishTaskChanged(taskId)
-                        }
-                    }
-                    logger.debug("恢复孤儿任务完成", [("count", rowCount.toString())])
-                    return rowCount
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("恢复孤儿任务失败", ("error", e.message))
-                return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                UPDATE tasks
+                SET status = 'failed',
+                    message = '服务端重启，任务未完成',
+                    progress = 0,
+                    completed_at = CURRENT_TIMESTAMP
+                WHERE status NOT IN ('completed', 'failed', 'stopped')
+                RETURNING id
+            """, [])
+            let recoveredIds = ArrayList<Int64>()
+            for (r in rows) {
+                recoveredIds.add(r.getInt("id"))
+            }
+            let rowCount = Int64(recoveredIds.size)
+            for (taskId in recoveredIds) {
+                if (taskId > 0) {
+                    TaskEventHub.getInstance().publishTaskChanged(taskId)
                 }
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return 0
+            logger.debug("恢复孤儿任务完成", [("count", rowCount.toString())])
+            return rowCount
+        } catch (e: Exception) {
+            logger.error("恢复孤儿任务失败", ("error", e.message))
+            return 0
         }
     }
 
@@ -1258,55 +668,22 @@ public class TaskDao {
      */
     public static func hasRecentTask(taskType: String, triggerSource: String, withinSeconds: Int32): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let sql = """
-                        SELECT COUNT(*) FROM tasks
-                        WHERE task_type = ?
-                        AND trigger_source = ?
-                        AND created_at >= NOW() - INTERVAL '${withinSeconds} seconds'
-                    """
-                let stmt = conn.prepareStatement(sql)
-                try {
-                    stmt.set(0, taskType)
-                    stmt.set(1, triggerSource)
-                    let rs = stmt.query()
-
-                    try {
-                        if (rs.next()) {
-                            let count = rs.getOrNull<Int32>(0) ?? 0
-                            return count > 0
-                        } else {
-                            return false
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            logger.warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("检查最近任务失败", ("error", e.message))
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT COUNT(*) FROM tasks
+                WHERE task_type = $1
+                AND trigger_source = $2
+                AND created_at >= NOW() - ($3 * INTERVAL '1 second')
+            """, [DbText(taskType), DbText(triggerSource), DbInt(Int64(withinSeconds))])
+            if (rows.size > 0) {
+                let count = rows[0].getInt("count")
+                return count > 0
+            } else {
                 return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+        } catch (e: Exception) {
+            logger.error("检查最近任务失败", ("error", e.message))
+            return false
         }
     }
 
@@ -1315,87 +692,24 @@ public class TaskDao {
      */
     public static func getTasksByTriggerSource(triggerSource: String, limit: Int32): Array<TaskData> {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
-                               priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks
-                        WHERE trigger_source = ?
-                        ORDER BY created_at DESC
-                        LIMIT ?
-                    """)
-                try {
-                    stmt.set(0, triggerSource)
-                    stmt.set(1, limit)
-                    let rs = stmt.query()
-
-                    var taskList = ArrayList<TaskData>()
-                    try {
-                        while (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.createdAt = rs.getOrNull<String>(13) ?? ""
-                            data.startedAt = rs.getOrNull<String>(14) ?? ""
-                            data.completedAt = rs.getOrNull<String>(15) ?? ""
-                            data.phase = rs.getOrNull<String>(16) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                            data.activeKey = rs.getOrNull<String>(18) ?? ""
-
-                            taskList.add(data)
-                        }
-                        let size = taskList.size
-                        if (size > 0) {
-                            var result = Array<TaskData>(size, {_ => TaskData()})
-                            for (i in 0..size) {
-                                result[i] = taskList[i]
-                            }
-                            return result
-                        } else {
-                            return Array<TaskData>()
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            logger.warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("按触发源查询任务失败", ("error", e.message))
-                return Array<TaskData>()
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                       priority, group_id, timeout_at, trigger_source,
+                       created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks
+                WHERE trigger_source = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+            """, [DbText(triggerSource), DbInt(Int64(limit))])
+            let taskList = ArrayList<TaskData>()
+            for (r in rows) {
+                taskList.add(mapRowToTaskData(r))
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return Array<TaskData>()
+            return taskList.toArray()
+        } catch (e: Exception) {
+            logger.error("按触发源查询任务失败", ("error", e.message))
+            return Array<TaskData>()
         }
     }
 
@@ -1404,85 +718,23 @@ public class TaskDao {
      */
     public static func getTasksByGroupId(groupId: String): Array<TaskData> {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
-                               priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks
-                        WHERE group_id = ?
-                        ORDER BY created_at ASC
-                    """)
-                try {
-                    stmt.set(0, groupId)
-                    let rs = stmt.query()
-
-                    var taskList = ArrayList<TaskData>()
-                    try {
-                        while (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.createdAt = rs.getOrNull<String>(13) ?? ""
-                            data.startedAt = rs.getOrNull<String>(14) ?? ""
-                            data.completedAt = rs.getOrNull<String>(15) ?? ""
-                            data.phase = rs.getOrNull<String>(16) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                            data.activeKey = rs.getOrNull<String>(18) ?? ""
-
-                            taskList.add(data)
-                        }
-                        let size = taskList.size
-                        if (size > 0) {
-                            var result = Array<TaskData>(size, {_ => TaskData()})
-                            for (i in 0..size) {
-                                result[i] = taskList[i]
-                            }
-                            return result
-                        } else {
-                            return Array<TaskData>()
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            logger.warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("按分组ID查询任务失败", ("error", e.message))
-                return Array<TaskData>()
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                       priority, group_id, timeout_at, trigger_source,
+                       created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks
+                WHERE group_id = $1
+                ORDER BY created_at ASC
+            """, [DbText(groupId)])
+            let taskList = ArrayList<TaskData>()
+            for (r in rows) {
+                taskList.add(mapRowToTaskData(r))
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return Array<TaskData>()
+            return taskList.toArray()
+        } catch (e: Exception) {
+            logger.error("按分组ID查询任务失败", ("error", e.message))
+            return Array<TaskData>()
         }
     }
 
@@ -1494,36 +746,17 @@ public class TaskDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT 1
-                        FROM tasks
-                        WHERE group_id = ?
-                          AND status NOT IN ('completed', 'failed', 'stopped')
-                        LIMIT 1
-                    """)
-                try {
-                    stmt.set(0, groupId)
-                    let rs = stmt.query()
-                    try {
-                        return rs.next()
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    stmt.close()
-                }
-            } catch (_: Exception) {
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
-            }
-            case None => return false
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT 1
+                FROM tasks
+                WHERE group_id = $1
+                  AND status NOT IN ('completed', 'failed', 'stopped')
+                LIMIT 1
+            """, [DbText(groupId)])
+            return rows.size > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -1535,38 +768,18 @@ public class TaskDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT 1
-                        FROM tasks
-                        WHERE task_type = ?
-                          AND group_id = ?
-                          AND status IN ('pending', 'running', 'waiting')
-                        LIMIT 1
-                    """)
-                try {
-                    stmt.set(0, taskType)
-                    stmt.set(1, groupId)
-                    let rs = stmt.query()
-                    try {
-                        return rs.next()
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    stmt.close()
-                }
-            } catch (_: Exception) {
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
-            }
-            case None => return false
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT 1
+                FROM tasks
+                WHERE task_type = $1
+                  AND group_id = $2
+                  AND status IN ('pending', 'running', 'waiting')
+                LIMIT 1
+            """, [DbText(taskType), DbText(groupId)])
+            return rows.size > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -1579,36 +792,17 @@ public class TaskDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT 1
-                        FROM tasks
-                        WHERE active_key = ?
-                          AND status IN ('pending', 'running', 'waiting')
-                        LIMIT 1
-                    """)
-                try {
-                    stmt.set(0, normalized)
-                    let rs = stmt.query()
-                    try {
-                        return rs.next()
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    stmt.close()
-                }
-            } catch (_: Exception) {
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
-            }
-            case None => return false
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT 1
+                FROM tasks
+                WHERE active_key = $1
+                  AND status IN ('pending', 'running', 'waiting')
+                LIMIT 1
+            """, [DbText(normalized)])
+            return rows.size > 0
+        } catch (_: Exception) {
+            return false
         }
     }
 
@@ -1617,44 +811,17 @@ public class TaskDao {
      */
     public static func updateTaskStatusByGroupId(groupId: String, status: String, message: String): Int64 {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET status = ?, message = ?, completed_at = CURRENT_TIMESTAMP
-                        WHERE group_id = ? AND status IN ('pending', 'running')
-                    """)
-                try {
-                    stmt.set(0, status)
-                    stmt.set(1, message)
-                    stmt.set(2, groupId)
-
-                    let updateResult = stmt.update()
-                    let rowCount = updateResult.rowCount
-                    logger.debug("批量更新任务状态", ("group_id", groupId), ("count", rowCount.toString()))
-                    return rowCount
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("批量更新任务状态失败", ("error", e.message))
-                return 0
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
-            }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return 0
+        try {
+            let rowCount = DatabaseConfig.driver().exec("""
+                UPDATE tasks
+                SET status = $1, message = $2, completed_at = CURRENT_TIMESTAMP
+                WHERE group_id = $3 AND status IN ('pending', 'running')
+            """, [DbText(status), DbText(message), DbText(groupId)])
+            logger.debug("批量更新任务状态", ("group_id", groupId), ("count", rowCount.toString()))
+            return rowCount
+        } catch (e: Exception) {
+            logger.error("批量更新任务状态失败", ("error", e.message))
+            return 0
         }
     }
 
@@ -1663,73 +830,49 @@ public class TaskDao {
      */
     public static func claimNextPendingTask(): Option<TaskData> {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                // 使用单条UPDATE + 子查询实现原子领取
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET status = 'running',
-                            message = '任务已启动',
-                            progress = 0,
-                            started_at = CURRENT_TIMESTAMP
-                        WHERE id = (
-                            SELECT id FROM tasks
-                            WHERE status = 'pending'
-                            ORDER BY priority ASC, created_at ASC, id ASC
-                            LIMIT 1
-                        )
-                        AND status = 'pending'
-                        RETURNING id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
-                                  priority, group_id, timeout_at, trigger_source,
-                                  created_at, started_at, completed_at
-                    """)
-
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        let data = TaskData()
-                        data.id = rs.getOrNull<Int64>(0) ?? 0
-                        data.name = rs.getOrNull<String>(1) ?? ""
-                        data.taskType = rs.getOrNull<String>(2) ?? ""
-                        data.status = rs.getOrNull<String>(3) ?? ""
-                        data.progress = rs.getOrNull<Int32>(4) ?? 0
-                        data.message = rs.getOrNull<String>(5) ?? ""
-                        data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                        data.parameters = rs.getOrNull<String>(7) ?? ""
-                        data.result = rs.getOrNull<String>(8) ?? ""
-                        data.priority = rs.getOrNull<Int32>(9) ?? 50
-                        data.groupId = rs.getOrNull<String>(10) ?? ""
-                        data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                        data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                        data.createdAt = rs.getOrNull<String>(13) ?? ""
-                        data.startedAt = rs.getOrNull<String>(14) ?? ""
-                        data.completedAt = rs.getOrNull<String>(15) ?? ""
-                        return Option<TaskData>.Some(data)
-                    }
-                    return Option<TaskData>.None
-                } finally {
-                    try {
-                        rs.close()
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error("领取待执行任务失败", ("error", e.message))
-                return Option<TaskData>.None
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
-                }
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                UPDATE tasks
+                SET status = 'running',
+                    message = '任务已启动',
+                    progress = 0,
+                    started_at = CURRENT_TIMESTAMP
+                WHERE id = (
+                    SELECT id FROM tasks
+                    WHERE status = 'pending'
+                    ORDER BY priority ASC, created_at ASC, id ASC
+                    LIMIT 1
+                )
+                AND status = 'pending'
+                RETURNING id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                          priority, group_id, timeout_at, trigger_source,
+                          created_at, started_at, completed_at
+            """, [])
+            if (rows.size > 0) {
+                let r = rows[0]
+                let data = TaskData()
+                data.id = r.getInt("id")
+                data.name = r.getText("name")
+                data.taskType = r.getText("task_type")
+                data.status = r.getText("status")
+                data.progress = Int32(r.getInt("progress"))
+                data.message = r.getText("message")
+                data.pluginNamespace = r.getText("plugin_namespace")
+                data.parameters = r.getText("parameters")
+                data.result = r.getText("result")
+                data.priority = Int32(r.getInt("priority"))
+                data.groupId = r.getText("group_id")
+                data.timeoutAt = r.getText("timeout_at")
+                data.triggerSource = r.getText("trigger_source")
+                data.createdAt = r.getText("created_at")
+                data.startedAt = r.getText("started_at")
+                data.completedAt = r.getText("completed_at")
+                return Option<TaskData>.Some(data)
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return Option<TaskData>.None
+            return Option<TaskData>.None
+        } catch (e: Exception) {
+            logger.error("领取待执行任务失败", ("error", e.message))
+            return Option<TaskData>.None
         }
     }
 
@@ -1745,85 +888,39 @@ public class TaskDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                // 使用子查询实现批量原子领取
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks
-                        SET status = 'running',
-                            message = '任务已启动',
-                            progress = 0,
-                            started_at = CURRENT_TIMESTAMP,
-                            phase = 'executing',
-                            waiting_reason = NULL
-                        WHERE id IN (
-                            SELECT id FROM tasks
-                            WHERE status = 'pending'
-                            ORDER BY priority ASC, created_at ASC, id ASC
-                            LIMIT ?
-                        )
-                        AND status = 'pending'
-                        RETURNING id, name, task_type, status, progress, message,
-                                  plugin_namespace, parameters, result,
-                                  priority, group_id, timeout_at, trigger_source,
-                                  created_at, started_at, completed_at, phase, waiting_reason, active_key
-                    """)
-                stmt.set(0, Int64(limit))
-
-                let rs = stmt.query()
-                try {
-                    while (rs.next()) {
-                        let data = TaskData()
-                        data.id = rs.getOrNull<Int64>(0) ?? 0
-                        data.name = rs.getOrNull<String>(1) ?? ""
-                        data.taskType = rs.getOrNull<String>(2) ?? ""
-                        data.status = rs.getOrNull<String>(3) ?? ""
-                        data.progress = rs.getOrNull<Int32>(4) ?? 0
-                        data.message = rs.getOrNull<String>(5) ?? ""
-                        data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                        data.parameters = rs.getOrNull<String>(7) ?? ""
-                        data.result = rs.getOrNull<String>(8) ?? ""
-                        data.priority = rs.getOrNull<Int32>(9) ?? 50
-                        data.groupId = rs.getOrNull<String>(10) ?? ""
-                        data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                        data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                        data.createdAt = rs.getOrNull<String>(13) ?? ""
-                        data.startedAt = rs.getOrNull<String>(14) ?? ""
-                        data.completedAt = rs.getOrNull<String>(15) ?? ""
-                        data.phase = rs.getOrNull<String>(16) ?? ""
-                        data.waitingReason = rs.getOrNull<String>(17) ?? ""
-                        data.activeKey = rs.getOrNull<String>(18) ?? ""
-                        result.add(data)
-                    }
-                    for (task in result) {
-                        if (task.id > 0) {
-                            TaskEventHub.getInstance().publishTaskChanged(task.id)
-                        }
-                    }
-                } finally {
-                    try {
-                        rs.close()
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
-                    }
-                }
-                return result
-            } catch (e: Exception) {
-                logger.error("批量领取待执行任务失败", ("error", e.message))
-                return result
-            } finally {
-                try {
-                    conn.close()
-                } catch (closeError: Exception) {
-                    logger.warn("关闭Connection失败: ${closeError.message}")
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                UPDATE tasks
+                SET status = 'running',
+                    message = '任务已启动',
+                    progress = 0,
+                    started_at = CURRENT_TIMESTAMP,
+                    phase = 'executing',
+                    waiting_reason = NULL
+                WHERE id IN (
+                    SELECT id FROM tasks
+                    WHERE status = 'pending'
+                    ORDER BY priority ASC, created_at ASC, id ASC
+                    LIMIT $1
+                )
+                AND status = 'pending'
+                RETURNING id, name, task_type, status, progress, message,
+                          plugin_namespace, parameters, result,
+                          priority, group_id, timeout_at, trigger_source,
+                          created_at, started_at, completed_at, phase, waiting_reason, active_key
+            """, [DbInt(Int64(limit))])
+            for (r in rows) {
+                result.add(mapRowToTaskData(r))
+            }
+            for (task in result) {
+                if (task.id > 0) {
+                    TaskEventHub.getInstance().publishTaskChanged(task.id)
                 }
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return result
+            return result
+        } catch (e: Exception) {
+            logger.error("批量领取待执行任务失败", ("error", e.message))
+            return result
         }
     }
 
@@ -1833,79 +930,41 @@ public class TaskDao {
      */
     public static func createWaitingTaskData(data: TaskData, waitForTaskId: Int64): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                data.phase = "awaiting_dependency"
-                data.waitingReason = "task_dependency"
-                let stmt = conn.prepareStatement(
-                    """
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at, phase, waiting_reason, active_key)
-                        VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?) RETURNING id
-                    """)
-                try {
-                    stmt.set(0, data.name)
-                    stmt.set(1, data.taskType)
-                    stmt.set(2, data.progress)
-                    stmt.set(3, data.message)
-                    stmt.set(4, data.pluginNamespace)
-                    stmt.set(5, data.parameters)
-                    stmt.set(6, data.result)
-                    stmt.set(7, data.priority)
-                    if (data.groupId.size > 0) {
-                        stmt.set(8, data.groupId)
-                    } else {
-                        stmt.setNull(8)
-                    }
-                    if (data.timeoutAt.size > 0) {
-                        stmt.set(9, data.timeoutAt)
-                    } else {
-                        stmt.setNull(9)
-                    }
-                    if (data.triggerSource.size > 0) {
-                        stmt.set(10, data.triggerSource)
-                    } else {
-                        stmt.setNull(10)
-                    }
-                    stmt.set(11, waitForTaskId)
-                    stmt.set(12, data.phase)
-                    stmt.set(13, data.waitingReason)
-                    if (data.activeKey.size > 0) {
-                        stmt.set(14, data.activeKey)
-                    } else {
-                        stmt.setNull(14)
-                    }
-
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.status = "waiting"
-                            data.waitForTaskId = waitForTaskId
-                            logger.info("创建等待任务", ("id", data.id.toString()),
-                                ("wait_for", waitForTaskId.toString()))
-                            return true
-                        }
-                        return false
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("创建等待任务失败", ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            data.phase = "awaiting_dependency"
+            data.waitingReason = "task_dependency"
+            let rows = DatabaseConfig.driver().query("""
+                INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at, phase, waiting_reason, active_key)
+                VALUES ($1, $2, 'waiting', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, NULL, $13, $14, $15) RETURNING id
+            """, [
+                DbText(data.name),
+                DbText(data.taskType),
+                DbInt(Int64(data.progress)),
+                DbText(data.message),
+                DbText(data.pluginNamespace),
+                DbText(data.parameters),
+                DbText(data.result),
+                DbInt(Int64(data.priority)),
+                if (data.groupId.size > 0) { DbText(data.groupId) } else { DbNull },
+                if (data.timeoutAt.size > 0) { DbText(data.timeoutAt) } else { DbNull },
+                if (data.triggerSource.size > 0) { DbText(data.triggerSource) } else { DbNull },
+                DbInt(waitForTaskId),
+                DbText(data.phase),
+                DbText(data.waitingReason),
+                if (data.activeKey.size > 0) { DbText(data.activeKey) } else { DbNull }
+            ])
+            if (rows.size > 0) {
+                data.id = rows[0].getInt("id")
+                data.status = "waiting"
+                data.waitForTaskId = waitForTaskId
+                logger.info("创建等待任务", ("id", data.id.toString()),
+                    ("wait_for", waitForTaskId.toString()))
+                return true
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return false
+        } catch (e: Exception) {
+            logger.error("创建等待任务失败", ("error", e.message))
+            return false
         }
     }
 
@@ -1914,74 +973,22 @@ public class TaskDao {
      */
     public static func getTasksWaitingFor(taskId: Int64): Array<TaskData> {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
-                               priority, group_id, timeout_at, trigger_source, wait_for_task_id,
-                               created_at, started_at, completed_at, phase, waiting_reason, active_key
-                        FROM tasks
-                        WHERE wait_for_task_id = ? AND status = 'waiting'
-                    """)
-                try {
-                    stmt.set(0, taskId)
-                    let rs = stmt.query()
-                    var taskList = ArrayList<TaskData>()
-                    try {
-                        while (rs.next()) {
-                            let data = TaskData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.name = rs.getOrNull<String>(1) ?? ""
-                            data.taskType = rs.getOrNull<String>(2) ?? ""
-                            data.status = rs.getOrNull<String>(3) ?? ""
-                            data.progress = rs.getOrNull<Int32>(4) ?? 0
-                            data.message = rs.getOrNull<String>(5) ?? ""
-                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
-                            data.parameters = rs.getOrNull<String>(7) ?? ""
-                            data.result = rs.getOrNull<String>(8) ?? ""
-                            data.priority = rs.getOrNull<Int32>(9) ?? 50
-                            data.groupId = rs.getOrNull<String>(10) ?? ""
-                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
-                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
-                            data.waitForTaskId = rs.getOrNull<Int64>(13) ?? 0
-                            data.createdAt = rs.getOrNull<String>(14) ?? ""
-                            data.startedAt = rs.getOrNull<String>(15) ?? ""
-                            data.completedAt = rs.getOrNull<String>(16) ?? ""
-                            data.phase = rs.getOrNull<String>(17) ?? ""
-                            data.waitingReason = rs.getOrNull<String>(18) ?? ""
-                            data.activeKey = rs.getOrNull<String>(19) ?? ""
-                            taskList.add(data)
-                        }
-                        let size = taskList.size
-                        if (size > 0) {
-                            var result = Array<TaskData>(size, {_ => TaskData()})
-                            for (i in 0..size) {
-                                result[i] = taskList[i]
-                            }
-                            return result
-                        }
-                        return Array<TaskData>()
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("查询等待任务失败", ("error", e.message))
-                return Array<TaskData>()
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                       priority, group_id, timeout_at, trigger_source, wait_for_task_id,
+                       created_at, started_at, completed_at, phase, waiting_reason, active_key
+                FROM tasks
+                WHERE wait_for_task_id = $1 AND status = 'waiting'
+            """, [DbInt(taskId)])
+            let taskList = ArrayList<TaskData>()
+            for (r in rows) {
+                taskList.add(mapRowToTaskDataWithWaitFor(r))
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return Array<TaskData>()
+            return taskList.toArray()
+        } catch (e: Exception) {
+            logger.error("查询等待任务失败", ("error", e.message))
+            return Array<TaskData>()
         }
     }
 
@@ -1990,41 +997,22 @@ public class TaskDao {
      */
     public static func activateWaitingTask(taskId: Int64): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks SET status = 'pending', message = '依赖任务已完成，等待执行', phase = 'queued', waiting_reason = NULL
-                        WHERE id = ? AND status = 'waiting'
-                    """)
-                try {
-                    stmt.set(0, taskId)
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        logger.debug("激活等待任务", ("id", taskId.toString()))
-                        let eventHub = TaskEventHub.getInstance()
-                        eventHub.publishTaskChanged(taskId)
-                        eventHub.publishWaitingActivated(taskId)
-                        return true
-                    }
-                    return false
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("激活等待任务失败", ("id", taskId.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks SET status = 'pending', message = '依赖任务已完成，等待执行', phase = 'queued', waiting_reason = NULL
+                WHERE id = $1 AND status = 'waiting'
+            """, [DbInt(taskId)])
+            if (result > 0) {
+                logger.debug("激活等待任务", ("id", taskId.toString()))
+                let eventHub = TaskEventHub.getInstance()
+                eventHub.publishTaskChanged(taskId)
+                eventHub.publishWaitingActivated(taskId)
+                return true
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return false
+        } catch (e: Exception) {
+            logger.error("激活等待任务失败", ("id", taskId.toString()), ("error", e.message))
+            return false
         }
     }
 
@@ -2033,40 +1021,20 @@ public class TaskDao {
      */
     public static func failWaitingTask(taskId: Int64, errorMessage: String): Bool {
         let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    """
-                        UPDATE tasks SET status = 'failed', message = ?, completed_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND status = 'waiting'
-                    """)
-                try {
-                    stmt.set(0, errorMessage)
-                    stmt.set(1, taskId)
-                    let result = stmt.update()
-                    if (result.rowCount > 0) {
-                        logger.debug("等待任务标记失败", ("id", taskId.toString()))
-                        TaskEventHub.getInstance().publishTaskChanged(taskId)
-                        return true
-                    }
-                    return false
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (_: Exception) {}
-                }
-            } catch (e: Exception) {
-                logger.error("标记等待任务失败", ("id", taskId.toString()), ("error", e.message))
-                return false
-            } finally {
-                try {
-                    conn.close()
-                } catch (_: Exception) {}
+        try {
+            let result = DatabaseConfig.driver().exec("""
+                UPDATE tasks SET status = 'failed', message = $1, completed_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND status = 'waiting'
+            """, [DbText(errorMessage), DbInt(taskId)])
+            if (result > 0) {
+                logger.debug("等待任务标记失败", ("id", taskId.toString()))
+                TaskEventHub.getInstance().publishTaskChanged(taskId)
+                return true
             }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
+            return false
+        } catch (e: Exception) {
+            logger.error("标记等待任务失败", ("id", taskId.toString()), ("error", e.message))
+            return false
         }
     }
 }

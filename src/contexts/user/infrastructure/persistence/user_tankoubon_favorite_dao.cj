@@ -1,7 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 
-import std.database.sql.*
+import ace_orm.*
 import std.collection.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -12,46 +12,42 @@ import lanlu.shared.utils.*
  */
 public class UserTankoubonFavoriteDao {
     /**
+     * 通过 tankoubon_id 查询 tankoubons.id（内部 ID）。
+     * 内联查找：TankoubonDao.getTankoubonInternalId 仍基于 std.database.sql.Connection，
+     * 而 ACE-ORM 不暴露连接句柄，故此处直接走 driver().query。
+     */
+    private static func getTankInternalId(tankoubonId: String): Int64 {
+        try {
+            let rows = DatabaseConfig.driver().query("SELECT id FROM tankoubons WHERE tankoubon_id = $1", [DbText(tankoubonId)])
+            if (rows.size > 0) {
+                return rows[0].getInt("id")
+            }
+        } catch (_: Exception) {}
+        return 0
+    }
+
+    /**
      * 添加收藏
      */
     public static func addFavorite(userId: Int64, tankoubonId: String): Bool {
         let logger = getLogger("user_tankoubon_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
-                    if (tankInternalId <= 0) {
-                        return false
-                    }
-
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_tankoubon_favorites (user_id, tankoubon_id, created_at)
-                        SELECT ?, ?, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_tankoubon_favorites WHERE user_id = ? AND tankoubon_id = ?
-                        )
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, tankInternalId)
-                        stmt.set(2, userId)
-                        stmt.set(3, tankInternalId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("添加Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
+        try {
+            let tankInternalId = getTankInternalId(tankoubonId)
+            if (tankInternalId <= 0) {
                 return false
+            }
+
+            DatabaseConfig.driver().exec("""
+                INSERT INTO user_tankoubon_favorites (user_id, tankoubon_id, created_at)
+                SELECT $1, $2, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM user_tankoubon_favorites WHERE user_id = $3 AND tankoubon_id = $4
+                )
+            """, [DbInt(userId), DbInt(tankInternalId), DbInt(userId), DbInt(tankInternalId)])
+            return true
+        } catch (e: Exception) {
+            logger.error("添加Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
+            return false
         }
     }
 
@@ -60,37 +56,20 @@ public class UserTankoubonFavoriteDao {
      */
     public static func removeFavorite(userId: Int64, tankoubonId: String): Bool {
         let logger = getLogger("user_tankoubon_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
-                    if (tankInternalId <= 0) {
-                        return false
-                    }
-
-                    let stmt = conn.prepareStatement("""
-                        DELETE FROM user_tankoubon_favorites
-                        WHERE user_id = ? AND tankoubon_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, tankInternalId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("取消Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
+        try {
+            let tankInternalId = getTankInternalId(tankoubonId)
+            if (tankInternalId <= 0) {
                 return false
+            }
+
+            DatabaseConfig.driver().exec("""
+                DELETE FROM user_tankoubon_favorites
+                WHERE user_id = $1 AND tankoubon_id = $2
+            """, [DbInt(userId), DbInt(tankInternalId)])
+            return true
+        } catch (e: Exception) {
+            logger.error("取消Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
+            return false
         }
     }
 
@@ -98,41 +77,22 @@ public class UserTankoubonFavoriteDao {
      * 检查是否已收藏
      */
     public static func isFavorite(userId: Int64, tankoubonId: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
-                    if (tankInternalId <= 0) {
-                        return false
-                    }
+        try {
+            let tankInternalId = getTankInternalId(tankoubonId)
+            if (tankInternalId <= 0) {
+                return false
+            }
 
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM user_tankoubon_favorites
-                        WHERE user_id = ? AND tankoubon_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, tankInternalId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let count = rs.getOrNull<Int64>(0) ?? 0
-                                return count > 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+            let rows = DatabaseConfig.driver().query("""
+                SELECT COUNT(*) FROM user_tankoubon_favorites
+                WHERE user_id = $1 AND tankoubon_id = $2
+            """, [DbInt(userId), DbInt(tankInternalId)])
+            if (rows.size > 0) {
+                let count = rows[0].getInt("count")
+                return count > 0
+            }
+        } catch (_: Exception) {
+            return false
         }
         return false
     }
@@ -142,41 +102,22 @@ public class UserTankoubonFavoriteDao {
      */
     public static func getUserFavoriteTankoubonIds(userId: Int64): Array<String> {
         let result = ArrayList<String>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM user_tankoubon_favorites utf
-                        JOIN tankoubons t ON t.id = utf.tankoubon_id
-                        WHERE utf.user_id = ?
-                        ORDER BY utf.created_at DESC
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                if (tid.size > 0) {
-                                    result.add(tid)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏列表失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT t.tankoubon_id
+                FROM user_tankoubon_favorites utf
+                JOIN tankoubons t ON t.id = utf.tankoubon_id
+                WHERE utf.user_id = $1
+                ORDER BY utf.created_at DESC
+            """, [DbInt(userId)])
+            for (r in rows) {
+                let tid = r.getText("tankoubon_id")
+                if (tid.size > 0) {
+                    result.add(tid)
                 }
-            case None =>
-                getLogger("user_tankoubon_favorite_dao").error("无法连接到数据库")
+            }
+        } catch (e: Exception) {
+            getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏列表失败", ("error", e.message))
         }
         return result.toArray()
     }
@@ -188,62 +129,31 @@ public class UserTankoubonFavoriteDao {
         let ids = ArrayList<String>()
         var totalCount: Int32 = 0
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    // total count
-                    try {
-                        let countStmt = conn.prepareStatement("SELECT COUNT(*) FROM user_tankoubon_favorites WHERE user_id = ?")
-                        try {
-                            countStmt.set(0, userId)
-                            let rs = countStmt.query()
-                            try {
-                                if (rs.next()) {
-                                    totalCount = Int32(rs.getOrNull<Int64>(0) ?? 0)
-                                }
-                            } finally {
-                                rs.close()
-                            }
-                        } finally {
-                            countStmt.close()
-                        }
-                    } catch (_: Exception) {}
-
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM user_tankoubon_favorites utf
-                        JOIN tankoubons t ON t.id = utf.tankoubon_id
-                        WHERE utf.user_id = ?
-                        ORDER BY utf.created_at DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, count)
-                        stmt.set(2, start)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                if (tid.size > 0) {
-                                    ids.add(tid)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏分页失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+        try {
+            // total count
+            try {
+                let countRows = DatabaseConfig.driver().query("SELECT COUNT(*) FROM user_tankoubon_favorites WHERE user_id = $1", [DbInt(userId)])
+                if (countRows.size > 0) {
+                    totalCount = Int32(countRows[0].getInt("count"))
                 }
-            case None =>
-                getLogger("user_tankoubon_favorite_dao").error("无法连接到数据库")
+            } catch (_: Exception) {}
+
+            let rows = DatabaseConfig.driver().query("""
+                SELECT t.tankoubon_id
+                FROM user_tankoubon_favorites utf
+                JOIN tankoubons t ON t.id = utf.tankoubon_id
+                WHERE utf.user_id = $1
+                ORDER BY utf.created_at DESC
+                LIMIT $2 OFFSET $3
+            """, [DbInt(userId), DbInt(Int64(count)), DbInt(Int64(start))])
+            for (r in rows) {
+                let tid = r.getText("tankoubon_id")
+                if (tid.size > 0) {
+                    ids.add(tid)
+                }
+            }
+        } catch (e: Exception) {
+            getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏分页失败", ("error", e.message))
         }
 
         return (ids.toArray(), totalCount)
@@ -259,26 +169,22 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let _ = DatabaseConfig.withPooledConnection<Bool>("user_tankoubon_favorite_dao", "批量检查 Tankoubon 收藏状态失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT t.tankoubon_id
                 FROM user_tankoubon_favorites utf
                 JOIN tankoubons t ON t.id = utf.tankoubon_id
-                WHERE utf.user_id = ? AND t.tankoubon_id = ANY(?::text[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setTextArray(stmt, 1, tankoubonIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let tid = rs.getOrNull<String>(0) ?? ""
-                        if (tid.size > 0) {
-                            result[tid] = true
-                        }
-                    }
-                    return true
-                })
-            })
-        })
+                WHERE utf.user_id = $1 AND t.tankoubon_id = ANY($2::text[])
+            """, [DbInt(userId), DbArray(Array<DbValue>(tankoubonIds.size, { k => DbText(tankoubonIds[k]) }))])
+            for (r in rows) {
+                let tid = r.getText("tankoubon_id")
+                if (tid.size > 0) {
+                    result[tid] = true
+                }
+            }
+        } catch (e: Exception) {
+            getLogger("user_tankoubon_favorite_dao").error("批量检查 Tankoubon 收藏状态失败", ("error", e.message))
+        }
 
         return result
     }
@@ -293,27 +199,23 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let _ = DatabaseConfig.withPooledConnection<Bool>("user_tankoubon_favorite_dao", "批量获取 Tankoubon 收藏时间失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
+        try {
+            let rows = DatabaseConfig.driver().query("""
                 SELECT t.tankoubon_id, COALESCE(CAST(EXTRACT(EPOCH FROM utf.created_at) AS BIGINT), 0) as unix_timestamp
                 FROM user_tankoubon_favorites utf
                 JOIN tankoubons t ON t.id = utf.tankoubon_id
-                WHERE utf.user_id = ? AND t.tankoubon_id = ANY(?::text[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setTextArray(stmt, 1, tankoubonIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let tid = rs.getOrNull<String>(0) ?? ""
-                        let unixTimestamp = rs.getOrNull<Int64>(1) ?? 0
-                        if (tid.size > 0) {
-                            result[tid] = unixTimestamp
-                        }
-                    }
-                    return true
-                })
-            })
-        })
+                WHERE utf.user_id = $1 AND t.tankoubon_id = ANY($2::text[])
+            """, [DbInt(userId), DbArray(Array<DbValue>(tankoubonIds.size, { k => DbText(tankoubonIds[k]) }))])
+            for (r in rows) {
+                let tid = r.getText("tankoubon_id")
+                let unixTimestamp = r.getInt("unix_timestamp")
+                if (tid.size > 0) {
+                    result[tid] = unixTimestamp
+                }
+            }
+        } catch (e: Exception) {
+            getLogger("user_tankoubon_favorite_dao").error("批量获取 Tankoubon 收藏时间失败", ("error", e.message))
+        }
 
         return result
     }

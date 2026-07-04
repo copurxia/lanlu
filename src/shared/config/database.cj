@@ -1,6 +1,6 @@
 package lanlu.shared.config
 
-import std.database.sql.*
+import ace_orm.*
 import std.collection.*
 import std.convert.*
 import std.sync.*
@@ -8,28 +8,28 @@ import stdx.log.*
 import cjdotenv.load
 import std.env.getVariable
 import lanlu.shared.utils.*
-// 必须保留：通过副作用注册 postgres/opengauss 驱动，不能移除
-import opengauss.driver.*
 import std.fs.exists
 
 /**
- * 数据库配置类
+ * 数据库配置与访问门面(ACE-ORM 后端)。
+ *
+ * 持有全局 DataSource(单例,经 DataSourceManager 管理),提供 DAO 用的查询/写入/事务封装。
+ * SQL 占位符统一用 PG 规范 $n(经 ParamList 构造或手写),绑定值用 DbValue 数组。
+ * 查询结果用 ACE Row 按列名读取(getText/getInt/getBool/getJson)。
+ *
+ * 旧 std.database.sql.Connection/Statement/QueryResult 接口已彻底移除;
+ * 旧 opengauss 驱动已移除。取消查询走 ACE PostgresDriver.cancel()(PQcancel FFI)。
  */
 public class DatabaseConfig {
     public static var dbString: String
     public static var dbType: String
     public static var queryTimeoutMs: Int64
 
-    /**
-     * 静态初始化器，从环境变量读取配置
-     */
     static init() {
         if (exists(".env")) {
             load()
         }
-        // 从环境变量中读取数据库配置
         dbString = getVariable("DB_STRING") ?? "postgres://lgr:lgr@127.0.0.1:5432/lgr?sslmode=disable"
-        // 从连接字符串中解析数据库类型
         dbType = parseDbType(dbString)
         let queryTimeoutStr = getVariable("DB_QUERY_TIMEOUT_MS") ?? ""
         queryTimeoutMs = if (queryTimeoutStr.size > 0) {
@@ -39,14 +39,10 @@ public class DatabaseConfig {
         }
     }
 
-    /**
-     * 从连接字符串中解析数据库类型
-     */
     private static func parseDbType(connStr: String): String {
         if (connStr.isEmpty()) {
             return "postgres"
         }
-        // 提取协议部分，如 "postgres://" -> "postgres"
         let parts = connStr.split("://")
         if (parts.size >= 2) {
             return parts[0]
@@ -54,9 +50,6 @@ public class DatabaseConfig {
         return "postgres"
     }
 
-    /**
-     * 获取数据库连接字符串
-     */
     public static func getConnectionString(): String {
         let logger = getLogger("database")
         logger.debug("Using database connection string from DB_STRING")
@@ -64,157 +57,68 @@ public class DatabaseConfig {
         return dbString
     }
 
-    /**
-     * 获取数据库驱动
-     */
-    public static func getDriver(): Option<Driver> {
-        return DriverManager.getDriver(dbType)
+    /** 获取 ACE Driver(便捷,等价 DataSourceManager.driver())。 */
+    public static func driver(): Driver {
+        return DataSourceManager.driver()
+    }
+
+    /** 获取 DataSource(供 transaction 等用)。 */
+    public static func dataSource(): DataSource {
+        return DataSourceManager.getInstance()
     }
 
     /**
-     * 创建数据库连接
+     * 在查询超时保护下执行操作。timeoutMs > 0 时起看门狗线程,到期调 driver().cancel()
+     * 发送 PostgreSQL CancelRequest;timeoutMs <= 0 时不启用取消。
+     * ACE PostgresDriver.query/exec 是同步阻塞的,看门狗在另一线程取消正在跑的连接。
      */
-    public static func createConnection(): Option<Connection> {
-        let drvopt = getDriver()
-        match (drvopt) {
-            case Some(drv) =>
-                let connStr = getConnectionString()
-                let ds = drv.open(connStr)
-                try {
-                    let conn = ds.connect()
-                    return Some(conn)
-                } catch (e: Exception) {
-                    let logger = getLogger("database")
-                    logger.error("数据库连接失败: ${e.toString()}")
-                    logger.error("连接异常详细信息: ${e.message}")
-                    return None
-                }
-            case None =>
-                getLogger("database").error("无法获取 ${dbType} 驱动")
-                return None
+    public static func withTimeout<T>(timeoutMs: Int64, operation: () -> T): T {
+        if (timeoutMs <= 0) {
+            return operation()
         }
-    }
-
-    /**
-     * 从连接池获取连接（推荐使用）
-     * 复用连接以提升性能
-     * 使用完毕后需调用 conn.close() 归还连接到池中
-     */
-    public static func getPooledConnection(): Option<Connection> {
-        return ConnectionPool.getInstance().getConnection()
-    }
-
-    /**
-     * 使用连接池连接执行数据库操作，并统一处理连接释放、连接失败和异常日志。
-     * 适合 DAO 层替代重复的 getPooledConnection/match/try/finally close 模式。
-     */
-    public static func withPooledConnection<T>(
-        loggerName: String,
-        errorMessage: String,
-        defaultValue: T,
-        operation: (Connection) -> T
-    ): T {
-        let logger = getLogger(loggerName)
-        let connOpt = getPooledConnection()
-        match (connOpt) {
-            case Some(rawConn) =>
-                var result = Option<T>.None
-                try (conn = rawConn) {
-                    result = Some(operation(conn))
-                } catch (e: Exception) {
-                    logger.error(errorMessage, ("error", e.message))
-                    return defaultValue
-                }
-                match (result) {
-                    case Some(value) => return value
-                    case None => return defaultValue
-                }
-            case None =>
-                logger.error("cannot connect to database")
-                return defaultValue
-        }
-    }
-
-    /**
-     * 使用 PreparedStatement 执行操作，并统一关闭 Statement。
-     */
-    public static func withStatement<T>(conn: Connection, sql: String, operation: (Statement) -> T): T {
-        return withStatementTimeout<T>(conn, sql, queryTimeoutMs, operation)
-    }
-
-    /**
-     * 使用 PreparedStatement 执行操作，并在 timeoutMs 到期后尝试发送 PostgreSQL CancelRequest。
-     * timeoutMs <= 0 时不启用取消线程。
-     */
-    public static func withStatementTimeout<T>(
-        conn: Connection,
-        sql: String,
-        timeoutMs: Int64,
-        operation: (Statement) -> T
-    ): T {
-        let rawStmt = conn.prepareStatement(sql)
-        var result = Option<T>.None
         let completed = AtomicBool(false)
-        if (timeoutMs > 0) {
-            let _ = spawn {
-                sleep(Duration.millisecond * timeoutMs)
-                if (!completed.load()) {
-                    try { let _ = cancelStatement(rawStmt) } catch (_: Exception) {}
-                }
+        let _ = spawn {
+            sleep(Duration.millisecond * timeoutMs)
+            if (!completed.load()) {
+                try { let _ = driver().cancel() } catch (_: Exception) {}
             }
         }
         try {
-            try (stmt = rawStmt) {
-                result = Some(operation(stmt))
-            }
+            let r = operation()
             completed.store(true)
+            return r
         } catch (e: Exception) {
             completed.store(true)
             throw e
-        }
-        match (result) {
-            case Some(value) => return value
-            case None => throw Exception("statement operation did not produce a result")
-        }
-    }
-
-    /**
-     * 执行 Statement.query() 并统一关闭 QueryResult。
-     */
-    public static func withQueryResult<T>(stmt: Statement, operation: (QueryResult) -> T): T {
-        let rawRs = stmt.query()
-        var result = Option<T>.None
-        try (rs = rawRs) {
-            result = Some(operation(rs))
-        }
-        match (result) {
-            case Some(value) => return value
-            case None => throw Exception("query result operation did not produce a result")
         }
     }
 
     /**
      * 查询单行。无结果或异常时返回 defaultValue。
+     * - sql 用 $n 占位符,params 为对应 DbValue 数组。
+     * - map 接收 Row(首行),按列名读取。
      */
     public static func queryOne<T>(
         loggerName: String,
         errorMessage: String,
         sql: String,
+        params: Array<DbValue>,
         defaultValue: T,
-        bind: (Statement) -> Unit,
-        map: (QueryResult) -> T
+        map: (Row) -> T
     ): T {
-        return withPooledConnection<T>(loggerName, errorMessage, defaultValue, { conn =>
-            withStatement<T>(conn, sql, { stmt =>
-                bind(stmt)
-                withQueryResult<T>(stmt, { rs =>
-                    if (rs.next()) {
-                        return map(rs)
-                    }
-                    return defaultValue
-                })
+        let logger = getLogger(loggerName)
+        try {
+            return withTimeout<T>(queryTimeoutMs, { =>
+                let rows = driver().query(sql, params)
+                if (rows.size > 0) {
+                    return map(rows[0])
+                }
+                return defaultValue
             })
-        })
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return defaultValue
+        }
     }
 
     /**
@@ -224,258 +128,200 @@ public class DatabaseConfig {
         loggerName: String,
         errorMessage: String,
         sql: String,
-        bind: (Statement) -> Unit,
-        map: (QueryResult) -> T
+        params: Array<DbValue>,
+        map: (Row) -> T
     ): Array<T> {
-        return withPooledConnection<Array<T>>(loggerName, errorMessage, Array<T>(), { conn =>
-            withStatement<Array<T>>(conn, sql, { stmt =>
-                bind(stmt)
-                withQueryResult<Array<T>>(stmt, { rs =>
-                    var rows = ArrayList<T>()
-                    while (rs.next()) {
-                        rows.add(map(rs))
-                    }
-                    return rows.toArray()
-                })
+        let logger = getLogger(loggerName)
+        try {
+            return withTimeout<Array<T>>(queryTimeoutMs, { =>
+                let rows = driver().query(sql, params)
+                let out = ArrayList<T>()
+                for (r in rows) {
+                    out.add(map(r))
+                }
+                out.toArray()
             })
-        })
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return Array<T>()
+        }
     }
 
     /**
-     * 执行更新语句。用于 INSERT/UPDATE/DELETE/DDL。
+     * 执行写语句(INSERT/UPDATE/DELETE/DDL)。异常时返回 false。
      */
     public static func execute(
         loggerName: String,
         errorMessage: String,
         sql: String,
-        bind: (Statement) -> Unit
+        params: Array<DbValue>
     ): Bool {
-        return withPooledConnection<Bool>(loggerName, errorMessage, false, { conn =>
-            withStatement<Bool>(conn, sql, { stmt =>
-                bind(stmt)
-                stmt.update()
-                return true
+        let logger = getLogger(loggerName)
+        try {
+            withTimeout<Unit>(queryTimeoutMs, { =>
+                driver().exec(sql, params)
             })
-        })
+            return true
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return false
+        }
     }
 
     /**
-     * 执行 RETURNING id 模式的写入语句。
+     * 执行 RETURNING id 模式的写入,返回首行 id。异常或无返回时 None。
      */
     public static func executeReturningId(
         loggerName: String,
         errorMessage: String,
         sql: String,
-        bind: (Statement) -> Unit
+        params: Array<DbValue>
     ): Option<Int64> {
-        return withPooledConnection<Option<Int64>>(loggerName, errorMessage, None, { conn =>
-            withStatement<Option<Int64>>(conn, sql, { stmt =>
-                bind(stmt)
-                withQueryResult<Option<Int64>>(stmt, { rs =>
-                    if (rs.next()) {
-                        let id = rs.getOrNull<Int64>(0) ?? 0
-                        if (id > 0) {
-                            return Some(id)
-                        }
+        let logger = getLogger(loggerName)
+        try {
+            return withTimeout<Option<Int64>>(queryTimeoutMs, { =>
+                let rows = driver().query(sql, params)
+                if (rows.size > 0) {
+                    let id = rows[0].getInt("id")
+                    if (id > 0) {
+                        return Some(id)
                     }
-                    return None
-                })
+                }
+                None
             })
-        })
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return None
+        }
     }
 
     /**
-     * 在一个连接内执行事务。operation 返回 false 或抛异常时回滚。
+     * 事务:operation 返回 false 或抛异常时回滚。
+     * operation 不再接收 conn 参数(ACE 用 ThreadLocal 钉事务连接,内部 driver.exec/query 自动走该连接)。
      */
     public static func withTransaction(
         loggerName: String,
         errorMessage: String,
-        operation: (Connection) -> Bool
+        operation: () -> Bool
     ): Bool {
-        return withPooledConnection<Bool>(loggerName, errorMessage, false, { conn =>
-            var committed = false
-            try {
-                executeOnConnection(conn, "BEGIN", { _ => () })
-                let ok = operation(conn)
-                if (ok) {
-                    executeOnConnection(conn, "COMMIT", { _ => () })
-                    committed = true
-                    return true
+        let logger = getLogger(loggerName)
+        // 用容器包装结果(lambda 不能捕获 mutable 变量,也不能直接 return 外层)。
+        let result = ArrayList<Bool>(0)
+        try {
+            dataSource().transaction({
+                =>
+                let ok = operation()
+                if (!ok) {
+                    throw Exception("transaction rolled back by operation returning false")
                 }
-                executeOnConnection(conn, "ROLLBACK", { _ => () })
-                return false
-            } catch (e: Exception) {
-                if (!committed) {
-                    try { executeOnConnection(conn, "ROLLBACK", { _ => () }) } catch (_: Exception) {}
-                }
-                throw e
+                result.add(true)
+            })
+            if (result.size > 0) {
+                return result[0]
             }
-        })
+            // transaction 体未添加(理论上不会到这,因 operation 成功必 add,失败必抛)
+            return false
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return false
+        }
     }
 
     /**
-     * 在已有连接上执行更新语句，适合事务内部复用。
+     * 在事务连接上执行写语句(事务内复用,供 withTransaction 的 operation 体调用)。
+     * ACE 下 driver.exec 自动走 ThreadLocal 钉的事务连接,故等价于 execute。
      */
-    public static func executeOnConnection(
-        conn: Connection,
+    public static func executeInTxn(
+        loggerName: String,
+        errorMessage: String,
         sql: String,
-        bind: (Statement) -> Unit
+        params: Array<DbValue>
     ): Bool {
-        return withStatement<Bool>(conn, sql, { stmt =>
-            bind(stmt)
-            stmt.update()
-            return true
-        })
+        return execute(loggerName, errorMessage, sql, params)
     }
 
     /**
-     * 在同一连接和同一 PreparedStatement 上重复执行一批绑定。
-     * 这是项目侧 batch 封装，降低连接获取和 Statement 准备开销。
+     * 批量执行(同一 SQL 多次绑定)。返回总受影响行数。异常时返回 0。
+     * ACE 无 PreparedStatement 复用,每次 exec 独立调用(连接池复用连接)。
      */
     public static func executeBatch(
         loggerName: String,
         errorMessage: String,
         sql: String,
-        binds: Array<(Statement) -> Unit>
+        binds: Array<Array<DbValue>>
     ): Int64 {
-        return withPooledConnection<Int64>(loggerName, errorMessage, 0, { conn =>
-            withStatement<Int64>(conn, sql, { stmt =>
-                var affected: Int64 = 0
-                for (bind in binds) {
-                    bind(stmt)
-                    affected += stmt.update().rowCount
+        let logger = getLogger(loggerName)
+        try {
+            var total: Int64 = 0
+            for (params in binds) {
+                driver().exec(sql, params)
+                let aff = driver().affectedRows()
+                if (aff > 0) {
+                    total += aff
                 }
-                return affected
-            })
-        })
-    }
-
-    /**
-     * 使用 PostgreSQL cursor 分批读取大结果集。selectSql 必须是 SELECT/VALUES 等可声明游标的查询。
-     */
-    public static func forEachCursor(
-        loggerName: String,
-        errorMessage: String,
-        selectSql: String,
-        fetchSize: Int64,
-        bind: (Statement) -> Unit,
-        consume: (QueryResult) -> Bool
-    ): Bool {
-        if (fetchSize <= 0) {
-            return false
-        }
-        return withTransaction(loggerName, errorMessage, { conn =>
-            let cursorName = "lanlu_cursor"
-            executeOnConnection(conn, "DECLARE ${cursorName} NO SCROLL CURSOR FOR ${selectSql}", bind)
-            var keepGoing = true
-            try {
-                while (keepGoing) {
-                    keepGoing = withStatement<Bool>(conn, "FETCH ${fetchSize} FROM ${cursorName}", { stmt =>
-                        withQueryResult<Bool>(stmt, { rs =>
-                            var hasRow = false
-                            while (rs.next()) {
-                                hasRow = true
-                                if (!consume(rs)) {
-                                    return false
-                                }
-                            }
-                            return hasRow
-                        })
-                    })
-                }
-                return true
-            } finally {
-                try { executeOnConnection(conn, "CLOSE ${cursorName}", { _ => () }) } catch (_: Exception) {}
             }
-        })
-    }
-
-    public static func setOptionString(stmt: Statement, index: Int, value: Option<String>): Unit {
-        match (value) {
-            case Some(v) => stmt.set(index, v)
-            case None => stmt.setNull(index)
+            return total
+        } catch (e: Exception) {
+            logger.error(errorMessage, ("error", e.message))
+            return 0
         }
     }
 
-    public static func setOptionInt64(stmt: Statement, index: Int, value: Option<Int64>): Unit {
-        match (value) {
-            case Some(v) => stmt.set(index, v)
-            case None => stmt.setNull(index)
-        }
+    // ===== PG 特定类型便捷绑定(返回 DbValue,供 params 数组用) =====
+
+    /** 构造 PG text[] 绑定值。 */
+    public static func textArray(values: Array<String>): DbValue {
+        DbArray(Array<DbValue>(values.size, { i => DbText(values[i]) }))
     }
 
-    public static func setJsonb(stmt: Statement, index: Int, json: String): Unit {
+    /** 构造 PG bigint[] 绑定值。 */
+    public static func int64Array(values: Array<Int64>): DbValue {
+        DbArray(Array<DbValue>(values.size, { i => DbInt(values[i]) }))
+    }
+
+    /** 构造 JSONB 绑定值(text 协议承载 JSON 文本)。空串归一为 {}。 */
+    public static func jsonb(json: String): DbValue {
         let normalized = json.trimAscii()
-        stmt.set(index, PgJsonb(if (normalized.size > 0) { normalized } else { "{}" }))
+        return DbText(if (normalized.size > 0) { normalized } else { "{}" })
     }
 
-    public static func setJsonbArray(stmt: Statement, index: Int, json: String): Unit {
+    /** 构造 JSONB 数组绑定值。空串归一为 []。 */
+    public static func jsonbArray(json: String): DbValue {
         let normalized = json.trimAscii()
-        stmt.set(index, PgJsonb(if (normalized.size > 0) { normalized } else { "[]" }))
+        return DbText(if (normalized.size > 0) { normalized } else { "[]" })
     }
 
-    public static func setTextArray(stmt: Statement, index: Int, values: Array<String>): Unit {
-        stmt.set(index, PgTextArray(values))
-    }
-
-    public static func setInt64Array(stmt: Statement, index: Int, values: Array<Int64>): Unit {
-        stmt.set(index, PgInt64Array(values))
-    }
-
-    public static func cancelStatement(stmt: Statement): Bool {
-        match (stmt) {
-            case ogStmt: Stmt =>
-                ogStmt.cancel()
-                return true
-            case _ => return false
+    /** Option<String> → DbValue。 */
+    public static func optionText(v: Option<String>): DbValue {
+        match (v) {
+            case Some(s) => DbText(s)
+            case None => DbNull
         }
     }
 
-    public static func cancelConnection(conn: Connection): Bool {
-        match (conn) {
-            case ogConn: PGConnection =>
-                ogConn.cancel()
-                return true
-            case _ => return false
+    /** Option<Int64> → DbValue。 */
+    public static func optionInt64(v: Option<Int64>): DbValue {
+        match (v) {
+            case Some(i) => DbInt(i)
+            case None => DbNull
         }
     }
 
-    public static func getStringOrEmpty(rs: QueryResult, index: Int): String {
-        return rs.getOrNull<String>(index) ?? ""
-    }
-
-    public static func getInt64OrZero(rs: QueryResult, index: Int): Int64 {
-        return rs.getOrNull<Int64>(index) ?? 0
-    }
-
-    public static func getInt32OrZero(rs: QueryResult, index: Int): Int32 {
-        return rs.getOrNull<Int32>(index) ?? 0
-    }
-
-    public static func getBoolOrFalse(rs: QueryResult, index: Int): Bool {
-        return rs.getOrNull<Bool>(index) ?? false
-    }
+    // ===== SQLSTATE 错误判定(从 OrmException.code 读取) =====
 
     public static func sqlStateOf(e: Exception): String {
-        let marker = "SQLSTATE "
-        let message = e.message
-        match (message.indexOf(marker)) {
-            case Some(start) =>
-                let codeStart = start + marker.size
-                if (message.size >= codeStart + 5) {
-                    return message[codeStart..codeStart + 5]
-                }
-                return ""
-            case None => return ""
+        match (e) {
+            case oe: OrmException => oe.code
+            case _ => ""
         }
     }
 
     public static func isUniqueViolation(e: Exception): Bool {
-        return sqlStateOf(e) == "23505"
+        sqlStateOf(e) == "23505"
     }
 
     public static func isForeignKeyViolation(e: Exception): Bool {
-        return sqlStateOf(e) == "23503"
+        sqlStateOf(e) == "23503"
     }
 
     public static func isDeadlockOrSerializationFailure(e: Exception): Bool {
@@ -484,18 +330,38 @@ public class DatabaseConfig {
     }
 
     public static func isConnectionFailure(e: Exception): Bool {
-        return sqlStateOf(e).startsWith("08")
+        sqlStateOf(e).startsWith("08")
     }
 
-    /**
-     * 初始化连接池
-     */
+    // ===== Row 便捷读取(按列名,缺列/类型不符回退默认) =====
+
+    public static func getString(row: Row, col: String): String {
+        row.getText(col)
+    }
+
+    public static func getInt64(row: Row, col: String): Int64 {
+        row.getInt(col)
+    }
+
+    public static func getInt32(row: Row, col: String): Int32 {
+        Int32(row.getInt(col))
+    }
+
+    public static func getBool(row: Row, col: String): Bool {
+        row.getBool(col)
+    }
+
+    public static func getJson(row: Row, col: String): String {
+        row.getJson(col)
+    }
+
+    /** 初始化数据源(主入口,main.cj 调用)。 */
     public static func initializePool(): Bool {
-        return ConnectionPool.getInstance().initialize()
+        return DataSourceManager.initialize(getConnectionString())
     }
 
-    // 注意：数据库表初始化已由迁移系统处理
-    // 原 initializeDatabase() 和 initializeArchiveSchema() 方法已移除
-    // 请参考 src/migrations/ 目录下的迁移文件
-
+    /** 查询取消(供外部超时控制;通常经 withTimeout 自动调用)。 */
+    public static func cancelStatement(): Bool {
+        return driver().cancel()
+    }
 }

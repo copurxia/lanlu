@@ -1,6 +1,6 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 import stdx.log.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -15,39 +15,18 @@ public class UserTargetFavoritesDao {
      */
     public static func addFavorite(userId: Int64, targetType: String, targetId: String): Bool {
         let logger = getLogger("user_target_favorites_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_target_favorites (user_id, target_type, target_id, created_at)
-                        SELECT ?, ?, ?, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_target_favorites WHERE user_id = ? AND target_type = ? AND target_id = ?
-                        )
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, targetType)
-                        stmt.set(2, targetId)
-                        stmt.set(3, userId)
-                        stmt.set(4, targetType)
-                        stmt.set(5, targetId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("添加收藏失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return false
+        try {
+            DatabaseConfig.driver().exec("""
+                INSERT INTO user_target_favorites (user_id, target_type, target_id, created_at)
+                SELECT $1, $2, $3, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM user_target_favorites WHERE user_id = $4 AND target_type = $5 AND target_id = $6
+                )
+            """, [DbInt(userId), DbText(targetType), DbText(targetId), DbInt(userId), DbText(targetType), DbText(targetId)])
+            return true
+        } catch (e: Exception) {
+            logger.error("添加收藏失败", ("error", e.message))
+            return false
         }
     }
 
@@ -60,33 +39,15 @@ public class UserTargetFavoritesDao {
      */
     public static func removeFavorite(userId: Int64, targetType: String, targetId: String): Bool {
         let logger = getLogger("user_target_favorites_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        DELETE FROM user_target_favorites
-                        WHERE user_id = ? AND target_type = ? AND target_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, targetType)
-                        stmt.set(2, targetId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("取消收藏失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return false
+        try {
+            DatabaseConfig.driver().exec("""
+                DELETE FROM user_target_favorites
+                WHERE user_id = $1 AND target_type = $2 AND target_id = $3
+            """, [DbInt(userId), DbText(targetType), DbText(targetId)])
+            return true
+        } catch (e: Exception) {
+            logger.error("取消收藏失败", ("error", e.message))
+            return false
         }
     }
 
@@ -98,38 +59,18 @@ public class UserTargetFavoritesDao {
      * @return 是否已收藏
      */
     public static func isFavorite(userId: Int64, targetType: String, targetId: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM user_target_favorites
-                        WHERE user_id = ? AND target_type = ? AND target_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, targetType)
-                        stmt.set(2, targetId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let count = rs.getOrNull<Int64>(0) ?? 0
-                                return count > 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return false
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
+        try {
+            let rows = DatabaseConfig.driver().query("""
+                SELECT COUNT(*) FROM user_target_favorites
+                WHERE user_id = $1 AND target_type = $2 AND target_id = $3
+            """, [DbInt(userId), DbText(targetType), DbText(targetId)])
+            if (rows.size > 0) {
+                let count = rows[0].getInt("count")
+                return count > 0
+            }
+            return false
+        } catch (_: Exception) {
+            return false
         }
     }
 }

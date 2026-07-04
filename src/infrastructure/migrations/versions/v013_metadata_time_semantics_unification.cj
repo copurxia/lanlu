@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,32 +18,32 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
         return "Unify archive/tankoubon time fields in metadata_objects and add release_at"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "metadata_objects", "release_at", "TIMESTAMP NULL")) {
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "metadata_objects", "release_at", "TIMESTAMP NULL")) {
             return false
         }
 
-        if (!ensureRootMetadata(conn)) {
+        if (!ensureRootMetadata(drv)) {
             return false
         }
 
-        if (!backfillRootTimeColumns(conn)) {
+        if (!backfillRootTimeColumns(drv)) {
             return false
         }
 
-        if (!backfillReleaseAt(conn)) {
+        if (!backfillReleaseAt(drv)) {
             return false
         }
 
-        if (!createMetadataTimeIndexes(conn)) {
+        if (!createMetadataTimeIndexes(drv)) {
             return false
         }
 
-        if (!dropLegacyTimeDependents(conn)) {
+        if (!dropLegacyTimeDependents(drv)) {
             return false
         }
 
-        if (!recreateArchiveMetadataSearchView(conn)) {
+        if (!recreateArchiveMetadataSearchView(drv)) {
             return false
         }
 
@@ -51,8 +51,8 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
         return true
     }
 
-    private func ensureRootMetadata(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    private func ensureRootMetadata(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -74,7 +74,7 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -99,8 +99,8 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
         return true
     }
 
-    private func backfillRootTimeColumns(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    private func backfillRootTimeColumns(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_objects mo
             SET created_at = COALESCE(mo.created_at, a.created_at),
                 updated_at = COALESCE(mo.updated_at, a.updated_at, a.created_at)
@@ -112,7 +112,7 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_objects mo
             SET created_at = COALESCE(mo.created_at, t.created_at),
                 updated_at = COALESCE(mo.updated_at, t.updated_at, t.created_at)
@@ -132,8 +132,8 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
      * - only from structured unix timestamp values in extra_data.release_at / extra_data.release_date
      * - otherwise keep NULL (no guessing).
      */
-    private func backfillReleaseAt(conn: Connection): Bool {
-        return MigrationHelpers.execUpdate(conn, """
+    private func backfillReleaseAt(drv: Driver): Bool {
+        return MigrationHelpers.execUpdate(drv, """
             UPDATE metadata_objects
             SET release_at = CASE
                 WHEN COALESCE(extra_data ->> 'release_at', '') ~ '^[0-9]{9,}$'
@@ -150,69 +150,69 @@ public class V013_MetadataTimeSemanticsUnification <: Migration {
         """)
     }
 
-    private func createMetadataTimeIndexes(conn: Connection): Bool {
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_objects_entity_created_at", "metadata_objects", "entity_type, created_at")) {
+    private func createMetadataTimeIndexes(drv: Driver): Bool {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_objects_entity_created_at", "metadata_objects", "entity_type, created_at")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_objects_entity_updated_at", "metadata_objects", "entity_type, updated_at")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_objects_entity_updated_at", "metadata_objects", "entity_type, updated_at")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_objects_entity_release_at", "metadata_objects", "entity_type, release_at")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_metadata_objects_entity_release_at", "metadata_objects", "entity_type, release_at")) {
             return false
         }
         return true
     }
 
-    private func dropLegacyTimeDependents(conn: Connection): Bool {
-        if (!dropLegacyRelation(conn, "archive_metadata_search")) {
+    private func dropLegacyTimeDependents(drv: Driver): Bool {
+        if (!dropLegacyRelation(drv, "archive_metadata_search")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_created_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_created_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_updated_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_updated_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_tankoubons_created_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_tankoubons_created_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_tankoubons_updated_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_tankoubons_updated_at")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS created_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS created_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS updated_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS updated_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS created_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS created_at")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS updated_at")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS updated_at")) {
             return false
         }
 
         return true
     }
 
-    private func dropLegacyRelation(conn: Connection, name: String): Bool {
-        if (MigrationHelpers.viewExists(conn, name)) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP VIEW IF EXISTS ${name}")) {
+    private func dropLegacyRelation(drv: Driver, name: String): Bool {
+        if (MigrationHelpers.viewExists(drv, name)) {
+            if (!MigrationHelpers.execUpdate(drv, "DROP VIEW IF EXISTS ${name}")) {
                 return false
             }
         }
-        if (MigrationHelpers.tableExists(conn, name)) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP TABLE IF EXISTS ${name}")) {
+        if (MigrationHelpers.tableExists(drv, name)) {
+            if (!MigrationHelpers.execUpdate(drv, "DROP TABLE IF EXISTS ${name}")) {
                 return false
             }
         }
         return true
     }
 
-    private func recreateArchiveMetadataSearchView(conn: Connection): Bool {
-        return MigrationHelpers.execUpdate(conn, """
+    private func recreateArchiveMetadataSearchView(drv: Driver): Bool {
+        return MigrationHelpers.execUpdate(drv, """
             CREATE VIEW archive_metadata_search AS
             SELECT
                 a.id,

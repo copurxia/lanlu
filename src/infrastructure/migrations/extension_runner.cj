@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations
 
-import std.database.sql.*
+import ace_orm.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 
@@ -15,79 +15,75 @@ public class ExtensionMigrationRunner {
      * @return true 如果所有可执行迁移成功或当前无需执行
      */
     public static func runReadyMigrations(): Bool {
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    if (!MigrationRunner.ensureMigrationsTable(conn)) {
-                        logger.error("Failed to create schema_migrations table")
-                        return false
-                    }
-
-                    let applied = MigrationRunner.getAppliedVersions(conn)
-                    let allMigrations = ExtensionMigrationRegistry.getAll()
-                    if (allMigrations.size == 0) {
-                        logger.debug("No registered extension migrations")
-                        return true
-                    }
-
-                    var ranAny = false
-                    for (migration in allMigrations) {
-                        if (applied.contains(migration.version())) {
-                            continue
-                        }
-
-                        if (!applied.contains(migration.targetSchemaVersion())) {
-                            logger.error(
-                                "Extension migration ${migration.version()} requires base schema ${migration.targetSchemaVersion()} but it is not applied"
-                            )
-                            return false
-                        }
-
-                        if (!hasRequiredExtensions(conn, migration)) {
-                            logger.info(
-                                "Skipping extension migration ${migration.version()} until required extensions are enabled"
-                            )
-                            continue
-                        }
-
-                        logger.info(
-                            "Running extension migration ${migration.version()}: ${migration.description()}"
-                        )
-                        let success = migration.up(conn)
-                        if (!success) {
-                            logger.error("Extension migration ${migration.version()} failed")
-                            return false
-                        }
-
-                        if (!MigrationRunner.recordMigration(conn, migration.version(), migration.description())) {
-                            logger.error("Failed to record extension migration ${migration.version()}")
-                            return false
-                        }
-
-                        logger.info("Extension migration ${migration.version()} completed successfully")
-                        ranAny = true
-                    }
-
-                    if (!ranAny) {
-                        logger.info("No ready extension migrations")
-                    }
-                    return true
-                } catch (e: Exception) {
-                    logger.error("Extension migration error: ${e.message}")
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("Cannot connect to database")
+        if (!DataSourceManager.isInitialized()) {
+            logger.error("DataSource not initialized")
+            return false
+        }
+        let drv = DatabaseConfig.driver()
+        try {
+            if (!MigrationRunner.ensureMigrationsTable(drv)) {
+                logger.error("Failed to create schema_migrations table")
                 return false
+            }
+
+            let applied = MigrationRunner.getAppliedVersions(drv)
+            let allMigrations = ExtensionMigrationRegistry.getAll()
+            if (allMigrations.size == 0) {
+                logger.debug("No registered extension migrations")
+                return true
+            }
+
+            var ranAny = false
+            for (migration in allMigrations) {
+                if (applied.contains(migration.version())) {
+                    continue
+                }
+
+                if (!applied.contains(migration.targetSchemaVersion())) {
+                    logger.error(
+                        "Extension migration ${migration.version()} requires base schema ${migration.targetSchemaVersion()} but it is not applied"
+                    )
+                    return false
+                }
+
+                if (!hasRequiredExtensions(drv, migration)) {
+                    logger.info(
+                        "Skipping extension migration ${migration.version()} until required extensions are enabled"
+                    )
+                    continue
+                }
+
+                logger.info(
+                    "Running extension migration ${migration.version()}: ${migration.description()}"
+                )
+                let success = migration.up(drv)
+                if (!success) {
+                    logger.error("Extension migration ${migration.version()} failed")
+                    return false
+                }
+
+                if (!MigrationRunner.recordMigration(drv, migration.version(), migration.description())) {
+                    logger.error("Failed to record extension migration ${migration.version()}")
+                    return false
+                }
+
+                logger.info("Extension migration ${migration.version()} completed successfully")
+                ranAny = true
+            }
+
+            if (!ranAny) {
+                logger.info("No ready extension migrations")
+            }
+            return true
+        } catch (e: Exception) {
+            logger.error("Extension migration error: ${e.message}")
+            return false
         }
     }
 
-    private static func hasRequiredExtensions(conn: Connection, migration: ExtensionMigration): Bool {
+    private static func hasRequiredExtensions(drv: Driver, migration: ExtensionMigration): Bool {
         for (extName in migration.requiredExtensions()) {
-            if (MigrationHelpers.extensionInstalled(conn, extName)) {
+            if (MigrationHelpers.extensionInstalled(drv, extName)) {
                 continue
             }
 
@@ -105,5 +101,4 @@ public class ExtensionMigrationRunner {
         }
         return true
     }
-
 }

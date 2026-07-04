@@ -1,212 +1,121 @@
 package lanlu.shared.config
 
-import std.database.sql.*
+import ace_orm.*
 import std.sync.*
 import std.env.getVariable
 import std.convert.*
 import lanlu.shared.utils.*
-import opengauss.sqlpool.{PooledDatasource as OgPooledDatasource, PoolConfig as OgPoolConfig}
 
 /**
- * 连接池配置
+ * 数据源管理(替代旧 ConnectionPool)。
+ *
+ * 基于 ACE PostgresDriver + DataSource,单例。连接池由 ACE ConnectionPool 内部管理
+ * (max/min/idle 回收),事务由 DataSource.transaction + ThreadLocal 钉连接保证同连接。
+ * 全局数据源经 setGlobalDataSource 注册,供 @Transactional 织入。
  */
-public class PoolConfig {
-    public var maxConnections: Int32 = 10
-    public var connectionTimeoutMs: Int64 = 5000      // 获取连接超时 ms
-    public var idleTimeoutMs: Int64 = 300000          // 空闲超时 ms（5分钟）
-    public var maxLifeTimeMs: Int64 = 1800000         // 连接最大生命周期 ms（30分钟）
-    public var keepaliveTimeMs: Int64 = 60000         // 健康检查间隔 ms（1分钟）
-
-    public init() {
-        // 从环境变量读取配置
-        let maxStr = getVariable("POOL_MAX") ?? ""
-        if (!maxStr.isEmpty()) {
-            try { this.maxConnections = Int32.parse(maxStr) } catch (_: Exception) {}
-        }
-        let timeoutStr = getVariable("POOL_ACQUIRE_TIMEOUT") ?? ""
-        if (!timeoutStr.isEmpty()) {
-            try { this.connectionTimeoutMs = Int64.parse(timeoutStr) } catch (_: Exception) {}
-        }
-        let idleStr = getVariable("POOL_IDLE_TIMEOUT") ?? ""
-        if (!idleStr.isEmpty()) {
-            try { this.idleTimeoutMs = Int64.parse(idleStr) } catch (_: Exception) {}
-        }
-        let lifeStr = getVariable("POOL_MAX_LIFETIME") ?? ""
-        if (!lifeStr.isEmpty()) {
-            try { this.maxLifeTimeMs = Int64.parse(lifeStr) } catch (_: Exception) {}
-        }
-        let keepaliveStr = getVariable("POOL_KEEPALIVE") ?? ""
-        if (!keepaliveStr.isEmpty()) {
-            try { this.keepaliveTimeMs = Int64.parse(keepaliveStr) } catch (_: Exception) {}
-        }
-    }
-}
-
-public class ConnectionPoolStats {
-    public var open: Int64 = 0
-    public var idle: Int64 = 0
-    public var inUse: Int64 = 0
-    public var broken: Int64 = 0
-    public var closed: Int64 = 0
-
-    public init() {}
-}
-
-/**
- * 数据库连接池
- * 基于标准库 PooledDatasource 的封装
- */
-public class ConnectionPool {
-    // 单例实例
-    private static var instance: Option<ConnectionPool> = Option<ConnectionPool>.None
-    private static let instanceMutex: Mutex = Mutex()
-
-    // 连接池配置
-    private var config: PoolConfig = PoolConfig()
-
-    // 标准库连接池
-    private var pooledDs: Option<OgPooledDatasource> = None
-    private var isInitialized: Bool = false
+public class DataSourceManager {
+    private static var instance: Option<DataSource> = Option<DataSource>.None
+    private static let instanceMutex = Mutex()
 
     private init() {}
 
-    /**
-     * 获取单例实例
-     */
-    public static func getInstance(): ConnectionPool {
-        instanceMutex.lock()
-        match (instance) {
-            case Some(pool) =>
-                instanceMutex.unlock()
-                return pool
-            case None =>
-                let pool = ConnectionPool()
-                instance = Some(pool)
-                instanceMutex.unlock()
-                return pool
+    /** 获取单例 DataSource(未初始化时抛异常)。 */
+    public static func getInstance(): DataSource {
+        synchronized(instanceMutex) {
+            match (instance) {
+                case Some(ds) => return ds
+                case None => throw OrmException("DataSourceManager not initialized")
+            }
+        }
+    }
+
+    /** 是否已初始化。 */
+    public static func isInitialized(): Bool {
+        synchronized(instanceMutex) {
+            match (instance) {
+                case Some(_) => return true
+                case None => return false
+            }
         }
     }
 
     /**
-     * 初始化连接池
+     * 初始化数据源:构造 PostgresDriver(含连接池) + DataSource,注册为全局数据源。
+     * conninfo 形如 "postgres://user:pass@host:port/db?sslmode=disable"(libpq URI)。
+     * 返回 true 表示成功。
      */
-    public func initialize(): Bool {
-        if (isInitialized) {
-            return true
-        }
-
-        let logger = getLogger("connection_pool")
-        logger.info("初始化连接池: max=${config.maxConnections}, maxIdle=0(unlimited)")
-
-        let drvopt = DatabaseConfig.getDriver()
-        match (drvopt) {
-            case Some(drv) =>
-                let connStr = DatabaseConfig.getConnectionString()
-                let ds = drv.open(connStr)
-                let poolConfig = OgPoolConfig(
-                    0,
-                    config.maxConnections,
-                    Duration.millisecond * config.idleTimeoutMs,
-                    Duration.millisecond * config.maxLifeTimeMs,
-                    Duration.millisecond * config.keepaliveTimeMs
-                )
-                let pool = OgPooledDatasource(ds, poolConfig)
-
-                pooledDs = Some(pool)
-                isInitialized = true
-                let _ = healthCheck()
-                logger.info("连接池初始化完成")
+    public static func initialize(conninfo: String): Bool {
+        synchronized(instanceMutex) {
+            var alreadyInit = false
+            match (instance) {
+                case Some(_) => alreadyInit = true
+                case None => ()
+            }
+            if (alreadyInit) {
                 return true
-            case None =>
-                logger.error("初始化连接池失败：无法获取数据库驱动")
+            }
+            let logger = getLogger("datasource_manager")
+            logger.info("初始化数据源(ACE PostgresDriver)")
+            // 从环境变量读取连接池配置,附加到 conninfo(pool.max/pool.min/pool.idleTimeout)。
+            let poolMax = getVariable("POOL_MAX") ?? ""
+            let fullConninfo = if (poolMax.size > 0) {
+                "${conninfo} pool.max=${poolMax}"
+            } else {
+                conninfo
+            }
+            try {
+                let drv = PostgresDriver(fullConninfo)
+                let ds = DataSource(drv)
+                setGlobalDataSource(ds)
+                instance = Some(ds)
+                logger.info("数据源初始化完成")
+                return true
+            } catch (e: Exception) {
+                logger.error("数据源初始化失败", ("error", e.message))
                 return false
+            }
         }
     }
 
-    /**
-     * 获取连接
-     */
-    public func getConnection(): Option<Connection> {
-        let logger = getLogger("connection_pool")
-        match (pooledDs) {
-            case Some(pool) =>
-                try {
-                    let conn = pool.connect()
-                    if (conn.state != ConnectionState.Connected) {
-                        try { conn.close() } catch (_: Exception) {}
-                        logger.warn("获取到不可用连接，已丢弃")
-                        return None
-                    }
-                    return Some(conn)
-                } catch (e: Exception) {
-                    logger.error("获取连接失败: ${e.message}")
-                    return None
-                }
-            case None =>
-                logger.error("连接池未初始化")
-                return None
+    /** 获取驱动(便捷,等价 getInstance().driver)。 */
+    public static func driver(): Driver {
+        getInstance().driver
+    }
+
+    /** 关闭数据源(关闭连接池)。 */
+    public static func shutdown(): Unit {
+        synchronized(instanceMutex) {
+            match (instance) {
+                case Some(ds) =>
+                    ds.driver.close()
+                    instance = None
+                    getLogger("datasource_manager").info("数据源已关闭")
+                case None => ()
+            }
         }
     }
 
-    /**
-     * 关闭连接池
-     */
-    public func shutdown(): Unit {
-        let logger = getLogger("connection_pool")
-        match (pooledDs) {
-            case Some(pool) =>
-                pool.closeAllConn()
-                pool.close()
-                pooledDs = None
-                isInitialized = false
-                logger.info("连接池已关闭")
-            case None => ()
+    /** 健康检查(SELECT 1)。 */
+    public static func healthCheck(): Bool {
+        if (!isInitialized()) {
+            return false
+        }
+        try {
+            let rows = driver().query("SELECT 1", [])
+            return rows.size > 0
+        } catch (e: Exception) {
+            getLogger("datasource_manager").warn("健康检查失败", ("error", e.message))
+            return false
         }
     }
+}
 
-    /**
-     * 检查连接池是否已关闭
-     */
-    public func isClosed(): Bool {
-        match (pooledDs) {
-            case Some(pool) => pool.isClosed()
-            case None => true
-        }
-    }
-
-    public func stats(): ConnectionPoolStats {
-        let stats = ConnectionPoolStats()
-        match (pooledDs) {
-            case Some(pool) =>
-                stats.open = pool.openConns
-                stats.idle = pool.idleConns
-                stats.inUse = pool.usedConn
-                stats.broken = pool.brokenConns
-                stats.closed = pool.closedConns
-            case None => ()
-        }
-        return stats
-    }
-
-    public func healthCheck(): Bool {
-        let connOpt = getConnection()
-        match (connOpt) {
-            case Some(rawConn) =>
-                try {
-                    var ok = false
-                    try (conn = rawConn) {
-                        ok = DatabaseConfig.withStatement<Bool>(conn, "SELECT 1", { stmt =>
-                            DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                                return rs.next()
-                            })
-                        })
-                    }
-                    return ok
-                } catch (e: Exception) {
-                    getLogger("connection_pool").warn("连接池健康检查失败", ("error", e.message))
-                    return false
-                }
-            case None => return false
-        }
-    }
+/** 连接池统计(兼容旧 API,从 ACE ConnectionPool 读取,部分指标不可得返回 -1)。 */
+public class ConnectionPoolStats {
+    public var open: Int64 = -1
+    public var idle: Int64 = -1
+    public var inUse: Int64 = -1
+    public var broken: Int64 = -1
+    public var closed: Int64 = -1
+    public init() {}
 }

@@ -8,7 +8,10 @@
   compile-option = ""
   override-compile-option = ""
   # vips_ffi uses libvips for general-purpose decode/resize/crop/encode.
-  link-option = "-larchive -lavif -lvips -lrocksdb -largon2 -lbrotlienc -lbrotlicommon -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s"
+  # ace-orm 把 sqlite/postgres/mysql 三驱动 FFI 编进同一 static 库,foreign func 声明
+  # 即使不调用也会在 .data 段产生符号引用,故用方须链接全部三客户端库(仅 PG 亦然)。
+  # TODO 上游建议:拆分 ace-orm-pg/sqlite/mysql 子包,或对非目标驱动用 weak symbol。
+  link-option = "-larchive -lavif -lvips -lrocksdb -largon2 -lbrotlienc -lbrotlicommon -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s -lpq -lsqlite3 -lmysqlclient"
 
 [dependencies]
   totp_crypto = { path = "packages/totp_crypto" }
@@ -17,7 +20,7 @@
   ace_router = { path = "ref/ACE/ace-router" }
   ace_http = { path = "ref/ACE/ace-http" }
   ace_observability = { path = "ref/ACE/ace-observability" }
-  opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", branch = "master", output-type = "static"}
+  ace_orm = { path = "ref/ACE/ace-orm" }
   cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
   ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
   cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", tag = "master" }

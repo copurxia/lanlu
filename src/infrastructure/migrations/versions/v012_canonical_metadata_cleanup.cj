@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,42 +18,42 @@ public class V012_CanonicalMetadataCleanup <: Migration {
         return "Drop legacy metadata tables and rebuild canonical metadata search view"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!ensureRootMetadata(conn)) {
+    public func up(drv: Driver): Bool {
+        if (!ensureRootMetadata(drv)) {
             return false
         }
 
-        if (!backfillTagsFromLegacyRelations(conn)) {
+        if (!backfillTagsFromLegacyRelations(drv)) {
             return false
         }
 
-        if (!backfillAssetsFromLegacyColumns(conn)) {
+        if (!backfillAssetsFromLegacyColumns(drv)) {
             return false
         }
 
         // Drop obsolete structures. Object type drift exists across historical branches,
         // so check actual type first to avoid PostgreSQL "is not a view/table" errors.
-        if (!dropLegacyRelation(conn, "archive_page_metadata")) {
+        if (!dropLegacyRelation(drv, "archive_page_metadata")) {
             return false
         }
-        if (!dropLegacyRelation(conn, "archive_metadata_search")) {
+        if (!dropLegacyRelation(drv, "archive_metadata_search")) {
             return false
         }
-        if (!dropLegacyRelation(conn, "archives_with_tags")) {
+        if (!dropLegacyRelation(drv, "archives_with_tags")) {
             return false
         }
-        if (!dropLegacyRelation(conn, "archive_tags")) {
+        if (!dropLegacyRelation(drv, "archive_tags")) {
             return false
         }
-        if (!dropLegacyRelation(conn, "tankoubon_tags")) {
-            return false
-        }
-
-        if (!dropLegacyColumnsAndIndexes(conn)) {
+        if (!dropLegacyRelation(drv, "tankoubon_tags")) {
             return false
         }
 
-        if (!recreateArchiveMetadataSearchView(conn)) {
+        if (!dropLegacyColumnsAndIndexes(drv)) {
+            return false
+        }
+
+        if (!recreateArchiveMetadataSearchView(drv)) {
             return false
         }
 
@@ -61,8 +61,8 @@ public class V012_CanonicalMetadataCleanup <: Migration {
         return true
     }
 
-    private func ensureRootMetadata(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    private func ensureRootMetadata(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -84,7 +84,7 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(drv, """
             INSERT INTO metadata_objects (
                 entity_type, entity_id, title, description, created_at, updated_at
             )
@@ -109,9 +109,9 @@ public class V012_CanonicalMetadataCleanup <: Migration {
         return true
     }
 
-    private func backfillTagsFromLegacyRelations(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "archive_tags") && MigrationHelpers.tableExists(conn, "tags")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+    private func backfillTagsFromLegacyRelations(drv: Driver): Bool {
+        if (MigrationHelpers.tableExists(drv, "archive_tags") && MigrationHelpers.tableExists(drv, "tags")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_tags (metadata_id, tag)
                 SELECT
                     mo.id,
@@ -141,8 +141,8 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             logger.warn("archive_tags relation missing; skipping legacy archive tag backfill")
         }
 
-        if (MigrationHelpers.tableExists(conn, "tankoubon_tags") && MigrationHelpers.tableExists(conn, "tags")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+        if (MigrationHelpers.tableExists(drv, "tankoubon_tags") && MigrationHelpers.tableExists(drv, "tags")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_tags (metadata_id, tag)
                 SELECT
                     mo.id,
@@ -175,9 +175,9 @@ public class V012_CanonicalMetadataCleanup <: Migration {
         return true
     }
 
-    private func backfillAssetsFromLegacyColumns(conn: Connection): Bool {
-        if (MigrationHelpers.columnExists(conn, "archives", "assets")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+    private func backfillAssetsFromLegacyColumns(drv: Driver): Bool {
+        if (MigrationHelpers.columnExists(drv, "archives", "assets")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 UPDATE metadata_assets ma
                 SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
@@ -199,7 +199,7 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             """)) {
                 return false
             }
-            if (!MigrationHelpers.execUpdate(conn, """
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
                 SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 FROM (
@@ -225,8 +225,8 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             }
         }
 
-        if (MigrationHelpers.columnExists(conn, "archives", "cover_asset_id")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+        if (MigrationHelpers.columnExists(drv, "archives", "cover_asset_id")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 UPDATE metadata_assets ma
                 SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
@@ -246,7 +246,7 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             """)) {
                 return false
             }
-            if (!MigrationHelpers.execUpdate(conn, """
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
                 SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 FROM (
@@ -270,8 +270,8 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             }
         }
 
-        if (MigrationHelpers.columnExists(conn, "tankoubons", "assets")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+        if (MigrationHelpers.columnExists(drv, "tankoubons", "assets")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 UPDATE metadata_assets ma
                 SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
@@ -293,7 +293,7 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             """)) {
                 return false
             }
-            if (!MigrationHelpers.execUpdate(conn, """
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
                 SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 FROM (
@@ -319,8 +319,8 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             }
         }
 
-        if (MigrationHelpers.columnExists(conn, "tankoubons", "cover_asset_id")) {
-            if (!MigrationHelpers.execUpdate(conn, """
+        if (MigrationHelpers.columnExists(drv, "tankoubons", "cover_asset_id")) {
+            if (!MigrationHelpers.execUpdate(drv, """
                 UPDATE metadata_assets ma
                 SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
@@ -340,7 +340,7 @@ public class V012_CanonicalMetadataCleanup <: Migration {
             """)) {
                 return false
             }
-            if (!MigrationHelpers.execUpdate(conn, """
+            if (!MigrationHelpers.execUpdate(drv, """
                 INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
                 SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 FROM (
@@ -367,73 +367,73 @@ public class V012_CanonicalMetadataCleanup <: Migration {
         return true
     }
 
-    private func dropLegacyColumnsAndIndexes(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_title_trgm")) {
+    private func dropLegacyColumnsAndIndexes(drv: Driver): Bool {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_title_trgm")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_summary_trgm")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_summary_trgm")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_cover_asset_id")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_cover_asset_id")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_archives_title_tsv")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_archives_title_tsv")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_tankoubons_name")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_tankoubons_name")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS idx_tankoubons_cover_asset_id")) {
-            return false
-        }
-
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS title_tsv")) {
-            return false
-        }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS title")) {
-            return false
-        }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS summary")) {
-            return false
-        }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS cover_asset_id")) {
-            return false
-        }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE archives DROP COLUMN IF EXISTS assets")) {
+        if (!MigrationHelpers.execUpdate(drv, "DROP INDEX IF EXISTS idx_tankoubons_cover_asset_id")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS name")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS title_tsv")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS summary")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS title")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS cover_asset_id")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS summary")) {
             return false
         }
-        if (!MigrationHelpers.execUpdate(conn, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS assets")) {
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS cover_asset_id")) {
+            return false
+        }
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE archives DROP COLUMN IF EXISTS assets")) {
+            return false
+        }
+
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS name")) {
+            return false
+        }
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS summary")) {
+            return false
+        }
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS cover_asset_id")) {
+            return false
+        }
+        if (!MigrationHelpers.execUpdate(drv, "ALTER TABLE tankoubons DROP COLUMN IF EXISTS assets")) {
             return false
         }
         return true
     }
 
-    private func dropLegacyRelation(conn: Connection, name: String): Bool {
-        if (MigrationHelpers.viewExists(conn, name)) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP VIEW IF EXISTS ${name}")) {
+    private func dropLegacyRelation(drv: Driver, name: String): Bool {
+        if (MigrationHelpers.viewExists(drv, name)) {
+            if (!MigrationHelpers.execUpdate(drv, "DROP VIEW IF EXISTS ${name}")) {
                 return false
             }
         }
-        if (MigrationHelpers.tableExists(conn, name)) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP TABLE IF EXISTS ${name}")) {
+        if (MigrationHelpers.tableExists(drv, name)) {
+            if (!MigrationHelpers.execUpdate(drv, "DROP TABLE IF EXISTS ${name}")) {
                 return false
             }
         }
         return true
     }
 
-    private func recreateArchiveMetadataSearchView(conn: Connection): Bool {
-        return MigrationHelpers.execUpdate(conn, """
+    private func recreateArchiveMetadataSearchView(drv: Driver): Bool {
+        return MigrationHelpers.execUpdate(drv, """
             CREATE VIEW archive_metadata_search AS
             SELECT
                 a.id,

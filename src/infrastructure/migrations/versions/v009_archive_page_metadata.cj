@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue, OrmException}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -19,7 +19,7 @@ public class V009_ArchivePageMetadata <: Migration {
         return "Create archive_page_metadata table for page-level metadata"
     }
 
-    public func up(conn: Connection): Bool {
+    public func up(drv: Driver): Bool {
         let createTableSql = """
             CREATE TABLE IF NOT EXISTS archive_page_metadata (
                 id BIGSERIAL PRIMARY KEY,
@@ -38,22 +38,22 @@ public class V009_ArchivePageMetadata <: Migration {
             )
         """
 
-        if (!MigrationHelpers.createTableIfNotExists(conn, "archive_page_metadata", createTableSql)) {
+        if (!MigrationHelpers.createTableIfNotExists(drv, "archive_page_metadata", createTableSql)) {
             return false
         }
 
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "entry_path", "TEXT NOT NULL DEFAULT ''")) { return false }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "sort_index", "INT DEFAULT 0")) { return false }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "hidden_in_files", "BOOLEAN DEFAULT false")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "archive_page_metadata", "entry_path", "TEXT NOT NULL DEFAULT ''")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "archive_page_metadata", "sort_index", "INT DEFAULT 0")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(drv, "archive_page_metadata", "hidden_in_files", "BOOLEAN DEFAULT false")) { return false }
 
-        if (!backfillEntryPath(conn)) {
+        if (!backfillEntryPath(drv)) {
             return false
         }
 
         // 旧版本唯一约束是 (archive_id, page_number)，新版本改为 (archive_id, entry_path)
-        if (oldPageNumberConstraintExists(conn)) {
+        if (oldPageNumberConstraintExists(drv)) {
             if (!MigrationHelpers.execUpdate(
-                conn,
+                drv,
                 "ALTER TABLE archive_page_metadata DROP CONSTRAINT archive_page_metadata_archive_id_page_number_key"
             )) {
                 return false
@@ -61,26 +61,26 @@ public class V009_ArchivePageMetadata <: Migration {
         }
 
         // 先删除旧索引定义，再创建新的 path 唯一索引
-        if (MigrationHelpers.indexExists(conn, "idx_apm_archive_entry")) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP INDEX idx_apm_archive_entry")) {
+        if (MigrationHelpers.indexExists(drv, "idx_apm_archive_entry")) {
+            if (!MigrationHelpers.execUpdate(drv, "DROP INDEX idx_apm_archive_entry")) {
                 return false
             }
         }
-        if (!MigrationHelpers.indexExists(conn, "idx_apm_archive_entry")) {
+        if (!MigrationHelpers.indexExists(drv, "idx_apm_archive_entry")) {
             if (!MigrationHelpers.execUpdate(
-                conn,
+                drv,
                 "CREATE UNIQUE INDEX idx_apm_archive_entry ON archive_page_metadata (archive_id, entry_path)"
             )) {
                 return false
             }
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_id", "archive_page_metadata", "archive_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_apm_archive_id", "archive_page_metadata", "archive_id")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_page", "archive_page_metadata", "archive_id, page_number")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_apm_archive_page", "archive_page_metadata", "archive_id, page_number")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_sort", "archive_page_metadata", "archive_id, sort_index, page_number")) {
+        if (!MigrationHelpers.createIndexIfNotExists(drv, "idx_apm_archive_sort", "archive_page_metadata", "archive_id, sort_index, page_number")) {
             return false
         }
 
@@ -88,41 +88,28 @@ public class V009_ArchivePageMetadata <: Migration {
         return true
     }
 
-    public func down(conn: Connection): Bool {
-        return MigrationHelpers.execUpdate(conn, "DROP TABLE IF EXISTS archive_page_metadata")
+    public func down(drv: Driver): Bool {
+        return MigrationHelpers.execUpdate(drv, "DROP TABLE IF EXISTS archive_page_metadata")
     }
 
-    private func backfillEntryPath(conn: Connection): Bool {
+    private func backfillEntryPath(drv: Driver): Bool {
         try {
-            let queryStmt = conn.prepareStatement(
-                "SELECT id, page_number FROM archive_page_metadata WHERE entry_path IS NULL OR LENGTH(entry_path) = 0 ORDER BY id"
+            // 查询需要回填的行(entry_path 为空)
+            let rows = drv.query(
+                "SELECT id, page_number FROM archive_page_metadata WHERE entry_path IS NULL OR LENGTH(entry_path) = 0 ORDER BY id",
+                []
             )
-            try {
-                let updateStmt = conn.prepareStatement(
-                    "UPDATE archive_page_metadata SET entry_path = ? WHERE id = ?"
-                )
-                try {
-                    let rs = queryStmt.query()
-                    try {
-                        while (rs.next()) {
-                            let id = rs.getOrNull<Int64>(0) ?? 0
-                            let pageNo = rs.getOrNull<Int32>(1) ?? 0
-                            if (id <= 0) {
-                                continue
-                            }
-                            let entryPath = if (pageNo > 0) { "__page_${pageNo}" } else { "__page_0" }
-                            updateStmt.set(0, entryPath)
-                            updateStmt.set(1, id)
-                            let _ = updateStmt.update()
-                        }
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    updateStmt.close()
+            for (r in rows) {
+                let id = r.getInt("id")
+                let pageNo = Int32(r.getInt("page_number"))
+                if (id <= 0) {
+                    continue
                 }
-            } finally {
-                queryStmt.close()
+                let entryPath = if (pageNo > 0) { "__page_${pageNo}" } else { "__page_0" }
+                drv.exec(
+                    "UPDATE archive_page_metadata SET entry_path = $1 WHERE id = $2",
+                    [DbText(entryPath), DbInt(id)]
+                )
             }
             return true
         } catch (e: Exception) {
@@ -131,29 +118,19 @@ public class V009_ArchivePageMetadata <: Migration {
         }
     }
 
-    private func oldPageNumberConstraintExists(conn: Connection): Bool {
-        let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = ? AND c.conname = ?)"
-        )
+    private func oldPageNumberConstraintExists(drv: Driver): Bool {
         try {
-            stmt.set(0, "archive_page_metadata")
-            stmt.set(1, "archive_page_metadata_archive_id_page_number_key")
-            let rs = stmt.query()
-            try {
-                if (rs.next()) {
-                    try {
-                        return rs.getOrNull<Bool>(0) ?? false
-                    } catch (_: Exception) {
-                        let n = rs.getOrNull<Int32>(0) ?? 0
-                        return n != 0
-                    }
-                }
-                return false
-            } finally {
-                rs.close()
+            let rows = drv.query(
+                "SELECT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = $1 AND c.conname = $2)",
+                [DbText("archive_page_metadata"), DbText("archive_page_metadata_archive_id_page_number_key")]
+            )
+            if (rows.size > 0) {
+                return rows[0].getBool("exists")
             }
-        } finally {
-            stmt.close()
+            return false
+        } catch (e: Exception) {
+            logger.error("oldPageNumberConstraintExists failed: ${e.message}")
+            return false
         }
     }
 }

@@ -1,41 +1,37 @@
 package lanlu.contexts.archive.infrastructure.persistence
 
-import std.database.sql.*
+import ace_orm.*
 
 /**
- * Centralized mappers for DAO ResultSet -> data objects.
+ * Centralized mappers for DAO Row -> data objects.
  *
- * Keep these small and index-based (matching SELECT column order) so query code stays readable
+ * Keep these small and name-based (matching SELECT column names) so query code stays readable
  * and column-order changes are done in one place.
  */
 public class ArchiveDataMappers {
     /**
-     * Map a row shaped like:
+     * ACE-ORM 版本：从 ace_orm.Row 按列名读取，对应 SQL 形如：
      *   arcid, filename, title, summary, thumbhash, cover_asset_id,
      *   created_at, updated_at, release_at, relative_path, file_size, pagecount,
      *   last_read_time, progress, tags
      */
-    public static func fromArchivesWithTagsRow(rs: QueryResult): ArchiveData {
-        return fromArchivesWithTagsRow(rs, 0i64)
-    }
-
-    public static func fromArchivesWithTagsRow(rs: QueryResult, offset: Int64): ArchiveData {
+    public static func fromArchivesWithTagsRow(r: Row): ArchiveData {
         let archive = ArchiveData()
-        archive.id = rs.getOrNull<String>(offset + 0) ?? ""
-        archive.filename = rs.getOrNull<String>(offset + 1) ?? ""
-        archive.title = rs.getOrNull<String>(offset + 2) ?? ""
-        archive.summary = rs.getOrNull<String>(offset + 3) ?? ""
-        archive.thumbhash = rs.getOrNull<String>(offset + 4) ?? ""
-        archive.cover_asset_id = rs.getOrNull<Int64>(offset + 5) ?? 0
-        archive.created_at = rs.getOrNull<String>(offset + 6) ?? ""
-        archive.updated_at = rs.getOrNull<String>(offset + 7) ?? ""
-        archive.release_at = rs.getOrNull<String>(offset + 8) ?? ""
-        archive.relative_path = rs.getOrNull<String>(offset + 9) ?? ""
-        archive.file_size = rs.getOrNull<Int64>(offset + 10) ?? 0
-        archive.pagecount = rs.getOrNull<Int32>(offset + 11) ?? 0
-        archive.last_read_time = rs.getOrNull<String>(offset + 12) ?? ""
-        archive.progress = rs.getOrNull<Int32>(offset + 13) ?? 0
-        archive.tags = rs.getOrNull<String>(offset + 14) ?? ""
+        archive.id = r.getText("arcid")
+        archive.filename = r.getText("filename")
+        archive.title = r.getText("title")
+        archive.summary = r.getText("summary")
+        archive.thumbhash = r.getText("thumbhash")
+        archive.cover_asset_id = r.getInt("cover_asset_id")
+        archive.created_at = r.getText("created_at")
+        archive.updated_at = r.getText("updated_at")
+        archive.release_at = r.getText("release_at")
+        archive.relative_path = r.getText("relative_path")
+        archive.file_size = r.getInt("file_size")
+        archive.pagecount = Int32(r.getInt("pagecount"))
+        archive.last_read_time = r.getText("last_read_time")
+        archive.progress = Int32(r.getInt("progress"))
+        archive.tags = r.getText("tags")
         return archive
     }
 }

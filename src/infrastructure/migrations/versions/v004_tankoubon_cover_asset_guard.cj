@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import ace_orm.{Driver, DbValue}
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -17,14 +17,14 @@ public class V004_TankoubonCoverAssetGuard <: Migration {
         return "Ensure tankoubons.cover_asset_id exists and is indexed"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "tankoubons")) {
+    public func up(drv: Driver): Bool {
+        if (!MigrationHelpers.tableExists(drv, "tankoubons")) {
             logger.warn("tankoubons table missing; skipping V004")
             return true
         }
 
-        MigrationHelpers.addColumnIfNotExists(conn, "tankoubons", "cover_asset_id", "BIGINT DEFAULT 0")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubons_cover_asset_id", "tankoubons", "cover_asset_id")
+        MigrationHelpers.addColumnIfNotExists(drv, "tankoubons", "cover_asset_id", "BIGINT DEFAULT 0")
+        MigrationHelpers.createIndexIfNotExists(drv, "idx_tankoubons_cover_asset_id", "tankoubons", "cover_asset_id")
         return true
     }
 }
