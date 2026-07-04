@@ -16,11 +16,11 @@
 [dependencies]
   totp_crypto = { path = "packages/totp_crypto" }
   brotli_middleware = { path = "packages/brotli_middleware" }
-  ace_web = { path = "ref/ACE/ace-web" }
-  ace_router = { path = "ref/ACE/ace-router" }
-  ace_http = { path = "ref/ACE/ace-http" }
-  ace_observability = { path = "ref/ACE/ace-observability" }
-  ace_orm = { path = "ref/ACE/ace-orm" }
+  ace_web = { path = "packages/ACE/ace-web" }
+  ace_router = { path = "packages/ACE/ace-router" }
+  ace_http = { path = "packages/ACE/ace-http" }
+  ace_observability = { path = "packages/ACE/ace-observability" }
+  ace_orm = { path = "packages/ACE/ace-orm" }
   cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
   ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
   cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", tag = "master" }

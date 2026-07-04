@@ -45,6 +45,14 @@ $:
               clang --version | head -n 1
             '
 
+        - name: Init submodules
+          script: |
+            bash -lc '
+              set -eux
+              unset GIT_DIR GIT_WORK_TREE
+              git submodule update --init --recursive
+            '
+
         - name: Download Cangjie SDK + stdx
           script: |
             bash -lc '
@@ -166,19 +174,22 @@ $:
               - dist/app-*.zip
 
         - name: Set CNB Docker image tag
-          # Avoid pushing images from non-main branches / PR builds.
-          if: test "$CNB_BRANCH" = "main"
+          # main -> :latest, other branches -> :dev-<sanitized-branch>
           script: |
             bash -lc '
               set -eu
+              if [ "$CNB_BRANCH" = "main" ]; then
+                tag="latest"
+              else
+                tag="dev-$(printf "%s" "$CNB_BRANCH" | tr "[:upper:]" "[:lower:]" | sed "s/[^a-z0-9.-]/-/g")"
+              fi
               # CNB provides built-in credentials; with `services: [docker]` we can push directly.
-              printf "%s" "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
+              printf "%s" "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${tag}"
             '
           exports:
             stdout: IMAGE_TAG
 
         - name: Docker build
-          if: test "$CNB_BRANCH" = "main"
           script: |
             bash -lc '
               set -eux
@@ -186,7 +197,6 @@ $:
             '
 
         - name: Docker push (CNB Docker registry)
-          if: test "$CNB_BRANCH" = "main"
           script: |
             bash -lc '
               set -eux

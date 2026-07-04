@@ -7,4 +7,4 @@
   link-option = "-lbrotlienc -lbrotlicommon"
 
 [dependencies]
-  ace_web = { path = "../../ref/ACE/ace-web" }
+  ace_web = { path = "../ACE/ace-web" }

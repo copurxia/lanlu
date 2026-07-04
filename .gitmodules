@@ -1,0 +1,4 @@
+[submodule "packages/ACE"]
+	path = packages/ACE
+	url = https://atomgit.com/copur/ACE.git
+	branch = lanlu
