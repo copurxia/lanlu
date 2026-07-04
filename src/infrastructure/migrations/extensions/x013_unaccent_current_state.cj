@@ -40,9 +40,10 @@ public class X013_UnaccentCurrentState <: ExtensionMigration {
             LANGUAGE SQL
             IMMUTABLE
             PARALLEL SAFE
+            SET search_path = public, pg_catalog
             AS $$
-                SELECT unaccent('unaccent', input)
-            $$        
+                SELECT public.unaccent(input)
+            $$
         """)) {
             logger.warn("Failed to create immutable unaccent wrapper")
             return false
