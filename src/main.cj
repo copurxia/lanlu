@@ -227,6 +227,9 @@ main(): Int64 {
         enablePrintSwaggerUrl: false,
         enableBannerSignature: false,
         enableTlsPrecheck: true,
+        // 关闭 ignite 网络变更监控：其内部 getPreferredLocalIP 的 UdpSocket.close 未放在 finally 中，
+        // 在容器网络异常时会每 2 秒周期性泄漏一个 UDP socket fd（ignite fd 审计 #4）
+        enableNetworkChangeNotice: false,
         tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
         tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
         ))
