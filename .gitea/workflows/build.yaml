@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
+        with:
+          submodules: true
       # - name: Setup Cangjie
       #   uses: Zxilly/setup-cangjie@v2
       #   with:
@@ -27,7 +29,8 @@ jobs:
               xmake \
               pkg-config \
               libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev libsqlite3-dev libmysqlclient-dev
           else
             apt-get update
             apt-get install -y --no-install-recommends \
@@ -36,7 +39,8 @@ jobs:
               xmake \
               pkg-config \
               libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev libsqlite3-dev libmysqlclient-dev
           fi
 
       - name: Verify xmake
@@ -90,12 +94,11 @@ jobs:
           cp target/release/bin/main app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release
           path: |
             app/main
-            app/lib*
             app/frontend
   package:
     needs: build
@@ -104,7 +107,7 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Download artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: release
           path: ./app/
@@ -124,8 +127,14 @@ jobs:
           owner="${REPOSITORY%%/*}"
           repo="${REPOSITORY##*/}"
 
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            tag="latest"
+          else
+            tag="dev-$(printf '%s' "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g')"
+          fi
+
           echo "registry=$registry" >> "$GITHUB_OUTPUT"
-          echo "image=$registry/$owner/$repo:latest" >> "$GITHUB_OUTPUT"
+          echo "image=$registry/$owner/$repo:${tag}" >> "$GITHUB_OUTPUT"
       - name: Login to Gitea Container Registry
         uses: docker/login-action@v3
         with:
