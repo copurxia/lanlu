@@ -3,6 +3,7 @@
 import * as React from 'react'
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog'
 import type { BaseMediaCardType } from '@/components/ui/base-media-card.types'
+import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useToast } from '@/hooks/use-toast'
 import { ArchiveService } from '@/lib/services/archive-service'
@@ -25,7 +26,7 @@ import {
   splitMetadataTagList,
 } from '@/lib/utils/metadata-plugin-preview'
 import type { Plugin } from '@/lib/services/plugin-service'
-import type { MetadataPagePatch } from '@/types/archive'
+import type { Archive, MetadataPagePatch } from '@/types/archive'
 import type { RpcSelectRequest } from '@/types/metadata-plugin'
 import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon'
 
@@ -38,6 +39,10 @@ type BaseMediaCardEditControllerProps = {
   onSaved: (next: { summary: string; tags: string; title: string }) => void
   thumbnailAssetId?: number
   type: BaseMediaCardType
+  archives?: Archive[]
+  onArchiveEdit?: (archive: Archive) => void
+  onArchiveRemove?: (archive: Archive) => void | Promise<void>
+  isRemovingArchiveId?: string | null
 }
 
 export function BaseMediaCardEditController({
@@ -49,9 +54,14 @@ export function BaseMediaCardEditController({
   onSaved,
   thumbnailAssetId,
   type,
+  archives,
+  onArchiveEdit,
+  onArchiveRemove,
+  isRemovingArchiveId,
 }: BaseMediaCardEditControllerProps) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const { error: showError } = useToast()
+  const { confirm } = useConfirmContext()
   const [editSaving, setEditSaving] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState(initialTitle)
   const [editSummary, setEditSummary] = React.useState(initialSummary)
@@ -79,6 +89,10 @@ export function BaseMediaCardEditController({
   const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
   const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = React.useState<number | null>(null)
   const resolvedRpcSelectRequestIdsRef = React.useRef<Set<string>>(new Set())
+  const [internalArchives, setInternalArchives] = React.useState<Archive[]>([])
+  const [editingArchive, setEditingArchive] = React.useState<Archive | null>(null)
+  const [internalRemovingArchiveId, setInternalRemovingArchiveId] = React.useState<string | null>(null)
+  const isArchivesControlled = archives !== undefined
 
   const clearRpcSelectState = React.useCallback(() => {
     setRpcSelectRequest(null)
@@ -133,6 +147,7 @@ export function BaseMediaCardEditController({
     setEditAssetCoverId(fallbackCoverId)
     setEditAssetBackdropId('')
     setEditAssetClearlogoId('')
+    setInternalArchives([])
 
     let cancelled = false
     ;(async () => {
@@ -173,6 +188,27 @@ export function BaseMediaCardEditController({
         setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
         setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
         setEditAssetClearlogoId(String(tank.assets?.clearlogo || ''))
+
+        if (!isArchivesControlled) {
+          try {
+            const result = await ArchiveService.search({
+              tankoubon_id: id,
+              sortby: 'tank_order',
+              order: 'asc',
+              page: 1,
+              pageSize: 10000,
+              groupby_tanks: false,
+              lang: language,
+            })
+            if (cancelled) return
+            const archiveItems = result.data.filter(
+              (item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item
+            )
+            setInternalArchives(archiveItems || [])
+          } catch (error) {
+            logger.apiError('fetch tankoubon archives', error)
+          }
+        }
       } catch {
         // Keep fallback values when detail request fails.
       }
@@ -181,11 +217,35 @@ export function BaseMediaCardEditController({
     return () => {
       cancelled = true
     }
-  }, [id, thumbnailAssetId, type])
+  }, [id, thumbnailAssetId, type, language, isArchivesControlled])
 
   const emitRefresh = React.useCallback(() => {
     appEvents.emit(AppEvents.ARCHIVES_REFRESH)
   }, [])
+
+  const handleInternalArchiveRemove = React.useCallback(async (archive: Archive) => {
+    if (!archive.arcid) return
+    const confirmed = await confirm({
+      title: t('tankoubon.removeArchiveConfirmTitle'),
+      description: t('tankoubon.removeArchiveConfirmMessage').replace('{title}', archive.title || ''),
+      confirmText: t('common.remove'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    })
+    if (!confirmed) return
+
+    setInternalRemovingArchiveId(archive.arcid)
+    try {
+      await TankoubonService.removeArchiveFromTankoubon(id, archive.arcid)
+      setInternalArchives((prev) => prev.filter((a) => a.arcid !== archive.arcid))
+      emitRefresh()
+    } catch (error) {
+      logger.operationFailed('remove archive from tankoubon', error, { id, archiveId: archive.arcid })
+      showError(extractApiError(error, t('common.error')))
+    } finally {
+      setInternalRemovingArchiveId(null)
+    }
+  }, [confirm, emitRefresh, id, showError, t])
 
   const submitRpcSelect = React.useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return
@@ -537,64 +597,99 @@ export function BaseMediaCardEditController({
     type,
   ])
 
+  const effectiveArchives = isArchivesControlled ? archives : internalArchives
+  const effectiveOnArchiveEdit = isArchivesControlled ? onArchiveEdit : setEditingArchive
+  const effectiveOnArchiveRemove = isArchivesControlled ? onArchiveRemove : handleInternalArchiveRemove
+  const effectiveIsRemovingArchiveId = isArchivesControlled ? isRemovingArchiveId : internalRemovingArchiveId
+
   return (
-    <ArchiveMetadataEditDialog
-      open
-      onOpenChange={onOpenChange}
-      t={t}
-      titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
-      summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
-      tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
-      summaryPlaceholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
-      tagsPlaceholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
-      title={editTitle}
-      onTitleChange={setEditTitle}
-      summary={editSummary}
-      onSummaryChange={setEditSummary}
-      assetCoverId={editAssetCoverId}
-      onAssetCoverIdChange={setEditAssetCoverId}
-      assetBackdropId={editAssetBackdropId}
-      onAssetBackdropIdChange={setEditAssetBackdropId}
-      assetClearlogoId={editAssetClearlogoId}
-      onAssetClearlogoIdChange={setEditAssetClearlogoId}
-      assetCoverValue={editCover}
-      assetBackdropValue={editBackdrop}
-      assetClearlogoValue={editClearlogo}
-      onUploadAssetCover={() => uploadMetadataAsset('cover')}
-      onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
-      onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
-      uploadingAssetCover={coverUploading}
-      uploadingAssetBackdrop={backdropUploading}
-      uploadingAssetClearlogo={clearlogoUploading}
-      tags={editTags}
-      onTagsChange={setEditTags}
-      isSaving={editSaving}
-      saveDisabled={type === 'tankoubon' ? !editTitle.trim() : false}
-      onSave={handleSaveEdit}
-      showMetadataPlugin
-      metadataPlugins={metadataPlugins}
-      selectedMetadataPlugin={selectedMetadataPlugin}
-      onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
-      metadataPluginParam={metadataPluginParam}
-      onMetadataPluginParamChange={setMetadataPluginParam}
-      isMetadataPluginRunning={isMetadataPluginRunning}
-      metadataPluginProgress={metadataPluginProgress}
-      metadataPluginMessage={metadataPluginMessage}
-      onRunMetadataPlugin={runMetadataPlugin}
-      rpcSelect={{
-        request: rpcSelectRequest,
-        selectedIndex: rpcSelectSelectedIndex,
-        remainingSeconds: rpcSelectRemainingSeconds,
-        onSelectIndex: setRpcSelectSelectedIndex,
-        onAbort: abortRpcSelect,
-        onSubmit: submitRpcSelect,
-      }}
-      pages={type === 'archive' ? archivePages : undefined}
-      previewPages={type === 'archive' ? metadataPreviewPages : undefined}
-      onPageEdit={undefined}
-      onPageRemove={type === 'archive' ? (page) => {
-        setMetadataPreviewPages((prev) => prev.filter((p) => p.page_number !== page.page_number && p.title !== page.title))
-      } : undefined}
-    />
+    <>
+      <ArchiveMetadataEditDialog
+        open
+        onOpenChange={onOpenChange}
+        t={t}
+        titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
+        summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
+        tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
+        summaryPlaceholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
+        tagsPlaceholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
+        title={editTitle}
+        onTitleChange={setEditTitle}
+        summary={editSummary}
+        onSummaryChange={setEditSummary}
+        assetCoverId={editAssetCoverId}
+        onAssetCoverIdChange={setEditAssetCoverId}
+        assetBackdropId={editAssetBackdropId}
+        onAssetBackdropIdChange={setEditAssetBackdropId}
+        assetClearlogoId={editAssetClearlogoId}
+        onAssetClearlogoIdChange={setEditAssetClearlogoId}
+        assetCoverValue={editCover}
+        assetBackdropValue={editBackdrop}
+        assetClearlogoValue={editClearlogo}
+        onUploadAssetCover={() => uploadMetadataAsset('cover')}
+        onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+        onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+        uploadingAssetCover={coverUploading}
+        uploadingAssetBackdrop={backdropUploading}
+        uploadingAssetClearlogo={clearlogoUploading}
+        tags={editTags}
+        onTagsChange={setEditTags}
+        isSaving={editSaving}
+        saveDisabled={type === 'tankoubon' ? !editTitle.trim() : false}
+        onSave={handleSaveEdit}
+        showMetadataPlugin
+        metadataPlugins={metadataPlugins}
+        selectedMetadataPlugin={selectedMetadataPlugin}
+        onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+        metadataPluginParam={metadataPluginParam}
+        onMetadataPluginParamChange={setMetadataPluginParam}
+        isMetadataPluginRunning={isMetadataPluginRunning}
+        metadataPluginProgress={metadataPluginProgress}
+        metadataPluginMessage={metadataPluginMessage}
+        onRunMetadataPlugin={runMetadataPlugin}
+        rpcSelect={{
+          request: rpcSelectRequest,
+          selectedIndex: rpcSelectSelectedIndex,
+          remainingSeconds: rpcSelectRemainingSeconds,
+          onSelectIndex: setRpcSelectSelectedIndex,
+          onAbort: abortRpcSelect,
+          onSubmit: submitRpcSelect,
+        }}
+        pages={type === 'archive' ? archivePages : undefined}
+        previewPages={type === 'archive' ? metadataPreviewPages : undefined}
+        onPageEdit={undefined}
+        onPageRemove={type === 'archive' ? (page) => {
+          setMetadataPreviewPages((prev) => prev.filter((p) => p.page_number !== page.page_number && p.title !== page.title))
+        } : undefined}
+        archives={type === 'tankoubon' ? effectiveArchives : undefined}
+        onArchiveEdit={type === 'tankoubon' ? effectiveOnArchiveEdit : undefined}
+        onArchiveRemove={type === 'tankoubon' ? effectiveOnArchiveRemove : undefined}
+        isRemovingArchiveId={type === 'tankoubon' ? effectiveIsRemovingArchiveId : undefined}
+        archiveMetadataPatches={type === 'tankoubon' ? metadataArchivePatches : undefined}
+      />
+      {!isArchivesControlled && editingArchive ? (
+        <BaseMediaCardEditController
+          id={editingArchive.arcid}
+          type="archive"
+          initialTitle={editingArchive.title || ''}
+          initialSummary={editingArchive.description || ''}
+          initialTags={editingArchive.tags || ''}
+          thumbnailAssetId={getCoverAssetId(editingArchive)}
+          onOpenChange={(open) => {
+            if (!open) setEditingArchive(null)
+          }}
+          onSaved={(next) => {
+            setEditingArchive(null)
+            setInternalArchives((prev) =>
+              prev.map((a) =>
+                a.arcid === editingArchive.arcid
+                  ? { ...a, title: next.title, description: next.summary, tags: next.tags }
+                  : a
+              )
+            )
+          }}
+        />
+      ) : null}
+    </>
   )
 }

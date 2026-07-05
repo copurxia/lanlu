@@ -1,7 +1,7 @@
 'use client';
 
-import type { ChangeEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { useCallback, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BookOpen,
@@ -19,21 +19,17 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
+import { BaseMediaCardEditController } from '@/components/ui/base-media-card-edit-controller';
 import { useAuth } from '@/contexts/AuthContext';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { ArchiveService } from '@/lib/services/archive-service';
-import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { appEvents, AppEvents } from '@/lib/utils/events';
-import { getCoverAssetId } from '@/lib/utils/archive-assets';
-import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { logger } from '@/lib/utils/logger';
 import { buildReaderPath } from '@/lib/utils/reader';
-import { extractApiError } from '@/lib/utils/api-utils';
 
 type HomeMediaItemType = 'archive' | 'tankoubon';
 
@@ -74,13 +70,6 @@ type Props = {
   onRequestEnterSelection?: () => void;
   onToggleSelect?: (selected: boolean) => void;
 };
-
-function toTagList(raw?: string): string[] {
-  return String(raw || '')
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
 
 function resolveSyncedValue<T>(state: SyncedValue<T>, source: T): T {
   return state !== null && Object.is(state.source, source) ? state.value : source;
@@ -125,20 +114,6 @@ export function HomeMediaItemMenu({
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editSaving, setEditSaving] = useState(false);
-  const [editTitle, setEditTitle] = useState(title);
-  const [editSummary, setEditSummary] = useState(description || '');
-  const [editTags, setEditTags] = useState<string[]>(toTagList(tags));
-  const [editCover, setEditCover] = useState('');
-  const [editBackdrop, setEditBackdrop] = useState('');
-  const [editClearlogo, setEditClearlogo] = useState('');
-  const [editAssetCoverId, setEditAssetCoverId] = useState('');
-  const [editAssetBackdropId, setEditAssetBackdropId] = useState('');
-  const [editAssetClearlogoId, setEditAssetClearlogoId] = useState('');
-  const [coverUploading, setCoverUploading] = useState(false);
-  const [backdropUploading, setBackdropUploading] = useState(false);
-  const [clearlogoUploading, setClearlogoUploading] = useState(false);
-  const editMetadataRequestIdRef = useRef(0);
 
   const isAdmin = user?.isAdmin === true;
   const canEdit = isAuthenticated;
@@ -147,7 +122,7 @@ export function HomeMediaItemMenu({
   const readerPath = readerTargetId
     ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined, type !== 'archive' ? id : undefined)
     : detailPath;
-  const menuActionDisabled = deleting || editSaving;
+  const menuActionDisabled = deleting;
   const displayTitle = resolveSyncedValue(displayTitleState, title);
   const displayDescription = resolveSyncedValue(displayDescriptionState, baseDescription);
   const displayTags = resolveSyncedValue(displayTagsState, baseTags);
@@ -227,225 +202,20 @@ export function HomeMediaItemMenu({
       showError(t('library.loginRequired'));
       return;
     }
-
-    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
-      ? String(Math.trunc(thumbnailAssetId))
-      : '';
-
-    setEditTitle(displayTitle);
-    setEditSummary(displayDescription);
-    setEditTags(toTagList(displayTags));
-    setEditCover('');
-    setEditBackdrop('');
-    setEditClearlogo('');
-    setEditAssetCoverId(fallbackCoverId);
-    setEditAssetBackdropId('');
-    setEditAssetClearlogoId('');
     setEditOpen(true);
+  }, [canEdit, showError, t]);
 
-    const requestId = ++editMetadataRequestIdRef.current;
-    void (async () => {
-      try {
-        if (type === 'archive') {
-          const meta = await ArchiveService.getMetadata(id);
-          if (editMetadataRequestIdRef.current !== requestId) return;
-          setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
-          setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
-          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
-          return;
-        }
-
-        const meta = await TankoubonService.getMetadata(id);
-        if (editMetadataRequestIdRef.current !== requestId) return;
-        setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
-        setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
-        setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
-      } catch {
-        // Keep fallback asset ids when detail loading fails.
-      }
-    })();
-  }, [canEdit, displayDescription, displayTags, displayTitle, id, showError, t, thumbnailAssetId, type]);
-
-  const handleEditOpenChange = useCallback((open: boolean) => {
-    setEditOpen(open);
-    if (!open) {
-      editMetadataRequestIdRef.current += 1;
-    }
-  }, []);
-
-  const uploadMetadataAsset = useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
-    if (!canEdit || editSaving) return;
-
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.style.display = 'none';
-
-    const setUploading = (next: boolean) => {
-      if (slot === 'cover') {
-        setCoverUploading(next);
-        return;
-      }
-      if (slot === 'backdrop') {
-        setBackdropUploading(next);
-        return;
-      }
-      setClearlogoUploading(next);
-    };
-
-    input.onchange = async (nativeEvent) => {
-      const event = nativeEvent as unknown as ChangeEvent<HTMLInputElement>;
-      const file = event.target.files?.[0];
-      if (!file) {
-        document.body.removeChild(input);
-        return;
-      }
-
-      setUploading(true);
-      try {
-        const result = await ChunkedUploadService.uploadWithChunks(
-          file,
-          {
-            targetType: 'metadata_asset',
-            overwrite: true,
-            contentType: file.type || 'application/octet-stream',
-          },
-          {
-            onProgress: () => {},
-            onChunkComplete: () => {},
-            onError: () => {},
-          }
-        );
-
-        if (!result.success) {
-          throw new Error(result.error || t('archive.assetUploadFailed'));
-        }
-
-        const assetId = Number(result.data?.assetId ?? 0);
-        if (!Number.isFinite(assetId) || assetId <= 0) {
-          throw new Error(t('archive.assetUploadFailed'));
-        }
-
-        const normalizedAssetId = String(Math.trunc(assetId));
-        if (slot === 'cover') {
-          setEditAssetCoverId(normalizedAssetId);
-          setEditCover('');
-        } else if (slot === 'backdrop') {
-          setEditAssetBackdropId(normalizedAssetId);
-          setEditBackdrop('');
-        } else {
-          setEditAssetClearlogoId(normalizedAssetId);
-          setEditClearlogo('');
-        }
-      } catch (error) {
-        logger.operationFailed('upload metadata asset from home menu', error, { id, slot, type });
-        showError(extractApiError(error, t('archive.assetUploadFailed')));
-      } finally {
-        setUploading(false);
-        document.body.removeChild(input);
-      }
-    };
-
-    document.body.appendChild(input);
-    input.click();
-  }, [canEdit, editSaving, id, showError, t, type]);
-
-  const handleSaveEdit = useCallback(async () => {
-    if (editSaving) return;
-    if (!canEdit) {
-      showError(t('library.loginRequired'));
-      return;
-    }
-
-    const nextTitle = editTitle.trim();
-    if (type === 'tankoubon' && !nextTitle) {
-      showError(t('tankoubon.nameRequired'));
-      return;
-    }
-
-    const parseAssetId = (raw: string): number | undefined => {
-      const value = Number(raw.trim());
-      if (!Number.isFinite(value)) return undefined;
-      const parsedId = Math.trunc(value);
-      return parsedId > 0 ? parsedId : undefined;
-    };
-
-    setEditSaving(true);
-    try {
-      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean);
-      const nextSummary = editSummary.trim();
-      const assetIds = {
-        backdrop: parseAssetId(editAssetBackdropId),
-        clearlogo: parseAssetId(editAssetClearlogoId),
-        cover: parseAssetId(editAssetCoverId),
-      };
-
-      if (type === 'archive') {
-        await ArchiveService.updateMetadata(id, {
-          title: nextTitle || displayTitle,
-          type: 0,
-          description: nextSummary,
-          tags: nextTags,
-          assets: buildMetadataAssetInputs(
-            {
-              cover: editCover || undefined,
-              backdrop: editBackdrop || undefined,
-              clearlogo: editClearlogo || undefined,
-            },
-            assetIds
-          ),
-        });
-      } else {
-        await TankoubonService.updateMetadata(id, {
-          title: nextTitle,
-          type: 1,
-          description: nextSummary,
-          tags: nextTags,
-          assets: buildMetadataAssetInputs(
-            {
-              cover: editCover || undefined,
-              backdrop: editBackdrop || undefined,
-              clearlogo: editClearlogo || undefined,
-            },
-            assetIds
-          ),
-        });
-      }
-
-      if (nextTitle) setDisplayTitleState({ source: title, value: nextTitle });
-      setDisplayDescriptionState({ source: baseDescription, value: nextSummary });
-      setDisplayTagsState({ source: baseTags, value: nextTags.join(', ') });
-      handleEditOpenChange(false);
-      emitRefresh();
-    } catch (error) {
-      logger.operationFailed('save home menu edit', error, { id, type });
-      showError(type === 'archive' ? t('archive.updateFailed') : t('common.error'));
-    } finally {
-      setEditSaving(false);
-    }
-  }, [
-    canEdit,
-    baseDescription,
-    baseTags,
-    displayTitle,
-    editAssetBackdropId,
-    editAssetClearlogoId,
-    editAssetCoverId,
-    editBackdrop,
-    editClearlogo,
-    editCover,
-    editSaving,
-    editSummary,
-    editTags,
-    editTitle,
-    emitRefresh,
-    id,
-    handleEditOpenChange,
-    showError,
-    t,
-    title,
-    type,
-  ]);
+  // Optimistically update the card display after the shared edit controller saves.
+  // The controller itself handles metadata fetching, uploads, saving and emits
+  // ARCHIVES_REFRESH, so here we only mirror the saved values onto the card.
+  const handleEditSaved = useCallback(
+    (next: { summary: string; tags: string; title: string }) => {
+      if (next.title) setDisplayTitleState({ source: title, value: next.title });
+      setDisplayDescriptionState({ source: baseDescription, value: next.summary });
+      setDisplayTagsState({ source: baseTags, value: next.tags });
+    },
+    [baseDescription, baseTags, title]
+  );
 
   const handleDelete = useCallback(async () => {
     if (!canDelete) {
@@ -576,41 +346,18 @@ export function HomeMediaItemMenu({
         toggleSelected,
       })}
 
-      <ArchiveMetadataEditDialog
-        open={editOpen}
-        onOpenChange={handleEditOpenChange}
-        t={t}
-        title={editTitle}
-        onTitleChange={setEditTitle}
-        summary={editSummary}
-        onSummaryChange={setEditSummary}
-        assetCoverId={editAssetCoverId}
-        onAssetCoverIdChange={setEditAssetCoverId}
-        assetBackdropId={editAssetBackdropId}
-        onAssetBackdropIdChange={setEditAssetBackdropId}
-        assetClearlogoId={editAssetClearlogoId}
-        onAssetClearlogoIdChange={setEditAssetClearlogoId}
-        assetCoverValue={editCover}
-        assetBackdropValue={editBackdrop}
-        assetClearlogoValue={editClearlogo}
-        onUploadAssetCover={() => {
-          uploadMetadataAsset('cover');
-        }}
-        onUploadAssetBackdrop={() => {
-          uploadMetadataAsset('backdrop');
-        }}
-        onUploadAssetClearlogo={() => {
-          uploadMetadataAsset('clearlogo');
-        }}
-        uploadingAssetCover={coverUploading}
-        uploadingAssetBackdrop={backdropUploading}
-        uploadingAssetClearlogo={clearlogoUploading}
-        tags={editTags}
-        onTagsChange={setEditTags}
-        isSaving={editSaving}
-        onSave={handleSaveEdit}
-        showMetadataPlugin={false}
-      />
+      {editOpen ? (
+        <BaseMediaCardEditController
+          id={id}
+          type={type}
+          initialTitle={displayTitle}
+          initialSummary={displayDescription}
+          initialTags={displayTags}
+          thumbnailAssetId={thumbnailAssetId}
+          onOpenChange={setEditOpen}
+          onSaved={handleEditSaved}
+        />
+      ) : null}
     </>
   );
 }
