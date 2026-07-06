@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations
 
-import std.database.sql.*
+import csorm.*
 
 /**
  * Migration 接口 - 所有迁移必须实现此接口
@@ -18,8 +18,8 @@ public interface Migration {
 
     /**
      * 执行迁移
-     * @param conn 数据库连接（调用者管理事务）
+     * @param db csorm.Database 句柄(调用者管理事务)
      * @return true 如果成功，false 否则
      */
-    func up(conn: Connection): Bool
+    func up(db: Database): Bool
 }

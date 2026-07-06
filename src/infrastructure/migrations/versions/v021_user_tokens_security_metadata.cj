@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 
 public class V021_UserTokensSecurityMetadata <: Migration {
@@ -12,14 +12,14 @@ public class V021_UserTokensSecurityMetadata <: Migration {
         return "Add security metadata columns to user tokens"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "user_tokens")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "user_tokens")) {
             return true
         }
 
-        MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "last_used_ip", "VARCHAR(64) NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "user_agent", "TEXT NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_tokens", "expires_at", "TIMESTAMP")
+        MigrationHelpers.addColumnIfNotExists(db, "user_tokens", "last_used_ip", "VARCHAR(64) NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_tokens", "user_agent", "TEXT NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_tokens", "expires_at", "TIMESTAMP")
         return true
     }
 }

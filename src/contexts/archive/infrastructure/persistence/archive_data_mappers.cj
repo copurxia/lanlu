@@ -1,9 +1,10 @@
 package lanlu.contexts.archive.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 
 /**
- * Centralized mappers for DAO ResultSet -> data objects.
+ * Centralized mappers for DAO Row -> data objects.
  *
  * Keep these small and index-based (matching SELECT column order) so query code stays readable
  * and column-order changes are done in one place.
@@ -15,27 +16,27 @@ public class ArchiveDataMappers {
      *   created_at, updated_at, release_at, relative_path, file_size, pagecount,
      *   last_read_time, progress, tags
      */
-    public static func fromArchivesWithTagsRow(rs: QueryResult): ArchiveData {
-        return fromArchivesWithTagsRow(rs, 0i64)
+    public static func fromArchivesWithTagsRow(row: Row): ArchiveData {
+        return fromArchivesWithTagsRow(row, 0i64)
     }
 
-    public static func fromArchivesWithTagsRow(rs: QueryResult, offset: Int64): ArchiveData {
+    public static func fromArchivesWithTagsRow(row: Row, offset: Int64): ArchiveData {
         let archive = ArchiveData()
-        archive.id = rs.getOrNull<String>(offset + 0) ?? ""
-        archive.filename = rs.getOrNull<String>(offset + 1) ?? ""
-        archive.title = rs.getOrNull<String>(offset + 2) ?? ""
-        archive.summary = rs.getOrNull<String>(offset + 3) ?? ""
-        archive.thumbhash = rs.getOrNull<String>(offset + 4) ?? ""
-        archive.cover_asset_id = rs.getOrNull<Int64>(offset + 5) ?? 0
-        archive.created_at = rs.getOrNull<String>(offset + 6) ?? ""
-        archive.updated_at = rs.getOrNull<String>(offset + 7) ?? ""
-        archive.release_at = rs.getOrNull<String>(offset + 8) ?? ""
-        archive.relative_path = rs.getOrNull<String>(offset + 9) ?? ""
-        archive.file_size = rs.getOrNull<Int64>(offset + 10) ?? 0
-        archive.pagecount = rs.getOrNull<Int32>(offset + 11) ?? 0
-        archive.last_read_time = rs.getOrNull<String>(offset + 12) ?? ""
-        archive.progress = rs.getOrNull<Int32>(offset + 13) ?? 0
-        archive.tags = rs.getOrNull<String>(offset + 14) ?? ""
+        archive.id = row.getOrNullText(offset + 0) ?? ""
+        archive.filename = row.getOrNullText(offset + 1) ?? ""
+        archive.title = row.getOrNullText(offset + 2) ?? ""
+        archive.summary = row.getOrNullText(offset + 3) ?? ""
+        archive.thumbhash = row.getOrNullText(offset + 4) ?? ""
+        archive.cover_asset_id = row.getOrNullInt64(offset + 5) ?? 0
+        archive.created_at = row.getOrNullText(offset + 6) ?? ""
+        archive.updated_at = row.getOrNullText(offset + 7) ?? ""
+        archive.release_at = row.getOrNullText(offset + 8) ?? ""
+        archive.relative_path = row.getOrNullText(offset + 9) ?? ""
+        archive.file_size = row.getOrNullInt64(offset + 10) ?? 0
+        archive.pagecount = row.getOrNullInt32(offset + 11) ?? 0
+        archive.last_read_time = row.getOrNullText(offset + 12) ?? ""
+        archive.progress = row.getOrNullInt32(offset + 13) ?? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? ""
         return archive
     }
 }

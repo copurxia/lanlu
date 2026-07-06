@@ -1,6 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -47,90 +48,71 @@ public class UserTokenDao {
         let tokenHash = AuthUtils.sha256Hex("${token}:${pepper}")
         let actualType = if (tokenType == "api" || tokenType == "session") { tokenType } else { "session" }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [
+            vint(userId),
+            vtext(name.trimAscii()),
+            vtext(actualType),
+            vtext(prefix),
+            vtext(tokenHash)
+        ]
+        let sql = """
+            INSERT INTO user_tokens (user_id, name, token_type, token_prefix, token_hash)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_tokens (user_id, name, token_type, token_prefix, token_hash)
-                        VALUES (?, ?, ?, ?, ?)
-                        RETURNING id
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, name.trimAscii())
-                        stmt.set(2, actualType)
-                        stmt.set(3, prefix)
-                        stmt.set(4, tokenHash)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let tokenId = rs.getOrNull<Int64>(0) ?? 0
-                                if (tokenId > 0) {
-                                    return Some(CreateTokenResult(tokenId, token, prefix))
-                                }
+                    let tokenIdOpt = db.rawOne<Int64>(sql, params, { r => r.getInt64(0) })
+                    match (tokenIdOpt) {
+                        case Some(tokenId) =>
+                            if (tokenId > 0) {
+                                return Some(CreateTokenResult(tokenId, token, prefix))
                             }
-                        } finally {
-                            rs.close()
-                        }
-                        return None
-                    } finally {
-                        stmt.close()
+                        case None => ()
                     }
+                    return None
                 } catch (_: Exception) {
                     return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return None
         }
     }
 
     public static func findActiveByHash(tokenHash: String): UserTokenRow {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [vtext(tokenHash)]
+        let sql = """
+            SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                   COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
+            FROM user_tokens
+            WHERE token_hash = $1 AND revoked_at IS NULL
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                               COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
-                               COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
-                        FROM user_tokens
-                        WHERE token_hash = ? AND revoked_at IS NULL
-                    """)
-                    try {
-                        stmt.set(0, tokenHash)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let row = UserTokenRow()
-                                row.id = rs.getOrNull<Int64>(0) ?? 0
-                                row.userId = rs.getOrNull<Int64>(1) ?? 0
-                                row.name = rs.getOrNull<String>(2) ?? ""
-                                row.tokenType = rs.getOrNull<String>(3) ?? "session"
-                                row.tokenPrefix = rs.getOrNull<String>(4) ?? ""
-                                row.tokenHash = rs.getOrNull<String>(5) ?? ""
-                                row.createdAt = rs.getOrNull<String>(6) ?? ""
-                                row.lastUsedAt = rs.getOrNull<String>(7) ?? ""
-                                row.revokedAt = rs.getOrNull<String>(8) ?? ""
-                                row.lastUsedIp = rs.getOrNull<String>(9) ?? ""
-                                row.userAgent = rs.getOrNull<String>(10) ?? ""
-                                row.expiresAt = rs.getOrNull<String>(11) ?? ""
-                                return row
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<UserTokenRow>(sql, params, { row =>
+                        let r = UserTokenRow()
+                        r.id = row.getOrNullInt64(0) ?? 0
+                        r.userId = row.getOrNullInt64(1) ?? 0
+                        r.name = row.getOrNullText(2) ?? ""
+                        r.tokenType = row.getOrNullText(3) ?? "session"
+                        r.tokenPrefix = row.getOrNullText(4) ?? ""
+                        r.tokenHash = row.getOrNullText(5) ?? ""
+                        r.createdAt = row.getOrNullText(6) ?? ""
+                        r.lastUsedAt = row.getOrNullText(7) ?? ""
+                        r.revokedAt = row.getOrNullText(8) ?? ""
+                        r.lastUsedIp = row.getOrNullText(9) ?? ""
+                        r.userAgent = row.getOrNullText(10) ?? ""
+                        r.expiresAt = row.getOrNullText(11) ?? ""
+                        return r
+                    })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
                     return UserTokenRow()
                 } catch (_: Exception) {
                     return UserTokenRow()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return UserTokenRow()
         }
@@ -141,30 +123,25 @@ public class UserTokenDao {
     }
 
     public static func touchUsage(tokenId: Int64, ip: String, userAgent: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let params: Array<Value> = [
+            vtext(ip.trimAscii()),
+            vtext(userAgent.trimAscii()),
+            vint(tokenId)
+        ]
+        let sql = """
+            UPDATE user_tokens
+            SET last_used_at = CURRENT_TIMESTAMP,
+                last_used_ip = $1,
+                user_agent = $2
+            WHERE id = $3
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_tokens
-                        SET last_used_at = CURRENT_TIMESTAMP,
-                            last_used_ip = ?,
-                            user_agent = ?
-                        WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, ip.trimAscii())
-                        stmt.set(1, userAgent.trimAscii())
-                        stmt.set(2, tokenId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -176,64 +153,48 @@ public class UserTokenDao {
 
     public static func listByUserAndType(userId: Int64, tokenType: Option<String>): Array<UserTokenRow> {
         var out: ArrayList<UserTokenRow> = ArrayList<UserTokenRow>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let (sql, params) = match (tokenType) {
+            case Some(t) => ("""
+                SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+                       COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                       COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
+                FROM user_tokens
+                WHERE user_id = $1 AND token_type = $2 AND revoked_at IS NULL
+                ORDER BY id DESC
+            """, [vint(userId), vtext(t)])
+            case None => ("""
+                SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+                       COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                       COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
+                FROM user_tokens
+                WHERE user_id = $1 AND revoked_at IS NULL
+                ORDER BY id DESC
+            """, [vint(userId)])
+        }
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let sql = match (tokenType) {
-                        case Some(t) => """
-                            SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
-                                   COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
-                            FROM user_tokens
-                            WHERE user_id = ? AND token_type = ? AND revoked_at IS NULL
-                            ORDER BY id DESC
-                        """
-                        case None => """
-                            SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
-                                   COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
-                            FROM user_tokens
-                            WHERE user_id = ? AND revoked_at IS NULL
-                            ORDER BY id DESC
-                        """
-                    }
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, userId)
-                        match (tokenType) {
-                            case Some(t) => stmt.set(1, t)
-                            case None => ()
-                        }
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let row = UserTokenRow()
-                                row.id = rs.getOrNull<Int64>(0) ?? 0
-                                row.userId = rs.getOrNull<Int64>(1) ?? 0
-                                row.name = rs.getOrNull<String>(2) ?? ""
-                                row.tokenType = rs.getOrNull<String>(3) ?? "session"
-                                row.tokenPrefix = rs.getOrNull<String>(4) ?? ""
-                                row.tokenHash = rs.getOrNull<String>(5) ?? ""
-                                row.createdAt = rs.getOrNull<String>(6) ?? ""
-                                row.lastUsedAt = rs.getOrNull<String>(7) ?? ""
-                                row.revokedAt = rs.getOrNull<String>(8) ?? ""
-                                row.lastUsedIp = rs.getOrNull<String>(9) ?? ""
-                                row.userAgent = rs.getOrNull<String>(10) ?? ""
-                                row.expiresAt = rs.getOrNull<String>(11) ?? ""
-                                out.add(row)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<UserTokenRow>(sql, params, { row =>
+                        let r = UserTokenRow()
+                        r.id = row.getOrNullInt64(0) ?? 0
+                        r.userId = row.getOrNullInt64(1) ?? 0
+                        r.name = row.getOrNullText(2) ?? ""
+                        r.tokenType = row.getOrNullText(3) ?? "session"
+                        r.tokenPrefix = row.getOrNullText(4) ?? ""
+                        r.tokenHash = row.getOrNullText(5) ?? ""
+                        r.createdAt = row.getOrNullText(6) ?? ""
+                        r.lastUsedAt = row.getOrNullText(7) ?? ""
+                        r.revokedAt = row.getOrNullText(8) ?? ""
+                        r.lastUsedIp = row.getOrNullText(9) ?? ""
+                        r.userAgent = row.getOrNullText(10) ?? ""
+                        r.expiresAt = row.getOrNullText(11) ?? ""
+                        return r
+                    })
+                    for (row in rows) {
+                        out.add(row)
                     }
                 } catch (_: Exception) {
                     ()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -241,40 +202,30 @@ public class UserTokenDao {
     }
 
     public static func revoke(userId: Int64, tokenId: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [vint(tokenId), vint(userId)]
+        let sql = "UPDATE user_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE user_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND revoked_at IS NULL")
-                    stmt.set(0, tokenId)
-                    stmt.set(1, userId)
-                    let updated = stmt.update()
-                    stmt.close()
-                    return updated.rowCount > 0
+                    let affected = db.execRaw(sql, params)
+                    return affected > 0
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
     }
 
     public static func revokeById(tokenId: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let params: Array<Value> = [vint(tokenId)]
+        let sql = "UPDATE user_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1 AND revoked_at IS NULL"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE user_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL")
-                    stmt.set(0, tokenId)
-                    let updated = stmt.update()
-                    stmt.close()
-                    return updated.rowCount > 0
+                    let affected = db.execRaw(sql, params)
+                    return affected > 0
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -286,25 +237,19 @@ public class UserTokenDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let params: Array<Value> = [vint(tokenId), vint(userId), vtext(normalizedType)]
+        let sql = """
+            UPDATE user_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND user_id = $2 AND token_type = $3 AND revoked_at IS NULL
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_tokens
-                        SET revoked_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND user_id = ? AND token_type = ? AND revoked_at IS NULL
-                    """)
-                    stmt.set(0, tokenId)
-                    stmt.set(1, userId)
-                    stmt.set(2, normalizedType)
-                    let updated = stmt.update()
-                    stmt.close()
-                    return updated.rowCount > 0
+                    let affected = db.execRaw(sql, params)
+                    return affected > 0
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -316,24 +261,19 @@ public class UserTokenDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let params: Array<Value> = [vint(userId), vtext(normalizedType)]
+        let sql = """
+            UPDATE user_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1 AND token_type = $2 AND revoked_at IS NULL
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_tokens
-                        SET revoked_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND token_type = ? AND revoked_at IS NULL
-                    """)
-                    stmt.set(0, userId)
-                    stmt.set(1, normalizedType)
-                    let updated = stmt.update()
-                    stmt.close()
-                    return updated.rowCount >= 0
+                    let affected = db.execRaw(sql, params)
+                    return affected >= 0
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -345,25 +285,19 @@ public class UserTokenDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let params: Array<Value> = [vint(userId), vtext(normalizedType), vint(excludedTokenId)]
+        let sql = """
+            UPDATE user_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1 AND token_type = $2 AND id <> $3 AND revoked_at IS NULL
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE user_tokens
-                        SET revoked_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND token_type = ? AND id <> ? AND revoked_at IS NULL
-                    """)
-                    stmt.set(0, userId)
-                    stmt.set(1, normalizedType)
-                    stmt.set(2, excludedTokenId)
-                    let updated = stmt.update()
-                    stmt.close()
-                    return updated.rowCount >= 0
+                    let affected = db.execRaw(sql, params)
+                    return affected >= 0
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }

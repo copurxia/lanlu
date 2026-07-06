@@ -1,7 +1,8 @@
 package lanlu.contexts.asset.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
 import lanlu.shared.config.*
+import lanlu.shared.utils.*
 import lanlu.contexts.asset.domain.*
 
 public class AssetRow {
@@ -28,6 +29,8 @@ public class AssetRow {
 }
 
 public class AssetDao {
+    private static let logger = getLogger("asset_dao")
+
     public static func create(
         ownerUserId: Option<Int64>,
         kind: String,
@@ -37,82 +40,102 @@ public class AssetDao {
         byteSize: Int64,
         thumbhash: String
     ): Option<Int64> {
-        return DatabaseConfig.withPooledConnection<Option<Int64>>("asset_dao", "create asset failed", None, { conn =>
-            DatabaseConfig.withStatement<Option<Int64>>(conn, """
-                INSERT INTO assets (owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                RETURNING id
-            """, { stmt =>
-                match (ownerUserId) {
-                    case Some(uid) => stmt.set(0, uid)
-                    case None => stmt.setNull(0)
-                }
-                stmt.set(1, kind)
-                stmt.set(2, originalFilename)
-                stmt.set(3, contentType)
-                stmt.set(4, fileExt)
-                stmt.set(5, byteSize)
-                stmt.set(6, thumbhash)
-                DatabaseConfig.withQueryResult<Option<Int64>>(stmt, { rs =>
-                    if (rs.next()) {
-                        let id = rs.getOrNull<Int64>(0) ?? 0
-                        if (id > 0) { return Some(id) }
-                    }
+        let params: Array<Value> = [
+            match (ownerUserId) {
+                case Some(uid) => vint(uid)
+                case None => vnull()
+            },
+            vtext(kind),
+            vtext(originalFilename),
+            vtext(contentType),
+            vtext(fileExt),
+            vint(byteSize),
+            vtext(thumbhash)
+        ]
+        let sql = """
+            INSERT INTO assets (owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    return db.rawOne<Int64>(sql, params, { r => r.getInt64(0) })
+                } catch (e: Exception) {
+                    logger.error("create asset failed", ("error", e.message))
                     return None
-                })
-            })
-        })
+                }
+            case None => return None
+        }
     }
 
     public static func getById(id: Int64): AssetRow {
         if (id <= 0) { return AssetRow() }
-        return DatabaseConfig.withPooledConnection<AssetRow>("asset_dao", "get asset failed", AssetRow(), { conn =>
-            DatabaseConfig.withStatement<AssetRow>(conn, """
-                SELECT id, owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash, created_at
-                FROM assets
-                WHERE id = ?
-            """, { stmt =>
-                stmt.set(0, id)
-                DatabaseConfig.withQueryResult<AssetRow>(stmt, { rs =>
-                    if (rs.next()) {
-                        let row = AssetRow()
-                        row.id = rs.getOrNull<Int64>(0) ?? 0
-                        row.ownerUserId = rs.getOrNull<Int64>(1) ?? 0
-                        row.kind = rs.getOrNull<String>(2) ?? ""
-                        row.originalFilename = rs.getOrNull<String>(3) ?? ""
-                        row.contentType = rs.getOrNull<String>(4) ?? ""
-                        row.fileExt = rs.getOrNull<String>(5) ?? ""
-                        row.byteSize = rs.getOrNull<Int64>(6) ?? 0
-                        row.thumbhash = rs.getOrNull<String>(7) ?? ""
-                        row.createdAt = rs.getOrNull<String>(8) ?? ""
-                        return row
+        let params: Array<Value> = [vint(id)]
+        let sql = """
+            SELECT id, owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash, created_at
+            FROM assets
+            WHERE id = $1
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<AssetRow>(sql, params, { row =>
+                        let r = AssetRow()
+                        r.id = row.getOrNullInt64(0) ?? 0
+                        r.ownerUserId = row.getOrNullInt64(1) ?? 0
+                        r.kind = row.getOrNullText(2) ?? ""
+                        r.originalFilename = row.getOrNullText(3) ?? ""
+                        r.contentType = row.getOrNullText(4) ?? ""
+                        r.fileExt = row.getOrNullText(5) ?? ""
+                        r.byteSize = row.getOrNullInt64(6) ?? 0
+                        r.thumbhash = row.getOrNullText(7) ?? ""
+                        r.createdAt = row.getOrNullText(8) ?? ""
+                        return r
+                    })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
                     return AssetRow()
-                })
-            })
-        })
+                } catch (e: Exception) {
+                    logger.error("get asset failed", ("error", e.message))
+                    return AssetRow()
+                }
+            case None => return AssetRow()
+        }
     }
 
     public static func updateThumbhash(id: Int64, thumbhash: String): Bool {
         if (id <= 0) { return false }
-        return DatabaseConfig.withPooledConnection<Bool>("asset_dao", "update thumbhash failed", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, "UPDATE assets SET thumbhash = ? WHERE id = ?", { stmt =>
-                stmt.set(0, thumbhash)
-                stmt.set(1, id)
-                stmt.update()
-                return true
-            })
-        })
+        let params: Array<Value> = [vtext(thumbhash), vint(id)]
+        let sql = "UPDATE assets SET thumbhash = $1 WHERE id = $2"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let affected = db.execRaw(sql, params)
+                    return affected > 0
+                } catch (e: Exception) {
+                    logger.error("update thumbhash failed", ("error", e.message))
+                    return false
+                }
+            case None => return false
+        }
     }
 
     public static func deleteById(id: Int64): Bool {
         if (id <= 0) { return true }
-        return DatabaseConfig.withPooledConnection<Bool>("asset_dao", "delete asset failed", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, "DELETE FROM assets WHERE id = ?", { stmt =>
-                stmt.set(0, id)
-                stmt.update()
-                return true
-            })
-        })
+        let params: Array<Value> = [vint(id)]
+        let sql = "DELETE FROM assets WHERE id = $1"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    db.execRaw(sql, params)
+                    return true
+                } catch (e: Exception) {
+                    logger.error("delete asset failed", ("error", e.message))
+                    return false
+                }
+            case None => return false
+        }
     }
 }

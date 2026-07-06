@@ -93,7 +93,8 @@ public class NavParser {
     }
 
     private static func stripHtmlTags(text: String): String {
-        var result = StringBuilder()
+        // 逐字节重写：StringBuilder.append(UInt8) 会把字节当整数追加其十进制文本，故用 ArrayList<UInt8>。
+        let result = ArrayList<UInt8>()
         var inTag = false
 
         for (c in text) {
@@ -102,10 +103,10 @@ public class NavParser {
             } else if (c == b'>') {
                 inTag = false
             } else if (!inTag) {
-                result.append(c)
+                result.add(c)
             }
         }
 
-        return result.toString()
+        return String.fromUtf8(result.toArray())
     }
 }

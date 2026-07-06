@@ -1,6 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import stdx.log.*
 import std.collection.*
 import lanlu.shared.config.*
@@ -27,45 +28,32 @@ public class UserArchiveStatusDao {
      */
     public static func setIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let updateSql = """
+            UPDATE user_archive_status
+            SET is_new = true, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let updateParams: Array<Value> = [vint(userId), vint(archiveId)]
+        let insertSql = """
+            INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
+            SELECT $1, $2, true, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM user_archive_status WHERE user_id = $3 AND archive_id = $4
+            )
+        """
+        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE user_archive_status
-                        SET is_new = true, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-                        SELECT ?, ?, true, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
-                        )
-                    """)
-                    try {
-                        updateStmt.set(0, userId)
-                        updateStmt.set(1, archiveId)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, userId)
-                            insertStmt.set(1, archiveId)
-                            insertStmt.set(2, userId)
-                            insertStmt.set(3, archiveId)
-                            insertStmt.update()
-                        }
-                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "setIsNew:${archiveId.toString()}")
-                        return true
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        db.execRaw(insertSql, insertParams)
                     }
+                    let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "setIsNew:${archiveId.toString()}")
+                    return true
                 } catch (e: Exception) {
                     logger.error("设置isNew标记失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -78,45 +66,32 @@ public class UserArchiveStatusDao {
      */
     public static func clearIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let updateSql = """
+            UPDATE user_archive_status
+            SET is_new = false, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let updateParams: Array<Value> = [vint(userId), vint(archiveId)]
+        let insertSql = """
+            INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
+            SELECT $1, $2, false, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM user_archive_status WHERE user_id = $3 AND archive_id = $4
+            )
+        """
+        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE user_archive_status
-                        SET is_new = false, updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-                        SELECT ?, ?, false, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
-                        )
-                    """)
-                    try {
-                        updateStmt.set(0, userId)
-                        updateStmt.set(1, archiveId)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, userId)
-                            insertStmt.set(1, archiveId)
-                            insertStmt.set(2, userId)
-                            insertStmt.set(3, archiveId)
-                            insertStmt.update()
-                        }
-                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "clearIsNew:${archiveId.toString()}")
-                        return true
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        db.execRaw(insertSql, insertParams)
                     }
+                    let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "clearIsNew:${archiveId.toString()}")
+                    return true
                 } catch (e: Exception) {
                     logger.error("清除isNew标记失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -133,49 +108,34 @@ public class UserArchiveStatusDao {
      */
     public static func updateProgress(userId: Int64, archiveId: Int64, progress: Int32): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let updateSql = """
+            UPDATE user_archive_status
+            SET is_new = false,
+                progress = $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = $2 AND archive_id = $3
+        """
+        let updateParams: Array<Value> = [vint(Int64(progress)), vint(userId), vint(archiveId)]
+        let insertSql = """
+            INSERT INTO user_archive_status (user_id, archive_id, is_new, progress, updated_at)
+            SELECT $1, $2, false, $3, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM user_archive_status WHERE user_id = $4 AND archive_id = $5
+            )
+        """
+        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(Int64(progress)), vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE user_archive_status
-                        SET is_new = false,
-                            progress = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO user_archive_status (user_id, archive_id, is_new, progress, updated_at)
-                        SELECT ?, ?, false, ?, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
-                        )
-                    """)
-                    try {
-                        updateStmt.set(0, progress)
-                        updateStmt.set(1, userId)
-                        updateStmt.set(2, archiveId)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, userId)
-                            insertStmt.set(1, archiveId)
-                            insertStmt.set(2, progress)
-                            insertStmt.set(3, userId)
-                            insertStmt.set(4, archiveId)
-                            insertStmt.update()
-                        }
-                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "updateProgress:${archiveId.toString()}")
-                        return true
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        db.execRaw(insertSql, insertParams)
                     }
+                    let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "updateProgress:${archiveId.toString()}")
+                    return true
                 } catch (e: Exception) {
                     logger.error("更新阅读进度失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) { /* ignore */ }
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -187,43 +147,28 @@ public class UserArchiveStatusDao {
      * 获取用户对特定归档的状态
      */
     public static func getStatus(userId: Int64, archiveId: Int64): Option<UserArchiveStatusRow> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT id, user_id, archive_id, is_new, progress, created_at, updated_at
+            FROM user_archive_status
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let params: Array<Value> = [vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, user_id, archive_id, is_new, progress, created_at, updated_at
-                        FROM user_archive_status
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let row = UserArchiveStatusRow()
-                                row.id = rs.getOrNull<Int64>(0) ?? 0
-                                row.userId = rs.getOrNull<Int64>(1) ?? 0
-                                row.archiveId = rs.getOrNull<Int64>(2) ?? 0
-                                row.isNew = rs.getOrNull<Bool>(3) ?? true
-                                row.progress = rs.getOrNull<Int32>(4) ?? 0
-                                row.createdAt = rs.getOrNull<String>(5) ?? ""
-                                row.updatedAt = rs.getOrNull<String>(6) ?? ""
-                                return Some(row)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
+                    return db.rawOne<UserArchiveStatusRow>(sql, params, { row =>
+                        let r = UserArchiveStatusRow()
+                        r.id = row.getOrNullInt64(0) ?? 0
+                        r.userId = row.getOrNullInt64(1) ?? 0
+                        r.archiveId = row.getOrNullInt64(2) ?? 0
+                        r.isNew = row.getOrNullBool(3) ?? true
+                        r.progress = row.getOrNullInt32(4) ?? 0
+                        r.createdAt = row.getOrNullText(5) ?? ""
+                        r.updatedAt = row.getOrNullText(6) ?? ""
+                        return r
+                    })
                 } catch (_: Exception) {
                     return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return None
         }
@@ -236,35 +181,18 @@ public class UserArchiveStatusDao {
      * @return 最后阅读时间的Unix时间戳，如果没有记录返回 0
      */
     public static func getLastReadTime(userId: Int64, archiveId: Int64): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0)
+            FROM user_archive_status
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let params: Array<Value> = [vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0)
-                        FROM user_archive_status
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                            return 0
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.rawOne<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 }) ?? 0
                 } catch (_: Exception) {
                     return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return 0
         }
@@ -305,24 +233,30 @@ public class UserArchiveStatusDao {
             return result
         }
 
-        let ok = DatabaseConfig.withPooledConnection<Bool>("user_archive_status_dao", "批量获取用户归档状态失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
-                SELECT archive_id, is_new, progress
-                FROM user_archive_status
-                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                        let isNew = rs.getOrNull<Bool>(1) ?? true
+        let sql = """
+            SELECT archive_id, is_new, progress
+            FROM user_archive_status
+            WHERE user_id = $1 AND archive_id = ANY($2::bigint[])
+        """
+        let params: Array<Value> = [vint(userId), int64Array(archiveIds)]
+        var ok = false
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<(Int64, Bool)>(sql, params, { r =>
+                        (r.getOrNullInt64(0) ?? 0, r.getOrNullBool(1) ?? true)
+                    })
+                    for (pair in rows) {
+                        let (archiveId, isNew) = pair
                         result[archiveId] = isNew
                     }
-                    return true
-                })
-            })
-        })
+                    ok = true
+                } catch (e: Exception) {
+                    getLogger("user_archive_status_dao").error("批量获取用户归档状态失败", ("error", e.message))
+                }
+            case None =>
+                getLogger("user_archive_status_dao").error("无法连接到数据库")
+        }
 
         // 对于没有记录或查询失败的归档，默认为新
         for (archiveId in archiveIds) {
@@ -346,27 +280,31 @@ public class UserArchiveStatusDao {
             return (progressMap, lastReadTimeMap)
         }
 
-        let ok = DatabaseConfig.withPooledConnection<Bool>("user_archive_status_dao", "批量获取用户归档进度失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
-                SELECT archive_id, progress, COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0) as unix_timestamp
-                FROM user_archive_status
-                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                        let progress = rs.getOrNull<Int32>(1) ?? 0
-                        let timestamp = rs.getOrNull<Int64>(2) ?? 0
-
+        let sql = """
+            SELECT archive_id, progress, COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0) as unix_timestamp
+            FROM user_archive_status
+            WHERE user_id = $1 AND archive_id = ANY($2::bigint[])
+        """
+        let params: Array<Value> = [vint(userId), int64Array(archiveIds)]
+        var ok = false
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<(Int64, Int32, Int64)>(sql, params, { r =>
+                        (r.getOrNullInt64(0) ?? 0, r.getOrNullInt32(1) ?? 0, r.getOrNullInt64(2) ?? 0)
+                    })
+                    for (triple in rows) {
+                        let (archiveId, progress, timestamp) = triple
                         progressMap[archiveId] = progress
                         lastReadTimeMap[archiveId] = timestamp
                     }
-                    return true
-                })
-            })
-        })
+                    ok = true
+                } catch (e: Exception) {
+                    getLogger("user_archive_status_dao").error("批量获取用户归档进度失败", ("error", e.message))
+                }
+            case None =>
+                getLogger("user_archive_status_dao").error("无法连接到数据库")
+        }
 
         // 对于没有记录或查询失败的归档，设置默认值
         for (archiveId in archiveIds) {
@@ -386,24 +324,16 @@ public class UserArchiveStatusDao {
      */
     public static func deleteByUserId(userId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM user_archive_status WHERE user_id = $1"
+        let params: Array<Value> = [vint(userId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM user_archive_status WHERE user_id = ?")
-                    try {
-                        stmt.set(0, userId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("删除用户归档状态失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -414,27 +344,43 @@ public class UserArchiveStatusDao {
      */
     public static func deleteByArchiveId(archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM user_archive_status WHERE archive_id = $1"
+        let params: Array<Value> = [vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM user_archive_status WHERE archive_id = ?")
-                    try {
-                        stmt.set(0, archiveId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("删除归档状态失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
+    }
+
+    /**
+     * 将 archive_metadata_search 行（含 tags、last_read_time、progress）映射为 ArchiveData。
+     * 列顺序需与 getUserReadArchives 的 SELECT 一致。
+     */
+    private static func mapArchivesWithTagsRow(row: Row): ArchiveData {
+        let archive = ArchiveData()
+        archive.id = row.getOrNullText(0) ?? ""
+        archive.filename = row.getOrNullText(1) ?? ""
+        archive.title = row.getOrNullText(2) ?? ""
+        archive.summary = row.getOrNullText(3) ?? ""
+        archive.thumbhash = row.getOrNullText(4) ?? ""
+        archive.cover_asset_id = row.getOrNullInt64(5) ?? 0
+        archive.created_at = row.getOrNullText(6) ?? ""
+        archive.updated_at = row.getOrNullText(7) ?? ""
+        archive.release_at = row.getOrNullText(8) ?? ""
+        archive.relative_path = row.getOrNullText(9) ?? ""
+        archive.file_size = row.getOrNullInt64(10) ?? 0
+        archive.pagecount = row.getOrNullInt32(11) ?? 0
+        archive.last_read_time = row.getOrNullText(12) ?? ""
+        archive.progress = row.getOrNullInt32(13) ?? 0
+        archive.tags = row.getOrNullText(14) ?? ""
+        return archive
     }
 
     /**
@@ -444,32 +390,24 @@ public class UserArchiveStatusDao {
     public static func getUserReadArchives(userId: Int64, start: Int32, count: Int32): (Array<ArchiveData>, Int64) {
         let result = ArrayList<ArchiveData>()
         var totalCount: Int64 = 0
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let logger = getLogger("user_archive_status_dao")
+
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 先获取总数
-                    let countStmt = conn.prepareStatement("""
+                    let countSql = """
                         SELECT COUNT(*) FROM user_archive_status
-                        WHERE user_id = ? AND is_new = false
-                    """)
-                    try {
-                        countStmt.set(0, userId)
-                        let countRs = countStmt.query()
-                        try {
-                            if (countRs.next()) {
-                                totalCount = countRs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            countRs.close()
-                        }
-                    } finally {
-                        countStmt.close()
+                        WHERE user_id = $1 AND is_new = false
+                    """
+                    let countParams: Array<Value> = [vint(userId)]
+                    let countRows = db.raw<Int64>(countSql, countParams, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (countRows.size > 0) {
+                        totalCount = countRows[0]
                     }
 
                     // 获取分页数据，使用标准 JOIN 获取用户特定数据
-                    let stmt = conn.prepareStatement("""
+                    let sql = """
                         SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash, awt.cover_asset_id,
                                awt.created_at, awt.updated_at, awt.release_at, awt.relative_path, awt.file_size,
                                awt.pagecount, uas.updated_at as last_read_time,
@@ -477,33 +415,20 @@ public class UserArchiveStatusDao {
                         FROM archive_metadata_search awt
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_archive_status uas ON a.id = uas.archive_id
-                        WHERE uas.user_id = ? AND uas.is_new = false
+                        WHERE uas.user_id = $1 AND uas.is_new = false
                         ORDER BY uas.updated_at DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, count)
-                        stmt.set(2, start)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archive = ArchiveDataMappers.fromArchivesWithTagsRow(rs)
-                                result.add(archive)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                        LIMIT $2 OFFSET $3
+                    """
+                    let params: Array<Value> = [vint(userId), vint(Int64(count)), vint(Int64(start))]
+                    let rows = db.raw<ArchiveData>(sql, params, { row => mapArchivesWithTagsRow(row) })
+                    for (archive in rows) {
+                        result.add(archive)
                     }
                 } catch (e: Exception) {
-                    getLogger("user_archive_status_dao").error("获取用户已读档案失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    logger.error("获取用户已读档案失败", ("error", e.message))
                 }
             case None =>
-                getLogger("user_archive_status_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
         }
         return (result.toArray(), totalCount)
     }

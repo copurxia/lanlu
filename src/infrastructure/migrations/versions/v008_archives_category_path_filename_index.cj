@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -16,21 +16,21 @@ public class V008_ArchivesCategoryPathFilenameIndex <: Migration {
         return "Add composite index on archives(category_id, relative_path, filename)"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "archives")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "archives")) {
             logger.warn("archives table missing; skipping V008")
             return true
         }
 
         let indexName = "idx_archives_category_relpath_filename"
-        if (MigrationHelpers.indexExists(conn, indexName)) {
+        if (MigrationHelpers.indexExists(db, indexName)) {
             logger.debug("Index ${indexName} already exists")
             return true
         }
 
         logger.info("Creating index ${indexName} on archives(category_id, relative_path, filename)")
         return MigrationHelpers.execUpdate(
-            conn,
+            db,
             "CREATE INDEX ${indexName} ON archives (category_id, relative_path, filename)"
         )
     }

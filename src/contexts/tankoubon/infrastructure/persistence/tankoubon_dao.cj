@@ -1,6 +1,7 @@
 package lanlu.contexts.tankoubon.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.shared.config.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
@@ -279,31 +280,21 @@ public class TankoubonDao {
         return MetadataDao.touchRootMetadataObject("tankoubon", normalized)
     }
 
-    private static func getArchivesInTankoubonWithConnection(conn: Connection, tankoubonId: String): Array<String> {
-        var arcids: ArrayList<String> = ArrayList<String>()
-        let stmt = conn.prepareStatement("""
+    private static func getArchivesInTankoubonWithConnection(db: Database, tankoubonId: String): Array<String> {
+        let sql = """
             SELECT a.arcid
             FROM tankoubon_archives ta
             JOIN tankoubons t ON t.id = ta.tankoubon_id
             JOIN archives a ON a.id = ta.archive_id
-            WHERE t.tankoubon_id = ?
+            WHERE t.tankoubon_id = $1
             ORDER BY ta.sort_order, ta.id
-        """)
-        try {
-            stmt.set(0, tankoubonId)
-            let rs = stmt.query()
-            try {
-                while (rs.next()) {
-                    let arcid = rs.getOrNull<String>(0) ?? ""
-                    if (arcid != "") {
-                        arcids.add(arcid)
-                    }
-                }
-            } finally {
-                rs.close()
+        """
+        let rows = db.raw<String>(sql, [vtext(tankoubonId)], { row => row.getOrNullText(0) ?? "" })
+        let arcids = ArrayList<String>()
+        for (arcid in rows) {
+            if (arcid != "") {
+                arcids.add(arcid)
             }
-        } finally {
-            stmt.close()
         }
         return arcids.toArray()
     }
@@ -312,78 +303,66 @@ public class TankoubonDao {
      * 获取所有Tankoubons
      */
     public static func getAllTankoubons(): Array<TankoubonData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            SELECT
+                t.id,
+                t.tankoubon_id,
+                COALESCE(mo.title, '') AS name,
+                COALESCE(mo.description, '') AS summary,
+                COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
+                COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
+                COALESCE(t.auto_created, false),
+                COALESCE(t.source_category_id, 0),
+                COALESCE(t.source_relative_path, ''),
+                COALESCE(mo.release_at::TEXT, ''),
+                COALESCE(mo.created_at::TEXT, ''),
+                COALESCE(mo.updated_at::TEXT, '')
+            FROM tankoubons t
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COALESCE(
+                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                            FILTER (WHERE ma.asset_id > 0),
+                        '{}'::jsonb
+                    ) AS assets_json,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
+                FROM metadata_assets ma
+                WHERE ma.metadata_id = mo.id
+            ) asset_map ON true
+            ORDER BY t.id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 var tankoubons: ArrayList<TankoubonData> = ArrayList<TankoubonData>()
                 try {
-                    let stmt = conn.prepareStatement(
-                        """
-                        SELECT
-                            t.id,
-                            t.tankoubon_id,
-                            COALESCE(mo.title, '') AS name,
-                            COALESCE(mo.description, '') AS summary,
-                            COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
-                            COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
-                            COALESCE(t.auto_created, false),
-                            COALESCE(t.source_category_id, 0),
-                            COALESCE(t.source_relative_path, ''),
-                            COALESCE(mo.release_at::TEXT, ''),
-                            COALESCE(mo.created_at::TEXT, ''),
-                            COALESCE(mo.updated_at::TEXT, '')
-                        FROM tankoubons t
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        LEFT JOIN LATERAL (
-                            SELECT
-                                COALESCE(
-                                    jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
-                                        FILTER (WHERE ma.asset_id > 0),
-                                    '{}'::jsonb
-                                ) AS assets_json,
-                                COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
-                            FROM metadata_assets ma
-                            WHERE ma.metadata_id = mo.id
-                        ) asset_map ON true
-                        ORDER BY t.id
-                        """)
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let tankoubon = TankoubonData()
-                                tankoubon.id = rs.getOrNull<Int64>(0) ?? 0
-                                tankoubon.tankoubon_id = rs.getOrNull<String>(1) ?? ""
-                                tankoubon.name = rs.getOrNull<String>(2) ?? ""
-                                tankoubon.summary = rs.getOrNull<String>(3) ?? ""
-                                tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
-                                tankoubon.assets_raw = (rs.getOrNull<String>(5) ?? "").trimAscii()
-                                if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
-                                tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
-                                tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
-                                tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.release_at = rs.getOrNull<String>(9) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(10) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(11) ?? ""
-                                tankoubons.add(tankoubon)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    for (tankoubon in tankoubons) {
-                        tankoubon.archives = getArchivesInTankoubonWithConnection(conn, tankoubon.tankoubon_id)
+                    let rows = db.raw<TankoubonData>(sql, [], { row =>
+                        let tankoubon = TankoubonData()
+                        tankoubon.id = row.getOrNullInt64(0) ?? 0
+                        tankoubon.tankoubon_id = row.getOrNullText(1) ?? ""
+                        tankoubon.name = row.getOrNullText(2) ?? ""
+                        tankoubon.summary = row.getOrNullText(3) ?? ""
+                        tankoubon.cover_asset_id = row.getOrNullInt64(4) ?? 0
+                        tankoubon.assets_raw = (row.getOrNullText(5) ?? "").trimAscii()
+                        if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
+                        tankoubon.auto_created = row.getOrNullBool(6) ?? false
+                        tankoubon.source_category_id = row.getOrNullInt64(7) ?? 0
+                        tankoubon.source_relative_path = row.getOrNullText(8) ?? ""
+                        tankoubon.release_at = row.getOrNullText(9) ?? ""
+                        tankoubon.created_at = row.getOrNullText(10) ?? ""
+                        tankoubon.updated_at = row.getOrNullText(11) ?? ""
+                        tankoubon
+                    })
+                    for (tankoubon in rows) {
+                        tankoubon.archives = getArchivesInTankoubonWithConnection(db, tankoubon.tankoubon_id)
+                        tankoubons.add(tankoubon)
                     }
                     return tankoubons.toArray()
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("查询Tankoubon失败", ("error", e.message))
                     return Array<TankoubonData>()
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -395,81 +374,66 @@ public class TankoubonDao {
      * 根据tankoubon_id获取Tankoubon
      */
     public static func getTankoubonById(tankoubonId: String): Option<TankoubonData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            SELECT
+                t.id,
+                t.tankoubon_id,
+                COALESCE(mo.title, '') AS name,
+                COALESCE(mo.description, '') AS summary,
+                COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
+                COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
+                COALESCE(t.auto_created, false),
+                COALESCE(t.source_category_id, 0),
+                COALESCE(t.source_relative_path, ''),
+                COALESCE(mo.release_at::TEXT, ''),
+                COALESCE(mo.created_at::TEXT, ''),
+                COALESCE(mo.updated_at::TEXT, '')
+            FROM tankoubons t
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COALESCE(
+                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                            FILTER (WHERE ma.asset_id > 0),
+                        '{}'::jsonb
+                    ) AS assets_json,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
+                FROM metadata_assets ma
+                WHERE ma.metadata_id = mo.id
+            ) asset_map ON true
+            WHERE t.tankoubon_id = $1
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    var resultOpt: Option<TankoubonData> = None
-                    let stmt = conn.prepareStatement(
-                        """
-                        SELECT
-                            t.id,
-                            t.tankoubon_id,
-                            COALESCE(mo.title, '') AS name,
-                            COALESCE(mo.description, '') AS summary,
-                            COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
-                            COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
-                            COALESCE(t.auto_created, false),
-                            COALESCE(t.source_category_id, 0),
-                            COALESCE(t.source_relative_path, ''),
-                            COALESCE(mo.release_at::TEXT, ''),
-                            COALESCE(mo.created_at::TEXT, ''),
-                            COALESCE(mo.updated_at::TEXT, '')
-                        FROM tankoubons t
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        LEFT JOIN LATERAL (
-                            SELECT
-                                COALESCE(
-                                    jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
-                                        FILTER (WHERE ma.asset_id > 0),
-                                    '{}'::jsonb
-                                ) AS assets_json,
-                                COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
-                            FROM metadata_assets ma
-                            WHERE ma.metadata_id = mo.id
-                        ) asset_map ON true
-                        WHERE t.tankoubon_id = ?
-                        """)
-                    try {
-                        stmt.set(0, tankoubonId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let tankoubon = TankoubonData()
-                                tankoubon.id = rs.getOrNull<Int64>(0) ?? 0
-                                tankoubon.tankoubon_id = rs.getOrNull<String>(1) ?? ""
-                                tankoubon.name = rs.getOrNull<String>(2) ?? ""
-                                tankoubon.summary = rs.getOrNull<String>(3) ?? ""
-                                tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
-                                tankoubon.assets_raw = (rs.getOrNull<String>(5) ?? "").trimAscii()
-                                if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
-                                tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
-                                tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
-                                tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.release_at = rs.getOrNull<String>(9) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(10) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(11) ?? ""
-                                resultOpt = Some(tankoubon)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    match (resultOpt) {
+                    let dataOpt = db.rawOne<TankoubonData>(sql, [vtext(tankoubonId)], { row =>
+                        let tankoubon = TankoubonData()
+                        tankoubon.id = row.getOrNullInt64(0) ?? 0
+                        tankoubon.tankoubon_id = row.getOrNullText(1) ?? ""
+                        tankoubon.name = row.getOrNullText(2) ?? ""
+                        tankoubon.summary = row.getOrNullText(3) ?? ""
+                        tankoubon.cover_asset_id = row.getOrNullInt64(4) ?? 0
+                        tankoubon.assets_raw = (row.getOrNullText(5) ?? "").trimAscii()
+                        if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
+                        tankoubon.auto_created = row.getOrNullBool(6) ?? false
+                        tankoubon.source_category_id = row.getOrNullInt64(7) ?? 0
+                        tankoubon.source_relative_path = row.getOrNullText(8) ?? ""
+                        tankoubon.release_at = row.getOrNullText(9) ?? ""
+                        tankoubon.created_at = row.getOrNullText(10) ?? ""
+                        tankoubon.updated_at = row.getOrNullText(11) ?? ""
+                        tankoubon
+                    })
+                    match (dataOpt) {
                         case Some(tankoubon) =>
-                            tankoubon.archives = getArchivesInTankoubonWithConnection(conn, tankoubonId)
+                            tankoubon.archives = getArchivesInTankoubonWithConnection(db, tankoubonId)
                             return Some(tankoubon)
                         case None => return None
                     }
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("查询Tankoubon失败", ("tankoubonId", tankoubonId), ("error", e.message))
                     return None
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -481,38 +445,22 @@ public class TankoubonDao {
      * 获取Tankoubon的档案数量和总页数
      */
     public static func getTankoubonArchiveStats(tankoubonId: String): (Int32, Int32) {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT COUNT(a.id) as archive_count, COALESCE(SUM(a.pagecount), 0) as total_pages
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            WHERE t.tankoubon_id = $1
+            GROUP BY t.id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(a.id) as archive_count, COALESCE(SUM(a.pagecount), 0) as total_pages
-                        FROM tankoubon_archives ta
-                        JOIN tankoubons t ON t.id = ta.tankoubon_id
-                        JOIN archives a ON a.id = ta.archive_id
-                        WHERE t.tankoubon_id = ?
-                        GROUP BY t.id
-                    """)
-                    try {
-                        stmt.set(0, tankoubonId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let archiveCount = rs.getOrNull<Int32>(0) ?? 0
-                                let totalPages = rs.getOrNull<Int32>(1) ?? 0
-                                return (archiveCount, totalPages)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.rawOne<(Int32, Int32)>(sql, [vtext(tankoubonId)], { row =>
+                        (row.getOrNullInt32(0) ?? 0, row.getOrNullInt32(1) ?? 0)
+                    }) ?? (0, 0)
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("获取Tankoubon档案统计失败", ("tankoubonId", tankoubonId), ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -525,35 +473,25 @@ public class TankoubonDao {
      * 返回生成的tankoubon_id
      */
     public static func createTankoubon(name: String): String {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 生成tankoubon_id: TANK_ + 时间戳（毫秒，避免并发冲突）
                     let timestamp = DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
                     let tankoubonId = "TANK_${timestamp}"
 
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO tankoubons (tankoubon_id) VALUES (?)")
-                    try {
-                        stmt.set(0, tankoubonId)
-                        stmt.update()
-                        if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, "")) {
-                            logger.error("创建Tankoubon metadata失败", ("tankoubonId", tankoubonId))
-                            return ""
-                        }
-                        invalidateTankoubonAggregatedContent("createTankoubon:${tankoubonId}")
-                        logger.info("创建Tankoubon成功", ("tankoubonId", tankoubonId), ("name", name))
-                        return tankoubonId
-                    } finally {
-                        stmt.close()
+                    let sql = "INSERT INTO tankoubons (tankoubon_id) VALUES ($1)"
+                    db.execRaw(sql, [vtext(tankoubonId)])
+                    if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, "")) {
+                        logger.error("创建Tankoubon metadata失败", ("tankoubonId", tankoubonId))
+                        return ""
                     }
+                    invalidateTankoubonAggregatedContent("createTankoubon:${tankoubonId}")
+                    logger.info("创建Tankoubon成功", ("tankoubonId", tankoubonId), ("name", name))
+                    return tankoubonId
                 } catch (e: Exception) {
                     logger.error("创建Tankoubon失败", ("name", name), ("error", e.message))
                     return ""
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -568,39 +506,23 @@ public class TankoubonDao {
         let normalizedTitle = title.trimAscii()
         if (normalizedTitle.size == 0) { return "" }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            SELECT t.tankoubon_id
+            FROM tankoubons t
+            JOIN metadata_objects mo
+              ON mo.entity_type = 'tankoubon'
+             AND mo.entity_id = t.tankoubon_id
+            WHERE LOWER(TRIM(COALESCE(mo.title, ''))) = LOWER(TRIM($1))
+            ORDER BY t.id
+            LIMIT 1
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM tankoubons t
-                        JOIN metadata_objects mo
-                          ON mo.entity_type = 'tankoubon'
-                         AND mo.entity_id = t.tankoubon_id
-                        WHERE LOWER(TRIM(COALESCE(mo.title, ''))) = LOWER(TRIM(?))
-                        ORDER BY t.id
-                        LIMIT 1
-                    """)
-                    try {
-                        stmt.set(0, normalizedTitle)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<String>(0) ?? ""
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return ""
+                    return db.rawOne<String>(sql, [vtext(normalizedTitle)], { row => row.getOrNullText(0) ?? "" }) ?? ""
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("按标题查找Tankoubon失败", ("title", normalizedTitle), ("error", e.message))
                     return ""
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -625,27 +547,18 @@ public class TankoubonDao {
      * 删除Tankoubon
      */
     public static func deleteTankoubon(tankoubonId: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM tankoubons WHERE tankoubon_id = $1"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM tankoubons WHERE tankoubon_id = ?")
-                    try {
-                        stmt.set(0, tankoubonId)
-                        stmt.update()
-                        invalidateTankoubonAggregatedContent("deleteTankoubon:${tankoubonId}")
-                        invalidateTankoubonChildren("deleteTankoubon:${tankoubonId}")
-                        logger.info("删除Tankoubon成功", ("tankoubonId", tankoubonId))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, [vtext(tankoubonId)])
+                    invalidateTankoubonAggregatedContent("deleteTankoubon:${tankoubonId}")
+                    invalidateTankoubonChildren("deleteTankoubon:${tankoubonId}")
+                    logger.info("删除Tankoubon成功", ("tankoubonId", tankoubonId))
+                    return true
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("删除Tankoubon失败", ("tankoubonId", tankoubonId), ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -657,14 +570,12 @@ public class TankoubonDao {
      * 添加归档到Tankoubon
      */
     public static func addArchiveToTankoubon(tankoubonId: String, archiveArcid: String, sortOrder: Int32): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 首先获取tankoubon的内部ID和archive的内部ID
-                    let tankoubonInternalId = getTankoubonInternalId(conn, tankoubonId)
-                    let archiveInternalId = getArchiveInternalId(conn, archiveArcid)
+                    let tankoubonInternalId = getTankoubonInternalId(db, tankoubonId)
+                    let archiveInternalId = getArchiveInternalId(db, archiveArcid)
 
                     if (tankoubonInternalId == 0 || archiveInternalId == 0) {
                         getLogger("tankoubon_dao").error("Tankoubon或Archive不存在",
@@ -672,46 +583,33 @@ public class TankoubonDao {
                         return false
                     }
 
-                    let updateStmt = conn.prepareStatement("""
+                    let updateSql = """
                         UPDATE tankoubon_archives
-                        SET sort_order = ?
-                        WHERE tankoubon_id = ? AND archive_id = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order)
-                        SELECT ?, ?, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = ? AND archive_id = ?
-                        )
-                    """)
-                    try {
-                        updateStmt.set(0, sortOrder)
-                        updateStmt.set(1, tankoubonInternalId)
-                        updateStmt.set(2, archiveInternalId)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, tankoubonInternalId)
-                            insertStmt.set(1, archiveInternalId)
-                            insertStmt.set(2, sortOrder)
-                            insertStmt.set(3, tankoubonInternalId)
-                            insertStmt.set(4, archiveInternalId)
-                            insertStmt.update()
-                        }
-                        invalidateTankoubonAggregatedContent("addArchiveToTankoubon:${tankoubonId}")
-                        invalidateTankoubonChildren("addArchiveToTankoubon:${tankoubonId}")
-                        logger.info("添加归档到Tankoubon成功",
-                            ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
-                        return true
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
+                        SET sort_order = $1
+                        WHERE tankoubon_id = $2 AND archive_id = $3
+                    """
+                    let updateParams: Array<Value> = [vint(Int64(sortOrder)), vint(tankoubonInternalId), vint(archiveInternalId)]
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        let insertSql = """
+                            INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order)
+                            SELECT $1, $2, $3
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = $4 AND archive_id = $5
+                            )
+                        """
+                        let insertParams: Array<Value> = [vint(tankoubonInternalId), vint(archiveInternalId), vint(Int64(sortOrder)), vint(tankoubonInternalId), vint(archiveInternalId)]
+                        db.execRaw(insertSql, insertParams)
                     }
+                    invalidateTankoubonAggregatedContent("addArchiveToTankoubon:${tankoubonId}")
+                    invalidateTankoubonChildren("addArchiveToTankoubon:${tankoubonId}")
+                    logger.info("添加归档到Tankoubon成功",
+                        ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
+                    return true
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("添加归档到Tankoubon失败",
                         ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid), ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -723,39 +621,28 @@ public class TankoubonDao {
      * 从Tankoubon移除归档
      */
     public static func removeArchiveFromTankoubon(tankoubonId: String, archiveArcid: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 获取内部ID
-                    let tankoubonInternalId = getTankoubonInternalId(conn, tankoubonId)
-                    let archiveInternalId = getArchiveInternalId(conn, archiveArcid)
+                    let tankoubonInternalId = getTankoubonInternalId(db, tankoubonId)
+                    let archiveInternalId = getArchiveInternalId(db, archiveArcid)
 
                     if (tankoubonInternalId == 0 || archiveInternalId == 0) {
                         return false
                     }
 
-                    let stmt = conn.prepareStatement(
-                        "DELETE FROM tankoubon_archives WHERE tankoubon_id = ? AND archive_id = ?")
-                    try {
-                        stmt.set(0, tankoubonInternalId)
-                        stmt.set(1, archiveInternalId)
-                        stmt.update()
-                        invalidateTankoubonAggregatedContent("removeArchiveFromTankoubon:${tankoubonId}")
-                        invalidateTankoubonChildren("removeArchiveFromTankoubon:${tankoubonId}")
-                        logger.info("从Tankoubon移除归档成功",
-                            ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    let sql = "DELETE FROM tankoubon_archives WHERE tankoubon_id = $1 AND archive_id = $2"
+                    db.execRaw(sql, [vint(tankoubonInternalId), vint(archiveInternalId)])
+                    invalidateTankoubonAggregatedContent("removeArchiveFromTankoubon:${tankoubonId}")
+                    invalidateTankoubonChildren("removeArchiveFromTankoubon:${tankoubonId}")
+                    logger.info("从Tankoubon移除归档成功",
+                        ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
+                    return true
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("从Tankoubon移除归档失败",
                         ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid), ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -767,61 +654,35 @@ public class TankoubonDao {
      * 添加归档到 Tankoubon（追加到末尾，不改变已有顺序）
      */
     public static func addArchiveToTankoubonAppend(tankoubonId: String, archiveArcid: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
-                    let archiveInternalId = getArchiveInternalId(conn, archiveArcid)
+                    let tankInternalId = getTankoubonInternalId(db, tankoubonId)
+                    let archiveInternalId = getArchiveInternalId(db, archiveArcid)
                     if (tankInternalId == 0 || archiveInternalId == 0) {
                         return false
                     }
 
                     // Compute next sort order.
-                    var nextOrder: Int32 = 0
-                    let maxStmt = conn.prepareStatement("SELECT COALESCE(MAX(sort_order), 0)::INT FROM tankoubon_archives WHERE tankoubon_id = ?")
-                    try {
-                        maxStmt.set(0, tankInternalId)
-                        let rs = maxStmt.query()
-                        try {
-                            if (rs.next()) {
-                                nextOrder = (rs.getOrNull<Int32>(0) ?? 0) + 1
-                            } else {
-                                nextOrder = 1
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        maxStmt.close()
-                    }
+                    let maxSql = "SELECT COALESCE(MAX(sort_order), 0)::INT FROM tankoubon_archives WHERE tankoubon_id = $1"
+                    var nextOrder: Int32 = (db.rawOne<Int32>(maxSql, [vint(tankInternalId)], { row => row.getOrNullInt32(0) ?? 0 }) ?? 0) + 1
 
-                    let stmt = conn.prepareStatement("""
+                    let sql = """
                         INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order)
-                        SELECT ?, ?, ?
+                        SELECT $1, $2, $3
                         WHERE NOT EXISTS (
-                            SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = ? AND archive_id = ?
+                            SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = $4 AND archive_id = $5
                         )
-                    """)
-                    try {
-                        stmt.set(0, tankInternalId)
-                        stmt.set(1, archiveInternalId)
-                        stmt.set(2, nextOrder)
-                        stmt.set(3, tankInternalId)
-                        stmt.set(4, archiveInternalId)
-                        stmt.update()
-                        invalidateTankoubonAggregatedContent("addArchiveToTankoubonAppend:${tankoubonId}")
-                        invalidateTankoubonChildren("addArchiveToTankoubonAppend:${tankoubonId}")
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    """
+                    let params: Array<Value> = [vint(tankInternalId), vint(archiveInternalId), vint(Int64(nextOrder)), vint(tankInternalId), vint(archiveInternalId)]
+                    db.execRaw(sql, params)
+                    invalidateTankoubonAggregatedContent("addArchiveToTankoubonAppend:${tankoubonId}")
+                    invalidateTankoubonChildren("addArchiveToTankoubonAppend:${tankoubonId}")
+                    return true
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("append archive to tank failed",
                         ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid), ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -836,74 +697,46 @@ public class TankoubonDao {
         let rel = sourceRelativePath.trimAscii()
         if (rel.size == 0) { return "" }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let selectSql = """
+            SELECT tankoubon_id
+            FROM tankoubons
+            WHERE auto_created = true AND source_category_id = $1 AND COALESCE(source_relative_path, '') = $2
+            LIMIT 1
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // Try to find existing.
-                    let sel = conn.prepareStatement("""
-                        SELECT tankoubon_id
-                        FROM tankoubons
-                        WHERE auto_created = true AND source_category_id = ? AND COALESCE(source_relative_path, '') = ?
-                        LIMIT 1
-                    """)
-                    try {
-                        sel.set(0, categoryInternalId)
-                        sel.set(1, rel)
-                        let rs = sel.query()
-                        try {
-                            if (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                if (tid.size > 0) { return tid }
-                            }
-                        } finally { rs.close() }
-                    } finally { sel.close() }
+                    let existing = db.rawOne<String>(selectSql, [vint(categoryInternalId), vtext(rel)], { row => row.getOrNullText(0) ?? "" })
+                    match (existing) {
+                        case Some(tid) =>
+                            if (tid.size > 0) { return tid }
+                        case None => ()
+                    }
 
                     // Create new.
                     let timestamp = DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
                     let tid = "TANK_${timestamp}"
 
-                    let ins = conn.prepareStatement("""
+                    let insSql = """
                         INSERT INTO tankoubons (tankoubon_id, auto_created, source_category_id, source_relative_path)
-                        VALUES (?, true, ?, ?)
-                    """)
-                    try {
-                        ins.set(0, tid)
-                        ins.set(1, categoryInternalId)
-                        ins.set(2, rel)
-                        ins.update()
-                        if (!MetadataDao.upsertRootMetadataObject("tankoubon", tid, name, "")) {
-                            logger.error("auto-created Tankoubon metadata root 写入失败", ("tankoubonId", tid))
-                            return ""
-                        }
-                        invalidateTankoubonAggregatedContent("getOrCreateAutoTankoubon:${tid}")
-                        return tid
-                    } finally { ins.close() }
+                        VALUES ($1, true, $2, $3)
+                    """
+                    db.execRaw(insSql, [vtext(tid), vint(categoryInternalId), vtext(rel)])
+                    if (!MetadataDao.upsertRootMetadataObject("tankoubon", tid, name, "")) {
+                        logger.error("auto-created Tankoubon metadata root 写入失败", ("tankoubonId", tid))
+                        return ""
+                    }
+                    invalidateTankoubonAggregatedContent("getOrCreateAutoTankoubon:${tid}")
+                    return tid
                 } catch (e: Exception) {
                     // If concurrent creation raced, try select again.
                     getLogger("tankoubon_dao").warn("getOrCreateAutoTankoubon create failed, retrying select",
                         ("categoryInternalId", categoryInternalId.toString()), ("rel", rel), ("error", e.message))
                     try {
-                        let stmt2 = conn.prepareStatement("""
-                            SELECT tankoubon_id
-                            FROM tankoubons
-                            WHERE auto_created = true AND source_category_id = ? AND COALESCE(source_relative_path, '') = ?
-                            LIMIT 1
-                        """)
-                        try {
-                            stmt2.set(0, categoryInternalId)
-                            stmt2.set(1, rel)
-                            let rs2 = stmt2.query()
-                            try {
-                                if (rs2.next()) {
-                                    return rs2.getOrNull<String>(0) ?? ""
-                                }
-                            } finally { rs2.close() }
-                        } finally { stmt2.close() }
+                        return db.rawOne<String>(selectSql, [vint(categoryInternalId), vtext(rel)], { row => row.getOrNullText(0) ?? "" }) ?? ""
                     } catch (_: Exception) {}
                     return ""
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return ""
         }
@@ -934,61 +767,52 @@ public class TankoubonDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            WITH target AS (
+                SELECT id AS metadata_id
+                FROM metadata_objects
+                WHERE entity_type = 'tankoubon' AND entity_id = $1
+                LIMIT 1
+            ),
+            payload AS (
+                SELECT COALESCE(CAST($2 AS JSONB), '{}'::jsonb) AS j
+            ),
+            parsed AS (
+                SELECT LOWER(TRIM(kv.key)) AS slot, kv.value AS raw_value
+                FROM payload p
+                CROSS JOIN LATERAL jsonb_each(p.j) kv(key, value)
+            ),
+            normalized AS (
+                SELECT
+                    slot,
+                    CASE
+                        WHEN COALESCE(raw_value #>> '{}', '') ~ '^[0-9]+$'
+                             AND (raw_value #>> '{}')::BIGINT > 0
+                            THEN (raw_value #>> '{}')::BIGINT
+                        ELSE 0
+                    END AS asset_id
+                FROM parsed
+                WHERE slot != ''
+            ),
+            deleted AS (
+                DELETE FROM metadata_assets ma
+                USING target t
+                WHERE ma.metadata_id = t.metadata_id
+            )
+            INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+            SELECT t.metadata_id, n.slot, n.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            FROM target t
+            JOIN normalized n ON n.asset_id > 0
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        WITH target AS (
-                            SELECT id AS metadata_id
-                            FROM metadata_objects
-                            WHERE entity_type = 'tankoubon' AND entity_id = ?
-                            LIMIT 1
-                        ),
-                        payload AS (
-                            SELECT COALESCE(CAST(? AS JSONB), '{}'::jsonb) AS j
-                        ),
-                        parsed AS (
-                            SELECT LOWER(TRIM(kv.key)) AS slot, kv.value AS raw_value
-                            FROM payload p
-                            CROSS JOIN LATERAL jsonb_each(p.j) kv(key, value)
-                        ),
-                        normalized AS (
-                            SELECT
-                                slot,
-                                CASE
-                                    WHEN COALESCE(raw_value #>> '{}', '') ~ '^[0-9]+$'
-                                         AND (raw_value #>> '{}')::BIGINT > 0
-                                        THEN (raw_value #>> '{}')::BIGINT
-                                    ELSE 0
-                                END AS asset_id
-                            FROM parsed
-                            WHERE slot != ''
-                        ),
-                        deleted AS (
-                            DELETE FROM metadata_assets ma
-                            USING target t
-                            WHERE ma.metadata_id = t.metadata_id
-                        )
-                        INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                        SELECT t.metadata_id, n.slot, n.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                        FROM target t
-                        JOIN normalized n ON n.asset_id > 0
-                    """)
-                    try {
-                        stmt.set(0, tankoubonId)
-                        stmt.set(1, payload)
-                        stmt.update()
-                        let _ = touchTankoubonUpdatedAt(tankoubonId)
-                        invalidateTankoubonAggregatedContent("updateTankoubonAssetsRaw:${tankoubonId}")
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, [vtext(tankoubonId), vjson(payload)])
+                    let _ = touchTankoubonUpdatedAt(tankoubonId)
+                    invalidateTankoubonAggregatedContent("updateTankoubonAssetsRaw:${tankoubonId}")
+                    return true
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -1041,33 +865,27 @@ public class TankoubonDao {
      * Get merged tags string for a Tankoubon (tankoubon tags + all archive tags).
      */
     public static func getMergedTagsForTankoubon(tankoubonId: String): String {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => return ""
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    let tankTags = getTankoubonTagsForTankoubon(conn, tankoubonId)
-                    let archiveTags = getArchiveTagsForTankoubon(conn, tankoubonId)
+                    let tankTags = getTankoubonTagsForTankoubon(db, tankoubonId)
+                    let archiveTags = getArchiveTagsForTankoubon(db, tankoubonId)
                     return mergeTags(tankTags, archiveTags)
                 } catch (_: Exception) {
                     return ""
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
     }
 
     public static func getOwnTagsForTankoubon(tankoubonId: String): String {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => return ""
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    return getTankoubonTagsForTankoubon(conn, tankoubonId)
+                    return getTankoubonTagsForTankoubon(db, tankoubonId)
                 } catch (_: Exception) {
                     return ""
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
     }
@@ -1088,17 +906,14 @@ public class TankoubonDao {
      * 获取Tankoubon中的所有归档arcids
      */
     public static func getArchivesInTankoubon(tankoubonId: String): Array<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    return getArchivesInTankoubonWithConnection(conn, tankoubonId)
+                    return getArchivesInTankoubonWithConnection(db, tankoubonId)
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("获取Tankoubon中的归档失败",
                         ("tankoubonId", tankoubonId), ("error", e.message))
                     return Array<String>()
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -1111,42 +926,28 @@ public class TankoubonDao {
      * 返回tankoubon_id，如果不在任何Tankoubon中则返回None
      */
     public static func getTankoubonForArchive(archiveArcid: String): Option<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT t.tankoubon_id
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            WHERE a.arcid = $1
+            LIMIT 1
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM tankoubon_archives ta
-                        JOIN tankoubons t ON t.id = ta.tankoubon_id
-                        JOIN archives a ON a.id = ta.archive_id
-                        WHERE a.arcid = ?
-                        LIMIT 1
-                    """)
-                    try {
-                        stmt.set(0, archiveArcid)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let tankoubonId = rs.getOrNull<String>(0) ?? ""
-                                if (tankoubonId != "") {
-                                    return Some(tankoubonId)
-                                }
-                            }
+                    let opt = db.rawOne<String>(sql, [vtext(archiveArcid)], { row => row.getOrNullText(0) ?? "" })
+                    match (opt) {
+                        case Some(tid) =>
+                            if (tid != "") { return Some(tid) }
                             return None
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                        case None => return None
                     }
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("检查归档所属Tankoubon失败",
                         ("archiveArcid", archiveArcid), ("error", e.message))
                     return None
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -1158,45 +959,32 @@ public class TankoubonDao {
      * 获取归档所属的所有Tankoubon（返回tankoubon_id列表）
      */
     public static func getTankoubonsForArchive(archiveArcid: String): Array<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            SELECT t.tankoubon_id
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            WHERE a.arcid = $1
+            ORDER BY COALESCE(mo.title, ''), t.tankoubon_id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM tankoubon_archives ta
-                        JOIN tankoubons t ON t.id = ta.tankoubon_id
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        JOIN archives a ON a.id = ta.archive_id
-                        WHERE a.arcid = ?
-                        ORDER BY COALESCE(mo.title, ''), t.tankoubon_id
-                    """)
-                    try {
-                        stmt.set(0, archiveArcid)
-                        let rs = stmt.query()
-                        try {
-                            var list: ArrayList<String> = ArrayList<String>()
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                if (tid != "") {
-                                    list.add(tid)
-                                }
-                            }
-                            return list.toArray()
-                        } finally {
-                            rs.close()
+                    let rows = db.raw<String>(sql, [vtext(archiveArcid)], { row => row.getOrNullText(0) ?? "" })
+                    var list: ArrayList<String> = ArrayList<String>()
+                    for (tid in rows) {
+                        if (tid != "") {
+                            list.add(tid)
                         }
-                    } finally {
-                        stmt.close()
                     }
+                    return list.toArray()
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("获取归档所属Tankoubon列表失败",
                         ("archiveArcid", archiveArcid), ("error", e.message))
                     return Array<String>()
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -1208,97 +996,79 @@ public class TankoubonDao {
      * 获取Tankoubon的聚合元数据（用于搜索结果）
      */
     public static func getAggregatedMetadata(tankoubonId: String, userId: Int64): Option<TankoubonAggregatedData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT
+                t.tankoubon_id,
+                COALESCE(mo.title, '') AS name,
+                COALESCE(mo.description, '') AS summary,
+                COALESCE(mo.release_at::TEXT, '') AS release_at,
+                COALESCE(mo.created_at::TEXT, '') AS created_at,
+                COALESCE(mo.updated_at::TEXT, '') AS updated_at,
+                COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
+                COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
+                COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
+                COUNT(a.id)::INT as archive_count,
+                COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
+                COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
+                COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
+            FROM tankoubons t
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COALESCE(
+                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                            FILTER (WHERE ma.asset_id > 0),
+                        '{}'::jsonb
+                    ) AS assets_json,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
+                FROM metadata_assets ma
+                WHERE ma.metadata_id = mo.id
+            ) asset_map ON true
+            JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
+            JOIN archives a ON a.id = ta.archive_id
+            LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = $1
+            WHERE t.tankoubon_id = $2
+            GROUP BY
+                t.id, t.tankoubon_id, mo.title, mo.description,
+                mo.release_at, mo.created_at, mo.updated_at,
+                asset_map.cover_asset_id, asset_map.assets_json
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT
-                            t.tankoubon_id,
-                            COALESCE(mo.title, '') AS name,
-                            COALESCE(mo.description, '') AS summary,
-                            COALESCE(mo.release_at::TEXT, '') AS release_at,
-                            COALESCE(mo.created_at::TEXT, '') AS created_at,
-                            COALESCE(mo.updated_at::TEXT, '') AS updated_at,
-                            COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
-                            COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
-                            COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
-                            COUNT(a.id)::INT as archive_count,
-                            COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
-                            COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
-                            COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
-                        FROM tankoubons t
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        LEFT JOIN LATERAL (
-                            SELECT
-                                COALESCE(
-                                    jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
-                                        FILTER (WHERE ma.asset_id > 0),
-                                    '{}'::jsonb
-                                ) AS assets_json,
-                                COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
-                            FROM metadata_assets ma
-                            WHERE ma.metadata_id = mo.id
-                        ) asset_map ON true
-                        JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
-                        JOIN archives a ON a.id = ta.archive_id
-                        LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
-                        WHERE t.tankoubon_id = ?
-                        GROUP BY
-                            t.id, t.tankoubon_id, mo.title, mo.description,
-                            mo.release_at, mo.created_at, mo.updated_at,
-                            asset_map.cover_asset_id, asset_map.assets_json
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, tankoubonId)
-                        var dataOpt: Option<TankoubonAggregatedData> = None
+                    let dataOpt = db.rawOne<TankoubonAggregatedData>(sql, [vint(userId), vtext(tankoubonId)], { row =>
+                        let data = TankoubonAggregatedData()
+                        data.tankoubon_id = row.getOrNullText(0) ?? ""
+                        data.name = row.getOrNullText(1) ?? ""
+                        data.summary = row.getOrNullText(2) ?? ""
+                        data.release_at = row.getOrNullText(3) ?? ""
+                        data.created_at = row.getOrNullText(4) ?? ""
+                        data.updated_at = row.getOrNullText(5) ?? ""
+                        data.cover_asset_id = row.getOrNullInt64(6) ?? 0
+                        data.assets_raw = (row.getOrNullText(7) ?? "").trimAscii()
+                        if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
+                        data.pagecount = row.getOrNullInt32(8) ?? 0
+                        data.archive_count = row.getOrNullInt32(9) ?? 0
+                        data.last_read_time = row.getOrNullText(10) ?? ""
+                        data.progress = row.getOrNullInt32(11) ?? 0
+                        data.isnew = row.getOrNullBool(12) ?? true
+                        data
+                    })
 
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let data = TankoubonAggregatedData()
-                                data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
-                                data.name = rs.getOrNull<String>(1) ?? ""
-                                data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.release_at = rs.getOrNull<String>(3) ?? ""
-                                data.created_at = rs.getOrNull<String>(4) ?? ""
-                                data.updated_at = rs.getOrNull<String>(5) ?? ""
-                                data.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
-                                data.assets_raw = (rs.getOrNull<String>(7) ?? "").trimAscii()
-                                if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
-                                data.pagecount = rs.getOrNull<Int32>(8) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(9) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(10) ?? ""
-                                data.progress = rs.getOrNull<Int32>(11) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(12) ?? true
-                                dataOpt = Some(data)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-
-                        // 注意：必须先关闭 ResultSet，再在同一连接上执行后续查询，否则会触发 conn busy
-                        match (dataOpt) {
-                            case Some(data) =>
-                                let tankoubonTags = getTankoubonTagsForTankoubon(conn, tankoubonId)
-                                let archiveTags = getArchiveTagsForTankoubon(conn, tankoubonId)
-                                data.tags = mergeTags(tankoubonTags, archiveTags)
-                                return Some(data)
-                            case None => return None
-                        }
-                    } finally {
-                        stmt.close()
+                    match (dataOpt) {
+                        case Some(data) =>
+                            let tankoubonTags = getTankoubonTagsForTankoubon(db, tankoubonId)
+                            let archiveTags = getArchiveTagsForTankoubon(db, tankoubonId)
+                            data.tags = mergeTags(tankoubonTags, archiveTags)
+                            return Some(data)
+                        case None => return None
                     }
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("获取Tankoubon聚合元数据失败",
                         ("tankoubonId", tankoubonId), ("error", e.message))
                     return None
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
@@ -1309,22 +1079,9 @@ public class TankoubonDao {
     /**
      * 获取Tankoubon内部ID（从tankoubon_id）
      */
-    public static func getTankoubonInternalId(conn: Connection, tankoubonId: String): Int64 {
+    public static func getTankoubonInternalId(db: Database, tankoubonId: String): Int64 {
         try {
-            let stmt = conn.prepareStatement("SELECT id FROM tankoubons WHERE tankoubon_id = ?")
-            try {
-                stmt.set(0, tankoubonId)
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<Int64>(0) ?? 0
-                    }
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
+            return db.rawOne<Int64>("SELECT id FROM tankoubons WHERE tankoubon_id = $1", [vtext(tankoubonId)], { row => row.getInt64(0) }) ?? 0
         } catch (_: Exception) {}
         return 0
     }
@@ -1332,22 +1089,9 @@ public class TankoubonDao {
     /**
      * 获取Archive内部ID（从arcid）
      */
-    private static func getArchiveInternalId(conn: Connection, arcid: String): Int64 {
+    private static func getArchiveInternalId(db: Database, arcid: String): Int64 {
         try {
-            let stmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
-            try {
-                stmt.set(0, arcid)
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<Int64>(0) ?? 0
-                    }
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
+            return db.rawOne<Int64>("SELECT id FROM archives WHERE arcid = $1", [vtext(arcid)], { row => row.getInt64(0) }) ?? 0
         } catch (_: Exception) {}
         return 0
     }
@@ -1355,29 +1099,16 @@ public class TankoubonDao {
     /**
      * 获取 Tankoubon 自身标签（metadata_tags）。
      */
-    private static func getTankoubonTagsForTankoubon(conn: Connection, tankoubonId: String): String {
+    private static func getTankoubonTagsForTankoubon(db: Database, tankoubonId: String): String {
+        let sql = """
+            SELECT COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
+            FROM metadata_objects mo
+            LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
+            WHERE mo.entity_type = 'tankoubon'
+              AND mo.entity_id = $1
+        """
         try {
-            let stmt = conn.prepareStatement("""
-                SELECT COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
-                FROM metadata_objects mo
-                LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                WHERE mo.entity_type = 'tankoubon'
-                  AND mo.entity_id = ?
-            """)
-            try {
-                stmt.set(0, tankoubonId)
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<String>(0) ?? ""
-                    }
-                    return ""
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
+            return db.rawOne<String>(sql, [vtext(tankoubonId)], { row => row.getOrNullText(0) ?? "" }) ?? ""
         } catch (_: Exception) {}
         return ""
     }
@@ -1385,32 +1116,19 @@ public class TankoubonDao {
     /**
      * 获取Tankoubon中所有归档的标签
      */
-    private static func getArchiveTagsForTankoubon(conn: Connection, tankoubonId: String): String {
+    private static func getArchiveTagsForTankoubon(db: Database, tankoubonId: String): String {
+        let sql = """
+            SELECT COALESCE(string_agg(DISTINCT
+                mt.tag, ','), '')
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+            JOIN metadata_tags mt ON mt.metadata_id = mo.id
+            WHERE t.tankoubon_id = $1
+        """
         try {
-            let stmt = conn.prepareStatement("""
-                SELECT COALESCE(string_agg(DISTINCT
-                    mt.tag, ','), '')
-                FROM tankoubon_archives ta
-                JOIN tankoubons t ON t.id = ta.tankoubon_id
-                JOIN archives a ON a.id = ta.archive_id
-                JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
-                JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                WHERE t.tankoubon_id = ?
-            """)
-            try {
-                stmt.set(0, tankoubonId)
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<String>(0) ?? ""
-                    }
-                    return ""
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
+            return db.rawOne<String>(sql, [vtext(tankoubonId)], { row => row.getOrNullText(0) ?? "" }) ?? ""
         } catch (_: Exception) {}
         return ""
     }
@@ -1460,59 +1178,42 @@ public class TankoubonDao {
     /**
      * 批量获取 Tankoubon 自身标签（metadata_tags）。
      */
-    private static func getBatchTankoubonTagsForTankoubons(conn: Connection, tankoubonIds: Array<String>): HashMap<String, String> {
+    private static func getBatchTankoubonTagsForTankoubons(db: Database, tankoubonIds: Array<String>): HashMap<String, String> {
         var result: HashMap<String, String> = HashMap<String, String>()
         if (tankoubonIds.size == 0) {
             return result
         }
 
         try {
-            var placeholders = ""
-            for (i in 0..tankoubonIds.size) {
-                if (i > 0) { placeholders += "," }
-                placeholders += "?"
-            }
-
-            let stmt = conn.prepareStatement("""
+            let sql = """
                 SELECT mo.entity_id, mt.tag
                 FROM metadata_objects mo
                 JOIN metadata_tags mt ON mt.metadata_id = mo.id
                 WHERE mo.entity_type = 'tankoubon'
-                  AND mo.entity_id IN (${placeholders})
-            """)
-            try {
-                for (i in 0..tankoubonIds.size) {
-                    stmt.set(i, tankoubonIds[i])
-                }
-                let rs = stmt.query()
-                try {
-                    var tagsMap: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
-                    while (rs.next()) {
-                        let tid = rs.getOrNull<String>(0) ?? ""
-                        let tag = rs.getOrNull<String>(1) ?? ""
-                        if (tid != "" && tag != "") {
-                            match (tagsMap.get(tid)) {
-                                case Some(list) => list.add(tag)
-                                case None =>
-                                    let list = ArrayList<String>()
-                                    list.add(tag)
-                                    tagsMap[tid] = list
-                            }
-                        }
+                  AND mo.entity_id = ANY($1::text[])
+            """
+            let rows = db.raw<(String, String)>(sql, [textArray(tankoubonIds)], { row =>
+                (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "")
+            })
+            var tagsMap: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
+            for ((tid, tag) in rows) {
+                if (tid != "" && tag != "") {
+                    match (tagsMap.get(tid)) {
+                        case Some(list) => list.add(tag)
+                        case None =>
+                            let list = ArrayList<String>()
+                            list.add(tag)
+                            tagsMap[tid] = list
                     }
-                    for ((tid, tagsList) in tagsMap) {
-                        var combined = ""
-                        for (i in 0..tagsList.size) {
-                            if (i > 0) { combined += "," }
-                            combined += tagsList[i]
-                        }
-                        result[tid] = combined
-                    }
-                } finally {
-                    rs.close()
                 }
-            } finally {
-                stmt.close()
+            }
+            for ((tid, tagsList) in tagsMap) {
+                var combined = ""
+                for (i in 0..tagsList.size) {
+                    if (i > 0) { combined += "," }
+                    combined += tagsList[i]
+                }
+                result[tid] = combined
             }
         } catch (_: Exception) {}
         return result
@@ -1521,20 +1222,14 @@ public class TankoubonDao {
     /**
      * 批量获取Tankoubon的归档标签
      */
-    private static func getBatchArchiveTagsForTankoubons(conn: Connection, tankoubonIds: Array<String>): HashMap<String, String> {
+    private static func getBatchArchiveTagsForTankoubons(db: Database, tankoubonIds: Array<String>): HashMap<String, String> {
         var result: HashMap<String, String> = HashMap<String, String>()
         if (tankoubonIds.size == 0) {
             return result
         }
 
         try {
-            var placeholders = ""
-            for (i in 0..tankoubonIds.size) {
-                if (i > 0) { placeholders += "," }
-                placeholders += "?"
-            }
-
-            let stmt = conn.prepareStatement("""
+            let sql = """
                 SELECT
                     t.tankoubon_id,
                     COALESCE(string_agg(DISTINCT mt.tag, ','), '') AS tags
@@ -1543,27 +1238,16 @@ public class TankoubonDao {
                 JOIN archives a ON a.id = ta.archive_id
                 JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
                 JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                WHERE t.tankoubon_id IN (${placeholders})
+                WHERE t.tankoubon_id = ANY($1::text[])
                 GROUP BY t.tankoubon_id
-            """)
-            try {
-                for (i in 0..tankoubonIds.size) {
-                    stmt.set(i, tankoubonIds[i])
+            """
+            let rows = db.raw<(String, String)>(sql, [textArray(tankoubonIds)], { row =>
+                (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "")
+            })
+            for ((tid, tags) in rows) {
+                if (tid != "") {
+                    result[tid] = tags
                 }
-                let rs = stmt.query()
-                try {
-                    while (rs.next()) {
-                        let tid = rs.getOrNull<String>(0) ?? ""
-                        let tags = rs.getOrNull<String>(1) ?? ""
-                        if (tid != "") {
-                            result[tid] = tags
-                        }
-                    }
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
             }
         } catch (e: Exception) {
             getLogger("tankoubon_dao").error("批量获取归档标签失败", ("error", e.message))
@@ -1609,117 +1293,99 @@ public class TankoubonDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT
+                t.tankoubon_id,
+                COALESCE(mo.title, '') AS name,
+                COALESCE(mo.description, '') AS summary,
+                COALESCE(mo.release_at::TEXT, '') AS release_at,
+                COALESCE(mo.created_at::TEXT, '') AS created_at,
+                COALESCE(mo.updated_at::TEXT, '') AS updated_at,
+                COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
+                COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
+                COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
+                COUNT(a.id)::INT as archive_count,
+                COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
+                COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
+                COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
+            FROM tankoubons t
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COALESCE(
+                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                            FILTER (WHERE ma.asset_id > 0),
+                        '{}'::jsonb
+                    ) AS assets_json,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
+                FROM metadata_assets ma
+                WHERE ma.metadata_id = mo.id
+            ) asset_map ON true
+            JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
+            JOIN archives a ON a.id = ta.archive_id
+            LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = $1
+            WHERE t.tankoubon_id = ANY($2::text[])
+            GROUP BY
+                t.id, t.tankoubon_id, mo.title, mo.description,
+                mo.release_at, mo.created_at, mo.updated_at,
+                asset_map.cover_asset_id, asset_map.assets_json
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    // 构建 IN 子句的占位符
-                    var placeholders = ""
-                    for (i in 0..misses.size) {
-                        if (i > 0) { placeholders += "," }
-                        placeholders += "?"
+                    var params: ArrayList<Value> = ArrayList<Value>()
+                    params.add(vint(userId))
+                    params.add(textArray(misses.toArray()))
+
+                    // 临时存储，用于后续获取标签
+                    var tempData: HashMap<String, TankoubonAggregatedData> = HashMap<String, TankoubonAggregatedData>()
+
+                    let rows = db.raw<TankoubonAggregatedData>(sql, params.toArray(), { row =>
+                        let data = TankoubonAggregatedData()
+                        data.tankoubon_id = row.getOrNullText(0) ?? ""
+                        data.name = row.getOrNullText(1) ?? ""
+                        data.summary = row.getOrNullText(2) ?? ""
+                        data.release_at = row.getOrNullText(3) ?? ""
+                        data.created_at = row.getOrNullText(4) ?? ""
+                        data.updated_at = row.getOrNullText(5) ?? ""
+                        data.cover_asset_id = row.getOrNullInt64(6) ?? 0
+                        data.assets_raw = (row.getOrNullText(7) ?? "").trimAscii()
+                        if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
+                        data.pagecount = row.getOrNullInt32(8) ?? 0
+                        data.archive_count = row.getOrNullInt32(9) ?? 0
+                        data.last_read_time = row.getOrNullText(10) ?? ""
+                        data.progress = row.getOrNullInt32(11) ?? 0
+                        data.isnew = row.getOrNullBool(12) ?? true
+                        data
+                    })
+                    for (data in rows) {
+                        tempData[data.tankoubon_id] = data
                     }
 
-                    let stmt = conn.prepareStatement("""
-                        SELECT
-                            t.tankoubon_id,
-                            COALESCE(mo.title, '') AS name,
-                            COALESCE(mo.description, '') AS summary,
-                            COALESCE(mo.release_at::TEXT, '') AS release_at,
-                            COALESCE(mo.created_at::TEXT, '') AS created_at,
-                            COALESCE(mo.updated_at::TEXT, '') AS updated_at,
-                            COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
-                            COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
-                            COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
-                            COUNT(a.id)::INT as archive_count,
-                            COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
-                            COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
-                            COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
-                        FROM tankoubons t
-                        LEFT JOIN metadata_objects mo
-                               ON mo.entity_type = 'tankoubon'
-                              AND mo.entity_id = t.tankoubon_id
-                        LEFT JOIN LATERAL (
-                            SELECT
-                                COALESCE(
-                                    jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
-                                        FILTER (WHERE ma.asset_id > 0),
-                                    '{}'::jsonb
-                                ) AS assets_json,
-                                COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
-                            FROM metadata_assets ma
-                            WHERE ma.metadata_id = mo.id
-                        ) asset_map ON true
-                        JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
-                        JOIN archives a ON a.id = ta.archive_id
-                        LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
-                        WHERE t.tankoubon_id IN (${placeholders})
-                        GROUP BY
-                            t.id, t.tankoubon_id, mo.title, mo.description,
-                            mo.release_at, mo.created_at, mo.updated_at,
-                            asset_map.cover_asset_id, asset_map.assets_json
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        for (i in 0..misses.size) {
-                            stmt.set(i + 1, misses[i])
+                    // 批量获取 tankoubon 自身标签和归档标签并合并
+                    let missingIds = misses.toArray()
+                    let tankoubonTagsMap = getBatchTankoubonTagsForTankoubons(db, missingIds)
+                    let archiveTagsMap = getBatchArchiveTagsForTankoubons(db, missingIds)
+                    for ((tid, data) in tempData) {
+                        var tankoubonTags = ""
+                        var archiveTags = ""
+                        match (tankoubonTagsMap.get(tid)) {
+                            case Some(tags) => tankoubonTags = tags
+                            case None => ()
                         }
-
-                        // 临时存储，用于后续获取标签
-                        var tempData: HashMap<String, TankoubonAggregatedData> = HashMap<String, TankoubonAggregatedData>()
-
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let data = TankoubonAggregatedData()
-                                data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
-                                data.name = rs.getOrNull<String>(1) ?? ""
-                                data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.release_at = rs.getOrNull<String>(3) ?? ""
-                                data.created_at = rs.getOrNull<String>(4) ?? ""
-                                data.updated_at = rs.getOrNull<String>(5) ?? ""
-                                data.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
-                                data.assets_raw = (rs.getOrNull<String>(7) ?? "").trimAscii()
-                                if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
-                                data.pagecount = rs.getOrNull<Int32>(8) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(9) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(10) ?? ""
-                                data.progress = rs.getOrNull<Int32>(11) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(12) ?? true
-                                tempData[data.tankoubon_id] = data
-                            }
-                        } finally {
-                            rs.close()
+                        match (archiveTagsMap.get(tid)) {
+                            case Some(tags) => archiveTags = tags
+                            case None => ()
                         }
-
-                        // 批量获取 tankoubon 自身标签和归档标签并合并
-                        let missingIds = misses.toArray()
-                        let tankoubonTagsMap = getBatchTankoubonTagsForTankoubons(conn, missingIds)
-                        let archiveTagsMap = getBatchArchiveTagsForTankoubons(conn, missingIds)
-                        for ((tid, data) in tempData) {
-                            var tankoubonTags = ""
-                            var archiveTags = ""
-                            match (tankoubonTagsMap.get(tid)) {
-                                case Some(tags) => tankoubonTags = tags
-                                case None => ()
-                            }
-                            match (archiveTagsMap.get(tid)) {
-                                case Some(tags) => archiveTags = tags
-                                case None => ()
-                            }
-                            data.tags = mergeTags(tankoubonTags, archiveTags)
-                            result[tid] = data
-                            let cacheKey = buildAggregatedMetadataCacheKey(contentVersion, userVersion, userId, tid)
-                            writeAggregatedMetadataCache(cacheKey, data)
-                        }
-                    } finally {
-                        stmt.close()
+                        data.tags = mergeTags(tankoubonTags, archiveTags)
+                        result[tid] = data
+                        let cacheKey = buildAggregatedMetadataCacheKey(contentVersion, userVersion, userId, tid)
+                        writeAggregatedMetadataCache(cacheKey, data)
                     }
                 } catch (e: Exception) {
                     logger.error("批量获取Tankoubon聚合元数据失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -1768,61 +1434,40 @@ public class TankoubonDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT t.tankoubon_id, a.arcid
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            WHERE t.tankoubon_id = ANY($1::text[])
+            ORDER BY t.tankoubon_id, ta.sort_order, ta.id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    var placeholders = ""
-                    for (i in 0..misses.size) {
-                        if (i > 0) { placeholders += "," }
-                        placeholders += "?"
+                    let rows = db.raw<(String, String)>(sql, [textArray(misses.toArray())], { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "")
+                    })
+                    var tempMap: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
+                    for ((tid, arcid) in rows) {
+                        if (tid != "" && arcid != "") {
+                            match (tempMap.get(tid)) {
+                                case Some(list) => list.add(arcid)
+                                case None =>
+                                    let list = ArrayList<String>()
+                                    list.add(arcid)
+                                    tempMap[tid] = list
+                            }
+                        }
                     }
-
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id, a.arcid
-                        FROM tankoubon_archives ta
-                        JOIN tankoubons t ON t.id = ta.tankoubon_id
-                        JOIN archives a ON a.id = ta.archive_id
-                        WHERE t.tankoubon_id IN (${placeholders})
-                        ORDER BY t.tankoubon_id, ta.sort_order, ta.id
-                    """)
-                    try {
-                        for (i in 0..misses.size) {
-                            stmt.set(i, misses[i])
-                        }
-                        let rs = stmt.query()
-                        try {
-                            var tempMap: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                let arcid = rs.getOrNull<String>(1) ?? ""
-                                if (tid != "" && arcid != "") {
-                                    match (tempMap.get(tid)) {
-                                        case Some(list) => list.add(arcid)
-                                        case None =>
-                                            let list = ArrayList<String>()
-                                            list.add(arcid)
-                                            tempMap[tid] = list
-                                    }
-                                }
-                            }
-                            for ((tid, list) in tempMap) {
-                                let children = list.toArray()
-                                result[tid] = children
-                                let cacheKey = buildChildrenCacheKey(cacheVersion, tid)
-                                writeChildrenCache(cacheKey, children)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    for ((tid, list) in tempMap) {
+                        let children = list.toArray()
+                        result[tid] = children
+                        let cacheKey = buildChildrenCacheKey(cacheVersion, tid)
+                        writeChildrenCache(cacheKey, children)
                     }
                 } catch (e: Exception) {
                     logger.error("批量获取Tankoubon归档列表失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")

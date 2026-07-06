@@ -1,6 +1,7 @@
 package lanlu.contexts.plugin.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.contexts.plugin.domain.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -51,77 +52,56 @@ public class PluginData {
  */
 public class PluginDao {
 
+    private static let logger = getLogger("plugin_dao")
+
+    private static let PLUGIN_SELECT = "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins"
+
+    private static func readPluginFromRow(row: Row): PluginData {
+        let plugin = PluginData()
+        plugin.id = row.getOrNullInt32(0) ?? 0
+        plugin.name = row.getOrNullText(1) ?? ""
+        plugin.namespace = row.getOrNullText(2) ?? ""
+        plugin.version = row.getOrNullText(3) ?? ""
+        plugin.description = row.getOrNullText(4) ?? ""
+        plugin.author = row.getOrNullText(5) ?? ""
+        plugin.entry = row.getOrNullText(6) ?? ""
+        plugin.plugin_type = row.getOrNullText(7) ?? ""
+        plugin.tags = row.getOrNullText(8) ?? ""
+        plugin.url_regex = row.getOrNullText(9) ?? ""
+        plugin.source_id_regex = row.getOrNullText(10) ?? ""
+        plugin.pre_hooks = row.getOrNullText(11) ?? "[]"
+        plugin.after_hooks = row.getOrNullText(12) ?? "[]"
+        let permissionsOpt = row.getOrNullText(13)
+        plugin.permissions = match (permissionsOpt) {
+            case Some(value) => value
+            case None => ""
+        }
+        plugin.icon = row.getOrNullText(14) ?? ""
+        plugin.enabled = row.getOrNullBool(15) ?? false
+        plugin.installed = row.getOrNullBool(16) ?? false
+        plugin.has_schema = row.getOrNullBool(17) ?? false
+        plugin.parameters = row.getOrNullText(18) ?? "[]"
+        plugin.update_url = row.getOrNullText(19) ?? ""
+        plugin.created_at = row.getOrNullText(20) ?? ""
+        plugin.updated_at = row.getOrNullText(21) ?? ""
+        return plugin
+    }
+
     /**
      * 获取所有插件
      */
     public static func getAllPlugins(): Array<PluginData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-
-                var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
-                let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins ORDER BY id")
+        let sql = "${PLUGIN_SELECT} ORDER BY id"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let rs = stmt.query()
-
-                    try {
-                        while (rs.next()) {
-                            let plugin = PluginData()
-                            plugin.id = rs.getOrNull<Int32>(0) ?? 0
-                            plugin.name = rs.getOrNull<String>(1) ?? ""
-                            plugin.namespace = rs.getOrNull<String>(2) ?? ""
-                            plugin.version = rs.getOrNull<String>(3) ?? ""
-                            plugin.description = rs.getOrNull<String>(4) ?? ""
-                            plugin.author = rs.getOrNull<String>(5) ?? ""
-                            plugin.entry = rs.getOrNull<String>(6) ?? ""
-                            plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
-                            plugin.tags = rs.getOrNull<String>(8) ?? ""
-                            plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                            plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
-                            plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
-                            plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
-                            let permissionsOpt = rs.getOrNull<String>(13)
-                            plugin.permissions = match (permissionsOpt) {
-                                case Some(value) => value
-                                case None => ""
-                            }
-                            plugin.icon = rs.getOrNull<String>(14) ?? ""
-                            plugin.enabled = rs.getOrNull<Bool>(15) ?? false
-                            plugin.installed = rs.getOrNull<Bool>(16) ?? false
-                            plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
-                            plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
-                            plugin.update_url = rs.getOrNull<String>(19) ?? ""
-                            plugin.created_at = rs.getOrNull<String>(20) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(21) ?? ""
-                            plugins.add(plugin)
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            getLogger("plugin_dao").warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-
-                    return plugins.toArray()
+                    return db.raw<PluginData>(sql, [], { row => readPluginFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("查询插件失败", ("error", e.message))
+                    logger.error("查询插件失败", ("error", e.message))
                     return Array<PluginData>()
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("plugin_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("plugin_dao").warn("关闭数据库连接失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<PluginData>()
         }
     }
@@ -130,74 +110,18 @@ public class PluginDao {
      * 根据类型获取插件
      */
     public static func getPluginsByType(pluginType: String): Array<PluginData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
-                let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) ORDER BY id")
+        let sql = "${PLUGIN_SELECT} WHERE LOWER(plugin_type) = LOWER($1) ORDER BY id"
+        let params: Array<Value> = [vtext(pluginType)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    stmt.set(0, pluginType)
-                    let rs = stmt.query()
-
-                    try {
-                        while (rs.next()) {
-                            let plugin = PluginData()
-                            plugin.id = rs.getOrNull<Int32>(0) ?? 0
-                            plugin.name = rs.getOrNull<String>(1) ?? ""
-                            plugin.namespace = rs.getOrNull<String>(2) ?? ""
-                            plugin.version = rs.getOrNull<String>(3) ?? ""
-                            plugin.description = rs.getOrNull<String>(4) ?? ""
-                            plugin.author = rs.getOrNull<String>(5) ?? ""
-                            plugin.entry = rs.getOrNull<String>(6) ?? ""
-                            plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
-                            plugin.tags = rs.getOrNull<String>(8) ?? ""
-                            plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                            plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
-                            plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
-                            plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
-                            let permissionsOpt = rs.getOrNull<String>(13)
-                            plugin.permissions = match (permissionsOpt) {
-                                case Some(value) => value
-                                case None => ""
-                            }
-                            plugin.icon = rs.getOrNull<String>(14) ?? ""
-                            plugin.enabled = rs.getOrNull<Bool>(15) ?? false
-                            plugin.installed = rs.getOrNull<Bool>(16) ?? false
-                            plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
-                            plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
-                            plugin.update_url = rs.getOrNull<String>(19) ?? ""
-                            plugin.created_at = rs.getOrNull<String>(20) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(21) ?? ""
-                            plugins.add(plugin)
-                        }
-                    } finally {
-                        try {
-                            rs.close()
-                        } catch (closeError: Exception) {
-                            getLogger("plugin_dao").warn("关闭ResultSet失败: ${closeError.message}")
-                        }
-                    }
-
-                    return plugins.toArray()
+                    return db.raw<PluginData>(sql, params, { row => readPluginFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("按类型查询插件失败", ("error", e.message), ("type", pluginType))
+                    logger.error("按类型查询插件失败", ("error", e.message), ("type", pluginType))
                     return Array<PluginData>()
-                } finally {
-                    try {
-                        stmt.close()
-                    } catch (closeError: Exception) {
-                        getLogger("plugin_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
-                    }
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("plugin_dao").warn("关闭数据库连接失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<PluginData>()
         }
     }
@@ -206,109 +130,63 @@ public class PluginDao {
      * 根据namespace获取插件
      */
     public static func getPluginByNamespace(namespace: String): PluginData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "${PLUGIN_SELECT} WHERE namespace = $1"
+        let params: Array<Value> = [vtext(namespace)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE namespace = ?")
-                    try {
-                        stmt.set(0, namespace)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let plugin = PluginData()
-                                plugin.id = rs.getOrNull<Int32>(0) ?? 0
-                                plugin.name = rs.getOrNull<String>(1) ?? ""
-                                plugin.namespace = rs.getOrNull<String>(2) ?? ""
-                                plugin.version = rs.getOrNull<String>(3) ?? ""
-                                plugin.description = rs.getOrNull<String>(4) ?? ""
-                                plugin.author = rs.getOrNull<String>(5) ?? ""
-                                plugin.entry = rs.getOrNull<String>(6) ?? ""
-                                plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
-                                plugin.tags = rs.getOrNull<String>(8) ?? ""
-                                plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                                plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
-                                plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
-                                plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
-                                let permissionsOpt = rs.getOrNull<String>(13)
-                                plugin.permissions = match (permissionsOpt) {
-                                    case Some(value) => value
-                                    case None => ""
-                                }
-                                plugin.icon = rs.getOrNull<String>(14) ?? ""
-                                plugin.enabled = rs.getOrNull<Bool>(15) ?? false
-                                plugin.installed = rs.getOrNull<Bool>(16) ?? false
-                                plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
-                                plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
-                                plugin.update_url = rs.getOrNull<String>(19) ?? ""
-                                plugin.created_at = rs.getOrNull<String>(20) ?? ""
-                                plugin.updated_at = rs.getOrNull<String>(21) ?? ""
-
-                                return plugin
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<PluginData>(sql, params, { row => readPluginFromRow(row) })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
+                    return PluginData()
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("根据namespace查询插件失败", ("error", e.message), ("namespace", namespace))
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
+                    logger.error("根据namespace查询插件失败", ("error", e.message), ("namespace", namespace))
+                    return PluginData()
                 }
-            case None => getLogger("plugin_dao").error("无法连接到数据库")
+            case None =>
+                logger.error("无法连接到数据库")
+                return PluginData()
         }
-        return PluginData()
     }
 
     /**
      * 创建插件记录
      */
     public static func create(plugin: PluginData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [
+            vtext(plugin.name),
+            vtext(plugin.namespace),
+            vtext(plugin.version),
+            vtext(plugin.description),
+            vtext(plugin.author),
+            vtext(plugin.entry),
+            vtext(plugin.plugin_type),
+            vtext(plugin.tags),
+            vtext(plugin.url_regex),
+            vtext(plugin.source_id_regex),
+            vtext(plugin.pre_hooks),
+            vtext(plugin.after_hooks),
+            vtext(plugin.permissions),
+            vtext(plugin.icon),
+            vbool(plugin.enabled),
+            vbool(plugin.installed),
+            vbool(plugin.has_schema),
+            vtext(plugin.parameters),
+            vtext(plugin.update_url)
+        ]
+        let sql = "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                    try {
-                        stmt.set(0, plugin.name)
-                        stmt.set(1, plugin.namespace)
-                        stmt.set(2, plugin.version)
-                        stmt.set(3, plugin.description)
-                        stmt.set(4, plugin.author)
-                        stmt.set(5, plugin.entry)
-                        stmt.set(6, plugin.plugin_type)
-                        stmt.set(7, plugin.tags)
-                        stmt.set(8, plugin.url_regex)
-                        stmt.set(9, plugin.source_id_regex)
-                        stmt.set(10, plugin.pre_hooks)
-                        stmt.set(11, plugin.after_hooks)
-                        stmt.set(12, plugin.permissions)
-                        stmt.set(13, plugin.icon)
-                        stmt.set(14, plugin.enabled)
-                        stmt.set(15, plugin.installed)
-                        stmt.set(16, plugin.has_schema)
-                        stmt.set(17, plugin.parameters)
-                        stmt.set(18, plugin.update_url)
-
-                        stmt.update()
-                        return true
-                    } finally {
-                        try { stmt.close() } catch (_: Exception) {}
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("创建插件失败", ("error", e.message), ("namespace", plugin.namespace))
+                    logger.error("创建插件失败", ("error", e.message), ("namespace", plugin.namespace))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -317,44 +195,39 @@ public class PluginDao {
      * 更新插件记录
      */
     public static func update(plugin: PluginData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [
+            vtext(plugin.name),
+            vtext(plugin.version),
+            vtext(plugin.description),
+            vtext(plugin.author),
+            vtext(plugin.entry),
+            vtext(plugin.plugin_type),
+            vtext(plugin.tags),
+            vtext(plugin.url_regex),
+            vtext(plugin.source_id_regex),
+            vtext(plugin.pre_hooks),
+            vtext(plugin.after_hooks),
+            vtext(plugin.permissions),
+            vtext(plugin.icon),
+            vbool(plugin.enabled),
+            vbool(plugin.installed),
+            vbool(plugin.has_schema),
+            vtext(plugin.parameters),
+            vtext(plugin.update_url),
+            vtext(plugin.namespace)
+        ]
+        let sql = "UPDATE plugins SET name = $1, version = $2, description = $3, author = $4, entry = $5, plugin_type = $6, tags = $7, url_regex = $8, source_id_regex = $9, pre_hooks = $10, after_hooks = $11, permissions = $12, icon = $13, enabled = $14, installed = $15, has_schema = $16, parameters = $17, update_url = $18, updated_at = CURRENT_TIMESTAMP WHERE namespace = $19"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                let stmt = conn.prepareStatement(
-                    "UPDATE plugins SET name = ?, version = ?, description = ?, author = ?, entry = ?, plugin_type = ?, tags = ?, url_regex = ?, source_id_regex = ?, pre_hooks = ?, after_hooks = ?, permissions = ?, icon = ?, enabled = ?, installed = ?, has_schema = ?, parameters = ?, update_url = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
-
-                stmt.set(0, plugin.name)
-                stmt.set(1, plugin.version)
-                stmt.set(2, plugin.description)
-                stmt.set(3, plugin.author)
-                stmt.set(4, plugin.entry)
-                stmt.set(5, plugin.plugin_type)
-                stmt.set(6, plugin.tags)
-                stmt.set(7, plugin.url_regex)
-                stmt.set(8, plugin.source_id_regex)
-                stmt.set(9, plugin.pre_hooks)
-                stmt.set(10, plugin.after_hooks)
-                stmt.set(11, plugin.permissions)
-                stmt.set(12, plugin.icon)
-                stmt.set(13, plugin.enabled)
-                stmt.set(14, plugin.installed)
-                stmt.set(15, plugin.has_schema)
-                stmt.set(16, plugin.parameters)
-                stmt.set(17, plugin.update_url)
-                stmt.set(18, plugin.namespace)
-
-                stmt.update()
-                conn.close()
-                return true
-            } catch (e: Exception) {
-                getLogger("plugin_dao").error("更新插件失败", ("error", e.message), ("namespace", plugin.namespace))
-                conn.close()
-                return false
-            }
+                    db.execRaw(sql, params)
+                    return true
+                } catch (e: Exception) {
+                    logger.error("更新插件失败", ("error", e.message), ("namespace", plugin.namespace))
+                    return false
+                }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -363,24 +236,19 @@ public class PluginDao {
      * 删除插件记录
      */
     public static func delete(namespace: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM plugins WHERE namespace = $1"
+        let params: Array<Value> = [vtext(namespace)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                let stmt = conn.prepareStatement("DELETE FROM plugins WHERE namespace = ?")
-                stmt.set(0, namespace)
-
-                stmt.update()
-                conn.close()
-                return true
-            } catch (e: Exception) {
-                getLogger("plugin_dao").error("删除插件失败", ("error", e.message), ("namespace", namespace))
-                conn.close()
-                return false
-            }
+                    db.execRaw(sql, params)
+                    return true
+                } catch (e: Exception) {
+                    logger.error("删除插件失败", ("error", e.message), ("namespace", namespace))
+                    return false
+                }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -390,29 +258,19 @@ public class PluginDao {
      * 启用/禁用插件
      */
     public static func setEnabled(namespace: String, enabled: Bool): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [vbool(enabled), vtext(namespace)]
+        let sql = "UPDATE plugins SET enabled = $1, updated_at = CURRENT_TIMESTAMP WHERE namespace = $2"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE plugins SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
-                    try {
-                        stmt.set(0, enabled)
-                        stmt.set(1, namespace)
-
-                        stmt.update()
-                        return true
-                    } finally {
-                        try { stmt.close() } catch (_: Exception) {}
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("设置插件状态失败", ("error", e.message), ("namespace", namespace))
+                    logger.error("设置插件状态失败", ("error", e.message), ("namespace", namespace))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -421,35 +279,22 @@ public class PluginDao {
      * 检查插件是否存在
      */
     public static func exists(namespace: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT COUNT(*) FROM plugins WHERE namespace = $1"
+        let params: Array<Value> = [vtext(namespace)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM plugins WHERE namespace = ?")
-                    try {
-                        stmt.set(0, namespace)
-                        let rs = stmt.query()
-                        try {
-                            var count: Int64 = 0
-                            if (rs.next()) {
-                                count = rs.getOrNull<Int64>(0) ?? 0
-                            }
-                            return count > 0
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (rows.size > 0) {
+                        return rows[0] > 0
                     }
-                } catch (e: Exception) {
-                    getLogger("plugin_dao").error("检查插件存在性失败", ("error", e.message), ("namespace", namespace))
                     return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
+                } catch (e: Exception) {
+                    logger.error("检查插件存在性失败", ("error", e.message), ("namespace", namespace))
+                    return false
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -458,57 +303,18 @@ public class PluginDao {
      * 获取已启用的插件
      */
     public static func getEnabledPlugins(pluginType: String): Array<PluginData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
+        let sql = "${PLUGIN_SELECT} WHERE LOWER(plugin_type) = LOWER($1) AND enabled = true ORDER BY id"
+        let params: Array<Value> = [vtext(pluginType)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) AND enabled = true ORDER BY id")
-                    stmt.set(0, pluginType)
-                    let rs = stmt.query()
-
-                    while (rs.next()) {
-                        let plugin = PluginData()
-                        plugin.id = rs.getOrNull<Int32>(0) ?? 0
-                        plugin.name = rs.getOrNull<String>(1) ?? ""
-                        plugin.namespace = rs.getOrNull<String>(2) ?? ""
-                        plugin.version = rs.getOrNull<String>(3) ?? ""
-                        plugin.description = rs.getOrNull<String>(4) ?? ""
-                        plugin.author = rs.getOrNull<String>(5) ?? ""
-                        plugin.entry = rs.getOrNull<String>(6) ?? ""
-                        plugin.plugin_type = rs.getOrNull<String>(7) ?? ""
-                        plugin.tags = rs.getOrNull<String>(8) ?? ""
-                        plugin.url_regex = rs.getOrNull<String>(9) ?? ""
-                        plugin.source_id_regex = rs.getOrNull<String>(10) ?? ""
-                        plugin.pre_hooks = rs.getOrNull<String>(11) ?? "[]"
-                        plugin.after_hooks = rs.getOrNull<String>(12) ?? "[]"
-                        let permissionsOpt = rs.getOrNull<String>(13)
-                        plugin.permissions = match (permissionsOpt) {
-                                case Some(value) => value
-                                case None => ""
-                            }
-                        plugin.icon = rs.getOrNull<String>(14) ?? ""
-                        plugin.enabled = rs.getOrNull<Bool>(15) ?? false
-                        plugin.installed = rs.getOrNull<Bool>(16) ?? false
-                        plugin.has_schema = rs.getOrNull<Bool>(17) ?? false
-                        plugin.parameters = rs.getOrNull<String>(18) ?? "[]"
-                        plugin.update_url = rs.getOrNull<String>(19) ?? ""
-                        plugin.created_at = rs.getOrNull<String>(20) ?? ""
-                        plugin.updated_at = rs.getOrNull<String>(21) ?? ""
-                        plugins.add(plugin)
-                    }
-
-                    conn.close()
-                    return plugins.toArray()
+                    return db.raw<PluginData>(sql, params, { row => readPluginFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("plugin_dao").error("查询已启用插件失败", ("error", e.message), ("type", pluginType))
-                    conn.close()
+                    logger.error("查询已启用插件失败", ("error", e.message), ("type", pluginType))
                     return Array<PluginData>()
                 }
             case None =>
-                getLogger("plugin_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<PluginData>()
         }
     }

@@ -1,7 +1,7 @@
 package lanlu.contexts.system.infrastructure.persistence
 
-import std.database.sql.*
-import std.collection.*
+import csorm.*
+import postgresql_driver.*
 import stdx.log.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -28,32 +28,46 @@ public class SystemSettingData {
  */
 public class SystemSettingsDao {
 
+    private static let logger = getLogger("system_settings_dao")
+
+    private static let SETTINGS_SELECT = """
+        SELECT id, key, value, value_type, category, description,
+               is_encrypted, created_at, updated_at
+        FROM system_settings
+    """
+
+    private static func readSettingFromRow(row: Row): SystemSettingData {
+        let data = SystemSettingData()
+        data.id = row.getOrNullInt64(0) ?? 0
+        data.key = row.getOrNullText(1) ?? ""
+        data.value = row.getOrNullText(2) ?? ""
+        data.valueType = row.getOrNullText(3) ?? "string"
+        data.category = row.getOrNullText(4) ?? ""
+        data.description = row.getOrNullJson(5) ?? ""
+        data.isEncrypted = row.getOrNullBool(6) ?? false
+        data.createdAt = row.getOrNullText(7) ?? ""
+        data.updatedAt = row.getOrNullText(8) ?? ""
+        return data
+    }
+
     /**
      * 创建设置表
      */
     public static func createTable(): Bool {
-        let logger = getLogger("system_settings_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 检查表是否存在
-                    let checkTable = conn.prepareStatement("""
+                    let checkSql = """
                         SELECT EXISTS (
                             SELECT 1 FROM information_schema.tables
                             WHERE table_name = 'system_settings'
                         )
-                    """)
-                    let rs = checkTable.query()
+                    """
+                    let rows = db.raw<Bool>(checkSql, [], { r => r.getOrNullBool(0) ?? false })
                     var tableExists = false
-                    try {
-                        if (rs.next()) {
-                            tableExists = rs.getOrNull<Bool>(0) ?? false
-                        }
-                    } finally {
-                        rs.close()
-                        checkTable.close()
+                    if (rows.size > 0) {
+                        tableExists = rows[0]
                     }
 
                     if (!tableExists) {
@@ -71,9 +85,7 @@ public class SystemSettingsDao {
                                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                             )
                         """
-                        let stmt = conn.prepareStatement(createTableSql)
-                        stmt.update()
-                        stmt.close()
+                        db.execRawSql(createTableSql)
 
                         // 创建索引
                         let indexSqls = [
@@ -82,9 +94,7 @@ public class SystemSettingsDao {
                         ]
                         for (sql in indexSqls) {
                             try {
-                                let idxStmt = conn.prepareStatement(sql)
-                                idxStmt.update()
-                                idxStmt.close()
+                                db.execRawSql(sql)
                             } catch (_: Exception) {
                                 // 忽略索引创建错误
                             }
@@ -95,12 +105,6 @@ public class SystemSettingsDao {
                 } catch (e: Exception) {
                     logger.error("创建system_settings表失败", ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -112,58 +116,17 @@ public class SystemSettingsDao {
      * 获取所有设置
      */
     public static func getAllSettings(): Array<SystemSettingData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "${SETTINGS_SELECT} ORDER BY category, key"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, key, value, value_type, category, description,
-                               is_encrypted, created_at, updated_at
-                        FROM system_settings
-                        ORDER BY category, key
-                    """)
-                    let rs = stmt.query()
-                    var settingsList = ArrayList<SystemSettingData>()
-                    try {
-                        while (rs.next()) {
-                            let data = SystemSettingData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.key = rs.getOrNull<String>(1) ?? ""
-                            data.value = rs.getOrNull<String>(2) ?? ""
-                            data.valueType = rs.getOrNull<String>(3) ?? "string"
-                            data.category = rs.getOrNull<String>(4) ?? ""
-                            data.description = rs.getOrNull<String>(5) ?? ""
-                            data.isEncrypted = rs.getOrNull<Bool>(6) ?? false
-                            data.createdAt = rs.getOrNull<String>(7) ?? ""
-                            data.updatedAt = rs.getOrNull<String>(8) ?? ""
-                            settingsList.add(data)
-                        }
-                        let size = settingsList.size
-                        if (size > 0) {
-                            var result = Array<SystemSettingData>(size, { _ => SystemSettingData() })
-                            for (i in 0..size) {
-                                result[i] = settingsList[i]
-                            }
-                            return result
-                        }
-                        return Array<SystemSettingData>()
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
+                    return db.raw<SystemSettingData>(sql, [], { row => readSettingFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("获取所有设置失败", ("error", e.message))
+                    logger.error("获取所有设置失败", ("error", e.message))
                     return Array<SystemSettingData>()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return Array<SystemSettingData>()
         }
     }
@@ -172,49 +135,18 @@ public class SystemSettingsDao {
      * 根据键获取设置
      */
     public static func getSetting(key: String): Option<SystemSettingData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "${SETTINGS_SELECT} WHERE key = $1"
+        let params: Array<Value> = [vtext(key)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, key, value, value_type, category, description,
-                               is_encrypted, created_at, updated_at
-                        FROM system_settings WHERE key = ?
-                    """)
-                    stmt.set(0, key)
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            let data = SystemSettingData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.key = rs.getOrNull<String>(1) ?? ""
-                            data.value = rs.getOrNull<String>(2) ?? ""
-                            data.valueType = rs.getOrNull<String>(3) ?? "string"
-                            data.category = rs.getOrNull<String>(4) ?? ""
-                            data.description = rs.getOrNull<String>(5) ?? ""
-                            data.isEncrypted = rs.getOrNull<Bool>(6) ?? false
-                            data.createdAt = rs.getOrNull<String>(7) ?? ""
-                            data.updatedAt = rs.getOrNull<String>(8) ?? ""
-                            return Option<SystemSettingData>.Some(data)
-                        }
-                        return Option<SystemSettingData>.None
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
+                    return db.rawOne<SystemSettingData>(sql, params, { row => readSettingFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("获取设置失败", ("key", key), ("error", e.message))
+                    logger.error("获取设置失败", ("key", key), ("error", e.message))
                     return Option<SystemSettingData>.None
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return Option<SystemSettingData>.None
         }
     }
@@ -225,36 +157,20 @@ public class SystemSettingsDao {
      * - system_settings 表不存在时静默回退
      */
     public static func getBootstrapValue(key: String): Option<String> {
-        let logger = getLogger("system_settings_dao")
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            SELECT value
+            FROM system_settings
+            WHERE key = $1
+            LIMIT 1
+        """
+        let params: Array<Value> = [vtext(key)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT value
-                        FROM system_settings
-                        WHERE key = ?
-                        LIMIT 1
-                    """)
-                    stmt.set(0, key)
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            let value = rs.getOrNull<String>(0) ?? ""
-                            return Some(value)
-                        }
-                        return None
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
+                    return db.rawOne<String>(sql, params, { r => r.getOrNullText(0) ?? "" })
                 } catch (e: Exception) {
                     logger.debug("启动阶段读取系统设置失败，回退到默认值", ("key", key), ("error", e.message))
                     return None
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (_: Exception) {}
                 }
             case None => return None
         }
@@ -264,59 +180,18 @@ public class SystemSettingsDao {
      * 根据分类获取设置
      */
     public static func getSettingsByCategory(category: String): Array<SystemSettingData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "${SETTINGS_SELECT} WHERE category = $1 ORDER BY key"
+        let params: Array<Value> = [vtext(category)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, key, value, value_type, category, description,
-                               is_encrypted, created_at, updated_at
-                        FROM system_settings WHERE category = ?
-                        ORDER BY key
-                    """)
-                    stmt.set(0, category)
-                    let rs = stmt.query()
-                    var settingsList = ArrayList<SystemSettingData>()
-                    try {
-                        while (rs.next()) {
-                            let data = SystemSettingData()
-                            data.id = rs.getOrNull<Int64>(0) ?? 0
-                            data.key = rs.getOrNull<String>(1) ?? ""
-                            data.value = rs.getOrNull<String>(2) ?? ""
-                            data.valueType = rs.getOrNull<String>(3) ?? "string"
-                            data.category = rs.getOrNull<String>(4) ?? ""
-                            data.description = rs.getOrNull<String>(5) ?? ""
-                            data.isEncrypted = rs.getOrNull<Bool>(6) ?? false
-                            data.createdAt = rs.getOrNull<String>(7) ?? ""
-                            data.updatedAt = rs.getOrNull<String>(8) ?? ""
-                            settingsList.add(data)
-                        }
-                        let size = settingsList.size
-                        if (size > 0) {
-                            var result = Array<SystemSettingData>(size, { _ => SystemSettingData() })
-                            for (i in 0..size) {
-                                result[i] = settingsList[i]
-                            }
-                            return result
-                        }
-                        return Array<SystemSettingData>()
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
+                    return db.raw<SystemSettingData>(sql, params, { row => readSettingFromRow(row) })
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("根据分类获取设置失败", ("category", category), ("error", e.message))
+                    logger.error("根据分类获取设置失败", ("category", category), ("error", e.message))
                     return Array<SystemSettingData>()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return Array<SystemSettingData>()
         }
     }
@@ -325,62 +200,50 @@ public class SystemSettingsDao {
      * 插入或更新设置
      */
     public static func upsertSetting(data: SystemSettingData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let updateSql = """
+            UPDATE system_settings
+            SET value = $1, value_type = $2, category = $3, description = $4::jsonb, is_encrypted = $5, updated_at = CURRENT_TIMESTAMP
+            WHERE key = $6
+        """
+        let updateParams: Array<Value> = [
+            vtext(data.value),
+            vtext(data.valueType),
+            vtext(data.category),
+            vjson(data.description),
+            vbool(data.isEncrypted),
+            vtext(data.key)
+        ]
+        let insertSql = """
+            INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
+            SELECT $1, $2, $3, $4, $5::jsonb, $6, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM system_settings WHERE key = $7
+            )
+        """
+        let insertParams: Array<Value> = [
+            vtext(data.key),
+            vtext(data.value),
+            vtext(data.valueType),
+            vtext(data.category),
+            vjson(data.description),
+            vbool(data.isEncrypted),
+            vtext(data.key)
+        ]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE system_settings
-                        SET value = ?, value_type = ?, category = ?, description = ?::jsonb, is_encrypted = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE key = ?
-                    """)
-                    try {
-                        updateStmt.set(0, data.value)
-                        updateStmt.set(1, data.valueType)
-                        updateStmt.set(2, data.category)
-                        updateStmt.set(3, data.description)
-                        updateStmt.set(4, data.isEncrypted)
-                        updateStmt.set(5, data.key)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            let insertStmt = conn.prepareStatement("""
-                                INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
-                                SELECT ?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP
-                                WHERE NOT EXISTS (
-                                    SELECT 1 FROM system_settings WHERE key = ?
-                                )
-                            """)
-                            try {
-                                insertStmt.set(0, data.key)
-                                insertStmt.set(1, data.value)
-                                insertStmt.set(2, data.valueType)
-                                insertStmt.set(3, data.category)
-                                insertStmt.set(4, data.description)
-                                insertStmt.set(5, data.isEncrypted)
-                                insertStmt.set(6, data.key)
-                                insertStmt.update()
-                            } finally {
-                                insertStmt.close()
-                            }
-                        }
-                    } finally {
-                        updateStmt.close()
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        db.execRaw(insertSql, insertParams)
                     }
-                    getLogger("system_settings_dao").info("更新设置", ("key", data.key))
+                    logger.info("更新设置", ("key", data.key))
                     return true
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("更新设置失败", ("key", data.key), ("error", e.message))
+                    logger.error("更新设置失败", ("key", data.key), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return false
         }
     }
@@ -389,61 +252,52 @@ public class SystemSettingsDao {
      * 批量插入或更新设置
      */
     public static func upsertSettings(settings: Array<SystemSettingData>): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let updateSql = """
+            UPDATE system_settings
+            SET value = $1, value_type = $2, category = $3, description = $4::jsonb, is_encrypted = $5, updated_at = CURRENT_TIMESTAMP
+            WHERE key = $6
+        """
+        let insertSql = """
+            INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
+            SELECT $1, $2, $3, $4, $5::jsonb, $6, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM system_settings WHERE key = $7
+            )
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE system_settings
-                        SET value = ?, value_type = ?, category = ?, description = ?::jsonb, is_encrypted = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE key = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
-                        SELECT ?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM system_settings WHERE key = ?
-                        )
-                    """)
-                    try {
-                        for (data in settings) {
-                            updateStmt.set(0, data.value)
-                            updateStmt.set(1, data.valueType)
-                            updateStmt.set(2, data.category)
-                            updateStmt.set(3, data.description)
-                            updateStmt.set(4, data.isEncrypted)
-                            updateStmt.set(5, data.key)
-                            let updated = updateStmt.update()
-                            if (updated.rowCount <= 0) {
-                                insertStmt.set(0, data.key)
-                                insertStmt.set(1, data.value)
-                                insertStmt.set(2, data.valueType)
-                                insertStmt.set(3, data.category)
-                                insertStmt.set(4, data.description)
-                                insertStmt.set(5, data.isEncrypted)
-                                insertStmt.set(6, data.key)
-                                insertStmt.update()
-                            }
+                    for (data in settings) {
+                        let updateParams: Array<Value> = [
+                            vtext(data.value),
+                            vtext(data.valueType),
+                            vtext(data.category),
+                            vjson(data.description),
+                            vbool(data.isEncrypted),
+                            vtext(data.key)
+                        ]
+                        let updated = db.execRaw(updateSql, updateParams)
+                        if (updated <= 0) {
+                            let insertParams: Array<Value> = [
+                                vtext(data.key),
+                                vtext(data.value),
+                                vtext(data.valueType),
+                                vtext(data.category),
+                                vjson(data.description),
+                                vbool(data.isEncrypted),
+                                vtext(data.key)
+                            ]
+                            db.execRaw(insertSql, insertParams)
                         }
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
                     }
-                    getLogger("system_settings_dao").info("批量更新设置", ("count", settings.size.toString()))
+                    logger.info("批量更新设置", ("count", settings.size.toString()))
                     return true
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("批量更新设置失败", ("error", e.message))
+                    logger.error("批量更新设置失败", ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return false
         }
     }
@@ -452,29 +306,20 @@ public class SystemSettingsDao {
      * 删除设置
      */
     public static func deleteSetting(key: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM system_settings WHERE key = $1"
+        let params: Array<Value> = [vtext(key)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM system_settings WHERE key = ?")
-                    stmt.set(0, key)
-                    stmt.update()
-                    stmt.close()
-                    getLogger("system_settings_dao").info("删除设置", ("key", key))
+                    db.execRaw(sql, params)
+                    logger.info("删除设置", ("key", key))
                     return true
                 } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("删除设置失败", ("key", key), ("error", e.message))
+                    logger.error("删除设置失败", ("key", key), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return false
         }
     }
@@ -483,36 +328,22 @@ public class SystemSettingsDao {
      * 检查设置是否存在
      */
     public static func settingExists(key: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT COUNT(*) FROM system_settings WHERE key = $1"
+        let params: Array<Value> = [vtext(key)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM system_settings WHERE key = ?")
-                    stmt.set(0, key)
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            let count = rs.getOrNull<Int32>(0) ?? 0
-                            return count > 0
-                        }
-                        return false
-                    } finally {
-                        rs.close()
-                        stmt.close()
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (rows.size > 0) {
+                        return rows[0] > 0
                     }
-                } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("检查设置存在性失败", ("key", key), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
+                } catch (e: Exception) {
+                    logger.error("检查设置存在性失败", ("key", key), ("error", e.message))
+                    return false
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return false
         }
     }
@@ -521,34 +352,21 @@ public class SystemSettingsDao {
      * 获取设置数量
      */
     public static func getSettingCount(): Int32 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT COUNT(*) FROM system_settings"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM system_settings")
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            return rs.getOrNull<Int32>(0) ?? 0
-                        }
-                        return 0
-                    } finally {
-                        rs.close()
-                        stmt.close()
+                    let rows = db.raw<Int64>(sql, [], { r => r.getOrNullInt64(0) ?? 0 })
+                    if (rows.size > 0) {
+                        return Int32(rows[0])
                     }
-                } catch (e: Exception) {
-                    getLogger("system_settings_dao").error("获取设置数量失败", ("error", e.message))
                     return 0
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        getLogger("system_settings_dao").warn("关闭Connection失败: ${closeError.message}")
-                    }
+                } catch (e: Exception) {
+                    logger.error("获取设置数量失败", ("error", e.message))
+                    return 0
                 }
             case None =>
-                getLogger("system_settings_dao").error("无法创建数据库连接")
+                logger.error("无法创建数据库连接")
                 return 0
         }
     }

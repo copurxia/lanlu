@@ -1,9 +1,9 @@
 package lanlu.contexts.task.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
-import std.collection.*
 import stdx.log.*
 
 /**
@@ -42,28 +42,29 @@ public class ScheduledTaskData {
  */
 public class ScheduledTaskDao {
 
+    private static let SELECT_COLUMNS = """
+        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
+               priority, timeout_seconds,
+               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+               run_count, success_count, failure_count,
+               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+               created_by, updated_by
+        FROM scheduled_tasks
+    """
+
     /**
      * 创建定时任务表
      */
     public static func createTable(): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 检查表是否存在
-                    let checkTable = conn.prepareStatement("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scheduled_tasks')")
-                    let rs = checkTable.query()
-                    var tableExists = false
-                    try {
-                        if (rs.next()) {
-                            tableExists = rs.getOrNull<Bool>(0) ?? false
-                        }
-                    } finally {
-                        rs.close()
-                        checkTable.close()
-                    }
+                    let checkSql = "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scheduled_tasks')"
+                    let tableExists = db.rawOne<Bool>(checkSql, [], { r => r.getOrNullBool(0) ?? false }) ?? false
 
                     if (!tableExists) {
                         logger.debug("scheduled_tasks表不存在，创建新表")
@@ -93,14 +94,11 @@ public class ScheduledTaskDao {
                                 updated_by VARCHAR(100)
                             )
                         """
-
-                        let stmt = conn.prepareStatement(createTableSql)
-                        stmt.update()
-                        stmt.close()
+                        db.execRawSql(createTableSql)
                         logger.debug("scheduled_tasks表创建成功")
 
                         // 创建索引
-                        createIndexes(conn)
+                        createIndexes(db)
                     } else {
                         logger.debug("scheduled_tasks表已存在，跳过创建")
                     }
@@ -108,12 +106,6 @@ public class ScheduledTaskDao {
                 } catch (e: Exception) {
                     logger.error("创建scheduled_tasks表失败", ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -121,7 +113,7 @@ public class ScheduledTaskDao {
         }
     }
 
-    private static func createIndexes(conn: Connection): Unit {
+    private static func createIndexes(db: Database): Unit {
         let logger = getLogger("scheduled_task_dao")
         let indexes = [
             ("idx_scheduled_tasks_enabled_next_run", "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled_next_run ON scheduled_tasks (enabled, next_run_at)"),
@@ -131,9 +123,7 @@ public class ScheduledTaskDao {
 
         for ((name, sql) in indexes) {
             try {
-                let stmt = conn.prepareStatement(sql)
-                stmt.update()
-                stmt.close()
+                db.execRawSql(sql)
                 logger.debug("索引创建成功", ("index", name))
             } catch (e: Exception) {
                 logger.warn("创建索引失败", ("index", name), ("error", e.message))
@@ -146,78 +136,44 @@ public class ScheduledTaskDao {
      */
     public static func create(data: ScheduledTaskData): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [
+            vtext(data.name),
+            vtext(data.cronExpression),
+            vtext(data.taskType),
+            if (data.taskParameters.size > 0) { vtext(data.taskParameters) } else { vnull() },
+            vbool(data.enabled),
+            vint(Int64(data.priority)),
+            vint(Int64(data.timeoutSeconds)),
+            if (data.nextRunAt.size > 0) { vtext(data.nextRunAt) } else { vnull() },
+            vtext(data.createdAt),
+            vtext(data.updatedAt),
+            if (data.createdBy.size > 0) { vtext(data.createdBy) } else { vnull() },
+            if (data.updatedBy.size > 0) { vtext(data.updatedBy) } else { vnull() }
+        ]
+        let sql = """
+            INSERT INTO scheduled_tasks (
+                name, cron_expression, task_type, task_parameters, enabled,
+                priority, timeout_seconds, next_run_at,
+                created_at, updated_at, created_by, updated_by
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO scheduled_tasks (
-                            name, cron_expression, task_type, task_parameters, enabled,
-                            priority, timeout_seconds, next_run_at,
-                            created_at, updated_at, created_by, updated_by
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        RETURNING id
-                    """)
-                    try {
-                        stmt.set(0, data.name)
-                        stmt.set(1, data.cronExpression)
-                        stmt.set(2, data.taskType)
-                        if (data.taskParameters.size > 0) {
-                            stmt.set(3, data.taskParameters)
-                        } else {
-                            stmt.setNull(3)
-                        }
-                        stmt.set(4, data.enabled)
-                        stmt.set(5, data.priority)
-                        stmt.set(6, data.timeoutSeconds)
-                        if (data.nextRunAt.size > 0) {
-                            stmt.set(7, data.nextRunAt)
-                        } else {
-                            stmt.setNull(7)
-                        }
-                        stmt.set(8, data.createdAt)
-                        stmt.set(9, data.updatedAt)
-                        if (data.createdBy.size > 0) {
-                            stmt.set(10, data.createdBy)
-                        } else {
-                            stmt.setNull(10)
-                        }
-                        if (data.updatedBy.size > 0) {
-                            stmt.set(11, data.updatedBy)
-                        } else {
-                            stmt.setNull(11)
-                        }
-
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                data.id = rs.getOrNull<Int64>(0) ?? 0
-                                logger.debug("创建定时任务成功", ("id", data.id.toString()), ("name", data.name))
-                                return true
-                            } else {
-                                logger.error("获取自增ID失败")
-                                return false
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        try {
-                            stmt.close()
-                        } catch (closeError: Exception) {
-                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
-                        }
+                    let idOpt = db.rawOne<Int64>(sql, params, { r => r.getInt64(0) })
+                    match (idOpt) {
+                        case Some(id) =>
+                            data.id = id
+                            logger.debug("创建定时任务成功", ("id", data.id.toString()), ("name", data.name))
+                            return true
+                        case None =>
+                            logger.error("获取自增ID失败")
+                            return false
                     }
                 } catch (e: Exception) {
                     logger.error("创建定时任务失败", ("name", data.name), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -230,47 +186,19 @@ public class ScheduledTaskDao {
      */
     public static func getById(id: Int64): ScheduledTaskData {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "${SELECT_COLUMNS} WHERE id = $1"
+        let params: Array<Value> = [vint(id)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
-                               priority, timeout_seconds,
-                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
-                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               run_count, success_count, failure_count,
-                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               created_by, updated_by
-                        FROM scheduled_tasks WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, id)
-                        let rs = stmt.query()
-
-                        try {
-                            if (rs.next()) {
-                                return mapResultSetToData(rs)
-                            } else {
-                                return ScheduledTaskData()
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<ScheduledTaskData>(sql, params, { row => mapRowToData(row) })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
+                    return ScheduledTaskData()
                 } catch (e: Exception) {
                     logger.error("查询定时任务失败", ("id", id), ("error", e.message))
                     return ScheduledTaskData()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -286,48 +214,24 @@ public class ScheduledTaskDao {
         let trimmed = name.trimAscii()
         if (trimmed.size == 0) { return ScheduledTaskData() }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = """
+            ${SELECT_COLUMNS}
+            WHERE name = $1
+            ORDER BY id ASC
+            LIMIT 1
+        """
+        let params: Array<Value> = [vtext(trimmed)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
-                               priority, timeout_seconds,
-                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
-                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               run_count, success_count, failure_count,
-                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               created_by, updated_by
-                        FROM scheduled_tasks
-                        WHERE name = ?
-                        ORDER BY id ASC
-                        LIMIT 1
-                    """)
-                    try {
-                        stmt.set(0, trimmed)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return mapResultSetToData(rs)
-                            } else {
-                                return ScheduledTaskData()
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<ScheduledTaskData>(sql, params, { row => mapRowToData(row) })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
+                    return ScheduledTaskData()
                 } catch (e: Exception) {
                     logger.error("按名称查询定时任务失败", ("name", trimmed), ("error", e.message))
                     return ScheduledTaskData()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -340,39 +244,18 @@ public class ScheduledTaskDao {
      */
     public static func getEnabledTasks(): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            ${SELECT_COLUMNS}
+            WHERE enabled = TRUE
+            ORDER BY priority ASC, id ASC
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
-                               priority, timeout_seconds,
-                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
-                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               run_count, success_count, failure_count,
-                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               created_by, updated_by
-                        FROM scheduled_tasks
-                        WHERE enabled = TRUE
-                        ORDER BY priority ASC, id ASC
-                    """)
-                    try {
-                        let rs = stmt.query()
-                        return collectTasks(rs)
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.raw<ScheduledTaskData>(sql, [], { row => mapRowToData(row) })
                 } catch (e: Exception) {
                     logger.error("查询启用的定时任务失败", ("error", e.message))
                     return Array<ScheduledTaskData>()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -385,42 +268,21 @@ public class ScheduledTaskDao {
      */
     public static func getDueTasks(): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            ${SELECT_COLUMNS}
+            WHERE enabled = TRUE
+              AND next_run_at IS NOT NULL
+              AND next_run_at <= NOW()
+            ORDER BY scheduled_tasks.next_run_at ASC, priority ASC
+            LIMIT 100
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
-                               priority, timeout_seconds,
-                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
-                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               run_count, success_count, failure_count,
-                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               created_by, updated_by
-                        FROM scheduled_tasks
-                        WHERE enabled = TRUE
-                          AND next_run_at IS NOT NULL
-                          AND next_run_at <= NOW()
-                        ORDER BY scheduled_tasks.next_run_at ASC, priority ASC
-                        LIMIT 100
-                    """)
-                    try {
-                        let rs = stmt.query()
-                        return collectTasks(rs)
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.raw<ScheduledTaskData>(sql, [], { row => mapRowToData(row) })
                 } catch (e: Exception) {
                     logger.error("查询到期定时任务失败", ("error", e.message))
                     return Array<ScheduledTaskData>()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -433,41 +295,19 @@ public class ScheduledTaskDao {
      */
     public static func getWithPagination(offset: Int32, limit: Int32): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            ${SELECT_COLUMNS}
+            ORDER BY id DESC
+            LIMIT $1 OFFSET $2
+        """
+        let params: Array<Value> = [vint(Int64(limit)), vint(Int64(offset))]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
-                               priority, timeout_seconds,
-                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
-                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               run_count, success_count, failure_count,
-                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
-                               created_by, updated_by
-                        FROM scheduled_tasks
-                        ORDER BY id DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                    try {
-                        stmt.set(0, limit)
-                        stmt.set(1, offset)
-                        let rs = stmt.query()
-                        return collectTasks(rs)
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.raw<ScheduledTaskData>(sql, params, { row => mapRowToData(row) })
                 } catch (e: Exception) {
                     logger.error("分页查询定时任务失败", ("error", e.message))
                     return Array<ScheduledTaskData>()
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -480,33 +320,15 @@ public class ScheduledTaskDao {
      */
     public static func getCount(): Int32 {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT COUNT(*) FROM scheduled_tasks"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM scheduled_tasks")
-                    let rs = stmt.query()
-
-                    try {
-                        if (rs.next()) {
-                            return rs.getOrNull<Int32>(0) ?? 0
-                        } else {
-                            return 0
-                        }
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
+                    let count = db.rawOne<Int64>(sql, [], { r => r.getOrNullInt64(0) ?? 0 }) ?? 0
+                    return Int32(count)
                 } catch (e: Exception) {
                     logger.error("获取定时任务总数失败", ("error", e.message))
                     return 0
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -519,58 +341,35 @@ public class ScheduledTaskDao {
      */
     public static func update(data: ScheduledTaskData): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let params: Array<Value> = [
+            vtext(data.name),
+            vtext(data.cronExpression),
+            vtext(data.taskType),
+            if (data.taskParameters.size > 0) { vtext(data.taskParameters) } else { vnull() },
+            vbool(data.enabled),
+            vint(Int64(data.priority)),
+            vint(Int64(data.timeoutSeconds)),
+            if (data.nextRunAt.size > 0) { vtext(data.nextRunAt) } else { vnull() },
+            vtext(data.updatedAt),
+            if (data.updatedBy.size > 0) { vtext(data.updatedBy) } else { vnull() },
+            vint(data.id)
+        ]
+        let sql = """
+            UPDATE scheduled_tasks SET
+                name = $1, cron_expression = $2, task_type = $3, task_parameters = $4,
+                enabled = $5, priority = $6, timeout_seconds = $7,
+                next_run_at = $8, updated_at = $9, updated_by = $10
+            WHERE id = $11
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE scheduled_tasks SET
-                            name = ?, cron_expression = ?, task_type = ?, task_parameters = ?,
-                            enabled = ?, priority = ?, timeout_seconds = ?,
-                            next_run_at = ?, updated_at = ?, updated_by = ?
-                        WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, data.name)
-                        stmt.set(1, data.cronExpression)
-                        stmt.set(2, data.taskType)
-                        if (data.taskParameters.size > 0) {
-                            stmt.set(3, data.taskParameters)
-                        } else {
-                            stmt.setNull(3)
-                        }
-                        stmt.set(4, data.enabled)
-                        stmt.set(5, data.priority)
-                        stmt.set(6, data.timeoutSeconds)
-                        if (data.nextRunAt.size > 0) {
-                            stmt.set(7, data.nextRunAt)
-                        } else {
-                            stmt.setNull(7)
-                        }
-                        stmt.set(8, data.updatedAt)
-                        if (data.updatedBy.size > 0) {
-                            stmt.set(9, data.updatedBy)
-                        } else {
-                            stmt.setNull(9)
-                        }
-                        stmt.set(10, data.id)
-
-                        stmt.update()
-                        logger.debug("更新定时任务成功", ("id", data.id))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    logger.debug("更新定时任务成功", ("id", data.id))
+                    return true
                 } catch (e: Exception) {
                     logger.error("更新定时任务失败", ("id", data.id), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -583,29 +382,17 @@ public class ScheduledTaskDao {
      */
     public static func delete(id: Int64): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM scheduled_tasks WHERE id = $1"
+        let params: Array<Value> = [vint(id)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM scheduled_tasks WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        stmt.update()
-                        logger.debug("删除定时任务成功", ("id", id))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    logger.debug("删除定时任务成功", ("id", id))
+                    return true
                 } catch (e: Exception) {
                     logger.error("删除定时任务失败", ("id", id), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -621,31 +408,20 @@ public class ScheduledTaskDao {
         let trimmed = name.trimAscii()
         if (trimmed.size == 0) { return false }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = "DELETE FROM scheduled_tasks WHERE name = $1"
+        let params: Array<Value> = [vtext(trimmed)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM scheduled_tasks WHERE name = ?")
-                    try {
-                        stmt.set(0, trimmed)
-                        let affected = stmt.update()
-                        if (affected.rowCount > 0) {
-                            logger.debug("按名称删除定时任务成功", [("name", trimmed), ("affected", affected.rowCount.toString())])
-                            return true
-                        }
-                        return false
-                    } finally {
-                        stmt.close()
+                    let affected = db.execRaw(sql, params)
+                    if (affected > 0) {
+                        logger.debug("按名称删除定时任务成功", [("name", trimmed), ("affected", affected.toString())])
+                        return true
                     }
+                    return false
                 } catch (e: Exception) {
                     logger.error("按名称删除定时任务失败", ("name", trimmed), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -658,33 +434,20 @@ public class ScheduledTaskDao {
      */
     public static func setEnabled(id: Int64, enabled: Bool): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            UPDATE scheduled_tasks SET enabled = $1, updated_at = NOW()
+            WHERE id = $2
+        """
+        let params: Array<Value> = [vbool(enabled), vint(id)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE scheduled_tasks SET enabled = ?, updated_at = NOW()
-                        WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, enabled)
-                        stmt.set(1, id)
-                        stmt.update()
-                        logger.debug("更新定时任务启用状态", ("id", id), ("enabled", enabled.toString()))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    logger.debug("更新定时任务启用状态", ("id", id), ("enabled", enabled.toString()))
+                    return true
                 } catch (e: Exception) {
                     logger.error("更新定时任务启用状态失败", ("id", id), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -697,52 +460,37 @@ public class ScheduledTaskDao {
      */
     public static func updateRunResult(id: Int64, success: Bool, errorMessage: String): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let status = if (success) { "success" } else { "failed" }
+        let successIncrement = if (success) { 1 } else { 0 }
+        let failureIncrement = if (success) { 0 } else { 1 }
+
+        let params: Array<Value> = [
+            vtext(status),
+            if (errorMessage.size > 0) { vtext(errorMessage) } else { vnull() },
+            vint(Int64(successIncrement)),
+            vint(Int64(failureIncrement)),
+            vint(id)
+        ]
+        let sql = """
+            UPDATE scheduled_tasks SET
+                last_run_at = NOW(),
+                last_run_status = $1,
+                last_error = $2,
+                run_count = run_count + 1,
+                success_count = success_count + $3,
+                failure_count = failure_count + $4,
+                updated_at = NOW()
+            WHERE id = $5
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let status = if (success) { "success" } else { "failed" }
-                    let successIncrement = if (success) { 1 } else { 0 }
-                    let failureIncrement = if (success) { 0 } else { 1 }
-
-                    let stmt = conn.prepareStatement("""
-                        UPDATE scheduled_tasks SET
-                            last_run_at = NOW(),
-                            last_run_status = ?,
-                            last_error = ?,
-                            run_count = run_count + 1,
-                            success_count = success_count + ?,
-                            failure_count = failure_count + ?,
-                            updated_at = NOW()
-                        WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, status)
-                        if (errorMessage.size > 0) {
-                            stmt.set(1, errorMessage)
-                        } else {
-                            stmt.setNull(1)
-                        }
-                        stmt.set(2, successIncrement)
-                        stmt.set(3, failureIncrement)
-                        stmt.set(4, id)
-
-                        stmt.update()
-                        logger.debug("更新定时任务执行结果", ("id", id), ("success", success.toString()))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    logger.debug("更新定时任务执行结果", ("id", id), ("success", success.toString()))
+                    return true
                 } catch (e: Exception) {
                     logger.error("更新定时任务执行结果失败", ("id", id), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -755,38 +503,23 @@ public class ScheduledTaskDao {
      */
     public static func updateNextRunAt(id: Int64, nextRunAt: String): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            UPDATE scheduled_tasks SET next_run_at = $1, updated_at = NOW()
+            WHERE id = $2
+        """
+        let params: Array<Value> = [
+            if (nextRunAt.size > 0) { vtext(nextRunAt) } else { vnull() },
+            vint(id)
+        ]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE scheduled_tasks SET next_run_at = ?, updated_at = NOW()
-                        WHERE id = ?
-                    """)
-                    try {
-                        if (nextRunAt.size > 0) {
-                            stmt.set(0, nextRunAt)
-                        } else {
-                            stmt.setNull(0)
-                        }
-                        stmt.set(1, id)
-
-                        stmt.update()
-                        logger.debug("更新下次执行时间", ("id", id), ("next_run_at", nextRunAt))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    logger.debug("更新下次执行时间", ("id", id), ("next_run_at", nextRunAt))
+                    return true
                 } catch (e: Exception) {
                     logger.error("更新下次执行时间失败", ("id", id), ("error", e.message))
                     return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -795,61 +528,29 @@ public class ScheduledTaskDao {
     }
 
     /**
-     * 从ResultSet映射到ScheduledTaskData
+     * 从Row映射到ScheduledTaskData
      */
-    private static func mapResultSetToData(rs: QueryResult): ScheduledTaskData {
+    private static func mapRowToData(row: Row): ScheduledTaskData {
         let data = ScheduledTaskData()
-        data.id = rs.getOrNull<Int64>(0) ?? 0
-        data.name = rs.getOrNull<String>(1) ?? ""
-        data.cronExpression = rs.getOrNull<String>(2) ?? ""
-        data.taskType = rs.getOrNull<String>(3) ?? ""
-        data.taskParameters = rs.getOrNull<String>(4) ?? ""
-        data.enabled = rs.getOrNull<Bool>(5) ?? true
-        data.priority = rs.getOrNull<Int32>(6) ?? 50
-        data.timeoutSeconds = rs.getOrNull<Int32>(7) ?? 3600
-        data.lastRunAt = rs.getOrNull<String>(8) ?? ""
-        data.lastRunStatus = rs.getOrNull<String>(9) ?? ""
-        data.lastError = rs.getOrNull<String>(10) ?? ""
-        data.nextRunAt = rs.getOrNull<String>(11) ?? ""
-        data.runCount = rs.getOrNull<Int32>(12) ?? 0
-        data.successCount = rs.getOrNull<Int32>(13) ?? 0
-        data.failureCount = rs.getOrNull<Int32>(14) ?? 0
-        data.createdAt = rs.getOrNull<String>(15) ?? ""
-        data.updatedAt = rs.getOrNull<String>(16) ?? ""
-        data.createdBy = rs.getOrNull<String>(17) ?? ""
-        data.updatedBy = rs.getOrNull<String>(18) ?? ""
+        data.id = row.getOrNullInt64(0) ?? 0
+        data.name = row.getOrNullText(1) ?? ""
+        data.cronExpression = row.getOrNullText(2) ?? ""
+        data.taskType = row.getOrNullText(3) ?? ""
+        data.taskParameters = row.getOrNullText(4) ?? ""
+        data.enabled = row.getOrNullBool(5) ?? true
+        data.priority = row.getOrNullInt32(6) ?? 50
+        data.timeoutSeconds = row.getOrNullInt32(7) ?? 3600
+        data.lastRunAt = row.getOrNullText(8) ?? ""
+        data.lastRunStatus = row.getOrNullText(9) ?? ""
+        data.lastError = row.getOrNullText(10) ?? ""
+        data.nextRunAt = row.getOrNullText(11) ?? ""
+        data.runCount = row.getOrNullInt32(12) ?? 0
+        data.successCount = row.getOrNullInt32(13) ?? 0
+        data.failureCount = row.getOrNullInt32(14) ?? 0
+        data.createdAt = row.getOrNullText(15) ?? ""
+        data.updatedAt = row.getOrNullText(16) ?? ""
+        data.createdBy = row.getOrNullText(17) ?? ""
+        data.updatedBy = row.getOrNullText(18) ?? ""
         return data
-    }
-
-    /**
-     * 收集ResultSet中的所有任务
-     */
-    private static func collectTasks(rs: QueryResult): Array<ScheduledTaskData> {
-        let logger = getLogger("scheduled_task_dao")
-        var taskList = ArrayList<ScheduledTaskData>()
-        try {
-            while (rs.next()) {
-                taskList.add(mapResultSetToData(rs))
-            }
-            let size = taskList.size
-            if (size > 0) {
-                var result = Array<ScheduledTaskData>(size, { _ => ScheduledTaskData() })
-                for (i in 0..size) {
-                    result[i] = taskList[i]
-                }
-                return result
-            } else {
-                return Array<ScheduledTaskData>()
-            }
-        } catch (e: Exception) {
-            logger.error("收集任务结果失败", ("error", e.message))
-            return Array<ScheduledTaskData>()
-        } finally {
-            try {
-                rs.close()
-            } catch (closeError: Exception) {
-                logger.warn("关闭ResultSet失败: ${closeError.message}")
-            }
-        }
     }
 }

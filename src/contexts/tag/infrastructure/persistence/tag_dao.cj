@@ -1,6 +1,7 @@
 package lanlu.contexts.tag.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.kv.*
@@ -89,45 +90,35 @@ public class TagDao {
     private static let logger = getLogger("tag_dao")
     private static let translationSearchCacheTtlSeconds: Int64 = 6 * 60 * 60
 
-    private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
-        let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
+    private static func extensionInstalled(db: Database, extensionName: String): Bool {
         try {
-            stmt.set(0, extensionName)
-            let rs = stmt.query()
-            try {
-                return rs.next()
-            } finally {
-                rs.close()
-            }
+            return db.rawOne<Int64>(
+                "SELECT 1 FROM pg_extension WHERE extname = $1 LIMIT 1",
+                [vtext(extensionName)],
+                { row => row.getInt64(0) }
+            ).isSome()
         } catch (_: Exception) {
             return false
-        } finally {
-            stmt.close()
         }
     }
 
-    private static func functionExists(conn: Connection, functionName: String): Bool {
-        let stmt = conn.prepareStatement("SELECT 1 FROM pg_proc WHERE proname = ? LIMIT 1")
+    private static func functionExists(db: Database, functionName: String): Bool {
         try {
-            stmt.set(0, functionName)
-            let rs = stmt.query()
-            try {
-                return rs.next()
-            } finally {
-                rs.close()
-            }
+            return db.rawOne<Int64>(
+                "SELECT 1 FROM pg_proc WHERE proname = $1 LIMIT 1",
+                [vtext(functionName)],
+                { row => row.getInt64(0) }
+            ).isSome()
         } catch (_: Exception) {
             return false
-        } finally {
-            stmt.close()
         }
     }
 
-    private static func getUnaccentFunction(conn: Connection): String {
-        if (functionExists(conn, "lanlu_immutable_unaccent")) {
+    private static func getUnaccentFunction(db: Database): String {
+        if (functionExists(db, "lanlu_immutable_unaccent")) {
             return "lanlu_immutable_unaccent"
         }
-        if (extensionInstalled(conn, "unaccent")) {
+        if (extensionInstalled(db, "unaccent")) {
             return "unaccent"
         }
         return ""
@@ -210,14 +201,14 @@ public class TagDao {
      * 根据 namespace 和 name 获取或创建标签
      */
     public static func getOrCreate(namespace: String, name: String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => return 0
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    return getOrCreateTagInternal(conn, namespace, name)
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    return getOrCreateTagInternal(db, namespace, name)
+                } catch (e: Exception) {
+                    logger.error("getOrCreate failed", ("error", e.message), ("namespace", namespace), ("name", name))
+                    return 0
                 }
         }
     }
@@ -225,56 +216,33 @@ public class TagDao {
     /**
      * 内部方法：获取或创建标签（使用已有连接）
      */
-    private static func getOrCreateTagInternal(conn: Connection, namespace: String, name: String): Int64 {
-        let stmt = conn.prepareStatement("SELECT id FROM tags WHERE namespace = ? AND name = ? LIMIT 1")
-        try {
-            stmt.set(0, namespace)
-            stmt.set(1, name)
-            let result = stmt.query()
-            try {
-                if (result.next()) {
-                    return result.getOrNull<Int64>(0) ?? 0
-                }
-            } finally {
-                result.close()
-            }
-        } finally {
-            stmt.close()
+    private static func getOrCreateTagInternal(db: Database, namespace: String, name: String): Int64 {
+        let selectSql = "SELECT id FROM tags WHERE namespace = $1 AND name = $2 LIMIT 1"
+        let selectParams: Array<Value> = [vtext(namespace), vtext(name)]
+        match (db.rawOne<Int64>(selectSql, selectParams, { row => row.getInt64(0) })) {
+            case Some(id) => return id
+            case None => ()
         }
 
-        let insertStmt = conn.prepareStatement("""
+        let insertSql = """
             INSERT INTO tags (namespace, name)
-            SELECT ?, ?
+            SELECT $1, $2
             WHERE NOT EXISTS (
-                SELECT 1 FROM tags WHERE namespace = ? AND name = ?
+                SELECT 1 FROM tags WHERE namespace = $3 AND name = $4
             )
-        """)
+        """
+        let insertParams: Array<Value> = [vtext(namespace), vtext(name), vtext(namespace), vtext(name)]
         try {
-            insertStmt.set(0, namespace)
-            insertStmt.set(1, name)
-            insertStmt.set(2, namespace)
-            insertStmt.set(3, name)
-            insertStmt.update()
+            db.execRaw(insertSql, insertParams)
         } catch (_: Exception) {
             // Concurrent inserts may race; reload the row below.
-        } finally {
-            insertStmt.close()
         }
 
-        let reloadStmt = conn.prepareStatement("SELECT id FROM tags WHERE namespace = ? AND name = ? LIMIT 1")
-        try {
-            reloadStmt.set(0, namespace)
-            reloadStmt.set(1, name)
-            let result = reloadStmt.query()
-            try {
-                if (result.next()) {
-                    return result.getOrNull<Int64>(0) ?? 0
-                }
-            } finally {
-                result.close()
-            }
-        } finally {
-            reloadStmt.close()
+        let reloadSql = "SELECT id FROM tags WHERE namespace = $1 AND name = $2 LIMIT 1"
+        let reloadParams: Array<Value> = [vtext(namespace), vtext(name)]
+        match (db.rawOne<Int64>(reloadSql, reloadParams, { row => row.getInt64(0) })) {
+            case Some(id) => return id
+            case None => ()
         }
 
         0
@@ -283,7 +251,7 @@ public class TagDao {
     /**
      * 在指定连接中补齐 tags 字典记录，不修改 metadata_tags。
      */
-    public static func ensureTagDictionaryEntriesWithConnection(conn: Connection, tags: Array<String>): Bool {
+    public static func ensureTagDictionaryEntriesWithConnection(db: Database, tags: Array<String>): Bool {
         let normalizedTags = normalizeTags(tags)
         try {
             for (tag in normalizedTags) {
@@ -293,7 +261,7 @@ public class TagDao {
                 if (name.size == 0) {
                     continue
                 }
-                let tagId = getOrCreateTagInternal(conn, namespace, name)
+                let tagId = getOrCreateTagInternal(db, namespace, name)
                 if (tagId <= 0) {
                     logger.error("Failed to ensure tag dictionary entry", ("tag", tag))
                     return false
@@ -310,14 +278,14 @@ public class TagDao {
      * 补齐 tags 字典记录，不修改 metadata_tags。
      */
     public static func ensureTagDictionaryEntries(tags: Array<String>): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => return false
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    return ensureTagDictionaryEntriesWithConnection(conn, tags)
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    return ensureTagDictionaryEntriesWithConnection(db, tags)
+                } catch (e: Exception) {
+                    logger.error("ensureTagDictionaryEntries failed", ("error", e.message))
+                    return false
                 }
         }
     }
@@ -329,35 +297,25 @@ public class TagDao {
      * @return 是否更新成功
      */
     public static func updateArchiveTags(archiveId: String, tagsString: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => false
-            case Some(conn) =>
+            case Some(db) =>
                 try {
                     // Ensure archive root metadata exists and resolve metadata id.
                     var metadataId: Int64 = 0
-                    let getMetadataStmt = conn.prepareStatement("""
+                    let getMetadataSql = """
                         SELECT id
                         FROM metadata_objects
-                        WHERE entity_type = 'archive' AND entity_id = ?
+                        WHERE entity_type = 'archive' AND entity_id = $1
                         LIMIT 1
-                    """)
-                    try {
-                        getMetadataStmt.set(0, archiveId)
-                        let rs = getMetadataStmt.query()
-                        try {
-                            if (rs.next()) {
-                                metadataId = rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        getMetadataStmt.close()
+                    """
+                    match (db.rawOne<Int64>(getMetadataSql, [vtext(archiveId)], { row => row.getInt64(0) })) {
+                        case Some(id) => metadataId = id
+                        case None => ()
                     }
 
                     if (metadataId <= 0) {
-                        let createMetadataStmt = conn.prepareStatement("""
+                        let createMetadataSql = """
                             INSERT INTO metadata_objects (
                                 entity_type, entity_id, title, description, created_at, updated_at
                             )
@@ -369,21 +327,12 @@ public class TagDao {
                                 CURRENT_TIMESTAMP,
                                 CURRENT_TIMESTAMP
                             FROM archives a
-                            WHERE a.arcid = ?
+                            WHERE a.arcid = $1
                             RETURNING id
-                        """)
-                        try {
-                            createMetadataStmt.set(0, archiveId)
-                            let rs = createMetadataStmt.query()
-                            try {
-                                if (rs.next()) {
-                                    metadataId = rs.getOrNull<Int64>(0) ?? 0
-                                }
-                            } finally {
-                                rs.close()
-                            }
-                        } finally {
-                            createMetadataStmt.close()
+                        """
+                        match (db.rawOne<Int64>(createMetadataSql, [vtext(archiveId)], { r => r.getInt64(0) })) {
+                            case Some(id) => metadataId = id
+                            case None => ()
                         }
                     }
                     if (metadataId <= 0) {
@@ -391,23 +340,11 @@ public class TagDao {
                     }
 
                     // Delete existing tags for this archive metadata object.
-                    let deleteStmt = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id = ?")
-                    try {
-                        deleteStmt.set(0, metadataId)
-                        deleteStmt.update()
-                    } finally {
-                        deleteStmt.close()
-                    }
+                    db.execRaw("DELETE FROM metadata_tags WHERE metadata_id = $1", [vint(metadataId)])
 
                     // 如果标签字符串为空，直接返回
                     if (tagsString.size == 0 || tagsString == "") {
-                        let touchStmt = conn.prepareStatement("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                        try {
-                            touchStmt.set(0, metadataId)
-                            touchStmt.update()
-                        } finally {
-                            touchStmt.close()
-                        }
+                        db.execRaw("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = $1", [vint(metadataId)])
                         let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("updateArchiveTags:${archiveId}")
                         return true
                     }
@@ -415,7 +352,7 @@ public class TagDao {
                     // 解析标签字符串
                     let tags = normalizeTags(parseTagsString(tagsString).toArray())
 
-                    if (!ensureTagDictionaryEntriesWithConnection(conn, tags)) {
+                    if (!ensureTagDictionaryEntriesWithConnection(db, tags)) {
                         return false
                     }
 
@@ -428,42 +365,22 @@ public class TagDao {
                         }
 
                         // Write unified relation into metadata_tags.
-                        let insertRelationStmt = conn.prepareStatement("""
+                        let insertRelationSql = """
                             INSERT INTO metadata_tags (metadata_id, tag)
-                            SELECT ?, ?
+                            SELECT $1, $2
                             WHERE NOT EXISTS (
-                                SELECT 1 FROM metadata_tags WHERE metadata_id = ? AND tag = ?
+                                SELECT 1 FROM metadata_tags WHERE metadata_id = $3 AND tag = $4
                             )
-                        """)
-                        try {
-                            insertRelationStmt.set(0, metadataId)
-                            insertRelationStmt.set(1, normalizedTag)
-                            insertRelationStmt.set(2, metadataId)
-                            insertRelationStmt.set(3, normalizedTag)
-                            insertRelationStmt.update()
-                        } finally {
-                            insertRelationStmt.close()
-                        }
+                        """
+                        db.execRaw(insertRelationSql, [vint(metadataId), vtext(normalizedTag), vint(metadataId), vtext(normalizedTag)])
                     }
 
-                    let touchStmt = conn.prepareStatement("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        touchStmt.set(0, metadataId)
-                        touchStmt.update()
-                    } finally {
-                        touchStmt.close()
-                    }
+                    db.execRaw("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = $1", [vint(metadataId)])
                     let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("updateArchiveTags:${archiveId}")
                     true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))
                     false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeException: Exception) {
-                        getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
-                    }
                 }
         }
     }
@@ -491,37 +408,21 @@ public class TagDao {
      * 获取档案的所有标签
      */
     public static func getArchiveTags(archiveId: String): String {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let sql = """
+            SELECT COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
+            FROM metadata_objects mo
+            LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
+            WHERE mo.entity_type = 'archive'
+              AND mo.entity_id = $1
+        """
+        match (DatabaseConfig.getDatabase()) {
             case None => ""
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
-                        FROM metadata_objects mo
-                        LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                        WHERE mo.entity_type = 'archive'
-                          AND mo.entity_id = ?
-                    """)
-                    try {
-                        stmt.set(0, archiveId)
-                        let result = stmt.query()
-                        try {
-                            if (result.next()) {
-                                return result.getOrNull<String>(0) ?? ""
-                            }
-                            return ""
-                        } finally {
-                            result.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
+                    return db.rawOne<String>(sql, [vtext(archiveId)], { row => row.getOrNullText(0) ?? "" }) ?? ""
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("Error getting archive tags", ("error", e.message))
                     ""
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
     }
@@ -547,47 +448,29 @@ public class TagDao {
         }
         if (deduped.size == 0) { return result }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let sql = """
+            SELECT mo.entity_id, COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
+            FROM metadata_objects mo
+            LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
+            WHERE mo.entity_type = 'archive'
+              AND mo.entity_id = ANY($1::text[])
+            GROUP BY mo.entity_id
+        """
+        match (DatabaseConfig.getDatabase()) {
             case None => return result
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    var placeholders = ""
-                    for (i in 0..deduped.size) {
-                        if (i > 0) { placeholders += "," }
-                        placeholders += "?"
-                    }
-
-                    let stmt = conn.prepareStatement("""
-                        SELECT mo.entity_id, COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
-                        FROM metadata_objects mo
-                        LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
-                        WHERE mo.entity_type = 'archive'
-                          AND mo.entity_id IN (${placeholders})
-                        GROUP BY mo.entity_id
-                    """)
-                    try {
-                        for (i in 0..deduped.size) {
-                            stmt.set(i, deduped[i])
-                        }
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let arcid = (rs.getOrNull<String>(0) ?? "").trimAscii()
-                                if (arcid.size == 0) { continue }
-                                result[arcid] = rs.getOrNull<String>(1) ?? ""
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<(String, String)>(sql, [textArray(deduped.toArray())], { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "")
+                    })
+                    for ((arcid, tags) in rows) {
+                        let id = arcid.trimAscii()
+                        if (id.size == 0) { continue }
+                        result[id] = tags
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("批量获取 archive tags 失败", ("error", e.message))
                     return result
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
 
@@ -598,73 +481,58 @@ public class TagDao {
      * 获取所有标签（支持分页和搜索）
      */
     public static func list(namespace: ?String, query: ?String, limit: Int64, offset: Int64): ArrayList<TagData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     var sql = "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE 1=1"
-                    var params: ArrayList<String> = ArrayList<String>()
-                    let unaccentFunction = getUnaccentFunction(conn)
+                    var params: ArrayList<Value> = ArrayList<Value>()
+                    let unaccentFunction = getUnaccentFunction(db)
+                    var paramIndex = 1
 
                     match (namespace) {
                         case Some(ns) =>
-                            sql += " AND namespace = ?"
-                            params.add(ns)
+                            sql += " AND namespace = \$${paramIndex}"
+                            params.add(vtext(ns))
+                            paramIndex += 1
                         case None => ()
                     }
 
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(\$${paramIndex})" } else { "\$${paramIndex}" }
                                 sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
-                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
+                                        " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
-                                params.add(searchPattern)
-                                params.add(searchPattern)
+                                params.add(vtext(searchPattern))
+                                params.add(vtext(searchPattern))
+                                paramIndex += 2
                             }
                         case None => ()
                     }
 
-                    sql += " ORDER BY namespace, name LIMIT ? OFFSET ?"
+                    sql += " ORDER BY namespace, name LIMIT \$${paramIndex} OFFSET \$${paramIndex + 1}"
+                    params.add(vint(limit))
+                    params.add(vint(offset))
 
-                    let stmt = conn.prepareStatement(sql)
-                    var idx = 0
-                    for (p in params) {
-                        stmt.set(idx, p)
-                        idx++
-                    }
-                    stmt.set(idx, limit)
-                    stmt.set(idx + 1, offset)
-
-                    let rs = stmt.query()
-                    var list: ArrayList<TagData> = ArrayList<TagData>()
-                    try {
-                        while (rs.next()) {
-                            let tag = TagData()
-                            tag.id = rs.getOrNull<Int64>(0) ?? 0
-                            tag.namespace = rs.getOrNull<String>(1) ?? ""
-                            tag.name = rs.getOrNull<String>(2) ?? ""
-                            let translationsJson = rs.getOrNull<String>(3) ?? "{}"
-                            tag.translations = parseTranslationsJson(translationsJson)
-                            tag.links = rs.getOrNull<String>(4) ?? ""
-                            tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                            tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
-                            tag.created_at = rs.getOrNull<String>(7) ?? ""
-                            tag.updated_at = rs.getOrNull<String>(8) ?? ""
-                            list.add(tag)
-                        }
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
-                    return list
+                    let list = db.raw<TagData>(sql, params.toArray(), { row =>
+                        let tag = TagData()
+                        tag.id = row.getOrNullInt64(0) ?? 0
+                        tag.namespace = row.getOrNullText(1) ?? ""
+                        tag.name = row.getOrNullText(2) ?? ""
+                        let translationsJson = row.getOrNullJson(3) ?? "{}"
+                        tag.translations = parseTranslationsJson(translationsJson)
+                        tag.links = row.getOrNullText(4) ?? ""
+                        tag.iconAssetId = row.getOrNullInt64(5) ?? 0
+                        tag.backgroundAssetId = row.getOrNullInt64(6) ?? 0
+                        tag.created_at = row.getOrNullText(7) ?? ""
+                        tag.updated_at = row.getOrNullText(8) ?? ""
+                        tag
+                    })
+                    return ArrayList<TagData>(list)
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("查询标签列表失败", ("error", e.message))
                     return ArrayList<TagData>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("tag_dao").error("无法连接到数据库")
@@ -677,74 +545,63 @@ public class TagDao {
      * - translations JSONB 通过 SQL 提取，不解析整个对象
      */
     public static func listLite(namespace: ?String, query: ?String, lang: String, limit: Int64, offset: Int64): ArrayList<TagLiteData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
+        let connOpt = DatabaseConfig.getDatabase()
         var effectiveLang = lang.trimAscii()
         if (effectiveLang.size == 0) { effectiveLang = "zh" }
         match (connOpt) {
-            case Some(conn) =>
+            case Some(db) =>
                 try {
                     var sql = """
                         SELECT
                             id,
                             namespace,
                             name,
-                            COALESCE(translations -> ? ->> 'text', '') AS translation_text
+                            COALESCE(translations -> $1 ->> 'text', '') AS translation_text
                         FROM tags
                         WHERE 1=1
                     """
-                    var params: ArrayList<String> = ArrayList<String>()
-                    let unaccentFunction = getUnaccentFunction(conn)
+                    var params: ArrayList<Value> = ArrayList<Value>()
+                    let unaccentFunction = getUnaccentFunction(db)
+                    var paramIndex = 2
 
                     // First param is lang for JSONB extraction.
-                    params.add(effectiveLang)
+                    params.add(vtext(effectiveLang))
 
                     match (namespace) {
                         case Some(ns) =>
-                            sql += " AND namespace = ?"
-                            params.add(ns)
+                            sql += " AND namespace = \$${paramIndex}"
+                            params.add(vtext(ns))
+                            paramIndex += 1
                         case None => ()
                     }
 
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(\$${paramIndex})" } else { "\$${paramIndex}" }
                                 sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
-                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
+                                        " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
-                                params.add(searchPattern)
-                                params.add(searchPattern)
+                                params.add(vtext(searchPattern))
+                                params.add(vtext(searchPattern))
+                                paramIndex += 2
                             }
                         case None => ()
                     }
 
-                    sql += " ORDER BY namespace, name LIMIT ? OFFSET ?"
+                    sql += " ORDER BY namespace, name LIMIT \$${paramIndex} OFFSET \$${paramIndex + 1}"
+                    params.add(vint(limit))
+                    params.add(vint(offset))
 
-                    let stmt = conn.prepareStatement(sql)
-                    var idx = 0
-                    for (p in params) {
-                        stmt.set(idx, p)
-                        idx++
-                    }
-                    stmt.set(idx, limit)
-                    stmt.set(idx + 1, offset)
-
-                    let rs = stmt.query()
-                    var list: ArrayList<TagLiteData> = ArrayList<TagLiteData>()
-                    try {
-                        while (rs.next()) {
-                            let row = TagLiteData()
-                            row.id = rs.getOrNull<Int64>(0) ?? 0
-                            row.namespace = rs.getOrNull<String>(1) ?? ""
-                            row.name = rs.getOrNull<String>(2) ?? ""
-                            row.translationText = rs.getOrNull<String>(3) ?? ""
-                            list.add(row)
-                        }
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
-                    return list
+                    let list = db.raw<TagLiteData>(sql, params.toArray(), { row =>
+                        let r = TagLiteData()
+                        r.id = row.getOrNullInt64(0) ?? 0
+                        r.namespace = row.getOrNullText(1) ?? ""
+                        r.name = row.getOrNullText(2) ?? ""
+                        r.translationText = row.getOrNullText(3) ?? ""
+                        r
+                    })
+                    return ArrayList<TagLiteData>(list)
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("查询标签轻量列表失败", ("error", e.message))
                     // Fallback: use the full list() and derive translation text in-process.
@@ -759,8 +616,6 @@ public class TagDao {
                         out.add(lite)
                     }
                     return out
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("tag_dao").error("无法连接到数据库")
@@ -772,57 +627,40 @@ public class TagDao {
      * 统计标签数量
      */
     public static func count(namespace: ?String, query: ?String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     var sql = "SELECT COUNT(*) FROM tags WHERE 1=1"
-                    var params: ArrayList<String> = ArrayList<String>()
-                    let unaccentFunction = getUnaccentFunction(conn)
+                    var params: ArrayList<Value> = ArrayList<Value>()
+                    let unaccentFunction = getUnaccentFunction(db)
+                    var paramIndex = 1
 
                     match (namespace) {
                         case Some(ns) =>
-                            sql += " AND namespace = ?"
-                            params.add(ns)
+                            sql += " AND namespace = \$${paramIndex}"
+                            params.add(vtext(ns))
+                            paramIndex += 1
                         case None => ()
                     }
 
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(\$${paramIndex})" } else { "\$${paramIndex}" }
                                 sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
-                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
+                                        " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
-                                params.add(searchPattern)
-                                params.add(searchPattern)
+                                params.add(vtext(searchPattern))
+                                params.add(vtext(searchPattern))
+                                paramIndex += 2
                             }
                         case None => ()
                     }
 
-                    let stmt = conn.prepareStatement(sql)
-                    var idx = 0
-                    for (p in params) {
-                        stmt.set(idx, p)
-                        idx++
-                    }
-
-                    let rs = stmt.query()
-                    try {
-                        if (rs.next()) {
-                            return rs.getOrNull<Int64>(0) ?? 0
-                        }
-                    } finally {
-                        rs.close()
-                        stmt.close()
-                    }
-                    return 0
+                    return db.rawOne<Int64>(sql, params.toArray(), { row => row.getOrNullInt64(0) ?? 0 }) ?? 0
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("统计标签数量失败", ("error", e.message))
                     return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return 0
@@ -833,43 +671,27 @@ public class TagDao {
      * 根据ID获取标签
      */
     public static func getById(id: Int64): ?TagData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE id = $1"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let tag = TagData()
-                                tag.id = rs.getOrNull<Int64>(0) ?? 0
-                                tag.namespace = rs.getOrNull<String>(1) ?? ""
-                                tag.name = rs.getOrNull<String>(2) ?? ""
-                                let translationsJson = rs.getOrNull<String>(3) ?? "{}"
-                                tag.translations = parseTranslationsJson(translationsJson)
-                                tag.links = rs.getOrNull<String>(4) ?? ""
-                                tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
-                                tag.created_at = rs.getOrNull<String>(7) ?? ""
-                                tag.updated_at = rs.getOrNull<String>(8) ?? ""
-                                return Some(tag)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
+                    return db.rawOne<TagData>(sql, [vint(id)], { row =>
+                        let tag = TagData()
+                        tag.id = row.getOrNullInt64(0) ?? 0
+                        tag.namespace = row.getOrNullText(1) ?? ""
+                        tag.name = row.getOrNullText(2) ?? ""
+                        let translationsJson = row.getOrNullJson(3) ?? "{}"
+                        tag.translations = parseTranslationsJson(translationsJson)
+                        tag.links = row.getOrNullText(4) ?? ""
+                        tag.iconAssetId = row.getOrNullInt64(5) ?? 0
+                        tag.backgroundAssetId = row.getOrNullInt64(6) ?? 0
+                        tag.created_at = row.getOrNullText(7) ?? ""
+                        tag.updated_at = row.getOrNullText(8) ?? ""
+                        tag
+                    })
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("查询标签失败", ("error", e.message), ("id", id.toString()))
                     return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return None
@@ -880,44 +702,27 @@ public class TagDao {
      * 根据 namespace 和 name 获取标签
      */
     public static func getByNamespaceName(namespace: String, name: String): ?TagData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE namespace = $1 AND name = $2"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE namespace = ? AND name = ?")
-                    try {
-                        stmt.set(0, namespace)
-                        stmt.set(1, name)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let tag = TagData()
-                                tag.id = rs.getOrNull<Int64>(0) ?? 0
-                                tag.namespace = rs.getOrNull<String>(1) ?? ""
-                                tag.name = rs.getOrNull<String>(2) ?? ""
-                                let translationsJson = rs.getOrNull<String>(3) ?? "{}"
-                                tag.translations = parseTranslationsJson(translationsJson)
-                                tag.links = rs.getOrNull<String>(4) ?? ""
-                                tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
-                                tag.created_at = rs.getOrNull<String>(7) ?? ""
-                                tag.updated_at = rs.getOrNull<String>(8) ?? ""
-                                return Some(tag)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return None
+                    return db.rawOne<TagData>(sql, [vtext(namespace), vtext(name)], { row =>
+                        let tag = TagData()
+                        tag.id = row.getOrNullInt64(0) ?? 0
+                        tag.namespace = row.getOrNullText(1) ?? ""
+                        tag.name = row.getOrNullText(2) ?? ""
+                        let translationsJson = row.getOrNullJson(3) ?? "{}"
+                        tag.translations = parseTranslationsJson(translationsJson)
+                        tag.links = row.getOrNullText(4) ?? ""
+                        tag.iconAssetId = row.getOrNullInt64(5) ?? 0
+                        tag.backgroundAssetId = row.getOrNullInt64(6) ?? 0
+                        tag.created_at = row.getOrNullText(7) ?? ""
+                        tag.updated_at = row.getOrNullText(8) ?? ""
+                        tag
+                    })
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("查询标签失败", ("error", e.message))
                     return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return None
@@ -928,40 +733,24 @@ public class TagDao {
      * 创建标签
      */
     public static func create(namespace: String, name: String, translations: HashMap<String, TagTranslation>, links: String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "INSERT INTO tags (namespace, name, translations, links) VALUES ($1, $2, $3::jsonb, $4) RETURNING id"
+        let translationsJson = serializeTranslationsJson(translations)
+        let params: Array<Value> = [vtext(namespace), vtext(name), vjson(translationsJson), vtext(links)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let translationsJson = serializeTranslationsJson(translations)
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO tags (namespace, name, translations, links) VALUES (?, ?, ?::jsonb, ?) RETURNING id")
-                    try {
-                        stmt.set(0, namespace)
-                        stmt.set(1, name)
-                        stmt.set(2, translationsJson)
-                        stmt.set(3, links)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let id = rs.getOrNull<Int64>(0) ?? 0
-                                if (id > 0) {
-                                    invalidateTranslationSearchCache()
-                                }
-                                return id
+                    let idOpt = db.rawOne<Int64>(sql, params, { r => r.getInt64(0) })
+                    match (idOpt) {
+                        case Some(id) =>
+                            if (id > 0) {
+                                invalidateTranslationSearchCache()
                             }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                            return id
+                        case None => return 0
                     }
-                    return 0
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("创建标签失败", ("error", e.message), ("namespace", namespace), ("name", name))
                     return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return 0
@@ -972,29 +761,18 @@ public class TagDao {
      * 更新标签
      */
     public static func update(id: Int64, translations: HashMap<String, TagTranslation>, links: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "UPDATE tags SET translations = $1::jsonb, links = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3"
+        let translationsJson = serializeTranslationsJson(translations)
+        let params: Array<Value> = [vjson(translationsJson), vtext(links), vint(id)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let translationsJson = serializeTranslationsJson(translations)
-                    let stmt = conn.prepareStatement(
-                        "UPDATE tags SET translations = ?::jsonb, links = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        stmt.set(0, translationsJson)
-                        stmt.set(1, links)
-                        stmt.set(2, id)
-                        stmt.update()
-                        invalidateTranslationSearchCache()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    invalidateTranslationSearchCache()
+                    return true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("更新标签失败", ("error", e.message), ("id", id.toString()))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -1005,25 +783,16 @@ public class TagDao {
      * 删除标签
      */
     public static func delete(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM tags WHERE id = $1"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM tags WHERE id = ?")
-                    try {
-                        stmt.set(0, id)
-                        stmt.update()
-                        invalidateTranslationSearchCache()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, [vint(id)])
+                    invalidateTranslationSearchCache()
+                    return true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("删除标签失败", ("error", e.message), ("id", id.toString()))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -1042,63 +811,47 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // Use row-wise IN to avoid long OR chains and keep it index-friendly.
-                    // WHERE (namespace, name) IN ((?, ?), (?, ?), ...)
+                    // WHERE (namespace, name) IN (($1, $2), ($3, $4), ...)
                     var tuples: ArrayList<String> = ArrayList<String>()
                     var namespaces: ArrayList<String> = ArrayList<String>()
                     var names: ArrayList<String> = ArrayList<String>()
-                    for (tag in tags) {
-                        let (namespace, name) = parseTagName(tag)
-                        tuples.add("(?, ?)")
+                    var paramIndex = 1
+                    for (_tag in tags) {
+                        let (namespace, name) = parseTagName(_tag)
+                        tuples.add("(\$${paramIndex}, \$${paramIndex + 1})")
                         namespaces.add(namespace)
                         names.add(name)
+                        paramIndex += 2
                     }
 
                     let tuplesStr = String.join(tuples.toArray(), delimiter: ", ")
                     let sql = "SELECT namespace, name, translations FROM tags WHERE (namespace, name) IN (" + tuplesStr + ")"
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        // 绑定 (namespace, name) 参数对
-                        var paramIndex = 0
-                        for (i in 0..namespaces.size) {
-                            stmt.set(paramIndex, namespaces[i])
-                            stmt.set(paramIndex + 1, names[i])
-                            paramIndex += 2
-                        }
+                    var params: ArrayList<Value> = ArrayList<Value>()
+                    for (i in 0..namespaces.size) {
+                        params.add(vtext(namespaces[i]))
+                        params.add(vtext(names[i]))
+                    }
 
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let namespace = rs.getOrNull<String>(0) ?? ""
-                                let name = rs.getOrNull<String>(1) ?? ""
-                                let translationsJson = rs.getOrNull<String>(2) ?? "{}"
-                                let translations = parseTranslationsJson(translationsJson)
-
-                                let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
-
-                                match (translations.get(lang)) {
-                                    case Some(t) =>
-                                        if (t.text.size > 0) {
-                                            result[fullName] = t.text
-                                        }
-                                    case None => ()
+                    let rows = db.raw<(String, String, String)>(sql, params.toArray(), { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "", row.getOrNullJson(2) ?? "{}")
+                    })
+                    for ((namespace, name, translationsJson) in rows) {
+                        let translations = parseTranslationsJson(translationsJson)
+                        let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        match (translations.get(lang)) {
+                            case Some(t) =>
+                                if (t.text.size > 0) {
+                                    result[fullName] = t.text
                                 }
-                            }
-                        } finally {
-                            rs.close()
+                            case None => ()
                         }
-                    } finally {
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("批量获取标签翻译失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -1111,38 +864,26 @@ public class TagDao {
     public static func getTranslationsMap(lang: String): HashMap<String, String> {
         var result: HashMap<String, String> = HashMap<String, String>()
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "SELECT namespace, name, translations FROM tags"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT namespace, name, translations FROM tags")
-                    let rs = stmt.query()
-                    try {
-                        while (rs.next()) {
-                            let namespace = rs.getOrNull<String>(0) ?? ""
-                            let name = rs.getOrNull<String>(1) ?? ""
-                            let translationsJson = rs.getOrNull<String>(2) ?? "{}"
-                            let translations = parseTranslationsJson(translationsJson)
-
-                            let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
-
-                            match (translations.get(lang)) {
-                                case Some(t) =>
-                                    if (t.text.size > 0) {
-                                        result[fullName] = t.text
-                                    }
-                                case None => ()
-                            }
+                    let rows = db.raw<(String, String, String)>(sql, [], { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "", row.getOrNullJson(2) ?? "{}")
+                    })
+                    for ((namespace, name, translationsJson) in rows) {
+                        let translations = parseTranslationsJson(translationsJson)
+                        let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        match (translations.get(lang)) {
+                            case Some(t) =>
+                                if (t.text.size > 0) {
+                                    result[fullName] = t.text
+                                }
+                            case None => ()
                         }
-                    } finally {
-                        rs.close()
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("获取标签翻译映射失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -1153,68 +894,55 @@ public class TagDao {
      * 获取所有命名空间
      */
     public static func listNamespaces(): Array<String> {
-        return DatabaseConfig.withPooledConnection<Array<String>>(
-            "tag_dao",
-            "获取命名空间列表失败",
-            Array<String>(),
-            { conn =>
-                DatabaseConfig.withStatement<Array<String>>(
-                    conn,
-                    "SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace",
-                    { stmt =>
-                        DatabaseConfig.withQueryResult<Array<String>>(stmt, { rs =>
-                            var list: ArrayList<String> = ArrayList<String>()
-                            while (rs.next()) {
-                                let ns = rs.getOrNull<String>(0) ?? ""
-                                if (ns.size > 0) {
-                                    list.add(ns)
-                                }
-                            }
-                            return list.toArray()
-                        })
+        let sql = "SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace"
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<String>(sql, [], { row => row.getOrNullText(0) ?? "" })
+                    var list: ArrayList<String> = ArrayList<String>()
+                    for (ns in rows) {
+                        if (ns.size > 0) {
+                            list.add(ns)
+                        }
                     }
-                )
-            }
-        )
+                    return list.toArray()
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("获取命名空间列表失败", ("error", e.message))
+                    return Array<String>()
+                }
+            case None =>
+                getLogger("tag_dao").error("无法连接到数据库")
+                return Array<String>()
+        }
     }
 
     /**
      * 获取当前系统已存在的所有标签名（用于自动补全等）
      */
     public static func listAllTagNames(): Array<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT DISTINCT
+                CASE WHEN namespace != '' AND namespace IS NOT NULL
+                     THEN namespace || ':' || name
+                     ELSE name
+                END AS full_name
+            FROM tags
+            ORDER BY full_name
+        """
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT DISTINCT
-                            CASE WHEN namespace != '' AND namespace IS NOT NULL
-                                 THEN namespace || ':' || name
-                                 ELSE name
-                            END AS full_name
-                        FROM tags
-                        ORDER BY full_name
-                    """)
-                    let rs = stmt.query()
+                    let rows = db.raw<String>(sql, [], { row => row.getOrNullText(0) ?? "" })
                     var list: ArrayList<String> = ArrayList<String>()
-                    try {
-                        while (rs.next()) {
-                            let name = rs.getOrNull<String>(0) ?? ""
-                            if (name.trimAscii().size > 0) {
-                                list.add(name)
-                            }
+                    for (name in rows) {
+                        if (name.trimAscii().size > 0) {
+                            list.add(name)
                         }
-                    } finally {
-                        rs.close()
-                        stmt.close()
                     }
                     return list.toArray()
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("获取全量标签失败", ("error", e.message))
                     return Array<String>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return Array<String>()
@@ -1225,50 +953,33 @@ public class TagDao {
      * 插入或更新标签（用于导入）
      */
     public static func upsert(namespace: String, name: String, translations: HashMap<String, TagTranslation>, links: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let translationsJson = serializeTranslationsJson(translations)
+        let updateSql = """
+            UPDATE tags
+            SET translations = $1::jsonb, links = $2, updated_at = CURRENT_TIMESTAMP
+            WHERE namespace = $3 AND name = $4
+        """
+        let updateParams: Array<Value> = [vjson(translationsJson), vtext(links), vtext(namespace), vtext(name)]
+        let insertSql = """
+            INSERT INTO tags (namespace, name, translations, links)
+            SELECT $1, $2, $3::jsonb, $4
+            WHERE NOT EXISTS (
+                SELECT 1 FROM tags WHERE namespace = $5 AND name = $6
+            )
+        """
+        let insertParams: Array<Value> = [vtext(namespace), vtext(name), vjson(translationsJson), vtext(links), vtext(namespace), vtext(name)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let translationsJson = serializeTranslationsJson(translations)
-                    let updateStmt = conn.prepareStatement("""
-                        UPDATE tags
-                        SET translations = ?::jsonb, links = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE namespace = ? AND name = ?
-                    """)
-                    let insertStmt = conn.prepareStatement("""
-                        INSERT INTO tags (namespace, name, translations, links)
-                        SELECT ?, ?, ?::jsonb, ?
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM tags WHERE namespace = ? AND name = ?
-                        )
-                    """)
-                    try {
-                        updateStmt.set(0, translationsJson)
-                        updateStmt.set(1, links)
-                        updateStmt.set(2, namespace)
-                        updateStmt.set(3, name)
-                        let updated = updateStmt.update()
-                        if (updated.rowCount <= 0) {
-                            insertStmt.set(0, namespace)
-                            insertStmt.set(1, name)
-                            insertStmt.set(2, translationsJson)
-                            insertStmt.set(3, links)
-                            insertStmt.set(4, namespace)
-                            insertStmt.set(5, name)
-                            insertStmt.update()
-                        }
-                        invalidateTranslationSearchCache()
-                        return true
-                    } finally {
-                        updateStmt.close()
-                        insertStmt.close()
+                    let updated = db.execRaw(updateSql, updateParams)
+                    if (updated <= 0) {
+                        db.execRaw(insertSql, insertParams)
                     }
+                    invalidateTranslationSearchCache()
+                    return true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("upsert标签失败", ("error", e.message), ("namespace", namespace), ("name", name))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -1437,11 +1148,10 @@ public class TagDao {
             ("searchTerm", normalizedSearchTerm),
             ("version", cacheVersion.toString()))
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
+                    let queried = queryTagsByTranslationWithConn(db, normalizedSearchTerm)
                     writeTranslationSearchCache(cacheKey, queried)
                     logger.debug("tag translation search cache store",
                         ("searchTerm", normalizedSearchTerm),
@@ -1450,8 +1160,6 @@ public class TagDao {
                     return queried
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -1463,7 +1171,7 @@ public class TagDao {
      * 根据翻译文本查找标签（使用已有连接，避免嵌套连接泄漏）
      * 用于在持有连接的情况下调用，避免连接池耗尽
      */
-    public static func findTagsByTranslationWithConn(conn: Connection, searchTerm: String): ArrayList<String> {
+    public static func findTagsByTranslationWithConn(db: Database, searchTerm: String): ArrayList<String> {
         let normalizedSearchTerm = normalizeTranslationSearchTerm(searchTerm)
         let result = ArrayList<String>()
         if (normalizedSearchTerm.size == 0) {
@@ -1487,7 +1195,7 @@ public class TagDao {
             ("version", cacheVersion.toString()),
             ("withConn", "true"))
 
-        let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
+        let queried = queryTagsByTranslationWithConn(db, normalizedSearchTerm)
         writeTranslationSearchCache(cacheKey, queried)
         logger.debug("tag translation search cache store",
             ("searchTerm", normalizedSearchTerm),
@@ -1501,7 +1209,7 @@ public class TagDao {
      * 批量根据翻译文本查找标签（使用已有连接）
      * 返回 raw searchTerm -> 匹配标签列表 的映射。
      */
-    public static func batchFindTagsByTranslationWithConn(conn: Connection, searchTerms: Array<String>): HashMap<String, ArrayList<String>> {
+    public static func batchFindTagsByTranslationWithConn(db: Database, searchTerms: Array<String>): HashMap<String, ArrayList<String>> {
         let result = HashMap<String, ArrayList<String>>()
         if (searchTerms.size == 0) {
             return result
@@ -1557,7 +1265,7 @@ public class TagDao {
         }
 
         if (uncachedNormalizedTerms.size > 0) {
-            let queried = queryTagsByTranslationsWithConn(conn, uncachedNormalizedTerms.toArray())
+            let queried = queryTagsByTranslationsWithConn(db, uncachedNormalizedTerms.toArray())
             for (normalized in uncachedNormalizedTerms) {
                 let matches = match (queried.get(normalized)) {
                     case Some(found) => found
@@ -1639,35 +1347,25 @@ public class TagDao {
         )
     }
 
-    private static func queryTagsByTranslationWithConn(conn: Connection, normalizedSearchTerm: String): ArrayList<String> {
+    private static func queryTagsByTranslationWithConn(db: Database, normalizedSearchTerm: String): ArrayList<String> {
         let result = ArrayList<String>()
         try {
-            let unaccentFunction = getUnaccentFunction(conn)
+            let unaccentFunction = getUnaccentFunction(db)
             // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索。
             // Add a LIMIT to cap worst-case work and response size (caller expands matches into OR tags LIKE ...).
-            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}($1)" } else { "$1" }
             let sql = "SELECT namespace, name FROM tags WHERE " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + " LIMIT 200"
-            let stmt = conn.prepareStatement(sql)
-            try {
-                let pattern = "%" + normalizedSearchTerm + "%"
-                stmt.set(0, pattern)
-                let rs = stmt.query()
-                try {
-                    while (rs.next()) {
-                        let namespace = rs.getOrNull<String>(0) ?? ""
-                        let name = rs.getOrNull<String>(1) ?? ""
-                        let fullName = if (namespace.size > 0) {
-                            "${namespace}:${name}"
-                        } else {
-                            name
-                        }
-                        result.add(fullName)
-                    }
-                } finally {
-                    rs.close()
+            let pattern = "%" + normalizedSearchTerm + "%"
+            let rows = db.raw<(String, String)>(sql, [vtext(pattern)], { row =>
+                (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "")
+            })
+            for ((namespace, name) in rows) {
+                let fullName = if (namespace.size > 0) {
+                    "${namespace}:${name}"
+                } else {
+                    name
                 }
-            } finally {
-                stmt.close()
+                result.add(fullName)
             }
         } catch (e: Exception) {
             getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
@@ -1675,7 +1373,7 @@ public class TagDao {
         return result
     }
 
-    private static func queryTagsByTranslationsWithConn(conn: Connection, normalizedSearchTerms: Array<String>): HashMap<String, ArrayList<String>> {
+    private static func queryTagsByTranslationsWithConn(db: Database, normalizedSearchTerms: Array<String>): HashMap<String, ArrayList<String>> {
         let result = HashMap<String, ArrayList<String>>()
         if (normalizedSearchTerms.size == 0) {
             return result
@@ -1698,63 +1396,54 @@ public class TagDao {
         }
 
         try {
-            let unaccentFunction = getUnaccentFunction(conn)
-            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+            let unaccentFunction = getUnaccentFunction(db)
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}($1)" } else { "$1" }
             let searchExpr = wrapSearchExpr("translations::text", unaccentFunction)
             let subqueries = ArrayList<String>()
+            var paramIndex = 1
             for (_term in uniqueTerms) {
-                subqueries.add("SELECT ? AS matched_term, namespace, name FROM tags WHERE ${searchExpr} ILIKE ${patternExpr} LIMIT 200")
+                subqueries.add("SELECT \$${paramIndex} AS matched_term, namespace, name FROM tags WHERE ${searchExpr} ILIKE ${patternExpr} LIMIT 200")
+                paramIndex += 2
             }
             let sql = String.join(subqueries.toArray(), delimiter: " UNION ALL ")
-            let stmt = conn.prepareStatement(sql)
-            try {
-                var index = 0
-                for (normalized in uniqueTerms) {
-                    stmt.set(index, normalized)
-                    stmt.set(index + 1, "%" + normalized + "%")
-                    index += 2
+            var params: ArrayList<Value> = ArrayList<Value>()
+            for (normalized in uniqueTerms) {
+                params.add(vtext(normalized))
+                params.add(vtext("%" + normalized + "%"))
+            }
+            let rows = db.raw<(String, String, String)>(sql, params.toArray(), { row =>
+                (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "", row.getOrNullText(2) ?? "")
+            })
+            let seenByTerm = HashMap<String, HashMap<String, Bool>>()
+            for ((matchedTerm, namespace, name) in rows) {
+                let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                if (matchedTerm.size == 0 || fullName.size == 0) {
+                    continue
                 }
-                let rs = stmt.query()
-                try {
-                    let seenByTerm = HashMap<String, HashMap<String, Bool>>()
-                    while (rs.next()) {
-                        let matchedTerm = rs.getOrNull<String>(0) ?? ""
-                        let namespace = rs.getOrNull<String>(1) ?? ""
-                        let name = rs.getOrNull<String>(2) ?? ""
-                        let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
-                        if (matchedTerm.size == 0 || fullName.size == 0) {
-                            continue
-                        }
 
-                        let seenForTerm = match (seenByTerm.get(matchedTerm)) {
-                            case Some(existing) => existing
-                            case None =>
-                                let created = HashMap<String, Bool>()
-                                seenByTerm[matchedTerm] = created
-                                created
-                        }
-                        if (seenForTerm.contains(fullName)) {
-                            continue
-                        }
-                        seenForTerm[fullName] = true
-
-                        match (result.get(matchedTerm)) {
-                            case Some(matches) => matches.add(fullName)
-                            case None =>
-                                let matches = ArrayList<String>()
-                                matches.add(fullName)
-                                result[matchedTerm] = matches
-                        }
-                    }
-                } finally {
-                    rs.close()
+                let seenForTerm = match (seenByTerm.get(matchedTerm)) {
+                    case Some(existing) => existing
+                    case None =>
+                        let created = HashMap<String, Bool>()
+                        seenByTerm[matchedTerm] = created
+                        created
                 }
-            } finally {
-                stmt.close()
+                if (seenForTerm.contains(fullName)) {
+                    continue
+                }
+                seenForTerm[fullName] = true
+
+                match (result.get(matchedTerm)) {
+                    case Some(matches) => matches.add(fullName)
+                    case None =>
+                        let matches = ArrayList<String>()
+                        matches.add(fullName)
+                        result[matchedTerm] = matches
+                }
             }
         } catch (_: Exception) {
             for (normalized in uniqueTerms) {
-                result[normalized] = queryTagsByTranslationWithConn(conn, normalized)
+                result[normalized] = queryTagsByTranslationWithConn(db, normalized)
             }
         }
 
@@ -1890,16 +1579,23 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let unaccentFunction = getUnaccentFunction(conn)
-                    let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                    let unaccentFunction = getUnaccentFunction(db)
+                    // 参数顺序：$1 name 精确匹配, $2 name 前缀匹配, $3 翻译精确匹配的语言,
+                    // $4 翻译精确匹配, $5 翻译前缀匹配的语言, $6 翻译前缀匹配,
+                    // $7 name 模糊搜索, $8 namespace:name 模糊搜索, $9 翻译搜索的语言,
+                    // $10 翻译模糊搜索, $11 全文本模糊搜索（备用）, $12 limit
+                    let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}($n)" } else { "$n" }
+                    // Note: patternExpr is a template; we replace $n with the actual placeholder index below.
                     let nameExpr = wrapSearchExpr("t.name", unaccentFunction)
                     let fullNameExpr = wrapSearchExpr("CASE WHEN t.namespace != '' THEN t.namespace || ':' || t.name ELSE t.name END", unaccentFunction)
-                    let translationTextExpr = wrapSearchExpr("t.translations->?->>'text'", unaccentFunction)
+                    // 翻译文本表达式按分支使用不同的 lang 占位符($3 精确/$5 前缀/$9 模糊)，
+                    // 否则 $5/$9 在 SQL 中不出现，PG 报 "could not determine data type of parameter $5"。
+                    let translationTextExact = wrapSearchExpr("t.translations->$3->>'text'", unaccentFunction)
+                    let translationTextPrefix = wrapSearchExpr("t.translations->$5->>'text'", unaccentFunction)
+                    let translationTextFuzzy = wrapSearchExpr("t.translations->$9->>'text'", unaccentFunction)
                     let translationsExpr = wrapSearchExpr("t.translations::text", unaccentFunction)
                     // 搜索标签名(namespace:name)和翻译文本。
                     // 默认只返回“已绑定档案”的标签，供全局搜索框等场景使用；
@@ -1909,88 +1605,75 @@ public class TagDao {
                     let sql = if (requireBound) {
                         "SELECT DISTINCT t.namespace, t.name, t.translations," +
                         " CASE" +
-                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 1" +
-                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 2" +
-                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 3" +
-                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 4" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$1") + " THEN 1" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$2") + " THEN 2" +
+                        " WHEN " + translationTextExact + " ILIKE " + patternExpr.replace("$n", "$4") + " THEN 3" +
+                        " WHEN " + translationTextPrefix + " ILIKE " + patternExpr.replace("$n", "$6") + " THEN 4" +
                         " ELSE 5 END as match_priority" +
                         " FROM tags t" +
                         " INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END" +
                         " INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'" +
-                        " WHERE " + nameExpr + " ILIKE " + patternExpr +
-                        " OR " + fullNameExpr + " ILIKE " + patternExpr +
-                        " OR " + translationTextExpr + " ILIKE " + patternExpr +
-                        " OR " + translationsExpr + " ILIKE " + patternExpr +
+                        " WHERE " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$7") +
+                        " OR " + fullNameExpr + " ILIKE " + patternExpr.replace("$n", "$8") +
+                        " OR " + translationTextFuzzy + " ILIKE " + patternExpr.replace("$n", "$10") +
+                        " OR " + translationsExpr + " ILIKE " + patternExpr.replace("$n", "$11") +
                         " ORDER BY match_priority, t.name" +
-                        " LIMIT ?"
+                        " LIMIT $12"
                     } else {
                         "SELECT DISTINCT t.namespace, t.name, t.translations," +
                         " CASE" +
-                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 1" +
-                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 2" +
-                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 3" +
-                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 4" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$1") + " THEN 1" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$2") + " THEN 2" +
+                        " WHEN " + translationTextExact + " ILIKE " + patternExpr.replace("$n", "$4") + " THEN 3" +
+                        " WHEN " + translationTextPrefix + " ILIKE " + patternExpr.replace("$n", "$6") + " THEN 4" +
                         " ELSE 5 END as match_priority" +
                         " FROM tags t" +
-                        " WHERE " + nameExpr + " ILIKE " + patternExpr +
-                        " OR " + fullNameExpr + " ILIKE " + patternExpr +
-                        " OR " + translationTextExpr + " ILIKE " + patternExpr +
-                        " OR " + translationsExpr + " ILIKE " + patternExpr +
+                        " WHERE " + nameExpr + " ILIKE " + patternExpr.replace("$n", "$7") +
+                        " OR " + fullNameExpr + " ILIKE " + patternExpr.replace("$n", "$8") +
+                        " OR " + translationTextFuzzy + " ILIKE " + patternExpr.replace("$n", "$10") +
+                        " OR " + translationsExpr + " ILIKE " + patternExpr.replace("$n", "$11") +
                         " ORDER BY match_priority, t.name" +
-                        " LIMIT ?"
+                        " LIMIT $12"
                     }
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        let exactPattern = query
-                        let prefixPattern = query + "%"
-                        let likePattern = "%" + query + "%"
-                        // CASE 中的参数
-                        stmt.set(0, exactPattern)       // name 精确匹配优先级
-                        stmt.set(1, prefixPattern)      // name 前缀匹配优先级
-                        stmt.set(2, lang)               // 翻译精确匹配的语言
-                        stmt.set(3, exactPattern)       // 翻译精确匹配
-                        stmt.set(4, lang)               // 翻译前缀匹配的语言
-                        stmt.set(5, prefixPattern)      // 翻译前缀匹配
-                        // WHERE 中的参数
-                        stmt.set(6, likePattern)        // name 模糊搜索
-                        stmt.set(7, likePattern)        // namespace:name 模糊搜索
-                        stmt.set(8, lang)               // 翻译搜索的语言
-                        stmt.set(9, likePattern)        // 翻译模糊搜索
-                        stmt.set(10, likePattern)       // 全文本模糊搜索（备用）
-                        stmt.set(11, limit)
+                    let exactPattern = query
+                    let prefixPattern = query + "%"
+                    let likePattern = "%" + query + "%"
+                    let params: Array<Value> = [
+                        vtext(exactPattern),       // $1 name 精确匹配优先级
+                        vtext(prefixPattern),      // $2 name 前缀匹配优先级
+                        vtext(lang),               // $3 翻译精确匹配的语言
+                        vtext(exactPattern),       // $4 翻译精确匹配
+                        vtext(lang),               // $5 翻译前缀匹配的语言
+                        vtext(prefixPattern),      // $6 翻译前缀匹配
+                        vtext(likePattern),        // $7 name 模糊搜索
+                        vtext(likePattern),        // $8 namespace:name 模糊搜索
+                        vtext(lang),               // $9 翻译搜索的语言
+                        vtext(likePattern),        // $10 翻译模糊搜索
+                        vtext(likePattern),        // $11 全文本模糊搜索（备用）
+                        vint(limit)                // $12 limit
+                    ]
 
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let namespace = rs.getOrNull<String>(0) ?? ""
-                                let name = rs.getOrNull<String>(1) ?? ""
-                                let translationsJson = rs.getOrNull<String>(2) ?? "{}"
-
-                                let fullName = if (namespace.size > 0) {
-                                    "${namespace}:${name}"
-                                } else {
-                                    name
-                                }
-
-                                // 获取对应语言的翻译
-                                let translations = parseTranslationsJson(translationsJson)
-                                let translatedText = match (translations.get(lang)) {
-                                    case Some(t) => if (t.text.size > 0) { t.text } else { name }
-                                    case None => name
-                                }
-
-                                result.add((fullName, translatedText))
-                            }
-                        } finally {
-                            rs.close()
+                    let rows = db.raw<(String, String, String)>(sql, params, { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "", row.getOrNullJson(2) ?? "{}")
+                    })
+                    for ((namespace, name, translationsJson) in rows) {
+                        let fullName = if (namespace.size > 0) {
+                            "${namespace}:${name}"
+                        } else {
+                            name
                         }
-                    } finally {
-                        stmt.close()
+
+                        // 获取对应语言的翻译
+                        let translations = parseTranslationsJson(translationsJson)
+                        let translatedText = match (translations.get(lang)) {
+                            case Some(t) => if (t.text.size > 0) { t.text } else { name }
+                            case None => name
+                        }
+
+                        result.add((fullName, translatedText))
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("自动补全搜索失败", ("error", e.message), ("query", query))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -2003,49 +1686,33 @@ public class TagDao {
      */
     public static func getTagCloud(lang: String, limit: Int64): ArrayList<(String, String, Int64)> {
         var result: ArrayList<(String, String, Int64)> = ArrayList<(String, String, Int64)>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let sql = """
+            SELECT t.namespace, t.name,
+                   COALESCE(t.translations->$1->>'text', '') as translated_text,
+                   COUNT(DISTINCT mo.entity_id)::BIGINT as usage_count
+            FROM tags t
+            INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END
+            INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'
+            WHERE COALESCE(LOWER(t.namespace), '') != 'source'
+            GROUP BY t.id, t.namespace, t.name, translated_text
+            ORDER BY usage_count DESC, t.name
+            LIMIT $2
+        """
+        let params: Array<Value> = [vtext(lang), vint(limit)]
+        match (DatabaseConfig.getDatabase()) {
             case None => return result
-            case Some(conn) =>
+            case Some(db) =>
                 try {
-                    let sql = """
-                        SELECT t.namespace, t.name,
-                               COALESCE(t.translations->?->>'text', '') as translated_text,
-                               COUNT(DISTINCT mo.entity_id)::BIGINT as usage_count
-                        FROM tags t
-                        INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END
-                        INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'
-                        WHERE COALESCE(LOWER(t.namespace), '') != 'source'
-                        GROUP BY t.id, t.namespace, t.name, translated_text
-                        ORDER BY usage_count DESC, t.name
-                        LIMIT ?
-                    """
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, lang)
-                        stmt.set(1, limit)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let namespace = rs.getOrNull<String>(0) ?? ""
-                                let name = rs.getOrNull<String>(1) ?? ""
-                                let translated = rs.getOrNull<String>(2) ?? ""
-                                let count = rs.getOrNull<Int64>(3) ?? 0
-
-                                let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
-                                let display = if (translated.trimAscii().size > 0) { translated } else { name }
-                                result.add((fullName, display, count))
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<(String, String, String, Int64)>(sql, params, { row =>
+                        (row.getOrNullText(0) ?? "", row.getOrNullText(1) ?? "", row.getOrNullText(2) ?? "", row.getOrNullInt64(3) ?? 0)
+                    })
+                    for ((namespace, name, translated, count) in rows) {
+                        let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        let display = if (translated.trimAscii().size > 0) { translated } else { name }
+                        result.add((fullName, display, count))
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("获取标签词云失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
         return result
@@ -2053,28 +1720,19 @@ public class TagDao {
 
     public static func updateIconAssetId(id: Int64, iconAssetId: Int64): Bool {
         if (id <= 0) { return false }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = "UPDATE tags SET icon_asset_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
+        let params: Array<Value> = [
+            if (iconAssetId > 0) { vint(iconAssetId) } else { vnull() },
+            vint(id)
+        ]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE tags SET icon_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        if (iconAssetId > 0) {
-                            stmt.set(0, iconAssetId)
-                        } else {
-                            stmt.setNull(0)
-                        }
-                        stmt.set(1, id)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("updateIconAssetId failed", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -2082,28 +1740,19 @@ public class TagDao {
 
     public static func updateBackgroundAssetId(id: Int64, backgroundAssetId: Int64): Bool {
         if (id <= 0) { return false }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let sql = "UPDATE tags SET background_asset_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
+        let params: Array<Value> = [
+            if (backgroundAssetId > 0) { vint(backgroundAssetId) } else { vnull() },
+            vint(id)
+        ]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE tags SET background_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    try {
-                        if (backgroundAssetId > 0) {
-                            stmt.set(0, backgroundAssetId)
-                        } else {
-                            stmt.setNull(0)
-                        }
-                        stmt.set(1, id)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("updateBackgroundAssetId failed", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -2118,19 +1767,17 @@ public class TagDao {
     public static func mergeById(sourceId: Int64, targetId: Int64, deleteSource: Bool): Bool {
         if (sourceId <= 0 || targetId <= 0 || sourceId == targetId) { return false }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        match (DatabaseConfig.getDatabase()) {
             case None => return false
-            case Some(conn) =>
+            case Some(db) =>
                 try {
                     // Best-effort transaction; if driver doesn't support BEGIN/COMMIT, statements still run in auto-commit.
                     try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
+                        db.execRawSql("BEGIN")
                     } catch (_: Exception) {}
 
                     // Merge translations/fields: update target from source.
-                    let mergeStmt = conn.prepareStatement("""
+                    let mergeSql = """
                         UPDATE tags t
                         SET
                             translations = s.translations || t.translations,
@@ -2139,18 +1786,14 @@ public class TagDao {
                             background_asset_id = CASE WHEN COALESCE(t.background_asset_id, 0) = 0 THEN COALESCE(s.background_asset_id, 0) ELSE t.background_asset_id END,
                             updated_at = CURRENT_TIMESTAMP
                         FROM tags s
-                        WHERE s.id = ? AND t.id = ?
-                    """)
-                    try {
-                        mergeStmt.set(0, sourceId)
-                        mergeStmt.set(1, targetId)
-                        mergeStmt.update()
-                    } finally { mergeStmt.close() }
+                        WHERE s.id = $1 AND t.id = $2
+                    """
+                    db.execRaw(mergeSql, [vint(sourceId), vint(targetId)])
 
                     // Resolve source/target canonical tag strings.
                     var sourceTag = ""
                     var targetTag = ""
-                    let tagInfoStmt = conn.prepareStatement("""
+                    let tagInfoSql = """
                         SELECT
                             id,
                             CASE
@@ -2158,74 +1801,51 @@ public class TagDao {
                                 ELSE name
                             END AS tag_str
                         FROM tags
-                        WHERE id = ? OR id = ?
-                    """)
-                    try {
-                        tagInfoStmt.set(0, sourceId)
-                        tagInfoStmt.set(1, targetId)
-                        let rs = tagInfoStmt.query()
-                        try {
-                            while (rs.next()) {
-                                let id = rs.getOrNull<Int64>(0) ?? 0
-                                let tagStr = rs.getOrNull<String>(1) ?? ""
-                                if (id == sourceId) {
-                                    sourceTag = tagStr
-                                } else if (id == targetId) {
-                                    targetTag = tagStr
-                                }
-                            }
-                        } finally { rs.close() }
-                    } finally { tagInfoStmt.close() }
+                        WHERE id = $1 OR id = $2
+                    """
+                    let rows = db.raw<(Int64, String)>(tagInfoSql, [vint(sourceId), vint(targetId)], { row =>
+                        (row.getOrNullInt64(0) ?? 0, row.getOrNullText(1) ?? "")
+                    })
+                    for ((id, tagStr) in rows) {
+                        if (id == sourceId) {
+                            sourceTag = tagStr
+                        } else if (id == targetId) {
+                            targetTag = tagStr
+                        }
+                    }
 
                     if (sourceTag.trimAscii().size > 0 && targetTag.trimAscii().size > 0) {
-                        let insMetadata = conn.prepareStatement("""
+                        let insMetadataSql = """
                             INSERT INTO metadata_tags (metadata_id, tag)
-                            SELECT mt.metadata_id, ?
+                            SELECT mt.metadata_id, $1
                             FROM metadata_tags mt
-                            WHERE mt.tag = ?
+                            WHERE mt.tag = $2
                               AND NOT EXISTS (
                                   SELECT 1 FROM metadata_tags existing
-                                  WHERE existing.metadata_id = mt.metadata_id AND existing.tag = ?
+                                  WHERE existing.metadata_id = mt.metadata_id AND existing.tag = $3
                               )
-                        """)
-                        try {
-                            insMetadata.set(0, targetTag)
-                            insMetadata.set(1, sourceTag)
-                            insMetadata.set(2, targetTag)
-                            insMetadata.update()
-                        } finally { insMetadata.close() }
+                        """
+                        db.execRaw(insMetadataSql, [vtext(targetTag), vtext(sourceTag), vtext(targetTag)])
 
-                        let delMetadata = conn.prepareStatement("DELETE FROM metadata_tags WHERE tag = ?")
-                        try {
-                            delMetadata.set(0, sourceTag)
-                            delMetadata.update()
-                        } finally { delMetadata.close() }
+                        db.execRaw("DELETE FROM metadata_tags WHERE tag = $1", [vtext(sourceTag)])
                     }
 
                     if (deleteSource) {
-                        let delTag = conn.prepareStatement("DELETE FROM tags WHERE id = ?")
-                        try {
-                            delTag.set(0, sourceId)
-                            delTag.update()
-                        } finally { delTag.close() }
+                        db.execRaw("DELETE FROM tags WHERE id = $1", [vint(sourceId)])
                     }
 
                     try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
+                        db.execRawSql("COMMIT")
                     } catch (_: Exception) {}
 
                     invalidateTranslationSearchCache()
                     return true
                 } catch (e: Exception) {
                     try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
+                        db.execRawSql("ROLLBACK")
                     } catch (_: Exception) {}
                     getLogger("tag_dao").error("mergeById failed", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
         }
     }

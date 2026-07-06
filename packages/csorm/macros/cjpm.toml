@@ -1,0 +1,8 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "csorm_macros"
+  description = "Cangjie SeaORM entity macro"
+  version = "0.1.0"
+  src-dir = "src"
+  output-type = "static"
+  compile-option = "--compile-macro -Woff unused"

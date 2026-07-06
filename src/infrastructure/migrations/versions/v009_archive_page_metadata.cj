@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -19,7 +19,7 @@ public class V009_ArchivePageMetadata <: Migration {
         return "Create archive_page_metadata table for page-level metadata"
     }
 
-    public func up(conn: Connection): Bool {
+    public func up(db: Database): Bool {
         let createTableSql = """
             CREATE TABLE IF NOT EXISTS archive_page_metadata (
                 id BIGSERIAL PRIMARY KEY,
@@ -38,22 +38,22 @@ public class V009_ArchivePageMetadata <: Migration {
             )
         """
 
-        if (!MigrationHelpers.createTableIfNotExists(conn, "archive_page_metadata", createTableSql)) {
+        if (!MigrationHelpers.createTableIfNotExists(db, "archive_page_metadata", createTableSql)) {
             return false
         }
 
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "entry_path", "TEXT NOT NULL DEFAULT ''")) { return false }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "sort_index", "INT DEFAULT 0")) { return false }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archive_page_metadata", "hidden_in_files", "BOOLEAN DEFAULT false")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(db, "archive_page_metadata", "entry_path", "TEXT NOT NULL DEFAULT ''")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(db, "archive_page_metadata", "sort_index", "INT DEFAULT 0")) { return false }
+        if (!MigrationHelpers.addColumnIfNotExists(db, "archive_page_metadata", "hidden_in_files", "BOOLEAN DEFAULT false")) { return false }
 
-        if (!backfillEntryPath(conn)) {
+        if (!backfillEntryPath(db)) {
             return false
         }
 
         // 旧版本唯一约束是 (archive_id, page_number)，新版本改为 (archive_id, entry_path)
-        if (oldPageNumberConstraintExists(conn)) {
+        if (oldPageNumberConstraintExists(db)) {
             if (!MigrationHelpers.execUpdate(
-                conn,
+                db,
                 "ALTER TABLE archive_page_metadata DROP CONSTRAINT archive_page_metadata_archive_id_page_number_key"
             )) {
                 return false
@@ -61,26 +61,26 @@ public class V009_ArchivePageMetadata <: Migration {
         }
 
         // 先删除旧索引定义，再创建新的 path 唯一索引
-        if (MigrationHelpers.indexExists(conn, "idx_apm_archive_entry")) {
-            if (!MigrationHelpers.execUpdate(conn, "DROP INDEX idx_apm_archive_entry")) {
+        if (MigrationHelpers.indexExists(db, "idx_apm_archive_entry")) {
+            if (!MigrationHelpers.execUpdate(db, "DROP INDEX idx_apm_archive_entry")) {
                 return false
             }
         }
-        if (!MigrationHelpers.indexExists(conn, "idx_apm_archive_entry")) {
+        if (!MigrationHelpers.indexExists(db, "idx_apm_archive_entry")) {
             if (!MigrationHelpers.execUpdate(
-                conn,
+                db,
                 "CREATE UNIQUE INDEX idx_apm_archive_entry ON archive_page_metadata (archive_id, entry_path)"
             )) {
                 return false
             }
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_id", "archive_page_metadata", "archive_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_apm_archive_id", "archive_page_metadata", "archive_id")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_page", "archive_page_metadata", "archive_id, page_number")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_apm_archive_page", "archive_page_metadata", "archive_id, page_number")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_apm_archive_sort", "archive_page_metadata", "archive_id, sort_index, page_number")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_apm_archive_sort", "archive_page_metadata", "archive_id, sort_index, page_number")) {
             return false
         }
 
@@ -88,41 +88,24 @@ public class V009_ArchivePageMetadata <: Migration {
         return true
     }
 
-    public func down(conn: Connection): Bool {
-        return MigrationHelpers.execUpdate(conn, "DROP TABLE IF EXISTS archive_page_metadata")
+    public func down(db: Database): Bool {
+        return MigrationHelpers.execUpdate(db, "DROP TABLE IF EXISTS archive_page_metadata")
     }
 
-    private func backfillEntryPath(conn: Connection): Bool {
+    private func backfillEntryPath(db: Database): Bool {
         try {
-            let queryStmt = conn.prepareStatement(
-                "SELECT id, page_number FROM archive_page_metadata WHERE entry_path IS NULL OR LENGTH(entry_path) = 0 ORDER BY id"
+            let rows = db.raw<(Int64, Int32)>(
+                "SELECT id, page_number FROM archive_page_metadata WHERE entry_path IS NULL OR LENGTH(entry_path) = 0 ORDER BY id",
+                [],
+                { row => (row.getInt64(0), row.getInt32(1)) }
             )
-            try {
-                let updateStmt = conn.prepareStatement(
-                    "UPDATE archive_page_metadata SET entry_path = ? WHERE id = ?"
+            for ((id, pageNo) in rows) {
+                if (id <= 0) { continue }
+                let entryPath = if (pageNo > 0) { "__page_${pageNo}" } else { "__page_0" }
+                db.execRaw(
+                    "UPDATE archive_page_metadata SET entry_path = $1 WHERE id = $2",
+                    [vtext(entryPath), vint(id)]
                 )
-                try {
-                    let rs = queryStmt.query()
-                    try {
-                        while (rs.next()) {
-                            let id = rs.getOrNull<Int64>(0) ?? 0
-                            let pageNo = rs.getOrNull<Int32>(1) ?? 0
-                            if (id <= 0) {
-                                continue
-                            }
-                            let entryPath = if (pageNo > 0) { "__page_${pageNo}" } else { "__page_0" }
-                            updateStmt.set(0, entryPath)
-                            updateStmt.set(1, id)
-                            let _ = updateStmt.update()
-                        }
-                    } finally {
-                        rs.close()
-                    }
-                } finally {
-                    updateStmt.close()
-                }
-            } finally {
-                queryStmt.close()
             }
             return true
         } catch (e: Exception) {
@@ -131,29 +114,14 @@ public class V009_ArchivePageMetadata <: Migration {
         }
     }
 
-    private func oldPageNumberConstraintExists(conn: Connection): Bool {
-        let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = ? AND c.conname = ?)"
-        )
-        try {
-            stmt.set(0, "archive_page_metadata")
-            stmt.set(1, "archive_page_metadata_archive_id_page_number_key")
-            let rs = stmt.query()
-            try {
-                if (rs.next()) {
-                    try {
-                        return rs.getOrNull<Bool>(0) ?? false
-                    } catch (_: Exception) {
-                        let n = rs.getOrNull<Int32>(0) ?? 0
-                        return n != 0
-                    }
-                }
-                return false
-            } finally {
-                rs.close()
-            }
-        } finally {
-            stmt.close()
+    private func oldPageNumberConstraintExists(db: Database): Bool {
+        match (db.rawOne<Bool>(
+            "SELECT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid WHERE t.relname = $1 AND c.conname = $2)",
+            [vtext("archive_page_metadata"), vtext("archive_page_metadata_archive_id_page_number_key")],
+            { row => row.getOrNullBool(0) ?? false }
+        )) {
+            case Some(b) => b
+            case None => false
         }
     }
 }

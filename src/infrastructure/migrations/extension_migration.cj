@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations
 
-import std.database.sql.*
+import csorm.*
 
 /**
  * 扩展迁移接口 - 依赖数据库扩展启用后再执行的迁移
@@ -28,8 +28,8 @@ public interface ExtensionMigration {
 
     /**
      * 执行迁移
-     * @param conn 数据库连接（调用者管理事务）
+     * @param db csorm.Database 句柄（调用者管理事务）
      * @return true 如果成功，false 否则
      */
-    func up(conn: Connection): Bool
+    func up(db: Database): Bool
 }

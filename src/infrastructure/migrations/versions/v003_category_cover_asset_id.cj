@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -17,14 +17,14 @@ public class V003_CategoryCoverAssetId <: Migration {
         return "Add categories.cover_asset_id column for category cover image"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "categories")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "categories")) {
             logger.warn("categories table missing; skipping V003")
             return true
         }
 
-        MigrationHelpers.addColumnIfNotExists(conn, "categories", "cover_asset_id", "BIGINT DEFAULT 0")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_categories_cover_asset_id", "categories", "cover_asset_id")
+        MigrationHelpers.addColumnIfNotExists(db, "categories", "cover_asset_id", "BIGINT DEFAULT 0")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_categories_cover_asset_id", "categories", "cover_asset_id")
         return true
     }
 }

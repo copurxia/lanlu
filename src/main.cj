@@ -89,6 +89,17 @@ main(): Int64 {
     MigrationRegistry.register(V026_AddSourceIdRegexToPlugins())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
+
+    // 初始化数据库连接池（迁移层也依赖此池，须先初始化）
+    logger.debug("Application starting... step 8-pool: initializing connection pool")
+    let poolInitialized = DatabaseConfig.initializePool()
+    if (poolInitialized) {
+        logger.info("Connection pool initialized successfully")
+    } else {
+        logger.error("Failed to initialize connection pool")
+        return 1
+    }
+
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {
@@ -103,16 +114,6 @@ main(): Int64 {
         logger.info("Extension migrations completed successfully")
     } else {
         logger.error("Failed to run extension migrations")
-        return 1
-    }
-
-    // 初始化数据库连接池
-    logger.debug("Application starting... step 9-pool: initializing connection pool")
-    let poolInitialized = DatabaseConfig.initializePool()
-    if (poolInitialized) {
-        logger.info("Connection pool initialized successfully")
-    } else {
-        logger.error("Failed to initialize connection pool")
         return 1
     }
 

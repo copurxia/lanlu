@@ -1,8 +1,8 @@
 package lanlu.infrastructure.migrations
 
-import std.database.sql.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import csorm.*
 
 /**
  * 扩展迁移执行器 - 仅在所需数据库扩展已启用时执行迁移
@@ -15,16 +15,16 @@ public class ExtensionMigrationRunner {
      * @return true 如果所有可执行迁移成功或当前无需执行
      */
     public static func runReadyMigrations(): Bool {
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let dbOpt = DatabaseConfig.getDatabase()
+        match (dbOpt) {
+            case Some(db) =>
                 try {
-                    if (!MigrationRunner.ensureMigrationsTable(conn)) {
+                    if (!MigrationRunner.ensureMigrationsTable(db)) {
                         logger.error("Failed to create schema_migrations table")
                         return false
                     }
 
-                    let applied = MigrationRunner.getAppliedVersions(conn)
+                    let applied = MigrationRunner.getAppliedVersions(db)
                     let allMigrations = ExtensionMigrationRegistry.getAll()
                     if (allMigrations.size == 0) {
                         logger.debug("No registered extension migrations")
@@ -44,7 +44,7 @@ public class ExtensionMigrationRunner {
                             return false
                         }
 
-                        if (!hasRequiredExtensions(conn, migration)) {
+                        if (!hasRequiredExtensions(db, migration)) {
                             logger.info(
                                 "Skipping extension migration ${migration.version()} until required extensions are enabled"
                             )
@@ -54,13 +54,13 @@ public class ExtensionMigrationRunner {
                         logger.info(
                             "Running extension migration ${migration.version()}: ${migration.description()}"
                         )
-                        let success = migration.up(conn)
+                        let success = migration.up(db)
                         if (!success) {
                             logger.error("Extension migration ${migration.version()} failed")
                             return false
                         }
 
-                        if (!MigrationRunner.recordMigration(conn, migration.version(), migration.description())) {
+                        if (!MigrationRunner.recordMigration(db, migration.version(), migration.description())) {
                             logger.error("Failed to record extension migration ${migration.version()}")
                             return false
                         }
@@ -76,8 +76,6 @@ public class ExtensionMigrationRunner {
                 } catch (e: Exception) {
                     logger.error("Extension migration error: ${e.message}")
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("Cannot connect to database")
@@ -85,9 +83,9 @@ public class ExtensionMigrationRunner {
         }
     }
 
-    private static func hasRequiredExtensions(conn: Connection, migration: ExtensionMigration): Bool {
+    private static func hasRequiredExtensions(db: Database, migration: ExtensionMigration): Bool {
         for (extName in migration.requiredExtensions()) {
-            if (MigrationHelpers.extensionInstalled(conn, extName)) {
+            if (MigrationHelpers.extensionInstalled(db, extName)) {
                 continue
             }
 
@@ -103,7 +101,6 @@ public class ExtensionMigrationRunner {
             )
             return false
         }
-        return true
+        true
     }
-
 }

@@ -1,6 +1,7 @@
 package lanlu.contexts.system.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -14,32 +15,25 @@ public class DatabaseMetaDao {
      * Best-effort: returns empty map on any error.
      */
     public static func getInstalledExtensions(): HashMap<String, String> {
-        var out: HashMap<String, String> = HashMap<String, String>()
+        let out: HashMap<String, String> = HashMap<String, String>()
+        let logger = getLogger("db_meta_dao")
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT extname, extversion FROM pg_extension ORDER BY extname")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let name = rs.getOrNull<String>(0) ?? ""
-                                let version = rs.getOrNull<String>(1) ?? ""
-                                if (name.size > 0) {
-                                    out[name] = version
-                                }
-                            }
-                        } finally { rs.close() }
-                    } finally { stmt.close() }
+                    let rows = db.raw<Row>("SELECT extname, extversion FROM pg_extension ORDER BY extname", [], { r => r })
+                    for (row in rows) {
+                        let name = row.getOrNullText(0) ?? ""
+                        let version = row.getOrNullText(1) ?? ""
+                        if (name.size > 0) {
+                            out[name] = version
+                        }
+                    }
                 } catch (e: Exception) {
-                    getLogger("db_meta_dao").warn("Failed to query pg_extension", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    logger.warn("Failed to query pg_extension", ("error", e.message))
                 }
             case None =>
-                getLogger("db_meta_dao").warn("Cannot get DB connection")
+                logger.warn("Cannot get DB connection")
         }
 
         return out

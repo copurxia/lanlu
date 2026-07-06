@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 
 public class V026_AddSourceIdRegexToPlugins <: Migration {
@@ -12,12 +12,12 @@ public class V026_AddSourceIdRegexToPlugins <: Migration {
         return "Add source_id_regex column to plugins table"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "plugins")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "plugins")) {
             return true
         }
 
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "plugins", "source_id_regex", "TEXT DEFAULT ''")) {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "plugins", "source_id_regex", "TEXT DEFAULT ''")) {
             return false
         }
 

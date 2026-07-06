@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -15,30 +15,30 @@ public class V019_UserWebauthnCredentials <: Migration {
         return "Create user webauthn credentials table"
     }
 
-    public func up(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "user_webauthn_credentials")) {
+    public func up(db: Database): Bool {
+        if (MigrationHelpers.tableExists(db, "user_webauthn_credentials")) {
             logger.debug("user_webauthn_credentials already exists, checking columns")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "algorithm", "VARCHAR(32) NOT NULL DEFAULT 'ES256'")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "public_key_b64", "TEXT NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "sign_count", "BIGINT NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "aaguid", "VARCHAR(64) NOT NULL DEFAULT ''")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "transports_json", "TEXT NOT NULL DEFAULT '[]'")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "user_verified", "BOOLEAN NOT NULL DEFAULT false")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "backup_eligible", "BOOLEAN NOT NULL DEFAULT false")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "backup_state", "BOOLEAN NOT NULL DEFAULT false")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "attestation_format", "VARCHAR(64) NOT NULL DEFAULT 'none'")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "last_used_at", "TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "revoked_at", "TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            MigrationHelpers.addColumnIfNotExists(conn, "user_webauthn_credentials", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_webauthn_credentials_user_id", "user_webauthn_credentials", "user_id")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_user_webauthn_credentials_credential_id", "user_webauthn_credentials", "credential_id_b64url")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "algorithm", "VARCHAR(32) NOT NULL DEFAULT 'ES256'")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "public_key_b64", "TEXT NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "sign_count", "BIGINT NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "aaguid", "VARCHAR(64) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "transports_json", "TEXT NOT NULL DEFAULT '[]'")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "user_verified", "BOOLEAN NOT NULL DEFAULT false")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "backup_eligible", "BOOLEAN NOT NULL DEFAULT false")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "backup_state", "BOOLEAN NOT NULL DEFAULT false")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "attestation_format", "VARCHAR(64) NOT NULL DEFAULT 'none'")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "last_used_at", "TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "revoked_at", "TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(db, "user_webauthn_credentials", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.createIndexIfNotExists(db, "idx_user_webauthn_credentials_user_id", "user_webauthn_credentials", "user_id")
+            MigrationHelpers.createIndexIfNotExists(db, "idx_user_webauthn_credentials_credential_id", "user_webauthn_credentials", "credential_id_b64url")
             return true
         }
 
         logger.debug("Creating user_webauthn_credentials table")
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             CREATE TABLE user_webauthn_credentials (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -63,8 +63,8 @@ public class V019_UserWebauthnCredentials <: Migration {
             return false
         }
 
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_webauthn_credentials_user_id", "user_webauthn_credentials", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_webauthn_credentials_credential_id", "user_webauthn_credentials", "credential_id_b64url")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_webauthn_credentials_user_id", "user_webauthn_credentials", "user_id")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_webauthn_credentials_credential_id", "user_webauthn_credentials", "credential_id_b64url")
         return true
     }
 }

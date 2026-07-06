@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 
 /**
@@ -15,26 +15,26 @@ public class V017_TaskpoolStateModel <: Migration {
         return "Add task phase, waiting_reason, and active_key columns"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "tasks")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "tasks")) {
             return false
         }
 
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "tasks", "phase", "VARCHAR(80)")) {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "tasks", "phase", "VARCHAR(80)")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "tasks", "waiting_reason", "VARCHAR(80)")) {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "tasks", "waiting_reason", "VARCHAR(80)")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "tasks", "active_key", "VARCHAR(255)")) {
-            return false
-        }
-
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_tasks_active_key_status", "tasks", "active_key, status")) {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "tasks", "active_key", "VARCHAR(255)")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_tasks_active_key_status", "tasks", "active_key, status")) {
+            return false
+        }
+
+        if (!MigrationHelpers.execUpdate(db, """
             UPDATE tasks
             SET phase = CASE
                 WHEN status = 'pending' THEN 'queued'
@@ -50,7 +50,7 @@ public class V017_TaskpoolStateModel <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             UPDATE tasks
             SET waiting_reason = 'task_dependency'
             WHERE status = 'waiting' AND wait_for_task_id IS NOT NULL AND waiting_reason IS NULL

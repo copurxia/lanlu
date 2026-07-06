@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,15 +18,15 @@ public class V010_ArchiveTankoubonAssetsJson <: Migration {
         return "Add assets jsonb to archives and tankoubons with cover backfill"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "archives", "assets", "JSONB NOT NULL DEFAULT '{}'::jsonb")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "archives", "assets", "JSONB NOT NULL DEFAULT '{}'::jsonb")) {
             return false
         }
-        if (!MigrationHelpers.addColumnIfNotExists(conn, "tankoubons", "assets", "JSONB NOT NULL DEFAULT '{}'::jsonb")) {
+        if (!MigrationHelpers.addColumnIfNotExists(db, "tankoubons", "assets", "JSONB NOT NULL DEFAULT '{}'::jsonb")) {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             UPDATE archives
             SET assets = jsonb_set(
                 COALESCE(assets, '{}'::jsonb),
@@ -40,7 +40,7 @@ public class V010_ArchiveTankoubonAssetsJson <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             UPDATE tankoubons
             SET assets = jsonb_set(
                 COALESCE(assets, '{}'::jsonb),

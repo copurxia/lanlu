@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -15,8 +15,8 @@ public class V020_UserTotpCredentials <: Migration {
         return "Create user totp credentials and recovery codes tables"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.createTableIfNotExists(conn, "user_totp_credentials", """
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.createTableIfNotExists(db, "user_totp_credentials", """
             CREATE TABLE user_totp_credentials (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
@@ -38,26 +38,26 @@ public class V020_UserTotpCredentials <: Migration {
             return false
         }
 
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "secret_b32", "TEXT NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "secret_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "digits", "INTEGER NOT NULL DEFAULT 6")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "period_seconds", "INTEGER NOT NULL DEFAULT 30")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "algorithm", "VARCHAR(16) NOT NULL DEFAULT 'SHA1'")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "issuer", "VARCHAR(255) NOT NULL DEFAULT 'Lanlu'")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "verified_at", "TIMESTAMP")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "last_used_step", "BIGINT NOT NULL DEFAULT -1")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "revoked_at", "TIMESTAMP")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_credentials", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_totp_credentials_user_id", "user_totp_credentials", "user_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_totp_credentials_secret_hash", "user_totp_credentials", "secret_hash")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "secret_b32", "TEXT NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "secret_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "digits", "INTEGER NOT NULL DEFAULT 6")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "period_seconds", "INTEGER NOT NULL DEFAULT 30")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "algorithm", "VARCHAR(16) NOT NULL DEFAULT 'SHA1'")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "issuer", "VARCHAR(255) NOT NULL DEFAULT 'Lanlu'")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "verified_at", "TIMESTAMP")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "last_used_step", "BIGINT NOT NULL DEFAULT -1")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "revoked_at", "TIMESTAMP")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_credentials", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_totp_credentials_user_id", "user_totp_credentials", "user_id")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_totp_credentials_secret_hash", "user_totp_credentials", "secret_hash")
         let _ = MigrationHelpers.execUpdate(
-            conn,
+            db,
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_totp_credentials_active_user ON user_totp_credentials (user_id) WHERE revoked_at IS NULL"
         )
 
-        if (!MigrationHelpers.createTableIfNotExists(conn, "user_totp_recovery_codes", """
+        if (!MigrationHelpers.createTableIfNotExists(db, "user_totp_recovery_codes", """
             CREATE TABLE user_totp_recovery_codes (
                 id SERIAL PRIMARY KEY,
                 credential_id INTEGER NOT NULL,
@@ -69,12 +69,12 @@ public class V020_UserTotpCredentials <: Migration {
         """)) {
             return false
         }
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_recovery_codes", "credential_id", "INTEGER NOT NULL DEFAULT 0")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_recovery_codes", "code_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_recovery_codes", "used_at", "TIMESTAMP")
-        MigrationHelpers.addColumnIfNotExists(conn, "user_totp_recovery_codes", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_totp_recovery_codes_credential_id", "user_totp_recovery_codes", "credential_id")
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_user_totp_recovery_codes_code_hash", "user_totp_recovery_codes", "code_hash")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_recovery_codes", "credential_id", "INTEGER NOT NULL DEFAULT 0")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_recovery_codes", "code_hash", "VARCHAR(128) NOT NULL DEFAULT ''")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_recovery_codes", "used_at", "TIMESTAMP")
+        MigrationHelpers.addColumnIfNotExists(db, "user_totp_recovery_codes", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_totp_recovery_codes_credential_id", "user_totp_recovery_codes", "credential_id")
+        MigrationHelpers.createIndexIfNotExists(db, "idx_user_totp_recovery_codes_code_hash", "user_totp_recovery_codes", "code_hash")
 
         logger.debug("user_totp credentials tables ready")
         return true

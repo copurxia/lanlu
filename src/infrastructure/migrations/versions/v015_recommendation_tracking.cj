@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 
 /**
@@ -15,8 +15,8 @@ public class V015_RecommendationTracking <: Migration {
         return "Add recommendation tracking tables and indexes"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.execUpdate(db, """
             CREATE TABLE IF NOT EXISTS recommendation_impressions (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL DEFAULT 0,
@@ -33,7 +33,7 @@ public class V015_RecommendationTracking <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             CREATE TABLE IF NOT EXISTS recommendation_interactions (
                 id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL DEFAULT 0,
@@ -50,31 +50,31 @@ public class V015_RecommendationTracking <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_metadata_tags_tag_metadata", "metadata_tags", "tag, metadata_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_metadata_tags_tag_metadata", "metadata_tags", "tag, metadata_id")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_user_archive_status_user_updated", "user_archive_status", "user_id, updated_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_user_archive_status_user_updated", "user_archive_status", "user_id, updated_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_user_favorites_user_created", "user_favorites", "user_id, created_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_user_favorites_user_created", "user_favorites", "user_id, created_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_user_tank_favorites_user_created", "user_tankoubon_favorites", "user_id, created_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_user_tank_favorites_user_created", "user_tankoubon_favorites", "user_id, created_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_tankoubon_archives_tank_sort", "tankoubon_archives", "tankoubon_id, sort_order, archive_id")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_tankoubon_archives_tank_sort", "tankoubon_archives", "tankoubon_id, sort_order, archive_id")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_reco_impressions_user_scene_time", "recommendation_impressions", "user_id, scene, shown_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_reco_impressions_user_scene_time", "recommendation_impressions", "user_id, scene, shown_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_reco_impressions_session_scene_time", "recommendation_impressions", "session_key, scene, shown_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_reco_impressions_session_scene_time", "recommendation_impressions", "session_key, scene, shown_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_reco_interactions_user_scene_time", "recommendation_interactions", "user_id, scene, created_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_reco_interactions_user_scene_time", "recommendation_interactions", "user_id, scene, created_at DESC")) {
             return false
         }
-        if (!MigrationHelpers.createIndexIfNotExists(conn, "idx_reco_interactions_item_type_id", "recommendation_interactions", "item_type, item_id, created_at DESC")) {
+        if (!MigrationHelpers.createIndexIfNotExists(db, "idx_reco_interactions_item_type_id", "recommendation_interactions", "item_type, item_id, created_at DESC")) {
             return false
         }
 

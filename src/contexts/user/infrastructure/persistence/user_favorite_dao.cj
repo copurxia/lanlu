@@ -1,12 +1,13 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.database.sql.*
+import csorm.*
+import postgresql_driver.*
 import std.collection.*
+import stdx.log.*
 import lanlu.shared.config.*
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveData
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveDataMappers
 import lanlu.shared.utils.*
-import stdx.log.*
 
 /**
  * 用户收藏数据行
@@ -30,33 +31,22 @@ public class UserFavoriteDao {
      */
     public static func addFavorite(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            INSERT INTO user_favorites (user_id, archive_id, created_at)
+            SELECT $1, $2, CURRENT_TIMESTAMP
+            WHERE NOT EXISTS (
+                SELECT 1 FROM user_favorites WHERE user_id = $3 AND archive_id = $4
+            )
+        """
+        let params: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_favorites (user_id, archive_id, created_at)
-                        SELECT ?, ?, CURRENT_TIMESTAMP
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM user_favorites WHERE user_id = ? AND archive_id = ?
-                        )
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        stmt.set(2, userId)
-                        stmt.set(3, archiveId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("添加收藏失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -69,28 +59,19 @@ public class UserFavoriteDao {
      */
     public static func removeFavorite(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            DELETE FROM user_favorites
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let params: Array<Value> = [vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        DELETE FROM user_favorites
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("取消收藏失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -102,35 +83,21 @@ public class UserFavoriteDao {
      * 检查是否已收藏
      */
     public static func isFavorite(userId: Int64, archiveId: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT COUNT(*) FROM user_favorites
+            WHERE user_id = $1 AND archive_id = $2
+        """
+        let params: Array<Value> = [vint(userId), vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM user_favorites
-                        WHERE user_id = ? AND archive_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let count = rs.getOrNull<Int64>(0) ?? 0
-                                return count > 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (rows.size > 0) {
+                        return rows[0] > 0
                     }
                     return false
                 } catch (_: Exception) {
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -141,36 +108,23 @@ public class UserFavoriteDao {
      */
     public static func getUserFavorites(userId: Int64): Array<Int64> {
         let result = ArrayList<Int64>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT archive_id FROM user_favorites
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+        """
+        let params: Array<Value> = [vint(userId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT archive_id FROM user_favorites
-                        WHERE user_id = ?
-                        ORDER BY created_at DESC
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                                if (archiveId > 0) {
-                                    result.add(archiveId)
-                                }
-                            }
-                        } finally {
-                            rs.close()
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    for (archiveId in rows) {
+                        if (archiveId > 0) {
+                            result.add(archiveId)
                         }
-                    } finally {
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("user_favorite_dao").error("获取用户收藏失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("user_favorite_dao").error("无法连接到数据库")
@@ -183,37 +137,24 @@ public class UserFavoriteDao {
      */
     public static func getUserFavoriteArcids(userId: Int64): Array<String> {
         let result = ArrayList<String>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT a.arcid FROM user_favorites uf
+            JOIN archives a ON uf.archive_id = a.id
+            WHERE uf.user_id = $1
+            ORDER BY uf.created_at DESC
+        """
+        let params: Array<Value> = [vint(userId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT a.arcid FROM user_favorites uf
-                        JOIN archives a ON uf.archive_id = a.id
-                        WHERE uf.user_id = ?
-                        ORDER BY uf.created_at DESC
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let arcid = rs.getOrNull<String>(0) ?? ""
-                                if (arcid.size > 0) {
-                                    result.add(arcid)
-                                }
-                            }
-                        } finally {
-                            rs.close()
+                    let rows = db.raw<String>(sql, params, { r => r.getOrNullText(0) ?? "" })
+                    for (arcid in rows) {
+                        if (arcid.size > 0) {
+                            result.add(arcid)
                         }
-                    } finally {
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("user_favorite_dao").error("获取用户收藏arcid失败", ("error", e.message))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("user_favorite_dao").error("无法连接到数据库")
@@ -232,22 +173,26 @@ public class UserFavoriteDao {
             return result
         }
 
-        let ok = DatabaseConfig.withPooledConnection<Bool>("user_favorite_dao", "批量检查收藏状态失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
-                SELECT archive_id FROM user_favorites
-                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
+        let sql = """
+            SELECT archive_id FROM user_favorites
+            WHERE user_id = $1 AND archive_id = ANY($2::bigint[])
+        """
+        let params: Array<Value> = [vint(userId), int64Array(archiveIds)]
+        var ok = false
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    for (archiveId in rows) {
                         result[archiveId] = true
                     }
-                    return true
-                })
-            })
-        })
+                    ok = true
+                } catch (e: Exception) {
+                    getLogger("user_favorite_dao").error("批量检查收藏状态失败", ("error", e.message))
+                }
+            case None =>
+                getLogger("user_favorite_dao").error("无法连接到数据库")
+        }
 
         // 对于没有收藏或查询失败的档案，设置为 false
         for (archiveId in archiveIds) {
@@ -270,25 +215,29 @@ public class UserFavoriteDao {
             return result
         }
 
-        let _ = DatabaseConfig.withPooledConnection<Bool>("user_favorite_dao", "批量获取收藏时间失败", false, { conn =>
-            DatabaseConfig.withStatement<Bool>(conn, """
-                SELECT archive_id, COALESCE(CAST(EXTRACT(EPOCH FROM created_at) AS BIGINT), 0) as unix_timestamp FROM user_favorites
-                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
-            """, { stmt =>
-                stmt.set(0, userId)
-                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
-                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
-                    while (rs.next()) {
-                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                        let unixTimestamp = rs.getOrNull<Int64>(1) ?? 0
+        let sql = """
+            SELECT archive_id, COALESCE(CAST(EXTRACT(EPOCH FROM created_at) AS BIGINT), 0) as unix_timestamp FROM user_favorites
+            WHERE user_id = $1 AND archive_id = ANY($2::bigint[])
+        """
+        let params: Array<Value> = [vint(userId), int64Array(archiveIds)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let rows = db.raw<(Int64, Int64)>(sql, params, { r =>
+                        (r.getOrNullInt64(0) ?? 0, r.getOrNullInt64(1) ?? 0)
+                    })
+                    for (pair in rows) {
+                        let (archiveId, unixTimestamp) = pair
                         if (archiveId > 0) {
                             result[archiveId] = unixTimestamp
                         }
                     }
-                    return true
-                })
-            })
-        })
+                } catch (e: Exception) {
+                    getLogger("user_favorite_dao").error("批量获取收藏时间失败", ("error", e.message))
+                }
+            case None =>
+                getLogger("user_favorite_dao").error("无法连接到数据库")
+        }
 
         return result
     }
@@ -298,24 +247,16 @@ public class UserFavoriteDao {
      */
     public static func deleteByUserId(userId: Int64): Bool {
         let logger = getLogger("user_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM user_favorites WHERE user_id = $1"
+        let params: Array<Value> = [vint(userId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM user_favorites WHERE user_id = ?")
-                    try {
-                        stmt.set(0, userId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("删除用户收藏失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -326,24 +267,16 @@ public class UserFavoriteDao {
      */
     public static func deleteByArchiveId(archiveId: Int64): Bool {
         let logger = getLogger("user_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = "DELETE FROM user_favorites WHERE archive_id = $1"
+        let params: Array<Value> = [vint(archiveId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("DELETE FROM user_favorites WHERE archive_id = ?")
-                    try {
-                        stmt.set(0, archiveId)
-                        stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
+                    db.execRaw(sql, params)
+                    return true
                 } catch (e: Exception) {
                     logger.error("删除档案收藏失败", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -353,35 +286,47 @@ public class UserFavoriteDao {
      * 获取收藏数量
      */
     public static func getFavoriteCount(userId: Int64): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let sql = """
+            SELECT COUNT(*) FROM user_favorites WHERE user_id = $1
+        """
+        let params: Array<Value> = [vint(userId)]
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM user_favorites WHERE user_id = ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    let rows = db.raw<Int64>(sql, params, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (rows.size > 0) {
+                        return rows[0]
                     }
                     return 0
                 } catch (_: Exception) {
                     return 0
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None => return 0
         }
+    }
+
+    /**
+     * 将 archive_metadata_search 行（含 tags、last_read_time、progress）映射为 ArchiveData。
+     * 列顺序需与 getUserFavoriteArchives 的 SELECT 一致。
+     */
+    private static func mapArchivesWithTagsRow(row: Row): ArchiveData {
+        let archive = ArchiveData()
+        archive.id = row.getOrNullText(0) ?? ""
+        archive.filename = row.getOrNullText(1) ?? ""
+        archive.title = row.getOrNullText(2) ?? ""
+        archive.summary = row.getOrNullText(3) ?? ""
+        archive.thumbhash = row.getOrNullText(4) ?? ""
+        archive.cover_asset_id = row.getOrNullInt64(5) ?? 0
+        archive.created_at = row.getOrNullText(6) ?? ""
+        archive.updated_at = row.getOrNullText(7) ?? ""
+        archive.release_at = row.getOrNullText(8) ?? ""
+        archive.relative_path = row.getOrNullText(9) ?? ""
+        archive.file_size = row.getOrNullInt64(10) ?? 0
+        archive.pagecount = row.getOrNullInt32(11) ?? 0
+        archive.last_read_time = row.getOrNullText(12) ?? ""
+        archive.progress = row.getOrNullInt32(13) ?? 0
+        archive.tags = row.getOrNullText(14) ?? ""
+        return archive
     }
 
     /**
@@ -391,31 +336,23 @@ public class UserFavoriteDao {
     public static func getUserFavoriteArchives(userId: Int64, start: Int32, count: Int32): (Array<ArchiveData>, Int64) {
         let result = ArrayList<ArchiveData>()
         var totalCount: Int64 = 0
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
+        let logger = getLogger("user_favorite_dao")
+
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
                 try {
                     // 先获取总数
-                    let countStmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM user_favorites WHERE user_id = ?
-                    """)
-                    try {
-                        countStmt.set(0, userId)
-                        let countRs = countStmt.query()
-                        try {
-                            if (countRs.next()) {
-                                totalCount = countRs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            countRs.close()
-                        }
-                    } finally {
-                        countStmt.close()
+                    let countSql = """
+                        SELECT COUNT(*) FROM user_favorites WHERE user_id = $1
+                    """
+                    let countParams: Array<Value> = [vint(userId)]
+                    let countRows = db.raw<Int64>(countSql, countParams, { r => r.getOrNullInt64(0) ?? 0 })
+                    if (countRows.size > 0) {
+                        totalCount = countRows[0]
                     }
 
                     // 获取分页数据，使用标准 JOIN 获取用户特定数据
-                    let stmt = conn.prepareStatement("""
+                    let sql = """
                         SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash, awt.cover_asset_id,
                                awt.created_at, awt.updated_at, awt.release_at, awt.relative_path, awt.file_size,
                                awt.pagecount,
@@ -425,34 +362,21 @@ public class UserFavoriteDao {
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_favorites uf ON a.id = uf.archive_id
                         LEFT JOIN user_archive_status uas ON a.id = uas.archive_id AND uas.user_id = uf.user_id
-                        WHERE uf.user_id = ?
+                        WHERE uf.user_id = $1
                         ORDER BY uf.created_at DESC
-                        LIMIT ? OFFSET ?
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        stmt.set(1, count)
-                        stmt.set(2, start)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archive = ArchiveDataMappers.fromArchivesWithTagsRow(rs)
-                                result.add(archive)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                        LIMIT $2 OFFSET $3
+                    """
+                    let params: Array<Value> = [vint(userId), vint(Int64(count)), vint(Int64(start))]
+                    let rows = db.raw<ArchiveData>(sql, params, { row => mapArchivesWithTagsRow(row) })
+                    for (archive in rows) {
+                        result.add(archive)
                     }
                 } catch (e: Exception) {
-                    getLogger("user_favorite_dao").error("获取用户收藏档案详情失败", ("error", e.message), ("stack", e.toString()))
-                    getLogger("user_favorite_dao").error("查询参数", ("userId", userId.toString()), ("start", start.toString()), ("count", count.toString()))
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    logger.error("获取用户收藏档案详情失败", ("error", e.message), ("stack", e.toString()))
+                    logger.error("查询参数", ("userId", userId.toString()), ("start", start.toString()), ("count", count.toString()))
                 }
             case None =>
-                getLogger("user_favorite_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
         }
         return (result.toArray(), totalCount)
     }

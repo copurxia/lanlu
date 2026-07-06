@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -16,15 +16,15 @@ public class V005_ArchivesWithTagsCoverAsset <: Migration {
         return "Update archives_with_tags view to include cover_asset_id"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.viewExists(conn, "archives_with_tags")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.viewExists(db, "archives_with_tags")) {
             logger.warn("archives_with_tags view missing; skipping V005")
             return true
         }
 
         logger.info("Recreating archives_with_tags view with cover_asset_id")
-        MigrationHelpers.execUpdate(conn, "DROP VIEW archives_with_tags")
-        return MigrationHelpers.execUpdate(conn, """
+        MigrationHelpers.execUpdate(db, "DROP VIEW archives_with_tags")
+        return MigrationHelpers.execUpdate(db, """
             CREATE VIEW archives_with_tags AS
             SELECT
                 a.id,

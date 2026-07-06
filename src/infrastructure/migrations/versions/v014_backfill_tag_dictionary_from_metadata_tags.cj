@@ -1,6 +1,6 @@
 package lanlu.infrastructure.migrations.versions
 
-import std.database.sql.*
+import csorm.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
@@ -18,17 +18,17 @@ public class V014_BackfillTagDictionaryFromMetadataTags <: Migration {
         return "Backfill tags table from metadata_tags canonical relations"
     }
 
-    public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "tags")) {
+    public func up(db: Database): Bool {
+        if (!MigrationHelpers.tableExists(db, "tags")) {
             logger.warn("tags table missing; skipping V014")
             return true
         }
-        if (!MigrationHelpers.tableExists(conn, "metadata_tags")) {
+        if (!MigrationHelpers.tableExists(db, "metadata_tags")) {
             logger.warn("metadata_tags table missing; skipping V014")
             return true
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             WITH normalized AS (
                 SELECT DISTINCT
                     CASE
@@ -54,7 +54,7 @@ public class V014_BackfillTagDictionaryFromMetadataTags <: Migration {
             return false
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
+        if (!MigrationHelpers.execUpdate(db, """
             WITH normalized AS (
                 SELECT DISTINCT
                     CASE
