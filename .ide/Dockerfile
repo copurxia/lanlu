@@ -14,7 +14,7 @@ RUN set -eux; \
     build-essential clang ninja-build cmake binutils \
     pkg-config \
     libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-    libvips-dev libheif-dev librocksdb-dev; \
+    libvips-dev libheif-dev librocksdb-dev libpq-dev; \
   rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 24 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
