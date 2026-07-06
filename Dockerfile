@@ -16,6 +16,7 @@ RUN set -eux; \
       libavif16 \
       libbrotli1 \
       libheif1 \
+      libpq5 \
       libssl3t64 \
       librocksdb9.11 \
       libmimalloc3 \
