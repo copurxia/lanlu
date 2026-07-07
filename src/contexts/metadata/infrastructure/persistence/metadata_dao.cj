@@ -355,7 +355,7 @@ public class MetadataDao {
                 return false
             }
 
-            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id = ?", [vint(metadataId)])
+            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id = $1", [vint(metadataId)])
 
             let seen = HashSet<String>()
             for (rawTag in normalizedTags) {
@@ -723,9 +723,9 @@ public static func getPageThumbAssetId(parentArchiveId: String, pageNumber: Int3
             return false
         }
         return DatabaseConfig.withTransaction({ db =>
-            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)", [vtext(normalizedParent)])
-            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)", [vtext(normalizedParent)])
-            db.execRaw("DELETE FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?", [vtext(normalizedParent)])
+            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = $1)", [vtext(normalizedParent)])
+            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = $1)", [vtext(normalizedParent)])
+            db.execRaw("DELETE FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = $1", [vtext(normalizedParent)])
             return true
         })
     }
@@ -737,9 +737,9 @@ public static func getPageThumbAssetId(parentArchiveId: String, pageNumber: Int3
             return false
         }
         return DatabaseConfig.withTransaction({ db =>
-            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)", [vtext(normalizedType), vtext(normalizedId)])
-            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)", [vtext(normalizedType), vtext(normalizedId)])
-            db.execRaw("DELETE FROM metadata_objects WHERE entity_type = ? AND entity_id = ?", [vtext(normalizedType), vtext(normalizedId)])
+            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = $1 AND entity_id = $2)", [vtext(normalizedType), vtext(normalizedId)])
+            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = $1 AND entity_id = $2)", [vtext(normalizedType), vtext(normalizedId)])
+            db.execRaw("DELETE FROM metadata_objects WHERE entity_type = $1 AND entity_id = $2", [vtext(normalizedType), vtext(normalizedId)])
             return true
         })
     }
