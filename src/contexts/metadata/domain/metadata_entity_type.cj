@@ -1,6 +1,13 @@
 package lanlu.contexts.metadata.domain
 
-public enum MetadataEntityType {
+import csorm.*
+
+/**
+ * 元数据实体类型枚举。
+ * 实现 csorm.ActiveEnum 接口，可用 activeEnumToValue() 转为 Value.VEnum，
+ * DB 侧仍走 VARCHAR 文本协议。
+ */
+public enum MetadataEntityType <: ActiveEnum {
     | Archive
     | Tankoubon
     | Page
@@ -37,4 +44,12 @@ public enum MetadataEntityType {
             case _ => return true
         }
     }
+
+    // ===== ActiveEnum 接口实现（csorm 阶段五落地） =====
+
+    public func enumName(): String { "entity_type" }
+
+    public func toValue(): String { this.toDb() }
+
+    public func fromValue(raw: String): Bool { this.toDb() == raw }
 }

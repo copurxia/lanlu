@@ -5,6 +5,8 @@ import std.env.getVariable
 import std.convert.*
 import lanlu.shared.utils.*
 import csorm.*
+import postgresql_driver.*
+import std.database.sql.*
 
 /**
  * 连接池配置(从环境变量读取)。
@@ -44,8 +46,9 @@ public class ConnectionPoolStats {
 
 /**
  * 数据库连接池：基于 csorm.Database 的单例封装。
- * Database 内部已持有 postgresql-driver 的 ConnectionPool(PGconn 句柄池)，
- * 故本类只做单例管理 + 健康检查 + 环境变量拼接。
+ * 经 PGDriver(DriverManager) → PGDatasource → Database(ds) 路径构造，
+ * 底层复用 postgresql-driver 的 ConnectionPool(PGconn 句柄池)。
+ * 若 Datasource 路径失败则回退到 Database(connStr) 旧入口。
  */
 public class ConnectionPool {
     private static var instance: Option<ConnectionPool> = Option<ConnectionPool>.None
@@ -72,7 +75,9 @@ public class ConnectionPool {
     }
 
     /**
-     * 初始化连接池：构造 csorm.Database(底层 PGDatabase 自带连接池)。
+     * 初始化连接池：经 std.database.sql Datasource 路径构造 csorm.Database。
+     * 优先走 PGDriver().open() → Datasource → Database(ds)，
+     * 失败则回退 Database(connStr) 旧入口(底层 PGDatabase 自带连接池)。
      */
     public func initialize(): Bool {
         if (isInitialized) {
@@ -83,26 +88,41 @@ public class ConnectionPool {
 
         try {
             let connStr = buildConnStr()
-            let database = Database(connStr)
-            db = Some(database)
-            isInitialized = true
-            let _ = healthCheck()
-            logger.info("连接池初始化完成")
-            return true
+            // 优先走 std.database.sql Datasource 路径（阶段零 L0 落地）
+            var database: ?Database = None
+            try {
+                let ds = PGDriver().open(connStr, Array<(String, String)>())
+                database = Some(Database(ds))
+                logger.info("连接池经 PGDriver/Datasource 构造")
+            } catch (dsErr: Exception) {
+                logger.warn("Datasource 路径失败，回退到 Database(connStr): ${dsErr.message}")
+                database = Some(Database(connStr))
+            }
+            match (database) {
+                case Some(d) =>
+                    db = Some(d)
+                    isInitialized = true
+                    let _ = healthCheck()
+                    logger.info("连接池初始化完成")
+                    return true
+                case None =>
+                    logger.error("连接池构造返回 None")
+                    return false
+            }
         } catch (e: Exception) {
             logger.error("初始化连接池失败: ${e.message}")
             return false
         }
     }
 
-    /** 把 pool.* 参数拼到连接串(postgresql-driver conninfo.cj 解析 pool.max/pool.min/pool.idleTimeout)。 */
+    /** 用 ConnectOptions 把 pool.* 参数拼到连接串(postgresql-driver conninfo.cj 解析 pool.max/pool.min/pool.idleTimeout)。 */
     func buildConnStr(): String {
         let base = DatabaseConfig.getConnectionString()
-        // 已含 query 串则追加 &，否则加 ?
-        let sep = if (base.contains("?")) { "&" } else { "?" }
-        base + sep + "pool.max=" + config.maxConnections.toString() +
-            "&pool.min=" + config.minConnections.toString() +
-            "&pool.idleTimeout=" + config.idleTimeoutMs.toString()
+        var opts = ConnectOptions(base)
+        opts.poolSize = Int64(config.maxConnections)
+        opts.minPoolSize = Int64(config.minConnections)
+        opts.idleTimeoutMs = config.idleTimeoutMs
+        opts.toConnectionString()
     }
 
     /**

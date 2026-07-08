@@ -43,11 +43,24 @@ public class Row {
     let nulls: Array<Bool>      // 是否为 NULL
     let nameIndex: HashMap<String, Int64>
 
-    init(names: Array<String>, oids: Array<Int32>, values: Array<String>, nulls: Array<Bool>) {
+    public init(names: Array<String>, oids: Array<Int32>, values: Array<String>, nulls: Array<Bool>) {
         this.names = names
         this.oids = oids
         this.values = values
         this.nulls = nulls
+        let m = HashMap<String, Int64>()
+        for (i in 0..names.size) {
+            m[names[i]] = Int64(i)
+        }
+        this.nameIndex = m
+    }
+
+    /** 便捷构造：names + values(oids 默认为 0，nulls 默认为 false)。 */
+    public init(names: Array<String>, values: Array<String>) {
+        this.names = names
+        this.oids = Array<Int32>(names.size, { _ => 0 })
+        this.values = values
+        this.nulls = Array<Bool>(values.size, { _ => false })
         let m = HashMap<String, Int64>()
         for (i in 0..names.size) {
             m[names[i]] = Int64(i)

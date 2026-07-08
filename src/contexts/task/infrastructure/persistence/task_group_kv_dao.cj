@@ -11,6 +11,9 @@ import lanlu.shared.config.*
  * task_group_kv DAO
  *
  * 注意：不要 import lanlu.models.*，避免 dao <-> models 循环依赖。
+ *
+ * @Deprecated: task_group_kv 表已在 v016 迁移中删除（KV 迁移到 RocksDB）。
+ * 此 DAO 为死代码，保留仅作历史参考。所有方法仍操作已删除的表，运行时会失败。
  */
 public class TaskGroupKVDao {
     private static func nowSeconds(): Int64 {

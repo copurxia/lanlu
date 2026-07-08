@@ -15,6 +15,7 @@
   ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx"}
   postgresql_driver = { path = "packages/postgresql-driver" }
   csorm = { path = "packages/csorm" }
+  csorm_macros = { path = "packages/csorm/macros" }
   cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
   ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
   cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", tag = "master" }

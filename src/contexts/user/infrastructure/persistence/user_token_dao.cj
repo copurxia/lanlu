@@ -4,6 +4,7 @@ import csorm.*
 import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import lanlu.shared.enums.*
 import std.collection.*
 
 public class UserTokenRow {
@@ -21,6 +22,12 @@ public class UserTokenRow {
     public var expiresAt: String = ""
 
     public init() {}
+
+    /** 令牌类型枚举视图（csorm ActiveEnum 落地）。 */
+    public mut prop tokenTypeEnum: TokenType {
+        get() { TokenType.parse(tokenType) }
+        set(v) { tokenType = v.toValue() }
+    }
 }
 
 public class CreateTokenResult {
@@ -46,7 +53,7 @@ public class UserTokenDao {
             token
         }
         let tokenHash = AuthUtils.sha256Hex("${token}:${pepper}")
-        let actualType = if (tokenType == "api" || tokenType == "session") { tokenType } else { "session" }
+        let actualType = TokenType.parse(tokenType).toValue()  // 非法值回退 session（与原逻辑一致）
 
         let params: Array<Value> = [
             vint(userId),

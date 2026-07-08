@@ -57,7 +57,45 @@ public class DatabaseConfig {
 
     /** 初始化连接池。 */
     public static func initializePool(): Bool {
-        ConnectionPool.getInstance().initialize()
+        let ok = ConnectionPool.getInstance().initialize()
+        if (ok) {
+            setupObservability()
+        }
+        ok
+    }
+
+    // ===== 可观测性埋点（L6 落地） =====
+    /**
+     * 设置全局 metric 回调 + query 日志开关。
+     * 慢查询(>500ms)与失败 SQL 统一记录到 logger；QueryLog 受 CSORM_QUERY_LOG 环境变量控制。
+     */
+    static func setupObservability(): Unit {
+        let logger = getLogger("database_metric")
+        // 全局 metric 回调：记录慢查询与失败 SQL
+        DatabaseMetric.setMetricCallback({ info: MetricInfo =>
+            if (info.failed) {
+                logger.error("SQL 失败", ("context", info.context), ("elapsed_ms", info.elapsed.toMilliseconds().toString()), ("sql", info.sql))
+            } else if (info.elapsed.toMilliseconds() > 500) {
+                logger.warn("慢查询", ("context", info.context), ("elapsed_ms", info.elapsed.toMilliseconds().toString()), ("sql", info.sql))
+            } else {
+                logger.debug("SQL 执行", ("context", info.context), ("elapsed_ms", info.elapsed.toMilliseconds().toString()))
+            }
+        })
+        // QueryLog 开关：CSORM_QUERY_LOG=true 时启用
+        let logEnabled = getVariable("CSORM_QUERY_LOG") ?? ""
+        if (logEnabled == "true" || logEnabled == "1") {
+            QueryLog.enable()
+        }
+    }
+
+    /** 启用 csorm query 日志(调试用)。 */
+    public static func enableQueryLog(): Unit {
+        QueryLog.enable()
+    }
+
+    /** 禁用 csorm query 日志。 */
+    public static func disableQueryLog(): Unit {
+        QueryLog.disable()
     }
 
     // ===== 事务封装 =====

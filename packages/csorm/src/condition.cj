@@ -26,6 +26,7 @@ public enum Cond {
     | RawCond(String, Array<Value>)      // 原始 SQL 片段，占位符用 ? (渲染时重排为 $n)
     | Exists(String, Array<Value>)       // EXISTS (subquery)，subquery 占位符用 ?
     | NotExists(String, Array<Value>)    // NOT EXISTS (subquery)
+    | ExprCond(Expr)                     // 表达式条件(类型化 Expr)
 }
 
 /** AND 多个条件。 */
@@ -79,6 +80,9 @@ public func exists(subSql: String, params: Array<Value>): Cond { Cond.Exists(sub
 
 /** NOT EXISTS (subquery)，subquery 占位符用 ?。 */
 public func notExists(subSql: String, params: Array<Value>): Cond { Cond.NotExists(subSql, params) }
+
+/** 表达式条件(类型化 Expr)。 */
+public func exprCond(e: Expr): Cond { Cond.ExprCond(e) }
 
 // ===== 条件渲染 =====
 
@@ -148,6 +152,8 @@ public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): S
         case NotExists(subSql, subParams) =>
             for (p in subParams) { params.add(p) }
             "NOT EXISTS (" + rewriteQPlaceholders(subSql, ph) + ")"
+        case ExprCond(e) =>
+            renderExpr(e, params, ph)
     }
 }
 

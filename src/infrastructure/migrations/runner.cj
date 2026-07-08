@@ -121,4 +121,65 @@ public class MigrationRunner {
             false
         }
     }
+
+    // ===== csorm Migrator 集成（阶段四 L4 落地） =====
+
+    /**
+     * 用 csorm.Migrator 执行待处理的迁移。
+     * 把旧 Migration 包装为 CsormMigration，经 csorm Migrator.up() 执行。
+     * csorm Migrator 自动在事务内执行每条迁移 + 写 schema_migrations。
+     *
+     * 兼容性：csorm Migrator 创建的 schema_migrations 表只有 (version, applied_at)，
+     * 但旧 runner 和扩展 runner 的 recordMigration 要写 description 列。
+     * 故此方法在执行前自动确保 description 列存在（ADD COLUMN IF NOT EXISTS）
+     * 并允许 NULL（csorm Migrator 的 recordApplied 不写 description）。
+     */
+    public static func runPendingMigrationsViaCsorm(): Bool {
+        let dbOpt = DatabaseConfig.getDatabase()
+        match (dbOpt) {
+            case Some(db) =>
+                try {
+                    // 先确保旧 runner 的 schema_migrations 表存在（含 description 列）
+                    if (!ensureMigrationsTable(db)) {
+                        logger.error("Failed to create schema_migrations table")
+                        return false
+                    }
+                    // 确保 description 列存在且允许 NULL
+                    // （csorm Migrator 可能创建了只有 version+applied_at 的表，
+                    //  旧 runner 和扩展 runner 的 recordMigration 需要 description 列）
+                    MigrationHelpers.execUpdate(db,
+                        "ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS description VARCHAR(255)")
+                    MigrationHelpers.execUpdate(db,
+                        "ALTER TABLE schema_migrations ALTER COLUMN description DROP NOT NULL")
+                    // 用 csorm Migrator 执行
+                    let migrator = Migrator(db)
+                    let allMigrations = MigrationRegistry.getAll()
+                    // 转为数组并包装
+                    var migArr = Array<Migration>(allMigrations.size, { _ =>
+                        allMigrations[0]
+                    })
+                    var idx = 0
+                    for (m in allMigrations) {
+                        migArr[idx] = m
+                        idx++
+                    }
+                    let wrapped = wrapMigrations(migArr)
+                    let applied = migrator.up(wrapped)
+                    if (applied.size > 0) {
+                        logger.info("csorm Migrator applied ${applied.size} migrations")
+                    } else {
+                        logger.info("No pending migrations (csorm Migrator)")
+                    }
+                    true
+                } catch (e: Exception) {
+                    logger.error("csorm Migrator error: ${e.message}")
+                    // 回退到旧 runner
+                    logger.info("Falling back to legacy MigrationRunner")
+                    runPendingMigrations()
+                }
+            case None =>
+                logger.error("Cannot connect to database")
+                false
+        }
+    }
 }

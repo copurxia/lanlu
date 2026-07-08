@@ -3,12 +3,17 @@ package csorm
 import std.collection.*
 import std.sync.*
 import std.time.*
+import std.database.sql.*
 import postgresql_driver.*
 
 /**
  * csorm 执行入口：包装 PGDatabase，执行 builder/RawQuery，统一把 Value 转 PGValue 后下发。
  * 错误：捕获 PGError 包成 CsormError 抛出(保留 SQLSTATE)。
  * 事务：直接透传到底层 driver 的 ThreadLocal 钉连接事务，多线程各自独立事务。
+ *
+ * 阶段零适配：新增 Datasource 入口，让 csorm 可经 std.database.sql 抽象构造；
+ * 内部仍复用 PGDatabase 的私有 API(查询/事务/游标)，保证现有 DAO 与测试不破坏。
+ * 后续阶段逐步把执行路径迁移到 Datasource/Connection/Statement/QueryResult。
  */
 public class Database {
     let pg: PGDatabase
@@ -20,6 +25,19 @@ public class Database {
     /** 适配器：包装已存在的 PGDatabase(跨 DAO 句柄传递 / 事务内复用)。 */
     public init(pg: PGDatabase) {
         this.pg = pg
+    }
+
+    /**
+     * 经 std.database.sql.Datasource 构造：从 PGDatasource 取底层 PGDatabase 复用。
+     * 用法：`Database(PGDriver().open(connString, []))` 或经 DriverManager 取驱动后 open。
+     * Datasource 仍持有池生命周期；close() 会一并关闭。
+     */
+    public init(ds: Datasource) {
+        match (ds as PGDatasource) {
+            case Some(pds) => this.pg = pds.pgDatabase()
+            case None =>
+                throw CsormError("Database(Datasource): only PGDatasource supported currently")
+        }
     }
 
     /** 逃生舱：直接拿底层 PGDatabase(用游标/cancel 等高级能力)。 */

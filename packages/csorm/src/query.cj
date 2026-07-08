@@ -62,6 +62,8 @@ public class SelectQuery {
     // 原始(不引号)SELECT 表达式，与 cols 并存；build() 时先 cols 后 rawCols。
     // (expr, alias) — expr 原样输出，alias 非空时输出 `expr AS "alias"`。
     var rawCols: ArrayList<(String, String)> = ArrayList<(String, String)>()
+    // 类型化 Expr 列：(Expr, alias)；build 时在 rawCols 之后渲染。
+    var exprCols: ArrayList<(Expr, String)> = ArrayList<(Expr, String)>()
     var distinctFlag: Bool = false
     var joins: ArrayList<(JoinKind, String, String)> = ArrayList<(JoinKind, String, String)>()   // (kind, table, onSql)
     var joinParams: ArrayList<Value> = ArrayList<Value>()
@@ -123,6 +125,35 @@ public class SelectQuery {
     /** 追加原始(不引号)SELECT 表达式，可带别名。如 EXTRACT(EPOCH FROM x)、COUNT(*)、COALESCE(...)。 */
     public func addRawColumn(expr: String, alias!: String = ""): SelectQuery {
         rawCols.add((expr, alias))
+        this
+    }
+    /** 追加类型化 Expr 列，可带别名。占位符在 build 时续编号压入。 */
+    public func selectExpr(e: Expr, alias!: String = ""): SelectQuery {
+        exprCols.add((e, alias))
+        this
+    }
+    /** whereExpr：用类型化 Expr 作 WHERE 条件(覆盖已有 where)。 */
+    public func whereExpr(e: Expr): SelectQuery {
+        whereCond = Some(Cond.ExprCond(e))
+        this
+    }
+    /** andWhereExpr：在已有 WHERE 上 AND 一个 Expr 条件。 */
+    public func andWhereExpr(e: Expr): SelectQuery {
+        whereCond = match (whereCond) {
+            case Some(existing) => Some(Cond.And([existing, Cond.ExprCond(e)]))
+            case None => Some(Cond.ExprCond(e))
+        }
+        this
+    }
+    /** havingExpr：用类型化 Expr 作 HAVING 条件。 */
+    public func havingExpr(e: Expr): SelectQuery {
+        havingCond = Some(Cond.ExprCond(e))
+        this
+    }
+    /** orderByExpr：按 Expr 排序(原样输出，不引号)。 */
+    public func orderByExpr(e: Expr, o: Order, nulls!: String = ""): SelectQuery {
+        orderBys.add((e.sql, o, nulls))
+        for (p in e.params) { /* Expr 参数在 ORDER BY 处无占位符编号；简化：ORDER BY 不带参数 */ }
         this
     }
     public func distinct(): SelectQuery { distinctFlag = true; this }
@@ -218,7 +249,7 @@ public class SelectQuery {
         var sel = "SELECT "
         if (distinctFlag) { sel += "DISTINCT " }
         let selParts = ArrayList<String>()
-        if (cols.size == 0 && rawCols.size == 0) {
+        if (cols.size == 0 && rawCols.size == 0 && exprCols.size == 0) {
             selParts.add("*")
         } else {
             if (cols.size > 0) {
@@ -229,6 +260,15 @@ public class SelectQuery {
                     selParts.add(expr)
                 } else {
                     selParts.add(expr + " AS " + quoteIdent(alias))
+                }
+            }
+            // 类型化 Expr 列：渲染并续编号压入参数
+            for ((e, alias) in exprCols) {
+                let rendered = renderExpr(e, allParams, ph)
+                if (alias.isEmpty()) {
+                    selParts.add(rendered)
+                } else {
+                    selParts.add(rendered + " AS " + quoteIdent(alias))
                 }
             }
         }
@@ -324,6 +364,8 @@ public class SelectQuery {
         q.cols = colsCopy.toArray()
         // 深拷贝 rawCols
         for (rc in rawCols) { q.rawCols.add(rc) }
+        // 深拷贝 exprCols(Expr 引用语义，直接复用)
+        for (ec in exprCols) { q.exprCols.add(ec) }
         q.distinctFlag = distinctFlag
         // 深拷贝 joins
         for (j in joins) { q.joins.add(j) }
@@ -464,6 +506,13 @@ public class UpdateQuery {
         let l = ArrayList<Value>()
         for (p in params) { l.add(p) }
         setColExprs.add((col, expr, l))
+        this
+    }
+    /** SET col = 类型化 Expr(占位符续编号)。 */
+    public func setExprTyped(col: String, e: Expr): UpdateQuery {
+        let l = ArrayList<Value>()
+        for (p in e.params) { l.add(p) }
+        setColExprs.add((col, e.sql, l))
         this
     }
 

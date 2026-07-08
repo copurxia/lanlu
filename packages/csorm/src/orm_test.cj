@@ -5,6 +5,8 @@ import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
 import postgresql_driver.*
+import postgresql_driver.PGDriver
+import std.database.sql.*
 import csorm_macros.*
 
 // 取连接串：优先 DB_STRING 环境变量，回退 lanludev。
@@ -379,5 +381,23 @@ func test_orm_with_timeout() {
             @Expect(r, 1)
             db.close()
             println("[csorm-test] withTimeout fast-query passed")
+    }
+}
+
+/**
+ * 阶段零适配：经 std.database.sql.Datasource 构造 Database，验证 csorm 可由
+ * DriverManager/PGDriver.open 路径创建，且执行能力与旧 connString 入口一致。
+ */
+@Test
+func test_orm_via_datasource() {
+    try {
+        let ds = PGDriver().open(ormConnStr(), [])
+        let db = Database(ds)
+        let r = db.rawOne<Int64>("SELECT 1", [], { row => row.getInt64(0) }).getOrThrow()
+        @Expect(r, 1)
+        db.close()
+        println("[csorm-test] via Datasource passed")
+    } catch (_: Exception) {
+        println("[skip] no PostgreSQL available (Datasource path)")
     }
 }

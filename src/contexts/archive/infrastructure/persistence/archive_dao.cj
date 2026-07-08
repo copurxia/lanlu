@@ -2557,4 +2557,71 @@ public class ArchiveDao {
         }
         return MetadataDao.deletePageMetadata(normalizedId)
     }
+
+    // ===== 阶段三 Expr 落地：类型化表达式搜索（试点） =====
+    //
+    // 以下方法用 csorm Expr 替代手拼 SQL 条件字符串，展示类型化查询构建路径。
+    // 适用于简单条件搜索（标题/文件名 LIKE + 分类过滤）；
+    // 复杂搜索（unaccent/EXISTS/相关度排序）仍走 substitutePlaceholders 主路径。
+
+    /**
+     * 用 csorm Expr 构建简单搜索查询（标题或文件名 LIKE pattern + 可选分类过滤）。
+     * 返回 (sql, params)，调用方用 db.raw<ArchiveData> 执行。
+     * 占位符编号由 Expr 自动续编，消除手拼 $n 错位风险。
+     */
+    public static func searchByExpr(
+        pattern: String,
+        categoryId!: ?Int64 = None,
+        limit!: Int64 = 50,
+        offset!: Int64 = 0
+    ): (String, Array<Value>) {
+        // 用 SelectQuery + Expr 构建查询
+        let q = selectQuery("archive_metadata_search")
+            .select(["arcid", "filename", "title", "summary", "thumbhash", "cover_asset_id",
+                     "created_at", "updated_at", "release_at", "relative_path", "file_size",
+                     "pagecount", "category_id", "tags"])
+        // 标题或文件名 LIKE pattern（用 Expr 构建）
+        let likeExpr = exprOr(
+            expr("title").like(pattern),
+            expr("filename").like(pattern)
+        )
+        var whereCond = exprCond(likeExpr)
+        // 分类过滤（AND 合并）
+        match (categoryId) {
+            case Some(cid) =>
+                whereCond = all([whereCond, col("category_id").eq(cid)])
+            case None => ()
+        }
+        q.filter(whereCond)
+        q.orderBy("title", Order.Asc)
+        q.limit(limit)
+        q.offset(offset)
+        q.build()
+    }
+
+    /**
+     * 用 csorm Expr 构建分类下的归档数量查询。
+     */
+    public static func countByCategoryExpr(categoryId: Int64): Int64 {
+        let logger = getLogger("archive_dao")
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let q = selectQuery("archives")
+                        .addRawColumn("COUNT(*)", alias: "cnt")
+                        .filter(col("category_id").eq(categoryId))
+                    let (sql, params) = q.build()
+                    match (db.rawOne<Int64>(sql, params, { r => r.getInt64(0) })) {
+                        case Some(n) => return n
+                        case None => return 0
+                    }
+                } catch (e: Exception) {
+                    logger.error("countByCategoryExpr 失败: ${e.message}")
+                    return 0
+                }
+            case None =>
+                logger.error("无法连接数据库")
+                return 0
+        }
+    }
 }

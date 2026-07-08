@@ -52,6 +52,10 @@ public interface Entity {
     func autoIncrement(): Bool
     func fromRow(r: Row): Any                   // 宏生成体构造具体 Model
     func emptyActive(): ActiveModel
+    /** 关系定义列表(默认空；宏可生成体覆盖)。对标 sea-orm RelationTrait。 */
+    func relations(): Array<RelationDef> { Array<RelationDef>() }
+    /** 列元数据(DDL 侧；默认空，回退到从 columns/pkColumns 推导)。对标 sea-orm ColumnDef。 */
+    func columnDefs(): Array<ColumnDef> { Array<ColumnDef>() }
 }
 
 /** ActiveModel：可变行载体，逐列三态。 */
@@ -226,5 +230,23 @@ public class Repo<E> where E <: Entity {
     /** 按主键查询单行(返回 Any 或 None)。 */
     public func one(pk: Array<Value>): ?Any {
         db.one<Any>(findById(pk), { r => entity.fromRow(r) })
+    }
+
+    /**
+     * 单跳关联查询：返回 parentPks 在指定 RelationDef 的 toEntity 中对应的关联行。
+     * 返回 (fkVal, relatedModel) 配对数组；fkVal 为 toCol 的值，用于回配 parent。
+     * 对标 sea-orm find_related。N+1 安全：单条 IN 查询。
+     */
+    public func findRelated(rel: RelationDef, parentPks: Array<Value>): Array<(Value, Any)> {
+        csormRelationFindRelated(db, rel, parentPks)
+    }
+
+    /**
+     * JOIN 形式关联查询：返回 (parentModel, relatedModel) 配对数组。
+     * parentPks 限定 parent 的 fromCol 集合。对标 sea-orm find_also_related。
+     */
+    public func findAlsoRelated(rel: RelationDef, parentFromRow: (Row) -> Any,
+        parentPks: Array<Value>): Array<(Any, Any)> {
+        csormRelationFindAlsoRelated(db, rel, entity.columns(), parentFromRow, parentPks)
     }
 }

@@ -241,6 +241,79 @@ public macro readonly(attr: Tokens, input: Tokens): Tokens {
 }
 
 /**
+ * 字段宏：@[hasMany[target = "RelChild", to = "parent_id"]]
+ * 标记一对多关系：当前实体的 pk ← 目标实体的 toCol。
+ * 属性：target = "目标 struct 名"(必填)，to = "外键列名"(必填)。
+ * 该字段本身不参与 INSERT/UPDATE(视为关系标记，非真实列)。
+ */
+public macro hasMany(attr: Tokens, input: Tokens): Tokens {
+    if (!insideParentContext("entity")) {
+        throw Exception("@[hasMany] 只能用于 @entity 修饰的 struct 字段")
+    }
+    let vd = (parseDecl(input) as VarDecl).getOrThrow()
+    setItem("field", vd.identifier.value)
+    setItem("relType", "HasMany")
+    // 解析 target = "..." 和 to = "..."
+    var target = ""
+    var toCol = ""
+    for (seg0 in splitTop(attr.toString())) {
+        let seg = trim(seg0)
+        if (seg == "") { continue }
+        let eq = indexOfEq(seg)
+        if (eq > 0) {
+            let key = trim(seg[0..eq])
+            let val = unquote(trim(seg[eq + 1..seg.size]))
+            if (key == "target") { target = val }
+            else if (key == "to") { toCol = val }
+        }
+    }
+    if (target == "") {
+        throw Exception("@[hasMany] 缺少 target 属性")
+    }
+    if (toCol == "") {
+        throw Exception("@[hasMany] 缺少 to 属性(外键列名)")
+    }
+    setItem("relTarget", target)
+    setItem("relToCol", toCol)
+    return input
+}
+
+/**
+ * 字段宏：@[hasOne[target = "RelProfile", to = "user_id"]]
+ * 标记一对一关系。属性同 @[hasMany]。
+ */
+public macro hasOne(attr: Tokens, input: Tokens): Tokens {
+    if (!insideParentContext("entity")) {
+        throw Exception("@[hasOne] 只能用于 @entity 修饰的 struct 字段")
+    }
+    let vd = (parseDecl(input) as VarDecl).getOrThrow()
+    setItem("field", vd.identifier.value)
+    setItem("relType", "HasOne")
+    var target = ""
+    var toCol = ""
+    for (seg0 in splitTop(attr.toString())) {
+        let seg = trim(seg0)
+        if (seg == "") { continue }
+        let eq = indexOfEq(seg)
+        if (eq > 0) {
+            let key = trim(seg[0..eq])
+            let val = unquote(trim(seg[eq + 1..seg.size]))
+            if (key == "target") { target = val }
+            else if (key == "to") { toCol = val }
+        }
+    }
+    if (target == "") {
+        throw Exception("@[hasOne] 缺少 target 属性")
+    }
+    if (toCol == "") {
+        throw Exception("@[hasOne] 缺少 to 属性(外键列名)")
+    }
+    setItem("relTarget", target)
+    setItem("relToCol", toCol)
+    return input
+}
+
+/**
  * @entity 属性宏：作用于 struct，生成 Entity/ActiveModel 实现类 + 工厂函数。
  * 用法：
  *   @Entity[table = "users"]
@@ -288,6 +361,16 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
     let jsonbMsgs = getChildMessages("jsonb")
     let columnMsgs = getChildMessages("column")
     let readonlyMsgs = getChildMessages("readonly")
+    let hasManyMsgs = getChildMessages("hasMany")
+    let hasOneMsgs = getChildMessages("hasOne")
+    let relationMsgs = ArrayList<MacroMessage>()
+    for (m in hasManyMsgs) { relationMsgs.add(m) }
+    for (m in hasOneMsgs) { relationMsgs.add(m) }
+    // 关系字段名集合(这些字段不参与 INSERT/UPDATE/fromRow 列读取)
+    let relationFields = HashSet<String>()
+    for (m in relationMsgs) {
+        relationFields.add(m.getString("field"))
+    }
 
     // 从 struct body 提取全部字段 VarDecl(用于无注解字段)
     let bodyFields = ArrayList<ColMeta>()
@@ -363,9 +446,21 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
     // ===== 生成 tokens =====
     let allCols = bodyFields
 
-    // columns() 返回数组字面量
+    // fromRow 时跳过关系字段(它们不是真实列)
+    let allColsForFromRow = ArrayList<ColMeta>()
+    for (cm in allCols) {
+        if (!relationFields.contains(cm.field)) {
+            allColsForFromRow.add(cm)
+        }
+    }
+
+    // columns() 返回数组字面量(跳过关系字段)
     let colNames = ArrayList<String>()
-    for (cm in allCols) { colNames.add(cm.column) }
+    for (cm in allCols) {
+        if (!relationFields.contains(cm.field)) {
+            colNames.add(cm.column)
+        }
+    }
     let colsArrTok = Tokens()
     var firstC = true
     for (cn in colNames) {
@@ -385,11 +480,11 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
         pkArrTok.append(quote($(cn)))
     }
 
-    // fromRow 体：构造 struct 并逐字段赋值
+    // fromRow 体：构造 struct 并逐字段赋值(跳过关系字段)
     let fromRowStmts = Tokens()
     fromRowStmts.append(quote(var __e = $(structTok)()))
     fromRowStmts.append(Token(TokenKind.NL))
-    for (cm in allCols) {
+    for (cm in allColsForFromRow) {
         fromRowStmts.append(genFromRowExpr(cm))
         fromRowStmts.append(Token(TokenKind.NL))
     }
@@ -397,6 +492,66 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
 
     // schema 返回
     let schemaExpr = if (schemaName == "") { quote(None) } else { quote(Some($(schemaName))) }
+
+    // relations() 实现：为每个 @[hasOne]/@[hasMany] 生成 RelationDef
+    // 用目标实体工厂函数(如 relChildEntity())取目标 Entity，构造 RelationDef.hasMany/hasOne
+    let relationsStmts = Tokens()
+    relationsStmts.append(quote(let __rels = ArrayList<RelationDef>()))
+    relationsStmts.append(Token(TokenKind.NL))
+    for (m in relationMsgs) {
+        let relType = m.getString("relType")
+        let targetName = m.getString("relTarget")
+        let toCol = m.getString("relToCol")
+        // 目标实体工厂函数名：lowerFirst(targetName) + "Entity"
+        let targetFactory = lowerFirst(targetName) + "Entity"
+        let targetFactoryTok = Token(TokenKind.IDENTIFIER, targetFactory)
+        let toColTok = quote($(toCol))
+        if (relType == "HasMany") {
+            relationsStmts.append(quote(
+                __rels.add(RelationDef.hasMany(this, $(targetFactoryTok)(), $(toColTok)))
+            ))
+        } else {
+            relationsStmts.append(quote(
+                __rels.add(RelationDef.hasOne(this, $(targetFactoryTok)(), $(toColTok)))
+            ))
+        }
+        relationsStmts.append(Token(TokenKind.NL))
+    }
+    relationsStmts.append(quote(return __rels.toArray()))
+
+    // columnDefs() 实现：按字段类型 + @[column] 属性派生 ColumnDef 列表。
+    // 跳过关系字段(它们不是真实列)。跳过 readonly 列(GENERATED)。
+    let columnDefsStmts = Tokens()
+    columnDefsStmts.append(quote(let __cds = ArrayList<ColumnDef>()))
+    columnDefsStmts.append(Token(TokenKind.NL))
+    for (cm in allCols) {
+        // 跳过关系字段与 readonly 列
+        if (relationFields.contains(cm.field)) { continue }
+        if (cm.readonly) { continue }
+        let colNameTok = quote($(cm.column))
+        let sqlColTypeTok = macroCjTypeToSqlColType(cm)
+        let cdVar = Token(TokenKind.IDENTIFIER, "__cd_" + cm.field)
+        columnDefsStmts.append(quote(let $(cdVar) = ColumnDef($(colNameTok), $(sqlColTypeTok))))
+        columnDefsStmts.append(Token(TokenKind.NL))
+        // pk + autoIncrement
+        if (cm.isPk) {
+            if (cm.autoInc) {
+                columnDefsStmts.append(quote($(cdVar).setPk().setAutoIncrement()))
+            } else {
+                columnDefsStmts.append(quote($(cdVar).setPk()))
+            }
+            columnDefsStmts.append(Token(TokenKind.NL))
+        } else {
+            // 非 pk 列：nullable 取决于类型是否为 ?T
+            if (!cm.nullable) {
+                columnDefsStmts.append(quote($(cdVar).notNull()))
+                columnDefsStmts.append(Token(TokenKind.NL))
+            }
+        }
+        columnDefsStmts.append(quote(__cds.add($(cdVar))))
+        columnDefsStmts.append(Token(TokenKind.NL))
+    }
+    columnDefsStmts.append(quote(return __cds.toArray()))
 
     // ActiveModel 字段声明：每个字段一个 var x: ActiveValue = NotSet
     let activeFields = Tokens()
@@ -513,6 +668,12 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
                 $(fromRowStmts)
             }
             public func emptyActive(): ActiveModel { $(emptyActiveExpr) }
+            public func relations(): Array<RelationDef> {
+                $(relationsStmts)
+            }
+            public func columnDefs(): Array<ColumnDef> {
+                $(columnDefsStmts)
+            }
         }
 
         public class $(activeTok) <: ActiveModel {
@@ -557,6 +718,48 @@ public macro entity(attr: Tokens, input: Tokens): Tokens {
         public func $(Token(TokenKind.IDENTIFIER, lowerFirst(structName) + "Entity"))(): $(entityTok) { $(entityTok)() }
     )
     return output
+}
+
+// 仓颉类型文本 → SqlColType 构造 Tokens(宏展开期使用，对标运行时 cjTypeToSqlColType)。
+// 返回如 SqlColType.TInt64 / SqlColType.TText / SqlColType.TArray(SqlColType.TText) 等。
+func macroCjTypeToSqlColType(cm: ColMeta): Tokens {
+    let t = cm.ty.trimAscii()
+    // 去掉 ?
+    var base = t
+    if (base.startsWith("?")) {
+        base = base[1..base.size].trimAscii()
+    }
+    // 自增主键 → TSerial64
+    if (cm.isPk && cm.autoInc) { return quote(SqlColType.TSerial64) }
+    // jsonb 列 → TJsonb
+    if (cm.jsonb) { return quote(SqlColType.TJsonb) }
+    // 数组：Array<T> → TArray(elem)
+    if (base.startsWith("Array")) {
+        let lt = indexOfByte(base, 60u8)   // '<'
+        let gt = lastIndexOfByte(base, 62u8) // '>'
+        if (lt >= 0 && gt > lt) {
+            let elemTy = base[lt + 1..gt].trimAscii()
+            if (elemTy == "String") { return quote(SqlColType.TArray(SqlColType.TText)) }
+            if (elemTy == "Int64") { return quote(SqlColType.TArray(SqlColType.TInt64)) }
+            if (elemTy == "Int32") { return quote(SqlColType.TArray(SqlColType.TInt32)) }
+            if (elemTy == "UInt8") { return quote(SqlColType.TBytes) }
+            return quote(SqlColType.TArray(SqlColType.TText))
+        }
+    }
+    // 标量类型
+    if (base == "Bool") { return quote(SqlColType.TBool) }
+    if (base == "Int16") { return quote(SqlColType.TInt16) }
+    if (base == "Int32") { return quote(SqlColType.TInt32) }
+    if (base == "Int64") { return quote(SqlColType.TInt64) }
+    if (base == "UInt16") { return quote(SqlColType.TInt16) }
+    if (base == "UInt32") { return quote(SqlColType.TInt32) }
+    if (base == "UInt64") { return quote(SqlColType.TInt64) }
+    if (base == "Float32") { return quote(SqlColType.TFloat32) }
+    if (base == "Float64") { return quote(SqlColType.TFloat64) }
+    if (base == "String") { return quote(SqlColType.TText) }
+    if (base == "Array<UInt8>") { return quote(SqlColType.TBytes) }
+    // 默认 TEXT
+    return quote(SqlColType.TText)
 }
 
 // 首字母小写(用于工厂函数命名)。

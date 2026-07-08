@@ -4,6 +4,7 @@ import csorm.*
 import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import std.collection.*
 import stdx.log.*
 
 /**
@@ -245,5 +246,53 @@ public class SmartFilterDao {
         filter.created_at = row.getOrNullText(13) ?? ""
         filter.updated_at = row.getOrNullText(14) ?? ""
         return filter
+    }
+
+    // ===== 阶段三 Expr 落地：用 Expr 构建动态筛选查询 =====
+
+    /**
+     * 根据智能筛选条件，用 csorm Expr 构建归档查询的 WHERE 子句。
+     * 返回 (sql_fragment, params)，可拼入主查询。
+     * 占位符由 Expr 自动续编，消除手拼 $n 错位风险。
+     */
+    public static func buildExprFilter(filter: SmartFilterData): (String, Array<Value>) {
+        var conds = ArrayList<Cond>()
+        // newonly：只显示未读
+        if (filter.newonly) {
+            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id=uas.archive_id WHERE a.arcid=archive_metadata_search.arcid AND uas.user_id=? AND uas.is_new=false)", [vint(0)]))
+        }
+        // untaggedonly：只显示无标签
+        if (filter.untaggedonly) {
+            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id=mo.id WHERE mo.entity_type='archive' AND mo.entity_id=archive_metadata_search.arcid)", []))
+        }
+        // 日期范围
+        if (filter.date_from.size > 0) {
+            conds.add(exprCond(expr("release_at").gte(vtext(filter.date_from))))
+        }
+        if (filter.date_to.size > 0) {
+            conds.add(exprCond(expr("release_at").lte(vtext(filter.date_to))))
+        }
+        if (conds.size == 0) {
+            return ("", Array<Value>())
+        }
+        // 合并条件
+        var combined = conds[0]
+        for (i in 1..conds.size) {
+            combined = all([combined, conds[i]])
+        }
+        let params = ArrayList<Value>()
+        let ph = Placeholder()
+        let frag = renderCond(combined, params, ph)
+        // ArrayList → Array
+        let sz = params.size
+        var outParams: Array<Value> = Array<Value>(sz, { _ => vnull() })
+        var idx = 0
+        for (p in params) {
+            if (idx < sz) {
+                outParams[idx] = p
+            }
+            idx++
+        }
+        (frag, outParams)
     }
 }

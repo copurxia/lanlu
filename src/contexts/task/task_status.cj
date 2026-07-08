@@ -1,13 +1,18 @@
 package lanlu.contexts.task
 
+import csorm.*
+
 /**
  * Strongly typed task lifecycle state.
  *
  * Database and API payloads still use strings. Keep conversion here so the
  * rest of the code can express lifecycle rules through the type instead of
  * repeated string comparisons.
+ *
+ * 实现 csorm.ActiveEnum 接口，可用 activeEnumToValue() 转为 Value.VEnum，
+ * DB 侧仍走 VARCHAR 文本协议。
  */
-public enum TaskStatus {
+public enum TaskStatus <: ActiveEnum {
     | Pending
     | Running
     | Waiting
@@ -106,4 +111,12 @@ public enum TaskStatus {
             case Unknown(_) => return ""
         }
     }
+
+    // ===== ActiveEnum 接口实现（csorm 阶段五落地） =====
+
+    public func enumName(): String { "task_status" }
+
+    public func toValue(): String { this.toDb() }
+
+    public func fromValue(raw: String): Bool { this.toDb() == raw }
 }

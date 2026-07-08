@@ -21,6 +21,12 @@ public class MetadataAssetData {
         this.slot = slot
         this.asset_id = assetId
     }
+
+    /** 槽位枚举视图（csorm ActiveEnum 落地）。 */
+    public mut prop slotEnum: MetadataAssetSlot {
+        get() { MetadataAssetSlot.fromDb(slot) }
+        set(v) { slot = v.toDb() }
+    }
 }
 
 public class MetadataObjectData {
