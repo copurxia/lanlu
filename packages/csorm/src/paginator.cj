@@ -2,7 +2,6 @@ package csorm
 
 import std.collection.*
 import std.convert.*
-import postgresql_driver.*
 
 /**
  * 分页器(对标 sea-orm Paginator)。两种模式：
@@ -52,7 +51,7 @@ public class Paginator<T> {
     /** 总条数：SELECT COUNT(*) FROM (<原查询去掉 limit/offset/order>) sub。 */
     public func numItems(): Int64 {
         let q = base.clone()
-        q.orderBys = ArrayList<(String, Order, String)>()
+        q.orderBys = ArrayList<(String, Order, String, Bool)>()
         q.limitVal = None
         q.offsetVal = None
         let (subSql, subParams) = q.build()
@@ -110,8 +109,7 @@ public class KeysetPaginator<T> {
             case None => q.filter(cursorCond)
         }
         q.orderBy(afterCol, Order.Asc).limit(pageSize)
-        let (sql, params) = q.build()
-        let rows = db.pgdb().query(sql, Array<PGValue>(params.size, { i => valueToPG(params[i]) }))
+        let rows = db.all<Row>(q, { r => r })
         let out = ArrayList<T>()
         for (r in rows) {
             let (item, cur) = map(r)

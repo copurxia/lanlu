@@ -87,35 +87,35 @@ public func exprCond(e: Expr): Cond { Cond.ExprCond(e) }
 // ===== 条件渲染 =====
 
 /**
- * 渲染条件树为 PG SQL 片段，参数压入 params 列表，占位符由 ph 编号。
- * 返回的字符串可直接拼入 WHERE 子句(外层不加括号；And/Or 自带括号)。
+ * 渲染条件树为 SQL 片段，参数压入 params 列表，占位符由 ph 编号。
+ * 标识符引号与占位符风格由 dialect 决定。返回的字符串可直接拼入 WHERE 子句(外层不加括号；And/Or 自带括号)。
  */
-public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): String {
+public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder, dialect: Dialect): String {
     match (cond) {
         case And(conds) =>
             if (conds.size == 0) { return "1=1" }
             let parts = ArrayList<String>()
-            for (c in conds) { parts.add(renderCond(c, params, ph)) }
+            for (c in conds) { parts.add(renderCond(c, params, ph, dialect)) }
             "(" + joinAnd(parts.toArray()) + ")"
         case Or(conds) =>
             if (conds.size == 0) { return "1=1" }
             let parts = ArrayList<String>()
-            for (c in conds) { parts.add(renderCond(c, params, ph)) }
+            for (c in conds) { parts.add(renderCond(c, params, ph, dialect)) }
             "(" + joinOr(parts.toArray()) + ")"
         case Cmp(col, op, v) =>
             if (match (v) { case VNull => true; case _ => false }) {
                 // NULL 比较：= NULL → IS NULL，<> NULL → IS NOT NULL
                 if (op == "<>") {
-                    quoteIdent(col) + " IS NOT NULL"
+                    dialect.quoteIdent(col) + " IS NOT NULL"
                 } else {
-                    quoteIdent(col) + " IS NULL"
+                    dialect.quoteIdent(col) + " IS NULL"
                 }
             } else {
                 params.add(v)
-                quoteIdent(col) + " " + op + " " + ph.next()
+                dialect.quoteIdent(col) + " " + op + " " + ph.next()
             }
-        case IsNull(col) => quoteIdent(col) + " IS NULL"
-        case IsNotNull(col) => quoteIdent(col) + " IS NOT NULL"
+        case IsNull(col) => dialect.quoteIdent(col) + " IS NULL"
+        case IsNotNull(col) => dialect.quoteIdent(col) + " IS NOT NULL"
         case InVals(col, vals) =>
             if (vals.size == 0) { return "1=0" } // IN () 非法，回落恒假
             let phs = ArrayList<String>()
@@ -123,7 +123,7 @@ public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): S
                 params.add(v)
                 phs.add(ph.next())
             }
-            quoteIdent(col) + " IN (" + joinComma(phs.toArray()) + ")"
+            dialect.quoteIdent(col) + " IN (" + joinComma(phs.toArray()) + ")"
         case NotInVals(col, vals) =>
             if (vals.size == 0) { return "1=1" }
             let phs = ArrayList<String>()
@@ -131,19 +131,19 @@ public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): S
                 params.add(v)
                 phs.add(ph.next())
             }
-            quoteIdent(col) + " NOT IN (" + joinComma(phs.toArray()) + ")"
+            dialect.quoteIdent(col) + " NOT IN (" + joinComma(phs.toArray()) + ")"
         case Like(col, pattern) =>
             params.add(Value.VText(pattern))
-            quoteIdent(col) + " LIKE " + ph.next()
+            dialect.quoteIdent(col) + " LIKE " + ph.next()
         case NotLike(col, pattern) =>
             params.add(Value.VText(pattern))
-            quoteIdent(col) + " NOT LIKE " + ph.next()
+            dialect.quoteIdent(col) + " NOT LIKE " + ph.next()
         case Between(col, a, b) =>
             params.add(a)
             params.add(b)
-            quoteIdent(col) + " BETWEEN " + ph.next() + " AND " + ph.next()
+            dialect.quoteIdent(col) + " BETWEEN " + ph.next() + " AND " + ph.next()
         case RawCond(sql, rawParams) =>
-            // 原始片段中的 ? 占位符按出现顺序替换为 $n(续编号)，参数压入 params
+            // 原始片段中的 ? 占位符按出现顺序替换为 ph 编号(按 dialect)，参数压入 params
             for (p in rawParams) { params.add(p) }
             rewriteQPlaceholders(sql, ph)
         case Exists(subSql, subParams) =>
@@ -155,6 +155,11 @@ public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): S
         case ExprCond(e) =>
             renderExpr(e, params, ph)
     }
+}
+
+/** 默认 PG 方言重载(向后兼容)。 */
+public func renderCond(cond: Cond, params: ArrayList<Value>, ph: Placeholder): String {
+    renderCond(cond, params, ph, defaultDialect)
 }
 
 /** 把 SQL 片段中的 ? 占位符按出现顺序替换为 $n(由 ph 续编号)。双引号内的 ? 不替换。 */

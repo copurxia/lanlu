@@ -5,7 +5,9 @@ import std.env.getVariable
 import std.convert.*
 import lanlu.shared.utils.*
 import csorm.*
-import postgresql_driver.*
+import postgresql_driver.PgConn
+import postgresql_driver.PGDriver
+import postgresql_driver.PGDatasource
 import std.database.sql.*
 
 /**
@@ -75,9 +77,9 @@ public class ConnectionPool {
     }
 
     /**
-     * 初始化连接池：经 std.database.sql Datasource 路径构造 csorm.Database。
-     * 优先走 PGDriver().open() → Datasource → Database(ds)，
-     * 失败则回退 Database(connStr) 旧入口(底层 PGDatabase 自带连接池)。
+     * 初始化连接池：经 PgConn 构造 csorm.Database。
+     * 优先走 PGDriver().open() → PGDatasource → PgConn(pgDatabase) → Database，
+     * 失败则回退 Database(PgConn(connStr))。
      */
     public func initialize(): Bool {
         if (isInitialized) {
@@ -88,15 +90,19 @@ public class ConnectionPool {
 
         try {
             let connStr = buildConnStr()
-            // 优先走 std.database.sql Datasource 路径（阶段零 L0 落地）
             var database: ?Database = None
             try {
                 let ds = PGDriver().open(connStr, Array<(String, String)>())
-                database = Some(Database(ds))
-                logger.info("连接池经 PGDriver/Datasource 构造")
+                match (ds as PGDatasource) {
+                    case Some(pds) =>
+                        database = Some(Database(PgConn(pds.pgDatabase())))
+                        logger.info("连接池经 PGDriver/Datasource 构造")
+                    case None =>
+                        throw Exception("not a PGDatasource")
+                }
             } catch (dsErr: Exception) {
-                logger.warn("Datasource 路径失败，回退到 Database(connStr): ${dsErr.message}")
-                database = Some(Database(connStr))
+                logger.warn("Datasource 路径失败，回退到 Database(PgConn(connStr)): ${dsErr.message}")
+                database = Some(Database(PgConn(connStr)))
             }
             match (database) {
                 case Some(d) =>
@@ -157,7 +163,7 @@ public class ConnectionPool {
         match (db) {
             case Some(d) =>
                 s.open = d.poolSize()
-                s.idle = d.pgdb().poolSize() - 0   // driver 未暴露 idle 计数，置 0
+                s.idle = 0   // driver 未暴露 idle 计数，置 0
             case None => ()
         }
         s

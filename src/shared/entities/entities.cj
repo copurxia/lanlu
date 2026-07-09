@@ -2,7 +2,6 @@ package lanlu.shared.entities
 
 import csorm.*
 import csorm_macros.*
-import postgresql_driver.*
 import std.collection.*
 
 /**

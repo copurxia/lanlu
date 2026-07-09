@@ -2,7 +2,6 @@ package csorm
 
 import std.collection.*
 import std.convert.*
-import postgresql_driver.*
 
 /**
  * ActiveValue 三态(对标 sea-orm ActiveValue)：
@@ -50,7 +49,7 @@ public interface Entity {
     func columns(): Array<String>               // 全部列名(顺序固定)
     func pkColumns(): Array<String>             // 主键列
     func autoIncrement(): Bool
-    func fromRow(r: Row): Any                   // 宏生成体构造具体 Model
+    func fromRow(r: Row): Any                   // 宏生成体构造具体 Model(csorm.Row 接口)
     func emptyActive(): ActiveModel
     /** 关系定义列表(默认空；宏可生成体覆盖)。对标 sea-orm RelationTrait。 */
     func relations(): Array<RelationDef> { Array<RelationDef>() }

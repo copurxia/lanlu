@@ -4,7 +4,7 @@ package postgresql_driver
  * std.database.sql 标准库驱动实现：基于 libpq FFI 的 PGDriver/PGDatasource/
  * PGConnection/PGStatement/PGQueryResult/PGUpdateResult/PGTransaction。
  *
- * 与同包 PGDatabase/PGValue/Row 私有 API 并存：本文件实现仓颉标准库 std.database.sql
+ * 与同包 PGDatabase/PGValue/PgRowData 私有 API 并存：本文件实现仓颉标准库 std.database.sql
  * 七大接口，供 csorm 经 Datasource/Connection/Statement/QueryResult 抽象使用；
  * PGDatabase 旧入口保留兼容，二者共享底层 libpq 句柄(CPointer<Unit>)与 PGResult。
  *

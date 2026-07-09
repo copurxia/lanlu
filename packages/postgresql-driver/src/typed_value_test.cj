@@ -1,14 +1,15 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段五测试：类型化 Value(VTimestamp/VDate/VUuid/VDecimal/VEnum) + ActiveEnum + Value 转换。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
 import std.time.*
-import postgresql_driver.*
 
 func tvConnStr(): String {
     getVariable("DB_STRING") ??
@@ -17,7 +18,7 @@ func tvConnStr(): String {
 
 func openTvOrSkip(): ?Database {
     try {
-        return Some(Database(tvConnStr()))
+        return Some(Database(PgConn(tvConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (typed_value test)")
         return None
@@ -154,7 +155,7 @@ func test_typed_value_pg_roundtrip() {
                     venum("archive_status", "reading")
                 ])
                 .returning(["id", "ts", "uid", "dec", "status"])
-            let rows = db.execReturning<Row>(ins, { r => r })
+            let rows = db.execReturning<csorm.Row>(ins, { r => r })
             @Expect(rows.size, 1)
             let r = rows[0]
             // ts 应可读为文本

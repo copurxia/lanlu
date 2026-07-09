@@ -5,11 +5,11 @@ import std.convert.*
 
 /**
  * SQL 渲染工具：标识符引号、占位符编号、片段拼接。
- * PG 文本协议下占位符 $1..$n，跨子句连续编号。
+ * 占位符与引号风格由 Dialect 决定；默认 PG($n + 双引号)。
  */
 
 /** 给标识符(表名/列名)加双引号，内部双引号转义为 ""，防注入。 */
-public func quoteIdent(s: String): String {
+func doQuoteIdent(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     out.add(34u8) // '"'
@@ -24,26 +24,25 @@ public func quoteIdent(s: String): String {
 }
 
 /** 带可选 schema 的表引用：schema.tbl → "schema"."tbl"。 */
-public func quoteTable(schema: ?String, table: String): String {
+func doQuoteTable(schema: ?String, table: String): String {
     match (schema) {
-        case Some(s) => quoteIdent(s) + "." + quoteIdent(table)
-        case None => quoteIdent(table)
+        case Some(s) => doQuoteIdent(s) + "." + doQuoteIdent(table)
+        case None => doQuoteIdent(table)
     }
 }
 
-/** 占位符编号自增器：每 append 一次返回 $n 并 n+=1。 */
-public class Placeholder {
-    var n: Int64 = 0
-    public init() {}
-    public init(start!: Int64) { n = start }
-    public func next(): String {
-        n += 1
-        return "$" + n.toString()
-    }
-    public func current(): Int64 { n }
+/**
+ * 标识符加引号(默认 PG 双引号)。
+ * 保留无参版本供旧调用方使用；build() 接收 Dialect 时经 dialect.quoteIdent。
+ */
+public func quoteIdent(s: String): String { defaultDialect.quoteIdent(s) }
+
+/** 带可选 schema 的表引用。 */
+public func quoteTable(schema: ?String, table: String): String {
+    defaultDialect.quoteTable(schema, table)
 }
 
-/** 生成 N 个占位符，逗号分隔：$1,$2,...$n。 */
+/** 生成 N 个占位符，逗号分隔。 */
 public func placeholders(n: Int64, ph: Placeholder): String {
     let parts = ArrayList<String>()
     var i = 0

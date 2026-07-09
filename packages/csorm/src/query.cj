@@ -6,7 +6,7 @@ import std.convert.*
 /**
  * 查询构建器(对标 sea_query SelectStatement/InsertStatement/...)。
  * 四个 builder class，各持状态 + 参数列表，链式调用后 build() 输出 (SQL, Array<Value>)。
- * 占位符 PG 文本协议 $1..$n，跨子句连续编号。标识符加双引号防注入。
+ * 占位符与引号风格由 Dialect 决定(默认 PG：$n + 双引号)。标识符加引号防注入。
  */
 
 // ===== Order =====
@@ -73,8 +73,8 @@ public class SelectQuery {
     var groupByCols: Array<String> = Array<String>()
     var groupByRaw: String = ""                          // 原始 GROUP BY(覆盖 groupByCols)
     var havingCond: ?Cond = None
-    // orderBys: (expr, order, nullsClause) — expr 为列名(引号)或原始表达式(用 orderByRaw 时)
-    var orderBys: ArrayList<(String, Order, String)> = ArrayList<(String, Order, String)>()
+    // orderBys: (expr, order, nullsClause, isRaw) — isRaw=true 时 expr 原样输出，否则 build 时由 dialect 引号
+    var orderBys: ArrayList<(String, Order, String, Bool)> = ArrayList<(String, Order, String, Bool)>()
     var limitVal: ?Int64 = None
     var offsetVal: ?Int64 = None
     var lockClause: String = ""                          // FOR UPDATE / FOR SHARE
@@ -152,7 +152,7 @@ public class SelectQuery {
     }
     /** orderByExpr：按 Expr 排序(原样输出，不引号)。 */
     public func orderByExpr(e: Expr, o: Order, nulls!: String = ""): SelectQuery {
-        orderBys.add((e.sql, o, nulls))
+        orderBys.add((e.sql, o, nulls, true))
         for (p in e.params) { /* Expr 参数在 ORDER BY 处无占位符编号；简化：ORDER BY 不带参数 */ }
         this
     }
@@ -193,7 +193,7 @@ public class SelectQuery {
     public func having(c: Cond): SelectQuery { havingCond = Some(c); this }
 
     public func orderBy(col: String, o: Order): SelectQuery {
-        orderBys.add((quoteIdent(col), o, ""))
+        orderBys.add((col, o, "", false))   // 存原始列名，build 时由 dialect 引号
         this
     }
     public func orderByAsc(col: String): SelectQuery { orderBy(col, Order.Asc) }
@@ -201,7 +201,7 @@ public class SelectQuery {
     /** 原始 ORDER BY 表达式(不引号)，支持 RANDOM()、子查询、表前缀 ta_order.sort_order。
      *  nulls 为 "NULLS LAST" / "NULLS FIRST" / ""。 */
     public func orderByRaw(expr: String, o: Order, nulls!: String = ""): SelectQuery {
-        orderBys.add((expr, o, nulls))
+        orderBys.add((expr, o, nulls, true))
         this
     }
 
@@ -227,10 +227,10 @@ public class SelectQuery {
         this
     }
 
-    /** 构建为 SQL + 参数(占位符 $1..$n 跨片段连续编号)。 */
-    public func build(): (String, Array<Value>) {
+    /** 构建为 SQL + 参数(占位符跨片段连续编号，风格由 Dialect 决定)。 */
+    public func build(dialect: Dialect): (String, Array<Value>) {
         let allParams = ArrayList<Value>()
-        let ph = Placeholder()
+        let ph = Placeholder(dialect.placeholderStyle())
 
         var sql = ""
         // 前置原始片段(CTE 等)的参数先编号
@@ -241,7 +241,7 @@ public class SelectQuery {
             for (p in rawPrefixParams) { allParams.add(p) }
         }
         // 派生表 FROM 的参数编号(在 SELECT 列之后、FROM 之前压入参数列)
-        // 注意：PG 占位符在 SQL 文本中按出现顺序编号，派生表参数出现在 FROM 子句，
+        // 注意：占位符在 SQL 文本中按出现顺序编号，派生表参数出现在 FROM 子句，
         // 而 SELECT 列通常无占位符(原始表达式)，故派生表参数从 $1 起编号与文本顺序一致。
         // 但若 rawPrefix 已占用 $1..$k，派生表参数应从 $k+1 起——此处先压入参数并推进编号，
         // 实际 SQL 文本中派生表占位符由调用方写为续接编号。
@@ -253,13 +253,13 @@ public class SelectQuery {
             selParts.add("*")
         } else {
             if (cols.size > 0) {
-                for (c in cols) { selParts.add(quoteIdent(c)) }
+                for (c in cols) { selParts.add(dialect.quoteIdent(c)) }
             }
             for ((expr, alias) in rawCols) {
                 if (alias.isEmpty()) {
                     selParts.add(expr)
                 } else {
-                    selParts.add(expr + " AS " + quoteIdent(alias))
+                    selParts.add(expr + " AS " + dialect.quoteIdent(alias))
                 }
             }
             // 类型化 Expr 列：渲染并续编号压入参数
@@ -268,7 +268,7 @@ public class SelectQuery {
                 if (alias.isEmpty()) {
                     selParts.add(rendered)
                 } else {
-                    selParts.add(rendered + " AS " + quoteIdent(alias))
+                    selParts.add(rendered + " AS " + dialect.quoteIdent(alias))
                 }
             }
         }
@@ -280,15 +280,15 @@ public class SelectQuery {
                 allParams.add(p)
                 ph.next()
             }
-            sel += " FROM (" + fromSubSql + ") AS " + quoteIdent(fromSubAlias)
+            sel += " FROM (" + fromSubSql + ") AS " + dialect.quoteIdent(fromSubAlias)
         } else {
-            sel += " FROM " + quoteTable(schema, table)
+            sel += " FROM " + dialect.quoteTable(schema, table)
         }
         // JOIN(ON 子句参数压入并续编号)
         for ((k, t, on) in joins) {
-            sel += " " + joinKeyword(k) + " " + quoteIdent(t) + " ON " + on
+            sel += " " + joinKeyword(k) + " " + dialect.quoteIdent(t) + " ON " + on
         }
-        // joinOnParams 按 join 顺序累积；假设 ON 子句中的 $n 已由调用方按续接编号写好
+        // joinOnParams 按 join 顺序累积；假设 ON 子句中的占位符已由调用方按续接编号写好
         for (p in joinOnParams) {
             allParams.add(p)
             ph.next()
@@ -297,7 +297,7 @@ public class SelectQuery {
         // WHERE
         match (whereCond) {
             case Some(c) =>
-                let w = renderCond(c, allParams, ph)
+                let w = renderCond(c, allParams, ph, dialect)
                 sql += " WHERE " + w
             case None => ()
         }
@@ -305,21 +305,22 @@ public class SelectQuery {
         if (!groupByRaw.isEmpty()) {
             sql += " GROUP BY " + groupByRaw
         } else if (groupByCols.size > 0) {
-            let quoted = Array<String>(groupByCols.size, { i => quoteIdent(groupByCols[i]) })
+            let quoted = Array<String>(groupByCols.size, { i => dialect.quoteIdent(groupByCols[i]) })
             sql += " GROUP BY " + joinComma(quoted)
         }
         // HAVING
         match (havingCond) {
             case Some(c) =>
-                let h = renderCond(c, allParams, ph)
+                let h = renderCond(c, allParams, ph, dialect)
                 sql += " HAVING " + h
             case None => ()
         }
-        // ORDER BY(三元组：expr/order/nulls；orderBy() 入口已 quoteIdent 列名，orderByRaw() 原样)
+        // ORDER BY(四元组：expr/order/nulls/isRaw；isRaw=false 时由 dialect 引号列名，isRaw=true 时原样)
         if (orderBys.size > 0) {
             let parts = ArrayList<String>()
-            for ((expr, o, nulls) in orderBys) {
-                var p = expr + " " + orderKeyword(o)
+            for ((expr, o, nulls, isRaw) in orderBys) {
+                let qExpr = if (isRaw) { expr } else { dialect.quoteIdent(expr) }
+                var p = qExpr + " " + orderKeyword(o)
                 if (!nulls.isEmpty()) { p += " " + nulls }
                 parts.add(p)
             }
@@ -352,6 +353,9 @@ public class SelectQuery {
         }
         (sql, allParams.toArray())
     }
+
+    /** 构建为 SQL + 参数(默认 PG 方言)。 */
+    public func build(): (String, Array<Value>) { build(defaultDialect) }
 
     /** 克隆(供 Paginator 与 count+data 双查询使用)。深拷贝所有可变集合。 */
     public func clone(): SelectQuery {
@@ -433,7 +437,7 @@ public class InsertQuery {
     public func returningAll(): InsertQuery { returningCols = ["*"]; this }
     public func returningId(col: String): InsertQuery { returningCols = [col]; this }
 
-    public func build(): (String, Array<Value>) {
+    public func build(dialect: Dialect): (String, Array<Value>) {
         if (table.isEmpty()) { throw CsormError("InsertQuery: table not set") }
         if (rows.size == 0) { throw CsormError("InsertQuery: no rows") }
         if (cols.size == 0 && rows[0].size > 0) {
@@ -441,10 +445,10 @@ public class InsertQuery {
             throw CsormError("InsertQuery: columns not set")
         }
         let allParams = ArrayList<Value>()
-        let ph = Placeholder()
-        var sql = "INSERT INTO " + quoteTable(schema, table)
+        let ph = Placeholder(dialect.placeholderStyle())
+        var sql = "INSERT INTO " + dialect.quoteTable(schema, table)
         // 列名
-        let quotedCols = Array<String>(cols.size, { i => quoteIdent(cols[i]) })
+        let quotedCols = Array<String>(cols.size, { i => dialect.quoteIdent(cols[i]) })
         sql += " (" + joinComma(quotedCols) + ")"
         // VALUES
         let rowSqls = ArrayList<String>()
@@ -457,32 +461,29 @@ public class InsertQuery {
             rowSqls.add("(" + joinComma(phs.toArray()) + ")")
         }
         sql += " VALUES " + joinComma(rowSqls.toArray())
-        // ON CONFLICT
+        // ON CONFLICT(经 Dialect 渲染，支持各后端 upsert 语法)
         match (conflict) {
             case Some(DoNothing(target)) =>
-                let q = Array<String>(target.size, { i => quoteIdent(target[i]) })
-                sql += " ON CONFLICT (" + joinComma(q) + ") DO NOTHING"
+                sql += dialect.renderOnConflictDoNothing(target)
             case Some(DoUpdate(target, setExprs)) =>
-                let q = Array<String>(target.size, { i => quoteIdent(target[i]) })
-                sql += " ON CONFLICT (" + joinComma(q) + ") DO UPDATE SET "
-                let setParts = ArrayList<String>()
-                for ((col, expr) in setExprs) {
-                    setParts.add(quoteIdent(col) + " = " + expr)
-                }
-                sql += joinComma(setParts.toArray())
+                sql += dialect.renderOnConflictDoUpdate(target, setExprs)
             case None => ()
         }
         // RETURNING
         if (returningCols.size > 0) {
-            if (returningCols.size == 1 && returningCols[0] == "*") {
-                sql += " RETURNING *"
-            } else {
-                let q = Array<String>(returningCols.size, { i => quoteIdent(returningCols[i]) })
-                sql += " RETURNING " + joinComma(q)
+            if (dialect.supportReturning()) {
+                if (returningCols.size == 1 && returningCols[0] == "*") {
+                    sql += " RETURNING *"
+                } else {
+                    let q = Array<String>(returningCols.size, { i => dialect.quoteIdent(returningCols[i]) })
+                    sql += " RETURNING " + joinComma(q)
+                }
             }
         }
         (sql, allParams.toArray())
     }
+
+    public func build(): (String, Array<Value>) { build(defaultDialect) }
 }
 
 // ===== UpdateQuery =====
@@ -525,39 +526,43 @@ public class UpdateQuery {
     public func returning(cols: Array<String>): UpdateQuery { returningCols = cols; this }
     public func returningAll(): UpdateQuery { returningCols = ["*"]; this }
 
-    public func build(): (String, Array<Value>) {
+    public func build(dialect: Dialect): (String, Array<Value>) {
         if (table.isEmpty()) { throw CsormError("UpdateQuery: table not set") }
         let allParams = ArrayList<Value>()
-        let ph = Placeholder()
-        var sql = "UPDATE " + quoteTable(schema, table) + " SET "
+        let ph = Placeholder(dialect.placeholderStyle())
+        var sql = "UPDATE " + dialect.quoteTable(schema, table) + " SET "
         let setParts = ArrayList<String>()
         for ((col, v) in setColVals) {
             allParams.add(v)
-            setParts.add(quoteIdent(col) + " = " + ph.next())
+            setParts.add(dialect.quoteIdent(col) + " = " + ph.next())
         }
         for ((col, expr, params) in setColExprs) {
             for (p in params) {
                 allParams.add(p)
                 ph.next()
             }
-            setParts.add(quoteIdent(col) + " = " + expr)
+            setParts.add(dialect.quoteIdent(col) + " = " + expr)
         }
         if (setParts.size == 0) { throw CsormError("UpdateQuery: no SET clause") }
         sql += joinComma(setParts.toArray())
         match (whereCond) {
-            case Some(c) => sql += " WHERE " + renderCond(c, allParams, ph)
+            case Some(c) => sql += " WHERE " + renderCond(c, allParams, ph, dialect)
             case None => ()
         }
         if (returningCols.size > 0) {
-            if (returningCols.size == 1 && returningCols[0] == "*") {
-                sql += " RETURNING *"
-            } else {
-                let q = Array<String>(returningCols.size, { i => quoteIdent(returningCols[i]) })
-                sql += " RETURNING " + joinComma(q)
+            if (dialect.supportReturning()) {
+                if (returningCols.size == 1 && returningCols[0] == "*") {
+                    sql += " RETURNING *"
+                } else {
+                    let q = Array<String>(returningCols.size, { i => dialect.quoteIdent(returningCols[i]) })
+                    sql += " RETURNING " + joinComma(q)
+                }
             }
         }
         (sql, allParams.toArray())
     }
+
+    public func build(): (String, Array<Value>) { build(defaultDialect) }
 }
 
 // ===== DeleteQuery =====
@@ -581,25 +586,29 @@ public class DeleteQuery {
     public func returning(cols: Array<String>): DeleteQuery { returningCols = cols; this }
     public func returningAll(): DeleteQuery { returningCols = ["*"]; this }
 
-    public func build(): (String, Array<Value>) {
+    public func build(dialect: Dialect): (String, Array<Value>) {
         if (table.isEmpty()) { throw CsormError("DeleteQuery: table not set") }
         let allParams = ArrayList<Value>()
-        let ph = Placeholder()
-        var sql = "DELETE FROM " + quoteTable(schema, table)
+        let ph = Placeholder(dialect.placeholderStyle())
+        var sql = "DELETE FROM " + dialect.quoteTable(schema, table)
         match (whereCond) {
-            case Some(c) => sql += " WHERE " + renderCond(c, allParams, ph)
+            case Some(c) => sql += " WHERE " + renderCond(c, allParams, ph, dialect)
             case None => ()
         }
         if (returningCols.size > 0) {
-            if (returningCols.size == 1 && returningCols[0] == "*") {
-                sql += " RETURNING *"
-            } else {
-                let q = Array<String>(returningCols.size, { i => quoteIdent(returningCols[i]) })
-                sql += " RETURNING " + joinComma(q)
+            if (dialect.supportReturning()) {
+                if (returningCols.size == 1 && returningCols[0] == "*") {
+                    sql += " RETURNING *"
+                } else {
+                    let q = Array<String>(returningCols.size, { i => dialect.quoteIdent(returningCols[i]) })
+                    sql += " RETURNING " + joinComma(q)
+                }
             }
         }
         (sql, allParams.toArray())
     }
+
+    public func build(): (String, Array<Value>) { build(defaultDialect) }
 }
 
 // ===== 便捷构造函数 =====

@@ -4,14 +4,13 @@ package csorm
  * 可观测性 / Mock / 连接选项(对标 sea-orm metric.rs / mock.rs / ConnectOptions)。
  *
  * - MetricInfo + setMetricCallback：每次 query/exec 的耗时/失败回调。
- * - MockDatabase：预设 (sql → rows) 映射，无需真实 PG 即可单测 DAO 层。
- * - ConnectOptions：poolSize / statementTimeout / connectTimeout / sslMode 集中管理。
+ * - MockDatabase：预设 (sql → rows) 映射，无需真实 DB 即可单测 DAO 层。
+ * - ConnectOptions：通用连接选项(poolSize / timeout 等)，具体连接串格式由 driver 决定。
  */
 import std.collection.*
 import std.convert.*
 import std.sync.*
 import std.time.*
-import postgresql_driver.*
 
 // ===== 7.1 Metric callback =====
 
@@ -41,7 +40,7 @@ public type MetricCallback = (MetricInfo) -> Unit
 
 /**
  * 扩展 Database：setMetricCallback 埋点。
- * 在 wrapRun 内记录耗时与失败状态，回调给用户。
+ * 在执行内记录耗时与失败状态，回调给用户。
  */
 public class DatabaseMetric {
     static var callback: ?MetricCallback = None
@@ -117,18 +116,175 @@ public class QueryLog {
 // ===== 7.3 MockDatabase =====
 
 /**
- * Mock 数据库：预设 (sql 模式 → rows) 映射，无需真实 PG 即可单测 DAO 层。
- * 实现 std.database.sql.Datasource 之外，也提供与 Database 一致的 raw/all/one/exec 接口，
- * 让 DAO 层无感切换。
+ * Mock 行：实现后端无关 Row 接口，供 MockDatabase 返回预设行。
+ * 通过列名索引读取值。
  */
-public class MockDatabase {
+public class MockRow <: Row {
+    let data: HashMap<String, String>
+    let nullCols: HashSet<String>
+    let colNames: Array<String>
+    let nameIndex: HashMap<String, Int64>
+
+    public init(data: HashMap<String, String>, nullCols: HashSet<String>,
+        colNames: Array<String>) {
+        this.data = data
+        this.nullCols = nullCols
+        this.colNames = colNames
+        let m = HashMap<String, Int64>()
+        for (i in 0..colNames.size) {
+            m[colNames[i]] = Int64(i)
+        }
+        this.nameIndex = m
+    }
+
+    /** 便捷构造：列名 + 值(均非空)。 */
+    public init(names: Array<String>, values: Array<String>) {
+        let d = HashMap<String, String>()
+        let nc = HashSet<String>()
+        for (i in 0..names.size) {
+            if (i < values.size) {
+                d[names[i]] = values[i]
+            }
+        }
+        this.data = d
+        this.nullCols = nc
+        this.colNames = names
+        let m = HashMap<String, Int64>()
+        for (i in 0..names.size) {
+            m[names[i]] = Int64(i)
+        }
+        this.nameIndex = m
+    }
+
+    func idx(col: String): Int64 {
+        match (nameIndex.get(col)) {
+            case Some(i) => i
+            case None => throw CsormError("MockRow: column not found: " + col)
+        }
+    }
+
+    public func columnCount(): Int64 { Int64(colNames.size) }
+    public func columnName(i: Int64): String { colNames[i] }
+    public func columnOid(i: Int64): Int32 { 0 }
+    public func isNull(col: Int64): Bool { nullCols.contains(colNames[col]) }
+    public func isNull(col: String): Bool { nullCols.contains(col) }
+    public func rawValue(col: Int64): String {
+        match (data.get(colNames[col])) { case Some(s) => s; case None => "" }
+    }
+    public func rawValue(col: String): String {
+        match (data.get(col)) { case Some(s) => s; case None => "" }
+    }
+
+    public func getText(col: Int64): String { rawValue(col) }
+    public func getText(col: String): String { rawValue(col) }
+    public func getOrNullText(col: Int64): ?String {
+        if (isNull(col)) { None } else { Some(rawValue(col)) }
+    }
+    public func getOrNullText(col: String): ?String {
+        if (isNull(col)) { None } else { Some(rawValue(col)) }
+    }
+
+    public func getInt64(col: Int64): Int64 {
+        try { Int64.parse(rawValue(col).trimAscii()) } catch (_: Exception) { 0 }
+    }
+    public func getInt64(col: String): Int64 { getInt64(idx(col)) }
+    public func getOrNullInt64(col: Int64): ?Int64 {
+        if (isNull(col)) { None } else {
+            try { Some(Int64.parse(rawValue(col).trimAscii())) } catch (_: Exception) { Some(0) }
+        }
+    }
+    public func getOrNullInt64(col: String): ?Int64 { getOrNullInt64(idx(col)) }
+
+    public func getInt32(col: Int64): Int32 { Int32(getInt64(col)) }
+    public func getInt32(col: String): Int32 { Int32(getInt64(col)) }
+    public func getOrNullInt32(col: Int64): ?Int32 {
+        match (getOrNullInt64(col)) { case Some(v) => Some(Int32(v)); case None => None }
+    }
+    public func getOrNullInt32(col: String): ?Int32 { getOrNullInt32(idx(col)) }
+
+    public func getBool(col: Int64): Bool {
+        let s = rawValue(col).trimAscii()
+        s == "t" || s == "true" || s == "TRUE" || s == "1"
+    }
+    public func getBool(col: String): Bool { getBool(idx(col)) }
+    public func getOrNullBool(col: Int64): ?Bool {
+        if (isNull(col)) { None } else { Some(getBool(col)) }
+    }
+    public func getOrNullBool(col: String): ?Bool { getOrNullBool(idx(col)) }
+
+    public func getFloat64(col: Int64): Float64 {
+        try { Float64.parse(rawValue(col).trimAscii()) } catch (_: Exception) { 0.0 }
+    }
+    public func getFloat64(col: String): Float64 { getFloat64(idx(col)) }
+    public func getOrNullFloat64(col: Int64): ?Float64 {
+        if (isNull(col)) { None } else {
+            try { Some(Float64.parse(rawValue(col).trimAscii())) } catch (_: Exception) { Some(0.0) }
+        }
+    }
+    public func getOrNullFloat64(col: String): ?Float64 { getOrNullFloat64(idx(col)) }
+
+    public func getBytes(col: Int64): Array<UInt8> { rawValue(col).toArray() }
+    public func getBytes(col: String): Array<UInt8> { getBytes(idx(col)) }
+    public func getOrNullBytes(col: Int64): ?Array<UInt8> {
+        if (isNull(col)) { None } else { Some(rawValue(col).toArray()) }
+    }
+    public func getOrNullBytes(col: String): ?Array<UInt8> { getOrNullBytes(idx(col)) }
+
+    public func getJson(col: Int64): String { getText(col) }
+    public func getJson(col: String): String { getText(col) }
+    public func getOrNullJson(col: Int64): ?String { getOrNullText(col) }
+    public func getOrNullJson(col: String): ?String { getOrNullText(col) }
+
+    public func getTextArray(col: Int64): Array<String> {
+        let s = rawValue(col)
+        // 简化：按逗号分割(去掉花括号)
+        let trimmed = s.trimAscii()
+        if (trimmed == "{}" || trimmed.isEmpty()) { return Array<String>() }
+        var inner = trimmed
+        if (trimmed.startsWith("{")) {
+            inner = trimmed[1..trimmed.size - 1]
+        }
+        inner.split(",")
+    }
+    public func getTextArray(col: String): Array<String> { getTextArray(idx(col)) }
+
+    public func getInt64Array(col: Int64): Array<Int64> {
+        let toks = getTextArray(col)
+        Array<Int64>(toks.size, { i =>
+            try { Int64.parse(toks[i].trimAscii()) } catch (_: Exception) { 0 }
+        })
+    }
+    public func getInt64Array(col: String): Array<Int64> { getInt64Array(idx(col)) }
+
+    public func getInt32Array(col: Int64): Array<Int32> {
+        let arr = getInt64Array(col)
+        Array<Int32>(arr.size, { i => Int32(arr[i]) })
+    }
+    public func getInt32Array(col: String): Array<Int32> { getInt32Array(idx(col)) }
+}
+
+/**
+ * Mock 数据库：预设 (sql → rows) 映射，无需真实 DB 即可单测 DAO 层。
+ * 实现后端无关 DriverConn 接口，让 DAO 层无感切换。
+ */
+public class MockDatabase <: DriverConn {
     // 预设响应：(sql 包含匹配串) → (rows, affected)
     let queryResponses = ArrayList<(String, Array<Row>)>()
     let execResponses = ArrayList<(String, Int64)>()
     // 记录所有调用(供测试断言)
     let callLog = ArrayList<String>()
+    let mockDialect: Dialect
 
-    public init() {}
+    public init() {
+        mockDialect = PgCompatDialect()
+    }
+
+    public init(dialect: Dialect) {
+        mockDialect = dialect
+    }
+
+    public func backend(): DbBackend { mockDialect.backend() }
+    public func dialect(): Dialect { mockDialect }
 
     /** 预设查询响应：当 SQL 包含 matchStr 时返回 rows。 */
     public func expectQuery(matchStr: String, rows: Array<Row>): MockDatabase {
@@ -142,13 +298,9 @@ public class MockDatabase {
         this
     }
 
-    /** 记录调用(内部)。 */
-    func logCall(sql: String): Unit {
-        callLog.add(sql)
-    }
+    func logCall(sql: String): Unit { callLog.add(sql) }
 
-    /** 查询：按 matchStr 顺序匹配，返回预设 rows；未匹配则空数组。 */
-    public func query(sql: String, params: Array<PGValue>): Array<Row> {
+    public func queryAll(sql: String, params: Array<Value>): Array<Row> {
         logCall(sql)
         for ((matchStr, rows) in queryResponses) {
             if (sql.contains(matchStr)) {
@@ -158,15 +310,18 @@ public class MockDatabase {
         Array<Row>()
     }
 
-    /** 查询单行：返回首行或 None。 */
-    public func queryOne(sql: String, params: Array<PGValue>): ?Row {
-        let rows = query(sql, params)
+    public func queryOne(sql: String, params: Array<Value>): ?Row {
+        let rows = queryAll(sql, params)
         if (rows.size == 0) { return None }
         Some(rows[0])
     }
 
-    /** 写语句：返回预设 affected；未匹配则 0。 */
-    public func exec(sql: String, params: Array<PGValue>): Int64 {
+    public func streamQuery(sql: String, params: Array<Value>, chunkSize: Int64, cb: (Array<Row>) -> Unit): Unit {
+        let rows = queryAll(sql, params)
+        if (rows.size > 0) { cb(rows) }
+    }
+
+    public func exec(sql: String, params: Array<Value>): Int64 {
         logCall(sql)
         for ((matchStr, affected) in execResponses) {
             if (sql.contains(matchStr)) {
@@ -176,26 +331,31 @@ public class MockDatabase {
         0
     }
 
-    /** 原始 SQL 执行(mock：记录但不执行)。 */
-    public func execSql(sql: String): Unit {
-        logCall(sql)
-    }
+    public func execSql(sql: String): Unit { logCall(sql) }
 
-    /** 原始 SQL 执行(mock：返回预设 affected 或 0)。 */
-    public func execRaw(sql: String, params: Array<Value>): Int64 {
-        logCall(sql)
-        for ((matchStr, affected) in execResponses) {
-            if (sql.contains(matchStr)) {
-                return affected
-            }
+    public func begin(): Unit { logCall("BEGIN") }
+    public func commit(): Unit { logCall("COMMIT") }
+    public func rollback(): Unit { logCall("ROLLBACK") }
+    public func inTransaction(): Bool { false }
+
+    public func transaction(body: () -> Unit): Unit {
+        begin()
+        try {
+            body()
+            commit()
+        } catch (e: Exception) {
+            rollback()
+            throw e
         }
-        0
     }
 
-    /** 原始 SQL 执行(mock：记录)。 */
-    public func execRawSql(sql: String): Unit {
-        logCall(sql)
-    }
+    public func save(name: String): Unit { logCall("SAVEPOINT " + name) }
+    public func rollback(name: String): Unit { logCall("ROLLBACK TO " + name) }
+    public func release(name: String): Unit { logCall("RELEASE " + name) }
+
+    public func cancel(): Bool { false }
+    public func close(): Unit { callLog.clear() }
+    public func poolSize(): Int64 { 1 }
 
     /** 取调用记录(供测试断言)。 */
     public func calls(): Array<String> {
@@ -218,8 +378,8 @@ public class MockDatabase {
 // ===== 7.4 ConnectOptions =====
 
 /**
- * 连接选项：集中管理 poolSize / statementTimeout / connectTimeout / sslMode 等。
- * 解析连接串 + 覆盖，产出给 PGDatabase / PGDatasource 使用。
+ * 通用连接选项：集中管理 poolSize / timeout 等。
+ * 具体连接串格式由各 driver 自行处理。
  */
 public struct ConnectOptions {
     public let connString: String
@@ -228,13 +388,13 @@ public struct ConnectOptions {
     public var idleTimeoutMs: Int64 = 0
     public var statementTimeoutMs: Int64 = 0     // 0 = 不设
     public var connectTimeoutMs: Int64 = 0       // 0 = 不设
-    public var sslMode: String = ""              // disable/allow/prefer/require/verify-ca/verify-full
+    public var sslMode: String = ""
 
     public init(connString: String) {
         this.connString = connString
     }
 
-    /** 生成带 options 覆盖的连接串(把 pool.* 和 libpq 选项拼入)。 */
+    /** 生成带 options 覆盖的连接串(把 pool.* 和 libpq 选项拼入——PG 专用)。 */
     public func toConnectionString(): String {
         let sb = StringBuilder()
         sb.append(connString)

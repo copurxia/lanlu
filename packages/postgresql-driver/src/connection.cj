@@ -112,25 +112,25 @@ public class PGDatabase {
         res.close()
     }
 
-    // 在指定连接上物化结果集为 Row 数组。
-    static func materialize(res: PGResult): Array<Row> {
+    // 在指定连接上物化结果集为 PgRowData 数组。
+    static func materialize(res: PGResult): Array<PgRowData> {
         let nrows = res.rowCount()
         let ncols = res.fieldCount()
         let names = Array<String>(ncols, { j => res.fieldName(j) })
         let oids = Array<Int32>(ncols, { j => res.fieldType(j) })
-        let rows = ArrayList<Row>()
+        let rows = ArrayList<PgRowData>()
         for (i in 0..nrows) {
             let vals = Array<String>(ncols, { j => if (res.isNull(i, j)) { "" } else { res.getValue(i, j) } })
             let nulls = Array<Bool>(ncols, { j => res.isNull(i, j) })
-            rows.add(Row(names, oids, vals, nulls))
+            rows.add(PgRowData(names, oids, vals, nulls))
         }
         return rows.toArray()
     }
 
     // ===== 公共 API =====
 
-    /** 执行查询，物化全部行为 Row 数组。 */
-    public func query(sql: String, params: Array<PGValue>): Array<Row> {
+    /** 执行查询，物化全部行为 PgRowData 数组。 */
+    public func query(sql: String, params: Array<PGValue>): Array<PgRowData> {
         match (txn.get()) {
             case Some(c) =>
                 setActiveConn(c)
@@ -156,7 +156,7 @@ public class PGDatabase {
     }
 
     /** 执行查询，返回首行(无结果返回 None)。 */
-    public func queryOne(sql: String, params: Array<PGValue>): ?Row {
+    public func queryOne(sql: String, params: Array<PGValue>): ?PgRowData {
         let rows = query(sql, params)
         if (rows.size == 0) {
             return None
@@ -317,7 +317,7 @@ public class PGDatabase {
      * - 事务外：借新连接，自建事务包裹游标生命周期，异常时 ROLLBACK。
      */
     public func streamQuery(sql: String, params: Array<PGValue>, chunkSize: Int64,
-        cb: (Array<Row>) -> Unit): Unit {
+        cb: (Array<PgRowData>) -> Unit): Unit {
         match (txn.get()) {
             case Some(c) =>
                 let cursorName = "pgc_stream_" + nowMillis().toString()

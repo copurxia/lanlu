@@ -1,13 +1,14 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段六测试：PartialModel、FromQueryResult、DynamicEntity。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 
 func pmConnStr(): String {
     getVariable("DB_STRING") ??
@@ -16,7 +17,7 @@ func pmConnStr(): String {
 
 func openPmOrSkip(): ?Database {
     try {
-        return Some(Database(pmConnStr()))
+        return Some(Database(PgConn(pmConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (partial test)")
         return None
@@ -173,7 +174,7 @@ func test_dynamic_entity() {
                 [ColType.TInt, ColType.TText, ColType.TBool])
             let q = dyn.select()
             let (sql, params) = q.build()
-            let rows = db.raw<Row>(sql, params, { r => r })
+            let rows = db.raw<csorm.Row>(sql, params, { r => r })
 
             @Expect(rows.size, 2)
             let models = ArrayList<DynamicModel>()

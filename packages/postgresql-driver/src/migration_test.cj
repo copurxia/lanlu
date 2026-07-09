@@ -1,13 +1,14 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段四迁移框架测试：验证 Migrator up/down/refresh/status + schema_migrations 元表。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 
 func migConnStr(): String {
     getVariable("DB_STRING") ??
@@ -16,7 +17,7 @@ func migConnStr(): String {
 
 func openMigOrSkip(): ?Database {
     try {
-        return Some(Database(migConnStr()))
+        return Some(Database(PgConn(migConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (migration test)")
         return None
@@ -94,7 +95,7 @@ func test_migrator_up_and_status() {
 
             // 验证表与列存在
             db.execRaw("INSERT INTO csorm_mig_test_a (name, age) VALUES ($1, $2)", [vtext("alice"), vint(30)])
-            let rows = db.raw<Row>("SELECT name, age FROM csorm_mig_test_a", [], { r => r })
+            let rows = db.raw<csorm.Row>("SELECT name, age FROM csorm_mig_test_a", [], { r => r })
             @Expect(rows.size, 1)
             @Expect(rows[0].getText("name"), "alice")
             @Expect(rows[0].getInt64("age"), 30)
@@ -217,7 +218,7 @@ func test_migrator_uses_entity_schema() {
             @Expect(applied.size, 1)
             // 验证表存在
             db.execRaw("INSERT INTO csorm_mig_entity_demo (name) VALUES ($1)", [vtext("test")])
-            let rows = db.raw<Row>("SELECT name FROM csorm_mig_entity_demo", [], { r => r })
+            let rows = db.raw<csorm.Row>("SELECT name FROM csorm_mig_entity_demo", [], { r => r })
             @Expect(rows.size, 1)
             @Expect(rows[0].getText("name"), "test")
 

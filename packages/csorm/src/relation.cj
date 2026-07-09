@@ -2,7 +2,6 @@ package csorm
 
 import std.collection.*
 import std.convert.*
-import postgresql_driver.*
 
 /**
  * 关系模型(对标 sea-orm RelationTrait/RelationDef/Related/LoaderTrait)。
@@ -169,7 +168,7 @@ public func csormRelationFindAlsoRelated(db: Database, rel: RelationDef,
         q.addRawColumn(rel.toTable + "." + c, alias: rel.toTable + "__" + c)
     }
     q.join(JoinKind.Inner, rel.toTable, rel.toTable + "." + rel.toCol + " = " +
-        quoteTable(rel.fromSchema, rel.fromTable) + "." + rel.fromCol)
+        defaultDialect.quoteTable(rel.fromSchema, rel.fromTable) + "." + rel.fromCol)
     if (let Some(c) <- rel.onCond) {
         q.andFilter(c)
     }

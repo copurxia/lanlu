@@ -16,7 +16,6 @@ package csorm
 import std.collection.*
 import std.convert.*
 import std.time.*
-import postgresql_driver.*
 
 /**
  * 迁移接口：每个迁移实现 up/down + 元数据。

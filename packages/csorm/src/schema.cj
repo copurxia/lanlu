@@ -15,7 +15,6 @@ package csorm
 import std.collection.*
 import std.convert.*
 import std.sync.*
-import postgresql_driver.*
 
 // ===== 扩展 ColType(DDL 侧完整列类型) =====
 // 原 ColType 在 value.cj，用于读侧类型提示。这里另起一个 DDL 专用的 SqlColType，
@@ -160,9 +159,9 @@ public class ColumnDef {
     public func setDefault(expr: String): ColumnDef { defaultValue = Some(expr); this }
     public func setComment(c: String): ColumnDef { comment = Some(c); this }
 
-    /** 渲染为 CREATE TABLE 中的列定义片段(不含外层逗号)。 */
-    public func toColumnSql(): String {
-        var s = quoteIdent(name) + " " + sqlColTypeToPg(colType)
+    /** 渲染为 CREATE TABLE 中的列定义片段(不含外层逗号)，经 dialect 引号与类型文本。 */
+    public func toColumnSql(dialect: Dialect): String {
+        var s = dialect.quoteIdent(name) + " " + dialect.renderColType(colType)
         if (!nullable) {
             s += " NOT NULL"
         }
@@ -181,11 +180,20 @@ public class ColumnDef {
 }
 
 /**
- * Schema：按 backend(先 PG)产出 DDL 文本。
+ * Schema：按 dialect 产出 DDL 文本。
  * 从 Entity 的列元数据(经 columnDefs())生成 CREATE TABLE。
+ * 默认使用 PG 兼容方言；可传入其他 dialect 产出不同后端 DDL。
  */
 public class Schema {
-    public init() {}
+    let dialect: Dialect
+
+    public init() {
+        this.dialect = defaultDialect
+    }
+
+    public init(dialect: Dialect) {
+        this.dialect = dialect
+    }
 
     /**
      * 从 Entity 生成 CREATE TABLE SQL。
@@ -218,13 +226,13 @@ public class Schema {
         let sb = StringBuilder()
         sb.append("CREATE TABLE ")
         match (e.schema()) {
-            case Some(s) => sb.append(quoteTable(Some(s), e.table()))
-            case None => sb.append(quoteTable(None, e.table()))
+            case Some(s) => sb.append(dialect.quoteTable(Some(s), e.table()))
+            case None => sb.append(dialect.quoteTable(None, e.table()))
         }
         sb.append(" (")
         let parts = ArrayList<String>()
         for (cd in defs) {
-            parts.add(cd.toColumnSql())
+            parts.add(cd.toColumnSql(dialect))
         }
         // 复合主键(若多列 pk 且未在列定义上标 PRIMARY KEY)
         var pkCount = 0
@@ -235,7 +243,7 @@ public class Schema {
             let pks = ArrayList<String>()
             for (cd in defs) {
                 if (cd.primaryKey) {
-                    pks.add(quoteIdent(cd.name))
+                    pks.add(dialect.quoteIdent(cd.name))
                 }
             }
             // 移除各列上的 PRIMARY KEY(改为表级)
@@ -250,25 +258,20 @@ public class Schema {
     /** DROP TABLE IF EXISTS。 */
     public func dropTable(e: Entity): String {
         match (e.schema()) {
-            case Some(s) => "DROP TABLE IF EXISTS " + quoteTable(Some(s), e.table())
-            case None => "DROP TABLE IF EXISTS " + quoteTable(None, e.table())
+            case Some(s) => "DROP TABLE IF EXISTS " + dialect.quoteTable(Some(s), e.table())
+            case None => "DROP TABLE IF EXISTS " + dialect.quoteTable(None, e.table())
         }
     }
 
     /**
-     * CREATE TYPE(用于枚举/自定义类型)。typeName 为 PG 枚举类型名，values 为枚举成员。
-     * 产出：CREATE TYPE "typeName" AS ENUM ('v1','v2',...)
+     * CREATE TYPE(用于枚举/自定义类型)。经 dialect 渲染(PG: CREATE TYPE AS ENUM)。
      */
     public func createEnumType(typeName: String, values: Array<String>): String {
-        let parts = ArrayList<String>()
-        for (v in values) {
-            parts.add("'" + v.replace("'", "''") + "'")
-        }
-        "CREATE TYPE " + quoteIdent(typeName) + " AS ENUM (" + joinComma(parts.toArray()) + ")"
+        dialect.renderCreateEnumType(typeName, values)
     }
 
     public func dropEnumType(typeName: String): String {
-        "DROP TYPE IF EXISTS " + quoteIdent(typeName)
+        dialect.renderDropEnumType(typeName)
     }
 }
 

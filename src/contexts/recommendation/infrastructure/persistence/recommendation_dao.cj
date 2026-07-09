@@ -2,7 +2,6 @@ package lanlu.contexts.recommendation.infrastructure.persistence
 
 import std.collection.*
 import csorm.*
-import postgresql_driver.*
 import lanlu.contexts.recommendation.domain.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*

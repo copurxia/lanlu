@@ -1,7 +1,6 @@
 package lanlu.contexts.task.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 import std.collection.*
 import std.time.*
 import std.convert.*

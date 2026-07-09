@@ -11,7 +11,6 @@ package csorm
  */
 import std.collection.*
 import std.convert.*
-import postgresql_driver.*
 
 // ===== PartialModel =====
 

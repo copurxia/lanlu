@@ -3,10 +3,9 @@ package csorm
 import std.collection.*
 import std.convert.*
 import std.time.*
-import postgresql_driver.*
 
 /**
- * csorm 运行时值类型(对标 sea_query::Value)。驱动边界处转换为 PGValue。
+ * csorm 运行时值类型(对标 sea_query::Value)。驱动边界处转换为原生参数。
  * - VJson 承载 JSONB 文本(上层按需解析)。
  * - VArr 用于 PG 数组(写侧绑定 $n::type[])。
  * - VTimestamp/VDate/VUuid/VDecimal：阶段五新增的类型化变体。
@@ -58,27 +57,6 @@ public func optionToValue<T>(v: ?T): Value where T <: IntoValue {
     }
 }
 
-/** Value → postgresql_driver.PGValue(驱动绑定边界)。 */
-public func valueToPG(v: Value): PGValue {
-    match (v) {
-        case VInt(x) => PGValue.PGInt64(x)
-        case VFloat(x) => PGValue.PGFloat64(x)
-        case VText(s) => PGValue.PGText(s)
-        case VBool(b) => PGValue.PGBool(b)
-        case VBytes(b) => PGValue.PGBytes(b)
-        case VJson(s) => PGValue.PGJson(s)
-        case VArr(elems) => PGValue.PGArray(Array<PGValue>(elems.size, { i => valueToPG(elems[i]) }))
-        case VTimestamp(us) => PGValue.PGText(timestampUsToPgText(us))
-        case VTimestampTz(us) => PGValue.PGText(timestampTzUsToPgText(us))
-        case VDate(days) => PGValue.PGText(dateDaysToPgText(days))
-        case VTime(us) => PGValue.PGText(timeUsToPgText(us))
-        case VUuid(s) => PGValue.PGText(s)
-        case VDecimal(s) => PGValue.PGText(s)
-        case VEnum(_, raw) => PGValue.PGText(raw)
-        case VNull => PGValue.PGNull
-    }
-}
-
 /** 便捷构造。 */
 public func vint(x: Int64): Value { Value.VInt(x) }
 public func vtext(s: String): Value { Value.VText(s) }
@@ -126,24 +104,8 @@ public func int32Array(elems: Array<Int32>): Value {
     Value.VArr(Array<Value>(elems.size, { i => Value.VInt(Int64(elems[i])) }))
 }
 
-/** PGValue → Value(读侧回包)。 */
-public func pgValueToValue(v: PGValue): Value {
-    match (v) {
-        case PGInt64(x) => Value.VInt(x)
-        case PGInt32(x) => Value.VInt(Int64(x))
-        case PGFloat64(x) => Value.VFloat(x)
-        case PGBool(b) => Value.VBool(b)
-        case PGText(s) => Value.VText(s)
-        case PGBytes(b) => Value.VBytes(b)
-        case PGJson(s) => Value.VJson(s)
-        case PGArray(elems) =>
-            Value.VArr(Array<Value>(elems.size, { i => pgValueToValue(elems[i]) }))
-        case PGNull => Value.VNull
-    }
-}
-
 /**
- * 行 → 值(按列名 + 类型提示)。typeHint 用列 OID 决定走哪种 Row 读取器。
+ * 行 → 值(按列名 + 类型提示)。经后端无关 Row 接口读取。
  * 由宏生成的 Entity.fromRow 调用，也可手动使用。
  */
 public func rowToValue(r: Row, col: String, hint: ColType): Value {

@@ -1,13 +1,14 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段三 Expr 测试：验证类型化表达式渲染、查询构建器接入、Cond.ExprCond。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 
 func exprConnStr(): String {
     getVariable("DB_STRING") ??
@@ -16,7 +17,7 @@ func exprConnStr(): String {
 
 func openExprOrSkip(): ?Database {
     try {
-        return Some(Database(exprConnStr()))
+        return Some(Database(PgConn(exprConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (expr test)")
         return None
@@ -96,7 +97,7 @@ func test_expr_in_query_builder() {
             @Expect(sql.contains("AS \"name_upper\""), true)
             @Expect(sql.contains("WHERE"), true)
 
-            let rows = db.raw<Row>(sql, params, { r => r })
+            let rows = db.raw<csorm.Row>(sql, params, { r => r })
             @Expect(rows.size, 2)  // alice(30), carol(25) > 22
             // 按 age DESC：alice(30) 先于 carol(25)
             @Expect(rows[0].getInt64("age"), 30)
@@ -110,7 +111,7 @@ func test_expr_in_query_builder() {
             db.exec(u)
 
             // 验证 bob.age 从 20 → 21
-            let r2 = db.rawOne<Row>("SELECT age FROM csorm_expr_test WHERE name = $1",
+            let r2 = db.rawOne<csorm.Row>("SELECT age FROM csorm_expr_test WHERE name = $1",
                 [vtext("bob")], { r => r })
             match (r2) {
                 case Some(row) => @Expect(row.getInt64("age"), 21)

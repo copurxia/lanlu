@@ -1,13 +1,12 @@
 package csorm
 
-import postgresql_driver.*
-
 /**
- * csorm 错误：包装底层 PGError，保留 SQLSTATE 与诊断字段，供上层做约束冲突判定。
- * 由 Database 在执行失败时抛出（捕获 PGError 后包成 CsormError）。
+ * csorm 错误：后端无关异常基类。
+ * 由各 driver 的 DriverConn 实现在执行失败时抛出(包装原生错误)。
+ * 若 driver 提供 DbError 诊断接口，则可通过 isUniqueViolation 等方法判定约束冲突。
  */
 public class CsormError <: Exception {
-    public let pgError: PGError
+    public let dbError: ?DbError
     public let sqlstate: String
     public let severity: String
     public let detail: String
@@ -17,38 +16,79 @@ public class CsormError <: Exception {
     public let columnName: String
     public let constraintName: String
 
-    public init(message: String, pgError!: PGError = PGError("")) {
+    public init(message: String) {
         super(message)
-        this.pgError = pgError
-        this.sqlstate = pgError.sqlstate
-        this.severity = pgError.severity
-        this.detail = pgError.detail
-        this.hint = pgError.hint
-        this.schemaName = pgError.schemaName
-        this.tableName = pgError.tableName
-        this.columnName = pgError.columnName
-        this.constraintName = pgError.constraintName
+        this.dbError = None
+        this.sqlstate = ""
+        this.severity = ""
+        this.detail = ""
+        this.hint = ""
+        this.schemaName = ""
+        this.tableName = ""
+        this.columnName = ""
+        this.constraintName = ""
     }
 
-    /** 唯一约束冲突(23505)。 */
-    public func isUniqueViolation(): Bool { sqlstate == "23505" }
+    public init(message: String, dbError: DbError) {
+        super(message)
+        this.dbError = Some(dbError)
+        this.sqlstate = dbError.sqlstate()
+        this.severity = dbError.severity()
+        this.detail = dbError.detail()
+        this.hint = dbError.hint()
+        this.schemaName = dbError.schemaName()
+        this.tableName = dbError.tableName()
+        this.columnName = dbError.columnName()
+        this.constraintName = dbError.constraintName()
+    }
 
-    /** 外键约束冲突(23503)。 */
-    public func isForeignKeyViolation(): Bool { sqlstate == "23503" }
+    /** 唯一约束冲突。 */
+    public func isUniqueViolation(): Bool {
+        match (dbError) {
+            case Some(e) => e.isUniqueViolation()
+            case None => false
+        }
+    }
 
-    /** NOT NULL 违反(23502)。 */
-    public func isNotNullViolation(): Bool { sqlstate == "23502" }
+    /** 外键约束冲突。 */
+    public func isForeignKeyViolation(): Bool {
+        match (dbError) {
+            case Some(e) => e.isForeignKeyViolation()
+            case None => false
+        }
+    }
 
-    /** CHECK 约束违反(23514)。 */
-    public func isCheckViolation(): Bool { sqlstate == "23514" }
+    /** NOT NULL 违反。 */
+    public func isNotNullViolation(): Bool {
+        match (dbError) {
+            case Some(e) => e.isNotNullViolation()
+            case None => false
+        }
+    }
 
-    /** 死锁(40P01)或序列化失败(40001)。 */
+    /** CHECK 约束违反。 */
+    public func isCheckViolation(): Bool {
+        match (dbError) {
+            case Some(e) => e.isCheckViolation()
+            case None => false
+        }
+    }
+
+    /** 死锁或序列化失败。 */
     public func isDeadlockOrSerializationFailure(): Bool {
-        sqlstate == "40P01" || sqlstate == "40001"
+        match (dbError) {
+            case Some(e) => e.isDeadlockOrSerializationFailure()
+            case None => false
+        }
     }
 
-    /** 连接异常(SQLSTATE 类 08)。 */
-    public func isConnectionError(): Bool { sqlstate.startsWith("08") }
+    /** 连接异常。 */
+    public func isConnectionError(): Bool {
+        match (dbError) {
+            case Some(e) => e.isConnectionError()
+            case None => false
+        }
+    }
 
     public override func toString(): String {
         var s = "CsormError: " + message
@@ -63,10 +103,4 @@ public class CsormError <: Exception {
         }
         s
     }
-}
-
-/** 把 PGError 包成 CsormError（保留原始诊断）。 */
-internal func wrapPgError(e: PGError, ctx: String): CsormError {
-    let msg = if (ctx.isEmpty()) { e.message } else { ctx + ": " + e.message }
-    CsormError(msg, pgError: e)
 }

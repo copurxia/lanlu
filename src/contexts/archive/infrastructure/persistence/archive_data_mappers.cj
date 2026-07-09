@@ -1,7 +1,6 @@
 package lanlu.contexts.archive.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 
 /**
  * Centralized mappers for DAO Row -> data objects.

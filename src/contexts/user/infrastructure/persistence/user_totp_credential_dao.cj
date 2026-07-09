@@ -1,7 +1,6 @@
 package lanlu.contexts.user.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 import lanlu.shared.config.*
 
 public class UserTotpCredentialRow {

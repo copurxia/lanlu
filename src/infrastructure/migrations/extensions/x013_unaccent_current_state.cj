@@ -41,7 +41,7 @@ public class X013_UnaccentCurrentState <: ExtensionMigration {
             IMMUTABLE
             PARALLEL SAFE
             AS $$
-                SELECT unaccent('unaccent', input)
+                SELECT public.unaccent('public.unaccent'::regdictionary, input)
             $$        
         """)) {
             logger.warn("Failed to create immutable unaccent wrapper")

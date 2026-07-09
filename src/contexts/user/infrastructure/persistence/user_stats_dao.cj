@@ -1,7 +1,6 @@
 package lanlu.contexts.user.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 import std.collection.*
 import std.time.DateTime
 import lanlu.shared.config.*

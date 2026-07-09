@@ -1,12 +1,11 @@
-package csorm
+package postgresql_driver
 
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
-import postgresql_driver.PGDriver
-import std.database.sql.*
 import csorm_macros.*
 
 // 取连接串：优先 DB_STRING 环境变量，回退 lanludev。
@@ -18,7 +17,7 @@ func ormConnStr(): String {
 // 无 PG 环境时静默跳过。
 func openOrmOrSkip(): ?Database {
     try {
-        return Some(Database(ormConnStr()))
+        return Some(Database(PgConn(ormConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available")
         return None
@@ -385,19 +384,17 @@ func test_orm_with_timeout() {
 }
 
 /**
- * 阶段零适配：经 std.database.sql.Datasource 构造 Database，验证 csorm 可由
- * DriverManager/PGDriver.open 路径创建，且执行能力与旧 connString 入口一致。
+ * 经 PgConn 构造 Database，验证 csorm 可由 driver 路径创建，且执行能力与旧 connString 入口一致。
  */
 @Test
 func test_orm_via_datasource() {
     try {
-        let ds = PGDriver().open(ormConnStr(), [])
-        let db = Database(ds)
+        let db = Database(PgConn(ormConnStr()))
         let r = db.rawOne<Int64>("SELECT 1", [], { row => row.getInt64(0) }).getOrThrow()
         @Expect(r, 1)
         db.close()
-        println("[csorm-test] via Datasource passed")
+        println("[csorm-test] via PgConn passed")
     } catch (_: Exception) {
-        println("[skip] no PostgreSQL available (Datasource path)")
+        println("[skip] no PostgreSQL available (PgConn path)")
     }
 }

@@ -1,13 +1,14 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段一 1.1 宏测试：验证 @Entity 的 @[hasMany]/@[hasOne] 生成 relations() 实现。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 import csorm_macros.*
 
 func rmConnStr(): String {
@@ -17,7 +18,7 @@ func rmConnStr(): String {
 
 func openRmOrSkip(): ?Database {
     try {
-        return Some(Database(rmConnStr()))
+        return Some(Database(PgConn(rmConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (relation macro test)")
         return None
@@ -278,7 +279,7 @@ func test_macro_column_defs_to_ddl() {
             // 插入数据验证
             db.execRaw("INSERT INTO csorm_cd_demo (name, age, active, meta, tags) VALUES ($1, $2, $3, $4, $5)",
                 [vtext("test"), vint(25), vbool(true), vjson("{}"), textArray(["a", "b"])])
-            let rows = db.raw<Row>("SELECT name, age, active FROM csorm_cd_demo", [], { r => r })
+            let rows = db.raw<csorm.Row>("SELECT name, age, active FROM csorm_cd_demo", [], { r => r })
             @Expect(rows.size, 1)
             @Expect(rows[0].getText("name"), "test")
             @Expect(rows[0].getInt64("age"), 25)

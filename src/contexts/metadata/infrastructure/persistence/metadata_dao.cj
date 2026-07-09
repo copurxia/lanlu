@@ -9,7 +9,6 @@ import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.kv.*
 import csorm.*
-import postgresql_driver.*
 
 public class MetadataAssetData {
     public var slot: String = ""

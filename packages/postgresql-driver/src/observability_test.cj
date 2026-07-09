@@ -1,14 +1,15 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段七测试：metric callback、MockDatabase、ConnectOptions。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
 import std.time.*
-import postgresql_driver.*
 
 @Test
 func test_metric_callback() {
@@ -43,24 +44,25 @@ func test_metric_callback() {
 func test_mock_database() {
     let mock = MockDatabase()
 
-    // 预设查询响应：SQL 包含 "FROM users" 时返回 2 行(用便捷 Row 构造)
-    let row1 = Row(["id", "name"], ["1", "alice"])
-    let row2 = Row(["id", "name"], ["2", "bob"])
-    mock.expectQuery("FROM users", [row1, row2])
+    // 预设查询响应：SQL 包含 "FROM users" 时返回 2 行(用 MockRow 构造)
+    let row1 = MockRow(["id", "name"], ["1", "alice"])
+    let row2 = MockRow(["id", "name"], ["2", "bob"])
+    let mockRows: Array<csorm.Row> = [row1, row2]
+    mock.expectQuery("FROM users", mockRows)
     mock.expectExec("INSERT INTO users", 1)
 
     // 查询：SQL 包含 matchStr 返回预设行
-    let rows = mock.query("SELECT id, name FROM users WHERE active = true", [])
+    let rows = mock.queryAll("SELECT id, name FROM users WHERE active = true", [])
     @Expect(rows.size, 2)
     @Expect(rows[0].getText("name"), "alice")
     @Expect(rows[1].getText("name"), "bob")
 
     // 写语句：返回预设 affected
-    let aff = mock.exec("INSERT INTO users (name) VALUES ($1)", [PGText("carol")])
+    let aff = mock.exec("INSERT INTO users (name) VALUES ($1)", [vtext("carol")])
     @Expect(aff, 1)
 
     // 未匹配的查询返回空数组
-    let empty = mock.query("SELECT * FROM unknown_table", [])
+    let empty = mock.queryAll("SELECT * FROM unknown_table", [])
     @Expect(empty.size, 0)
 
     // 调用记录

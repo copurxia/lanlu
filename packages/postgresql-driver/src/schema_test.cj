@@ -1,14 +1,15 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段二 Schema/DDL 测试：验证从 Entity 产出 CREATE TABLE、SchemaBuilder、
  * EntityRegistry + syncSchema，以及 codegen(从 PG information_schema 反向生成)。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 import csorm_macros.*
 
 func schemaConnStr(): String {
@@ -18,7 +19,7 @@ func schemaConnStr(): String {
 
 func openSchemaOrSkip(): ?Database {
     try {
-        return Some(Database(schemaConnStr()))
+        return Some(Database(PgConn(schemaConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (schema test)")
         return None

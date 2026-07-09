@@ -36,7 +36,7 @@ func isArrayOid(oid: Int32): Bool {
  * 查询结果的一行(已物化)。持有列名、OID、原始文本值与 NULL 标记。
  * 类型化读取器按需解析文本，并做 OID 感知的跨类型兼容(如 bool 列读为 Int64)。
  */
-public class Row {
+public class PgRowData {
     let names: Array<String>
     let oids: Array<Int32>
     let values: Array<String>   // 原始文本(列非空时)

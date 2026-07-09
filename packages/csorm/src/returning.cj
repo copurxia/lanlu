@@ -1,7 +1,6 @@
 package csorm
 
 import std.collection.*
-import postgresql_driver.*
 
 /**
  * 写操作执行结果。RETURNING 子句的原始行存入 returningRows，由调用方按需映射为 Model。

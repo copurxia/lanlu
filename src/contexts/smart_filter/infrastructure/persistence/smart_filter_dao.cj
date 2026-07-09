@@ -1,7 +1,6 @@
 package lanlu.contexts.smart_filter.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -281,7 +280,7 @@ public class SmartFilterDao {
             combined = all([combined, conds[i]])
         }
         let params = ArrayList<Value>()
-        let ph = Placeholder()
+        let ph = Placeholder(defaultDialect.placeholderStyle())
         let frag = renderCond(combined, params, ph)
         // ArrayList → Array
         let sz = params.size

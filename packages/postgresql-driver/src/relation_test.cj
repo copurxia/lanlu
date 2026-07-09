@@ -1,15 +1,16 @@
-package csorm
+package postgresql_driver
 
 /**
  * 阶段一关系模型测试：验证 RelationDef/findRelated/loadOne/loadMany 解决 N+1。
  * 用两个实体：TestParent(主表) 与 TestChild(从表，外键 parent_id)。
  * 手工构造 RelationDef(宏支持后续补)；验证单条 IN 查询回填 N 个 parent 的关联。
  */
+import csorm.*
+import csorm
 import std.unittest.*
 import std.unittest.testmacro.*
 import std.env.getVariable
 import std.collection.*
-import postgresql_driver.*
 import csorm_macros.*
 
 func relConnStr(): String {
@@ -19,7 +20,7 @@ func relConnStr(): String {
 
 func openRelOrSkip(): ?Database {
     try {
-        return Some(Database(relConnStr()))
+        return Some(Database(PgConn(relConnStr())))
     } catch (_: Exception) {
         println("[skip] no PostgreSQL available (relation test)")
         return None

@@ -1,7 +1,6 @@
 package lanlu.contexts.tankoubon.infrastructure.persistence
 
 import csorm.*
-import postgresql_driver.*
 import lanlu.shared.config.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
