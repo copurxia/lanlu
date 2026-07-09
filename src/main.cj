@@ -213,7 +213,8 @@ main(): Int64 {
         logger.info("SSL/TLS enabled from system settings",
             ("cert_file", sslCertFile),
             ("key_file", sslKeyFile),
-            ("http2", "alpn-auto"))
+            ("http2", "off"),
+            ("alpn", "http/1.1"))
     } else {
         logger.info("SSL/TLS disabled in system settings")
     }
@@ -233,6 +234,8 @@ main(): Int64 {
         enableNetworkChangeNotice: false,
         tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
         tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
+        // 仅协商 http/1.1，关闭 HTTP/2，保留 HTTPS
+        alpnProtocols: ["http/1.1"],
         ))
 
     installObservabilityMiddleware(app)
@@ -244,7 +247,7 @@ main(): Int64 {
     logger.info("Application starting... step 16: routes registered")
 
     if (sslEnabled) {
-        logger.info("Starting HTTPS server", ("http2", "enabled-via-alpn"), ("host", host), ("port", portStr))
+        logger.info("Starting HTTPS server", ("http2", "off"), ("alpn", "http/1.1"), ("host", host), ("port", portStr))
     } else {
         logger.info("Starting HTTP server", ("host", host), ("port", portStr))
     }
