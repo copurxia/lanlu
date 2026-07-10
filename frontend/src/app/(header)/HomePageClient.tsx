@@ -71,21 +71,6 @@ function getStoredHomeViewMode(): HomeViewMode {
   return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
 }
 
-const ArchiveGrid = dynamic(
-  () => import('@/components/archive/ArchiveGrid').then((m) => m.ArchiveGrid),
-  {
-    loading: () => (
-      <div className="columns-2 gap-4 sm:columns-3 md:columns-4 lg:columns-5 xl:columns-6 2xl:columns-7 3xl:columns-8 4xl:columns-10 5xl:columns-11">
-        {Array.from({ length: 10 }).map((_, idx) => (
-          <div key={idx} className="mb-4 break-inside-avoid">
-            <Skeleton className="aspect-3/4 w-full rounded-lg" />
-          </div>
-        ))}
-      </div>
-    ),
-  }
-);
-
 const AppSidebarNav = dynamic(
   () => import('@/components/layout/AppSidebarNav').then((m) => m.AppSidebarNav),
   {
@@ -967,23 +952,14 @@ function HomePageContent() {
               {archives.length > 0 ? (
                 <>
                   <div className={centeredFeedClassName || undefined}>
-                    {homeViewMode === 'masonry' ? (
-                      <HomeMediaMasonry items={archives} scrollContainerRef={mainScrollRef} {...selectionProps} />
-                    ) : homeViewMode === 'list' ? (
+                    {homeViewMode === 'list' ? (
                       <HomeMediaList items={archives} {...selectionProps} />
                     ) : homeViewMode === 'tweet' ? (
                       <HomeMediaTweet items={archives} {...selectionProps} />
                     ) : homeViewMode === 'channel' ? (
                       <HomeMediaChannel items={archives} {...selectionProps} />
                     ) : (
-                      <ArchiveGrid
-                        archives={archives} variant="home" selectable
-                        selectedArchives={selection.selectedArchiveIds}
-                        selectedTankoubons={selection.selectedTankoubonIds}
-                        onToggleArchiveSelect={selection.toggleArchiveSelect}
-                        onToggleTankoubonSelect={selection.toggleTankoubonSelect}
-                        onRequestEnterSelection={selection.enterSelectionMode}
-                      />
+                      <HomeMediaMasonry items={archives} scrollContainerRef={mainScrollRef} {...selectionProps} />
                     )}
                   </div>
                   <div className={cn('mt-4 flex items-center justify-between gap-3', centeredFeedClassName)}>
