@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArchiveGrid } from '@/components/archive/ArchiveGrid';
+import { MediaMasonryGrid } from '@/components/media/MediaMasonryGrid';
 
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -335,7 +335,7 @@ function LibraryPageContent() {
                         <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
                         <Badge variant="secondary">{group.archives.length}</Badge>
                       </div>
-                      <ArchiveGrid archives={group.archives} />
+                      <MediaMasonryGrid items={group.archives} virtualized={false} />
                     </div>
                   ))}
                 </div>
@@ -373,7 +373,7 @@ function LibraryPageContent() {
                         <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
                         <Badge variant="secondary">{group.archives.length}</Badge>
                       </div>
-                      <ArchiveGrid archives={group.archives} />
+                      <MediaMasonryGrid items={group.archives} virtualized={false} />
                     </div>
                   ))}
                 </div>
