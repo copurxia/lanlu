@@ -1,5 +1,4 @@
 import { apiClient } from '@/lib/api';
-import { ArchiveService } from '@/lib/services/archive-service';
 import type { Tankoubon, TankoubonCreateRequest, TankoubonMetadata, TankoubonResponse } from '@/types/tankoubon';
 import type { MetadataUpdatePayload } from '@/types/archive';
 import { normalizeArchiveAssets } from '@/lib/utils/archive-assets';
@@ -132,25 +131,6 @@ export class TankoubonService {
   static async getTankoubonsForArchive(archiveId: string): Promise<Tankoubon[]> {
     const response = await apiClient.get<TankoubonResponse>(`/api/archives/${archiveId}/tankoubons`);
     return this.normalizeResult(response.data);
-  }
-
-  /**
-   * 直接通过搜索接口获取收藏的合集列表（包含 archives）
-   */
-  static async getFavoriteTankoubons(params?: {
-    page?: number;
-    pageSize?: number;
-  }): Promise<{ data: Tankoubon[] }> {
-    const response = await ArchiveService.search({
-      favorite_tankoubons_only: true,
-      groupby_tanks: true,
-      page: params?.page ?? 1,
-      pageSize: params?.pageSize ?? 1000
-    });
-
-    return {
-      data: response.data.filter(this.isTankoubonItem)
-    };
   }
 
 

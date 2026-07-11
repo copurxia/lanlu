@@ -1,5 +1,6 @@
 package lanlu.contexts.tankoubon.domain
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
+import lanlu.contexts.user.infrastructure.persistence.UserTankoubonFavoriteDao
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
@@ -234,6 +235,10 @@ public class TankoubonModel {
                 tankoubon.last_read_time = agg.last_read_time
                 tankoubon.isnew = agg.isnew
             case None => ()
+        }
+        // 收藏状态：合集下任一子 archive 被收藏即为 true
+        if (userId > 0) {
+            tankoubon.isfavorite = UserTankoubonFavoriteDao.isFavorite(userId, tankoubon.id)
         }
     }
 

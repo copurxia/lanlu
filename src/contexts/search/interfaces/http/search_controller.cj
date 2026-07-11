@@ -391,12 +391,10 @@ public class SearchController {
         let untaggedOnlyStr = ctx.query("untaggedonly") ?? "false"
         let groupByTanksStr = ctx.query("groupby_tanks") ?? "false"  // 默认为false
         let favoriteOnlyStr = ctx.query("favoriteonly") ?? "false"
-        let favoriteTankoubonsOnlyStr = ctx.query("favorite_tankoubons_only") ?? "false"
         let newOnly = newOnlyStr == "true" || newOnlyStr == "1"
         let untaggedOnly = untaggedOnlyStr == "true" || untaggedOnlyStr == "1"
         let groupByTanks = groupByTanksStr == "true" || groupByTanksStr == "1"
         let favoriteOnly = favoriteOnlyStr == "true" || favoriteOnlyStr == "1"
-        let favoriteTankoubonsOnly = favoriteTankoubonsOnlyStr == "true" || favoriteTankoubonsOnlyStr == "1"
 
         // 处理日期范围参数
         let dateFrom = ctx.query("date_from") ?? ""
@@ -434,92 +432,6 @@ public class SearchController {
         let userId: Int64 = match (userIdOpt) {
             case Some(id) => id
             case None => 0
-        }
-
-        // 如果启用了 favoriteTankoubonsOnly，直接返回用户收藏的合集列表
-        if (favoriteTankoubonsOnly && userId > 0) {
-            let (tankoubonIds, totalTankCount) = UserTankoubonFavoriteDao.getUserFavoriteTankoubonIdsPaged(userId, start, count)
-
-            // 批量获取收藏时间
-            let tankFavoriteTimeMap = UserTankoubonFavoriteDao.getBatchFavoriteTime(userId, tankoubonIds)
-
-            // 批量获取合集聚合元数据 + 归档列表，避免逐个查询
-            let aggMap = TankoubonDao.getBatchAggregatedMetadata(tankoubonIds, userId)
-            let tankArchivesCache = TankoubonDao.getBatchArchivesInTankoubon(tankoubonIds)
-
-            // 批量获取标签翻译映射（按请求维度一次查询）
-            var tagTranslations: HashMap<String, String> = HashMap<String, String>()
-            if (lang.size > 0) {
-                var uniqueTags = ArrayList<String>()
-                var seenTags: HashMap<String, Bool> = HashMap<String, Bool>()
-                for ((_, agg) in aggMap) {
-                    collectUniqueTags(agg.tags, seenTags, uniqueTags)
-                }
-                if (uniqueTags.size > 0) {
-                    tagTranslations = TagDao.batchGetTranslations(uniqueTags.toArray(), lang)
-                }
-            }
-
-            let out = ByteBuffer()
-            let w = JsonWriter(out)
-            w.startObject()
-            w.writeName("data")
-            w.startArray()
-            for (tid in tankoubonIds) {
-                match (aggMap.get(tid)) {
-                    case Some(agg) =>
-                        let tankFavoriteTime = match (tankFavoriteTimeMap.get(tid)) {
-                            case Some(time) => time
-                            case None => 0
-                        }
-
-                        let translatedTags = if (lang.size > 0) {
-                            TagDao.translateTagsString(agg.tags, lang, tagTranslations)
-                        } else {
-                            agg.tags
-                        }
-
-                        w.startObject()
-                        w.writeName("type").writeValue("tankoubon")
-                        w.writeName("tankoubon_id").writeValue(agg.tankoubon_id)
-                        w.writeName("title").writeValue(agg.name)
-                        w.writeName("description").writeValue(agg.summary)
-                        writeArchiveAssetsJson(w, agg.assets_raw)
-                        w.writeName("tags").writeValue(translatedTags)
-                        w.writeName("children")
-                        w.startArray()
-                        match (tankArchivesCache.get(tid)) {
-                            case Some(archives) =>
-                                for (archiveId in archives) {
-                                    w.writeValue(archiveId)
-                                }
-                            case None => ()
-                        }
-                        w.endArray()
-                        w.writeName("pagecount").writeValue(agg.pagecount)
-                        w.writeName("progress").writeValue(agg.progress)
-                        w.writeName("lastreadtime").writeValue(agg.last_read_time)
-                        w.writeName("release_at").writeValue(agg.release_at)
-                        w.writeName("created_at").writeValue(agg.created_at)
-                        w.writeName("updated_at").writeValue(agg.updated_at)
-                        w.writeName("isnew").writeValue(agg.isnew)
-                        w.writeName("archive_count").writeValue(agg.archive_count)
-                        w.writeName("isfavorite").writeValue(true)
-                        w.writeName("favoritetime").writeValue(tankFavoriteTime)
-                        w.endObject()
-                    case None => ()
-                }
-            }
-            w.endArray()
-            w.writeName("draw").writeValue(0)
-            w.writeName("page").writeValue(page)
-            w.writeName("pageSize").writeValue(pageSize)
-            w.writeName("recordsFiltered").writeValue(totalTankCount)
-            w.writeName("recordsTotal").writeValue(totalTankCount)
-            w.endObject()
-            w.flush()
-            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-            return
         }
 
         // 处理 source 类型的 tankoubon_id（从 Metadata 插件获取 children 并构造 Archive 列表）

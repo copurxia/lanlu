@@ -346,7 +346,6 @@ export type SearchArchivesParams = {
   sortby?: string;
   order?: 'asc' | 'desc';
   favoriteonly?: boolean;
-  favorite_tankoubons_only?: boolean;
   newonly?: boolean;
   untaggedonly?: boolean;
   groupby_tanks?: boolean;
@@ -448,7 +447,6 @@ export async function searchArchives(
     sortby: params.sortby || 'created_at',
     order: params.order || 'desc',
     favoriteonly: params.favoriteonly || undefined,
-    favorite_tankoubons_only: params.favorite_tankoubons_only || undefined,
     newonly: params.newonly || undefined,
     untaggedonly: params.untaggedonly || undefined,
     groupby_tanks: params.groupby_tanks,
@@ -604,16 +602,6 @@ function getRecommendationSessionKey(): string {
       .slice(2)}`;
   }
   return recommendationSessionKey;
-}
-
-export async function fetchFavoriteTankoubons(): Promise<Tankoubon[]> {
-  const result = await searchArchives({
-    favorite_tankoubons_only: true,
-    groupby_tanks: true,
-    page: 1,
-    pageSize: 1000,
-  });
-  return result.data.filter(isTankoubon);
 }
 
 export async function fetchArchiveMetadata(id: string, lang?: string): Promise<ArchiveMetadata> {

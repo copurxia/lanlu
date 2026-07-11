@@ -137,7 +137,6 @@ export interface SearchParams {
   newonly?: boolean;
   untaggedonly?: boolean;
   favoriteonly?: boolean;
-  favorite_tankoubons_only?: boolean;
   date_from?: string;
   date_to?: string;
   groupby_tanks?: boolean;

@@ -87,6 +87,7 @@ main(): Int64 {
     MigrationRegistry.register(V024_SearchAndRecommendationHotPathIndexes())
     MigrationRegistry.register(V025_UserTargetState())
     MigrationRegistry.register(V026_AddSourceIdRegexToPlugins())
+    MigrationRegistry.register(V027_DropUserTankoubonFavorites())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
 

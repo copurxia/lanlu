@@ -21,7 +21,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { logger } from '@/lib/utils/logger';
 import { groupArchivesByTime } from '@/lib/utils/time-group';
 import { ArchiveService } from '@/lib/services/archive-service';
-import { TankoubonService } from '@/lib/services/tankoubon-service';
 import type { Archive } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 
@@ -30,17 +29,6 @@ type FavoriteItem = Archive | Tankoubon;
 
 function getItemTitle(item: FavoriteItem): string {
   return 'arcid' in item ? item.title : item.title;
-}
-
-function timeToMs(v: unknown): number {
-  if (!v) return 0;
-  if (typeof v === 'number') return v * 1000;
-  if (typeof v === 'string') {
-    const d = new Date(v);
-    const ms = d.getTime();
-    return Number.isFinite(ms) ? ms : 0;
-  }
-  return 0;
 }
 
 function LibraryPageContent() {
@@ -75,38 +63,17 @@ function LibraryPageContent() {
         if (!silent) setFavoritesLoading(true);
         setFavoritesError(null);
 
-        const [archivesRes, tankRes] = await Promise.allSettled([
-          ArchiveService.search({
-            favoriteonly: true,
-            groupby_tanks: false,
-            sortby: 'created_at',
-            order: 'desc',
-            page: 1,
-            pageSize: 1000,
-            lang: language,
-          }),
-          TankoubonService.getFavoriteTankoubons({
-            page: 1,
-            pageSize: 1000,
-          }),
-        ]);
+        const response = await ArchiveService.search({
+          favoriteonly: true,
+          groupby_tanks: true,
+          sortby: 'created_at',
+          order: 'desc',
+          page: 1,
+          pageSize: 1000,
+          lang: language,
+        });
 
-        const archives: FavoriteItem[] =
-          archivesRes.status === 'fulfilled' ? ((archivesRes.value.data as Archive[]) ?? []) : [];
-        const tankoubons: FavoriteItem[] =
-          tankRes.status === 'fulfilled' ? (tankRes.value.data ?? []) : [];
-
-        if (archivesRes.status === 'rejected' || tankRes.status === 'rejected') {
-          setFavoritesError(t('favorites.loadError'));
-          if (archivesRes.status === 'rejected') logger.apiError('加载收藏归档失败:', archivesRes.reason);
-          if (tankRes.status === 'rejected') logger.apiError('加载收藏合集失败:', tankRes.reason);
-        }
-
-        const combined = [...archives, ...tankoubons].sort(
-          (a, b) => timeToMs(b.favoritetime) - timeToMs(a.favoritetime)
-        );
-
-        setFavoriteItems(combined);
+        setFavoriteItems((response.data as FavoriteItem[]) ?? []);
       } catch (err) {
         logger.apiError('加载收藏列表失败:', err);
         setFavoritesError(t('favorites.loadError'));

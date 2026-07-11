@@ -16,7 +16,6 @@ import {BookOpen, Heart} from 'lucide-react-native';
 
 import {extractApiError, isNetworkError} from '../api/client';
 import {
-  fetchFavoriteTankoubons,
   isTankoubon,
   mediaItemId,
   mediaItemTitle,
@@ -127,19 +126,20 @@ export function FavoritesScreen() {
       }
     }
 
-    const [archivesResult, tankoubonsResult] = await Promise.allSettled([
-      searchArchives({
+    try {
+      const result = await searchArchives({
         favoriteonly: true,
-        groupby_tanks: false,
+        groupby_tanks: true,
         sortby: 'created_at',
         order: 'desc',
         page: 1,
         pageSize: 1000,
-      }),
-      fetchFavoriteTankoubons(),
-    ]);
-
-    if (archivesResult.status === 'rejected' && tankoubonsResult.status === 'rejected') {
+      });
+      setFavoriteItems(result.data);
+      if (serverId && result.data.length) {
+        cacheFavorites(serverId, {favorites: result.data});
+      }
+    } catch (err) {
       if (serverId) {
         const cached = getCachedFavorites(serverId);
         if (cached?.favorites.length) {
@@ -147,19 +147,7 @@ export function FavoritesScreen() {
           return;
         }
       }
-      throw archivesResult.reason;
-    }
-
-    const archives =
-      archivesResult.status === 'fulfilled' ? archivesResult.value.data : [];
-    const tankoubons =
-      tankoubonsResult.status === 'fulfilled' ? tankoubonsResult.value : [];
-    const items = [...archives, ...tankoubons].sort(
-      (a, b) => timeValue(b, 'favorites') - timeValue(a, 'favorites'),
-    );
-    setFavoriteItems(items);
-    if (serverId && items.length) {
-      cacheFavorites(serverId, {favorites: items});
+      throw err;
     }
   }, [isOffline, serverId, cacheFavorites, getCachedFavorites]);
 

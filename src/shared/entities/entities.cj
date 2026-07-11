@@ -122,15 +122,6 @@ public struct UserFavoriteEntity {
     public var created_at: String = ""
 }
 
-@entity[table = "user_tankoubon_favorites"]
-public struct UserTankoubonFavoriteEntity {
-    @pk[auto]
-    public var id: Int64 = 0
-    public var user_id: Int64 = 0
-    public var tankoubon_id: Int64 = 0
-    public var created_at: String = ""
-}
-
 @entity[table = "user_target_status"]
 public struct UserTargetStatusEntity {
     @pk[auto]
