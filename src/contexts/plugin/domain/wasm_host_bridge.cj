@@ -1698,6 +1698,18 @@ public class WasmHostBridge {
                     case None => return (false, "{}", "entry reader unavailable")
                     case Some(reader) =>
                         let totalSize = reader.getSize()
+                        // length=0：只查询 total_size，不读数据。
+                        if (length <= 0) {
+                            reader.close()
+                            let out = ByteBuffer()
+                            let w = JsonWriter(out)
+                            w.startObject()
+                            w.writeName("data").writeValue("")
+                            w.writeName("size").writeValue(0)
+                            w.writeName("total").writeValue(totalSize)
+                            w.endObject()
+                            return (true, String.fromUtf8(out.bytes()), "")
+                        }
                         var readData = Array<Byte>(Int64(length), { _ => 0 })
                         var actualRead: Int64 = 0
                         try {
