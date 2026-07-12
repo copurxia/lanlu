@@ -11,6 +11,7 @@ import std.sync.*
 import std.time.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
+import stdx.encoding.base64.*
 import stdx.encoding.json.stream.*
 import wasmedge_ffi.*
 import lanlu.contexts.archive.domain.*
@@ -803,6 +804,8 @@ public class WasmHostBridge {
         registerHostMethod("archive.readText", { ctx => handleArchiveReadText(ctx) })
         registerHostMethod("archive.read_entry_bytes", { ctx => handleArchiveReadEntryBytes(ctx) })
         registerHostMethod("archive.readEntryBytes", { ctx => handleArchiveReadEntryBytes(ctx) })
+        registerHostMethod("archive.read_entry_range", { ctx => handleArchiveReadEntryRange(ctx) })
+        registerHostMethod("archive.readEntryRange", { ctx => handleArchiveReadEntryRange(ctx) })
         registerHostMethod("archive.get_metadata", { ctx => handleArchiveGetMetadata(ctx) })
         registerHostMethod("archive.export_entries", { ctx => handleArchiveExportEntries(ctx) })
         registerHostMethod("archive.exportEntries", { ctx => handleArchiveExportEntries(ctx) })
@@ -1655,6 +1658,117 @@ public class WasmHostBridge {
                 w.endObject()
                 return (true, String.fromUtf8(out.bytes()), "")
         }
+    }
+
+    /**
+     * 读取归档内指定条目的一段字节范围（按需读取），返回 base64 编码。
+     * 供插件侧实现自定义 Read+Seek，避免将整个音频文件导出到磁盘。
+     *
+     * 请求参数 (JSON):
+     *   - archive_id: string (必填)
+     *   - entry_name: string (必填)
+     *   - offset: int64 (必填，字节偏移，从 0 开始)
+     *   - length: int64 (必填，读取长度)
+     *
+     * 返回: { "data": "<base64>", "size": <实际读取字节数>, "total": <文件总大小> }
+     */
+    private static func handleArchiveReadEntryRange(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, capErr) = ensureHostCapability(ctx.executionId, ["archive.read_entry_range", "archive.read_entry_bytes"], "archive.read_entry_range")
+        if (!allowed) { return (false, "{}", capErr) }
+        let (archiveId, entryName, offset, length) = parseArchiveReadEntryRangeParams(ctx.effectiveParams)
+        if (archiveId.size == 0 || entryName.trimAscii().size == 0) {
+            return (false, "{}", "missing archive_id/entry_name")
+        }
+        if (length <= 0) {
+            return (false, "{}", "invalid length")
+        }
+        let safeName = normalizeSafeRelPath(entryName)
+        if (safeName.size == 0) {
+            return (false, "{}", "invalid entry_name")
+        }
+        match (resolveArchiveActualPath(archiveId.trimAscii())) {
+            case None => return (false, "{}", "archive not found or path unresolved")
+            case Some((archiveType, actualPath)) =>
+                let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                let (readerExitCode, readerOpt, _) = handler.getEntryReader(actualPath, safeName)
+                if (readerExitCode != 0) {
+                    return (false, "{}", "failed to open entry reader")
+                }
+                match (readerOpt) {
+                    case None => return (false, "{}", "entry reader unavailable")
+                    case Some(reader) =>
+                        let totalSize = reader.getSize()
+                        var readData = Array<Byte>(Int64(length), { _ => 0 })
+                        var actualRead: Int64 = 0
+                        try {
+                            if (offset > 0) {
+                                if (!reader.seek(offset)) {
+                                    reader.close()
+                                    return (false, "{}", "seek failed")
+                                }
+                            }
+                            // 分块读取直到填满 buffer 或读完
+                            var remaining = Int64(length)
+                            while (remaining > 0) {
+                                let chunkSize = if (remaining > 65536) { 65536 } else { Int64(remaining) }
+                                let chunkBuf = Array<Byte>(chunkSize, { _ => 0 })
+                                let n = reader.read(chunkBuf)
+                                if (n <= 0) { break }
+                                for (i in 0..n) {
+                                    readData[actualRead + i] = chunkBuf[i]
+                                }
+                                actualRead += n
+                                remaining -= n
+                            }
+                        } finally {
+                            reader.close()
+                        }
+                        if (actualRead < Int64(readData.size)) {
+                            readData = readData.slice(0, Int64(actualRead)).toArray()
+                        }
+                        let b64Data = toBase64String(readData)
+                        let out = ByteBuffer()
+                        let w = JsonWriter(out)
+                        w.startObject()
+                        w.writeName("data").writeValue(b64Data)
+                        w.writeName("size").writeValue(actualRead)
+                        w.writeName("total").writeValue(totalSize)
+                        w.endObject()
+                        return (true, String.fromUtf8(out.bytes()), "")
+                }
+        }
+    }
+
+    private static func parseArchiveReadEntryRangeParams(raw: String): (String, String, Int64, Int64) {
+        var archiveId = ""
+        var entryName = ""
+        var offset: Int64 = 0
+        var length: Int64 = 0
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return ("", "", 0, 0)
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                match (name) {
+                    case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                    case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                    case "entry_name" => entryName = r.readValue<String>()
+                    case "entryName" => entryName = r.readValue<String>()
+                    case "offset" => offset = r.readValue<Int64>()
+                    case "length" => length = r.readValue<Int64>()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return (archiveId, entryName, offset, length)
     }
 
     private static func handleArchiveGetMetadata(ctx: WasmHostCallContext): (Bool, String, String) {
