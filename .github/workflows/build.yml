@@ -169,3 +169,41 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.1"
+
+      - name: Package lanlu-cli skill zip
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist/lanlu-cli/scripts
+          cp cli/SKILL.md dist/lanlu-cli/
+          cp cli/package.json dist/lanlu-cli/
+          cp cli/scripts/main.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/api_client.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/json_utils.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/archive_cmds.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/source_cmds.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/task_cmds.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/poll.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/info_cmds.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/lanlu-cli dist/lanlu-cli/scripts/
+          chmod +x dist/lanlu-cli/scripts/lanlu-cli dist/lanlu-cli/scripts/main.mjs
+          cd dist
+          zip -qr "lanlu-cli-skill-${GITHUB_SHA::7}.zip" lanlu-cli
+          ls -lah .
+
+      - name: Upload lanlu-cli artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanlu-cli-skill
+          path: dist/lanlu-cli-skill-*.zip

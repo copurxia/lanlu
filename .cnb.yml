@@ -287,7 +287,7 @@ $:
     - &cli_pipeline
       name: cli
       ifModify:
-        - lanlu/cli/**
+        - cli/**
       runner:
         tags: cnb:arch:amd64
       docker:
@@ -297,10 +297,6 @@ $:
             - .ide/Dockerfile
           versionBy:
             - .ide/Dockerfile
-        volumes:
-          - main:/root/.cache:copy-on-write
-          - main:/root/.cjpm:copy-on-write
-          - main:./build-script-cache:copy-on-write
       env:
         TZ: Asia/Shanghai
       stages:
@@ -310,43 +306,7 @@ $:
               set -eux
               cat /etc/os-release || true
               bash --version | head -n 1
-              node -v || true
-              pnpm -v || true
-              clang --version | head -n 1
-            '
-
-        - name: Download Cangjie SDK + stdx
-          script: |
-            bash -lc '
-              set -eux
-              : "${CANGJIE_URL:?Missing env CANGJIE_URL (configure in CNB project variables)}"
-              : "${STDX_URL:?Missing env STDX_URL (configure in CNB project variables)}"
-
-              mkdir -p build-script-cache
-
-              if [ ! -d "./cangjie" ]; then
-                wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
-                tar -xzf build-script-cache/cangjie.tar.gz
-              fi
-
-              if [ ! -d "./stdx" ]; then
-                wget -O build-script-cache/stdx.zip "$STDX_URL"
-                unzip -q build-script-cache/stdx.zip -d stdx
-              fi
-            '
-
-        - name: Build lanlu-cli
-          script: |
-            bash -lc '
-              set -eux
-              export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
-              unset GIT_DIR GIT_WORK_TREE
-              export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-              set +u
-              source ./cangjie/envsetup.sh
-              set -u
-              cd lanlu/cli
-              cjpm build -V
+              node -v
             '
 
         - name: Package lanlu-cli skill zip
@@ -355,8 +315,18 @@ $:
               set -eux
               rm -rf dist
               mkdir -p dist/lanlu-cli/scripts
-              cp lanlu/cli/target/release/bin/cli dist/lanlu-cli/scripts/lanlu-cli
-              cp lanlu/cli/SKILL.md dist/lanlu-cli/
+              cp cli/SKILL.md dist/lanlu-cli/
+              cp cli/package.json dist/lanlu-cli/
+              cp cli/scripts/main.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/api_client.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/json_utils.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/archive_cmds.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/source_cmds.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/task_cmds.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/poll.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/info_cmds.mjs dist/lanlu-cli/scripts/
+              cp cli/scripts/lanlu-cli dist/lanlu-cli/scripts/
+              chmod +x dist/lanlu-cli/scripts/lanlu-cli dist/lanlu-cli/scripts/main.mjs
               cd dist
               zip -qr "lanlu-cli-skill-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-cli
               ls -lah .
