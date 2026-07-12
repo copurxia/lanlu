@@ -287,8 +287,7 @@ $:
     - &cli_pipeline
       name: cli
       ifModify:
-        - packages/lanlu-cli/**
-        - .agents/skills/lanlu-cli/**
+        - lanlu/cli/**
       runner:
         tags: cnb:arch:amd64
       docker:
@@ -346,8 +345,8 @@ $:
               set +u
               source ./cangjie/envsetup.sh
               set -u
-              cd packages/lanlu-cli
-              ./build.sh
+              cd lanlu/cli
+              cjpm build -V
             '
 
         - name: Package lanlu-cli skill zip
@@ -356,8 +355,8 @@ $:
               set -eux
               rm -rf dist
               mkdir -p dist/lanlu-cli/scripts
-              cp packages/lanlu-cli/lanlu-cli dist/lanlu-cli/scripts/
-              cp .agents/skills/lanlu-cli/SKILL.md dist/lanlu-cli/
+              cp lanlu/cli/target/release/bin/cli dist/lanlu-cli/scripts/lanlu-cli
+              cp lanlu/cli/SKILL.md dist/lanlu-cli/
               cd dist
               zip -qr "lanlu-cli-skill-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-cli
               ls -lah .
