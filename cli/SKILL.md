@@ -40,8 +40,10 @@ lanlu-cli/
     ├── archive_cmds.mjs
     ├── source_cmds.mjs
     ├── task_cmds.mjs
-    ├── poll.mjs
-    └── info_cmds.mjs
+    ├── info_cmds.mjs
+    ├── cover_cmds.mjs
+    ├── tankoubon_cmds.mjs
+    └── poll.mjs
 ```
 
 调用时请将 `lanlu-cli` 替换为 Skill 目录下的实际路径，例如：
@@ -64,20 +66,30 @@ CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
 
 ## 命令速查
 
-### 归档
+### 归档 & 封面
 
 ```bash
 $CLI info
 $CLI search "tag:artist:foo"
 $CLI search --category 1 --page 1 --page-size 50
+$CLI search --group-by-tanks --new-only
 $CLI archive-show <arcid>
 $CLI archive-show <arcid> --include-pages
+$CLI cover <arcid|tankoubon-id>
+$CLI cover --asset-id 1234
 ```
 
 ### 分类
 
 ```bash
 $CLI category-list
+```
+
+### 合集(Tankoubon)
+
+```bash
+$CLI tankoubon-list
+$CLI tankoubon-show <id>
 ```
 
 ### Source 插件
@@ -94,8 +106,18 @@ $CLI source-download <namespace> <remote-id> --category-id <id> --wait
 ### 下载与上传
 
 ```bash
-$CLI download-url "https://example.com/file.zip" --wait
+$CLI download-url "https://example.com/file.zip"
 $CLI upload /path/to/file.zip --category-id <id> --wait
+
+注意：`download-url` 只下载文件到服务端临时目录，不关联分类。
+要导入到指定分类，需先 download-url 获取任务 ID，再使用 upload 上传：
+
+```bash
+# 两步走：先下载到服务端临时目录
+$CLI download-url "https://example.com/file.zip"
+# 再获取本地文件后用 upload 上传到分类
+$CLI upload /path/to/downloaded/file --category-id <id> --wait
+```
 ```
 
 ### 元数据插件
@@ -121,6 +143,39 @@ $CLI task <id>
 --timeout <ms>     # 默认 300000
 ```
 
+## 封面获取说明
+
+每个归档和合集都有一个封面图片，通过 `cover_asset_id` 或 `assets.cover` 字段关联。
+
+- **搜索/归档详情**返回的 `cover_asset_id` 或 `assets.cover` 是一个数字 ID
+- 封面图片 URL 格式：**`{LANLU_HOST}/api/assets/{asset_id}`**
+- 下载方式：`GET /api/assets/{id}` 带上 Bearer Token 即可获取图片内容
+
+```bash
+# 用 curl 下载封面
+curl -H "Authorization: Bearer $LANLU_TOKEN" \
+  "$LANLU_HOST/api/assets/1234" -o cover.avif
+
+# 查询归档/合集的封面 asset_id
+$CLI cover <arcid>
+$CLI cover --asset-id 1234
+```
+
+封面图片文件以 `.avif` 格式存储在服务器 `ASSET_PATH` 下。
+
+## 合集(Tankoubon)说明
+
+合集是对归档的分组管理。使用 `--group-by-tanks` 搜索时，结果中会包含 `[tank]` 开头的合集条目，显示合集的标题、归档数量和封面 asset_id。
+
+查看合集内容：
+
+```bash
+$CLI tankoubon-list                     # 列出所有合集
+$CLI tankoubon-show <tankoubon_id>       # 显示合集详情和子归档列表
+$CLI search --group-by-tanks             # 搜索时按合集分组显示
+$CLI archive-show <arcid>                # 查看归档所属的 tankoubon_ids
+```
+
 ## 典型工作流
 
 1. 获取分类 ID：
@@ -132,17 +187,23 @@ $CLI task <id>
    $CLI search "title:some title"
    $CLI archive-show <arcid>
    ```
-3. Source 搜索并下载：
+3. 按合集浏览：
+   ```bash
+   $CLI search --group-by-tanks --new-only
+   $CLI tankoubon-list
+   $CLI tankoubon-show <id>
+   ```
+4. Source 搜索并下载：
    ```bash
    $CLI source-list
    $CLI source-search nhentai "keyword"
    $CLI source-download nhentai 123456 --category-id 1 --wait
    ```
-4. 运行元数据插件：
+5. 运行元数据插件：
    ```bash
    $CLI metadata-run ehplugin <arcid> --write-back --wait
    ```
-5. 上传本地归档：
+6. 上传本地归档：
    ```bash
    $CLI upload ./file.zip --category-id 1 --wait
    ```

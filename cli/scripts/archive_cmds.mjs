@@ -98,13 +98,21 @@ function printSearchItems(data) {
       const tid = getString(o, 'tankoubon_id') ?? '';
       const title = getString(o, 'title') ?? '';
       const count = getInt(o, 'archive_count') ?? 0;
-      console.log(`[tank] ${tid} ${title} (${count} archives)`);
+      const children = getArray(o, 'children');
+      const childInfo = children && children.length > 0 ? `, ${children.length} children` : '';
+      const assets = o.assets ?? {};
+      const coverId = getInt(assets, 'cover') ?? '';
+      const coverInfo = coverId ? `, cover=${coverId}` : '';
+      console.log(`[tank] ${tid} ${title} (${count} archives${childInfo})${coverInfo}`);
     } else {
       const arcid = getString(o, 'arcid') ?? '';
       const title = getString(o, 'title') ?? '';
       const pagecount = getInt(o, 'pagecount') ?? 0;
       const tags = getString(o, 'tags') ?? '';
-      console.log(`${arcid} | ${title} | ${pagecount}p | ${tags}`);
+      const assets = o.assets ?? {};
+      const coverId = getInt(assets, 'cover') ?? '';
+      const coverInfo = coverId ? ` cover=${coverId}` : '';
+      console.log(`${arcid} | ${title} | ${pagecount}p | ${tags}${coverInfo}`);
     }
   }
 }
@@ -118,6 +126,10 @@ function printArchiveDetail(body) {
   console.log(`archivetype: ${getString(root, 'archivetype') ?? ''}`);
   console.log(`tags: ${getString(root, 'tags') ?? ''}`);
   console.log(`description: ${getString(root, 'description') ?? ''}`);
+  const coverAssetId = getInt(root, 'cover_asset_id') ?? 0;
+  if (coverAssetId > 0) {
+    console.log(`cover_asset_id: ${coverAssetId}`);
+  }
   const pages = getArray(root, 'pages');
   if (pages) console.log(`pages: ${pages.length}`);
 }

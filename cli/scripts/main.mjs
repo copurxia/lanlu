@@ -20,6 +20,8 @@ import { handleInfo } from './info_cmds.mjs';
 import {
   handleDownloadUrl, handleUpload, handleMetadataRun, handleTask,
 } from './task_cmds.mjs';
+import { handleCover } from './cover_cmds.mjs';
+import { handleTankoubonList, handleTankoubonShow } from './tankoubon_cmds.mjs';
 
 // ---- 参数定义 ----
 const SPECS = {
@@ -37,6 +39,7 @@ const SPECS = {
     'target-type', 'param',
     'chunk-size',
     'interval', 'timeout',
+    'asset-id',
   ]),
   // 布尔标志选项
   flags: new Set([
@@ -46,7 +49,10 @@ const SPECS = {
     'wait',
   ]),
   knownCommands: [
-    'info', 'search', 'archive-show', 'category-list', 'source-list',
+    'info', 'search', 'archive-show', 'category-list',
+    'cover',
+    'tankoubon-list', 'tankoubon-show',
+    'source-list',
     'source-home', 'source-search', 'source-filters',
     'source-download', 'download-url', 'upload',
     'metadata-run', 'task',
@@ -145,19 +151,24 @@ function printUsage() {
   console.log('');
   console.log('Commands:');
   console.log('  info                      server info');
-  console.log('  search <filter>           search local archives');
+  console.log('  search <filter>           search archives (--group-by-tanks)');
   console.log('  archive-show <arcid>      show archive metadata');
   console.log('  category-list             list categories');
+  console.log('  cover <id>                show cover asset_id for archive/tankoubon');
+  console.log('  cover --asset-id <id>     show URL for a known asset_id');
+  console.log('  tankoubon-list            list tankoubon collections');
+  console.log('  tankoubon-show <id>       show tankoubon detail + archives');
   console.log('  source-list               list source plugins');
   console.log('  source-home <namespace>   source plugin home');
   console.log('  source-search <namespace> <query>');
   console.log('  source-filters <namespace>');
   console.log('  source-download <namespace> <remote-id> --category-id <id>');
-  console.log('  download-url <url>');
+  console.log('  download-url <url>        (two-step: download then upload)');
   console.log('  upload <file> --category-id <id>');
   console.log('  metadata-run <namespace> <target-id>');
   console.log('  task <id>                 show task detail');
   console.log('');
+  console.log('Search flags: --new-only --untagged-only --favorite-only --group-by-tanks');
   console.log('Create commands support --wait [--interval <ms>] [--timeout <ms>].');
 }
 
@@ -215,6 +226,9 @@ async function main() {
       'search': handleSearch,
       'archive-show': handleArchiveShow,
       'category-list': handleCategoryList,
+      'cover': handleCover,
+      'tankoubon-list': handleTankoubonList,
+      'tankoubon-show': handleTankoubonShow,
       'source-list': handleSourceList,
       'source-home': handleSourceHome,
       'source-search': handleSourceSearch,

@@ -35,6 +35,13 @@ export class LanluApiClient {
   /**
    * 执行 HTTP 请求
    */
+  /**
+   * 获取服务端地址
+   */
+  getHost() {
+    return this.#host;
+  }
+
   async #request(method, path, { query, body, headers, bodyType } = {}) {
     let url = this.#buildUrl(path, query);
 
