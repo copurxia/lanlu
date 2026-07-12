@@ -1,31 +1,14 @@
 ---
 name: lanlu-cli
-description: "通过本 Skill 附带的 lanlu-cli 脚本调用 Lanlu 搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力。"
+description: "Lanlu 命令行客户端使用指南：通过 lanlu-cli 调用搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力。"
 ---
 
-# lanlu-cli Skill
+# lanlu-cli 使用指南
 
-本 Skill 附带一个可执行脚本 `scripts/lanlu-cli`，通过 HTTP API 与 Lanlu 后端交互。
-
-## 可执行文件位置
-
-解压后会得到：
-
-```
-lanlu-cli/
-├── SKILL.md
-└── scripts/
-    └── lanlu-cli
-```
-
-调用时请将 `lanlu-cli` 替换为 Skill 目录下的实际路径，例如：
+`lanlu-cli` 是 Lanlu 的命令行客户端，通过 HTTP API 与 Lanlu 后端交互。
 
 ```bash
-# 项目内安装
-CLI=.agents/skills/lanlu-cli/scripts/lanlu-cli
-
-# 用户级安装
-CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
+skills/lanlu-cli/scripts/lanlu-cli <子命令> [选项]
 ```
 
 ## 环境变量
@@ -34,11 +17,6 @@ CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
 |---|---|
 | `LANLU_TOKEN` | **必填**。Bearer Token，用于鉴权。 |
 | `LANLU_HOST` | 服务端地址，默认 `http://localhost:8082`。 |
-
-```bash
-export LANLU_TOKEN=<your-token>
-export LANLU_HOST=http://localhost:8082
-```
 
 ## 全局选项
 
@@ -55,47 +33,67 @@ export LANLU_HOST=http://localhost:8082
 ### 归档
 
 ```bash
-$CLI search "tag:artist:foo"
-$CLI search --category 1 --page 1 --page-size 50
-$CLI archive-show <arcid>
-$CLI archive-show <arcid> --include-pages
+# 搜索本地归档（filter 为空时列出全部）
+lanlu-cli search "tag:artist:foo"
+lanlu-cli search --category 1 --page 1 --page-size 50
+
+# 查看归档详情
+lanlu-cli archive-show <arcid>
+lanlu-cli archive-show <arcid> --include-pages
 ```
 
 ### 分类
 
 ```bash
-$CLI category-list
+# 列出分类，用于获取下载/上传所需的 category_id
+lanlu-cli category-list
 ```
 
 ### Source 插件
 
 ```bash
-$CLI source-list
-$CLI source-home <namespace>
-$CLI source-search <namespace> "keyword"
-$CLI source-search <namespace> "keyword" --page 2 --filters '{"sort":"popular"}'
-$CLI source-filters <namespace>
-$CLI source-download <namespace> <remote-id> --category-id <id> --wait
+# 列出 Source 插件
+lanlu-cli source-list
+
+# Source 首页
+lanlu-cli source-home <namespace>
+
+# Source 搜索
+lanlu-cli source-search <namespace> "keyword"
+lanlu-cli source-search <namespace> "keyword" --page 2 --filters '{"sort":"popular"}'
+
+# Source 筛选器
+lanlu-cli source-filters <namespace>
+
+# Source 下载
+lanlu-cli source-download <namespace> <remote-id> --category-id <id> --wait
 ```
 
 ### 下载与上传
 
 ```bash
-$CLI download-url "https://example.com/file.zip" --wait
-$CLI upload /path/to/file.zip --category-id <id> --wait
+# URL 下载
+lanlu-cli download-url "https://example.com/file.zip" --wait
+
+# 上传归档
+lanlu-cli upload /path/to/file.zip --category-id <id> --wait
 ```
 
 ### 元数据插件
 
 ```bash
-$CLI metadata-run <namespace> <arcid>
-$CLI metadata-run <namespace> <arcid> --write-back --wait
+# 预览模式
+lanlu-cli metadata-run <namespace> <arcid>
+
+# 写回模式
+lanlu-cli metadata-run <namespace> <arcid> --write-back --wait
 ```
 
 ### 任务
 
 ```bash
-$CLI task <id>
+# 查询任务详情
+lanlu-cli task <id>
 ```
 
 ## 轮询选项
@@ -112,26 +110,26 @@ $CLI task <id>
 
 1. 获取分类 ID：
    ```bash
-   $CLI category-list
+   lanlu-cli category-list
    ```
-2. 查看本地归档：
+2. 查看本地是否已有目标归档：
    ```bash
-   $CLI search "title:some title"
-   $CLI archive-show <arcid>
+   lanlu-cli search "title:some title"
+   lanlu-cli archive-show <arcid>
    ```
-3. Source 搜索并下载：
+3. 在 Source 中搜索并下载：
    ```bash
-   $CLI source-list
-   $CLI source-search nhentai "keyword"
-   $CLI source-download nhentai 123456 --category-id 1 --wait
+   lanlu-cli source-list
+   lanlu-cli source-search nhentai "keyword"
+   lanlu-cli source-download nhentai 123456 --category-id 1 --wait
    ```
 4. 运行元数据插件：
    ```bash
-   $CLI metadata-run ehplugin <arcid> --write-back --wait
+   lanlu-cli metadata-run ehplugin <arcid> --write-back --wait
    ```
 5. 上传本地归档：
    ```bash
-   $CLI upload ./file.zip --category-id 1 --wait
+   lanlu-cli upload ./file.zip --category-id 1 --wait
    ```
 
 ## 输出格式
@@ -141,14 +139,6 @@ $CLI task <id>
 - `pretty-json`：格式化后的 JSON。
 
 ```bash
-$CLI -o json search "tag:foo"
-$CLI -o pretty-json archive-show <arcid>
-```
-
-## 源码与重新编译
-
-如需修改源码，源码位于仓库的 `packages/lanlu-cli/`，编译脚本为 `packages/lanlu-cli/build.sh`。编译前请确保已设置环境变量：
-
-```bash
-export CANGJIE_STDX_PATH=/home/ubuntu/.cjv/stdx/sts-1.1.3/static/stdx
+lanlu-cli -o json search "tag:foo"
+lanlu-cli -o pretty-json archive-show <arcid>
 ```
