@@ -13,10 +13,13 @@ import { waitForTask } from './poll.mjs';
  */
 export async function handleDownloadUrl(client, opts, outputMode) {
   if (opts.args.length < 1) {
-    throw new Error('usage: download-url <url>');
+    throw new Error('usage: download-url <url> --category-id <id>');
   }
   const url = opts.args[0];
-  const payload = JSON.stringify({ url });
+  const categoryId = opts.options['category-id'];
+  if (!categoryId) throw new Error('--category-id is required');
+
+  const payload = JSON.stringify({ url, category_id: categoryId });
 
   const respBody = await client.post('/api/download_url', payload);
 

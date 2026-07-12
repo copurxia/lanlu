@@ -106,18 +106,10 @@ $CLI source-download <namespace> <remote-id> --category-id <id> --wait
 ### 下载与上传
 
 ```bash
-$CLI download-url "https://example.com/file.zip"
+$CLI download-url "https://example.com/file.zip" --category-id <id>
 $CLI upload /path/to/file.zip --category-id <id> --wait
 
-注意：`download-url` 只下载文件到服务端临时目录，不关联分类。
-要导入到指定分类，需先 download-url 获取任务 ID，再使用 upload 上传：
-
-```bash
-# 两步走：先下载到服务端临时目录
-$CLI download-url "https://example.com/file.zip"
-# 再获取本地文件后用 upload 上传到分类
-$CLI upload /path/to/downloaded/file --category-id <id> --wait
-```
+注意：`download-url` 必须指定 `--category-id`，下载的文件会自动归类到指定分类。
 ```
 
 ### 元数据插件
@@ -135,13 +127,7 @@ $CLI task <id>
 
 ## 轮询选项
 
-`source-download`、`download-url`、`upload`、`metadata-run` 支持创建任务后自动轮询：
-
-```
---wait
---interval <ms>    # 默认 1000
---timeout <ms>     # 默认 300000
-```
+`source-download`、`download-url`、`upload`、`metadata-run` 支持创建任务后自动轮询（`--wait`、`--interval`、`--timeout`）。
 
 ## 封面获取说明
 

@@ -163,7 +163,7 @@ function printUsage() {
   console.log('  source-search <namespace> <query>');
   console.log('  source-filters <namespace>');
   console.log('  source-download <namespace> <remote-id> --category-id <id>');
-  console.log('  download-url <url>        (two-step: download then upload)');
+  console.log('  download-url <url> --category-id <id>');
   console.log('  upload <file> --category-id <id>');
   console.log('  metadata-run <namespace> <target-id>');
   console.log('  task <id>                 show task detail');
