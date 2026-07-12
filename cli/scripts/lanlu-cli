@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#
+# lanlu-cli - Lanlu 命令行客户端包装脚本
+# 用法: scripts/lanlu-cli [options] <command> [args]
+#
+# 环境变量:
+#   LANLU_TOKEN  必填。Bearer Token
+#   LANLU_HOST   服务端地址，默认 http://localhost:8082
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+exec node "$SCRIPT_DIR/main.mjs" "$@"

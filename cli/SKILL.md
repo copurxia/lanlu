@@ -1,32 +1,16 @@
 ---
 name: lanlu-cli
-description: "通过本 Skill 附带的 scripts/lanlu-cli 脚本调用 Lanlu 搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力。"
+description: "通过本 Skill 附带的 scripts/lanlu-cli 脚本调用 Lanlu 搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力（Node.js ESM 重写，无需编译，仅需 Node 18+）。"
 ---
 
 # lanlu-cli Skill
 
 本 Skill 附带一个可执行脚本 `scripts/lanlu-cli`，通过 HTTP API 与 Lanlu 后端交互。
 
-## 可执行文件位置
+## 前置要求
 
-解压后会得到：
-
-```
-lanlu-cli/
-├── SKILL.md
-└── scripts/
-    └── lanlu-cli
-```
-
-调用时请将 `lanlu-cli` 替换为 Skill 目录下的实际路径，例如：
-
-```bash
-# 项目内安装
-CLI=.agents/skills/lanlu-cli/scripts/lanlu-cli
-
-# 用户级安装
-CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
-```
+- **Node.js 18+**（内置 `fetch` 支持）
+- 设置以下环境变量：
 
 ## 环境变量
 
@@ -40,13 +24,41 @@ export LANLU_TOKEN=<your-token>
 export LANLU_HOST=http://localhost:8082
 ```
 
-## 全局选项
+## 可执行文件位置
+
+解压后会得到：
 
 ```
--H, --host <url>          服务端地址
--t, --token <token>       Bearer Token
+lanlu-cli/
+├── SKILL.md
+├── package.json
+└── scripts/
+    ├── lanlu-cli
+    ├── main.mjs
+    ├── api_client.mjs
+    ├── json_utils.mjs
+    ├── archive_cmds.mjs
+    ├── source_cmds.mjs
+    ├── task_cmds.mjs
+    ├── poll.mjs
+    └── info_cmds.mjs
+```
+
+调用时请将 `lanlu-cli` 替换为 Skill 目录下的实际路径，例如：
+
+```bash
+# 项目内安装
+CLI=.agents/skills/lanlu-cli/scripts/lanlu-cli
+
+# 用户级安装
+CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
+```
+
+## 选项
+
+```
+-o, --output <mode>       text|json|pretty-json (default: text)
     --no-proxy            忽略 http_proxy / https_proxy 环境变量
--o, --output <mode>       text|json|pretty-json
 -h, --help                帮助
 ```
 
@@ -55,6 +67,7 @@ export LANLU_HOST=http://localhost:8082
 ### 归档
 
 ```bash
+$CLI info
 $CLI search "tag:artist:foo"
 $CLI search --category 1 --page 1 --page-size 50
 $CLI archive-show <arcid>
@@ -102,7 +115,7 @@ $CLI task <id>
 
 `source-download`、`download-url`、`upload`、`metadata-run` 支持创建任务后自动轮询：
 
-```bash
+```
 --wait
 --interval <ms>    # 默认 1000
 --timeout <ms>     # 默认 300000
