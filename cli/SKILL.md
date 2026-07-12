@@ -10,19 +10,6 @@ description: "通过本 Skill 附带的 scripts/lanlu-cli 脚本调用 Lanlu 搜
 ## 前置要求
 
 - **Node.js 18+**（内置 `fetch` 支持）
-- 设置以下环境变量：
-
-## 环境变量
-
-| 变量 | 说明 |
-|---|---|
-| `LANLU_TOKEN` | **必填**。Bearer Token，用于鉴权。 |
-| `LANLU_HOST` | 服务端地址，默认 `http://localhost:8082`。 |
-
-```bash
-export LANLU_TOKEN=<your-token>
-export LANLU_HOST=http://localhost:8082
-```
 
 ## 可执行文件位置
 
