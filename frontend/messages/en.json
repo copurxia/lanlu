@@ -274,7 +274,7 @@
     "summary": "Summary",
     "summaryPlaceholder": "Enter archive summary",
     "pageMetadata": "Page Metadata",
-    "pageCount": "{count} pages",
+    "pageCount": "Page Count",
     "assets": "Assets",
     "assetCoverLabel": "Cover",
     "assetBackdropLabel": "Backdrop",
