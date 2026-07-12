@@ -22,6 +22,7 @@ import {
 } from './task_cmds.mjs';
 import { handleCover } from './cover_cmds.mjs';
 import { handleTankoubonList, handleTankoubonShow } from './tankoubon_cmds.mjs';
+import { handleUpdateMetadata } from './update_metadata_cmds.mjs';
 
 // ---- 参数定义 ----
 const SPECS = {
@@ -37,9 +38,12 @@ const SPECS = {
     'category', 'page', 'page-size', 'sortby', 'order',
     'filters', 'category-id', 'kind',
     'target-type', 'param',
+    'namespace',
     'chunk-size',
     'interval', 'timeout',
     'asset-id',
+    'title', 'description', 'tags', 'release-at',
+    'cover',
   ]),
   // 布尔标志选项
   flags: new Set([
@@ -52,6 +56,7 @@ const SPECS = {
     'info', 'search', 'archive-show', 'category-list',
     'cover',
     'tankoubon-list', 'tankoubon-show',
+    'update-metadata',
     'source-list',
     'source-home', 'source-search', 'source-filters',
     'source-download', 'download-url', 'upload',
@@ -158,6 +163,7 @@ function printUsage() {
   console.log('  cover --asset-id <id>     show URL for a known asset_id');
   console.log('  tankoubon-list            list tankoubon collections');
   console.log('  tankoubon-show <id>       show tankoubon detail + archives');
+  console.log('  update-metadata <id>    update metadata (--title/--description/--tags/--cover)');
   console.log('  source-list               list source plugins');
   console.log('  source-home <namespace>   source plugin home');
   console.log('  source-search <namespace> <query>');
@@ -229,6 +235,7 @@ async function main() {
       'cover': handleCover,
       'tankoubon-list': handleTankoubonList,
       'tankoubon-show': handleTankoubonShow,
+      'update-metadata': handleUpdateMetadata,
       'source-list': handleSourceList,
       'source-home': handleSourceHome,
       'source-search': handleSourceSearch,

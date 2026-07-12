@@ -100,6 +100,13 @@ export class LanluApiClient {
     return await this.#request('PUT', path, { query, body, bodyType: 'bytes' });
   }
 
+  /**
+   * PUT 请求（JSON body）
+   */
+  async put(path, body = '') {
+    return await this.#request('PUT', path, { body });
+  }
+
   #buildUrl(path, query = {}) {
     const url = `${this.#host}${path.startsWith('/') ? path : '/' + path}`;
     const qs = buildQuery(query);

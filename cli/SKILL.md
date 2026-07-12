@@ -119,6 +119,18 @@ $CLI metadata-run <namespace> <arcid>
 $CLI metadata-run <namespace> <arcid> --write-back --wait
 ```
 
+### 元数据更新
+
+直接修改归档或合集的标题、描述、标签等字段：
+
+```bash
+$CLI update-metadata <arcid> --title "new title" --description "..." --tags "tag1, tag2"
+$CLI update-metadata <arcid> --cover 1234
+$CLI update-metadata <tankoubon-id> --title "new" --target-type tankoubon
+```
+
+支持字段：`--title` `--description` `--tags` `--release-at` `--cover` `--namespace`
+
 ### 任务
 
 ```bash

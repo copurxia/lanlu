@@ -177,6 +177,7 @@ jobs:
           cp cli/scripts/info_cmds.mjs dist/lanlu-cli/scripts/
           cp cli/scripts/cover_cmds.mjs dist/lanlu-cli/scripts/
           cp cli/scripts/tankoubon_cmds.mjs dist/lanlu-cli/scripts/
+          cp cli/scripts/update_metadata_cmds.mjs dist/lanlu-cli/scripts/
           cp cli/scripts/lanlu-cli dist/lanlu-cli/scripts/
           chmod +x dist/lanlu-cli/scripts/lanlu-cli dist/lanlu-cli/scripts/main.mjs
           cd dist
