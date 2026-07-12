@@ -46,6 +46,22 @@ public class ClearCacheTaskRunner {
                 errors.add(error)
             }
 
+            // 插件运行时目录（data/cache/plugins/）特殊清理：
+            // 常规 cleanDirectory 只在"目录整体 mtime 过期"时才删除整个命名空间目录，
+            // 但只要该命名空间还在被写入，目录 mtime 会持续刷新，导致其内部的过期
+            // 导出音频 / 提取的封面 / 歌词产物永远不会被回收。这里递归按"单文件 mtime"
+            // 清理，补齐这个缺口，避免运行时目录随时间无限膨胀。
+            TaskIO.appendLog(taskId, "Cleaning stale files under plugin runtime tree...")
+            TaskModel.updateTaskProgress(taskId, 60, "Cleaning plugin runtime")
+            let pluginsRoot = TaskRunnerUtils.joinPath(cacheRoot, "plugins")
+            let pluginResult = cleanPluginRuntimeFiles(pluginsRoot, maxAgeSeconds, dryRun, taskId)
+            totalDeletedCount += pluginResult.deletedCount
+            totalDeletedSize += pluginResult.deletedSize
+            totalSkippedCount += pluginResult.skippedCount
+            for (error in pluginResult.errors) {
+                errors.add(error)
+            }
+
             // 更新进度：完成
             TaskModel.updateTaskProgress(taskId, 100, "Cache cleanup completed")
 
@@ -211,6 +227,87 @@ public class ClearCacheTaskRunner {
         }
 
         return result
+    }
+
+    /**
+     * 清理插件运行时目录树（data/cache/plugins/）中按单文件 mtime 过期的文件。
+     *
+     * 与 cleanDirectoryUnit 的差别：后者只看"目录整体 mtime"，命名空间目录一旦还在被写入，
+     * 目录 mtime 会持续刷新，内部过期文件便永远回收不掉。这里递归遍历整棵子树，
+     * 对每个普通文件单独按 mtime 判定，过期即删除（保留目录骨架），从而补齐这个缺口。
+     */
+    private static func cleanPluginRuntimeFiles(
+        rootPath: String,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        taskId: Int64
+    ): CleanResult {
+        let result = CleanResult()
+        if (!TaskRunnerUtils.directoryExists(rootPath)) {
+            return result
+        }
+        let currentTime = DateTime.now().toUnixTimeStamp().toSeconds()
+        cleanPluginRuntimeFilesRecursive(rootPath, currentTime, maxAgeSeconds, dryRun, result, taskId)
+        return result
+    }
+
+    private static func cleanPluginRuntimeFilesRecursive(
+        dirPath: String,
+        currentTime: Int64,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        result: CleanResult,
+        taskId: Int64
+    ): Unit {
+        var entries: Array<String>
+        try {
+            entries = TaskRunnerUtils.listDirectory(dirPath)
+        } catch (e: Exception) {
+            result.errors.add("Error listing plugin runtime dir ${dirPath}: ${e.message}")
+            return
+        }
+
+        for (entry in entries) {
+            let fullPath = TaskRunnerUtils.joinPath(dirPath, entry)
+            try {
+                let fileInfo = FileInfo(Path(fullPath))
+                if (fileInfo.isDirectory()) {
+                    // 递归清理子目录（保留目录本身，等其内部清空后由常规流程回收空壳）。
+                    cleanPluginRuntimeFilesRecursive(fullPath, currentTime, maxAgeSeconds, dryRun, result, taskId)
+                } else {
+                    cleanPluginRuntimeFileUnit(fullPath, fileInfo.size, currentTime, maxAgeSeconds, dryRun, result, taskId)
+                }
+            } catch (e: Exception) {
+                result.errors.add("Error processing plugin runtime file ${fullPath}: ${e.message}")
+            }
+        }
+    }
+
+    private static func cleanPluginRuntimeFileUnit(
+        filePath: String,
+        fileSize: Int64,
+        currentTime: Int64,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        result: CleanResult,
+        taskId: Int64
+    ): Unit {
+        let ageSeconds = currentTime - getLastModifiedTime(filePath)
+        if (ageSeconds <= maxAgeSeconds) {
+            return
+        }
+        if (dryRun) {
+            result.skippedCount += 1
+            TaskIO.appendLog(taskId, "Would remove stale plugin runtime file: ${filePath}")
+            return
+        }
+        if (TaskRunnerUtils.removeFile(filePath)) {
+            result.deletedCount += 1
+            result.deletedSize += fileSize
+            TaskIO.appendLog(taskId, "Removed stale plugin runtime file: ${filePath}")
+        } else {
+            result.errors.add("Failed to remove plugin runtime file: ${filePath}")
+        }
     }
 
     private static func cleanFileUnit(

@@ -63,7 +63,7 @@ public class ArchiveDetailRow {
     public var relative_path: String = ""
     public var file_size: Int64 = 0
     public var pagecount: Int32 = 0
-    public var last_read_time: String = ""
+    public var last_read_time: Int64 = 0
     public var progress: Int32 = 0
     public var tags: String = ""
 
@@ -86,7 +86,7 @@ public class ArchiveDetailRowMapper <: FromQueryResult {
         out.relative_path = r.getOrNullText(9) ?? ""
         out.file_size = r.getOrNullInt64(10) ?? 0
         out.pagecount = r.getOrNullInt32(11) ?? 0
-        out.last_read_time = r.getOrNullText(12) ?? ""
+        out.last_read_time = r.getOrNullInt64(12) ?? 0
         out.progress = r.getOrNullInt32(13) ?? 0
         out.tags = r.getOrNullText(14) ?? ""
         out

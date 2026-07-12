@@ -16,11 +16,9 @@ export function ArchiveBasicInfoCard({ metadata, t }: Props) {
   const isTvArchive = isTvArchiveMetadata(metadata);
 
   const fileName = [metadata.relative_path, metadata.filename].filter(Boolean).join('/') || t('archive.unknown');
-  const lastRead = metadata.last_read_time
-    ? new Date(metadata.last_read_time).toLocaleDateString()
-    : metadata.lastreadtime
-      ? new Date(metadata.lastreadtime * 1000).toLocaleDateString()
-      : t('archive.neverRead');
+  const lastRead = metadata.lastreadtime
+    ? new Date(metadata.lastreadtime * 1000).toLocaleDateString()
+    : t('archive.neverRead');
 
   const items = [
     { label: t('archive.fileName'), value: fileName, title: fileName },

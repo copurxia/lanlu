@@ -239,7 +239,6 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
     progress: typeof progress === 'number' && Number.isFinite(progress) ? Math.trunc(progress) : 0,
     isnew: row.isnew === true,
     isfavorite: row.isfavorite === true,
-    last_read_time: readString(row.last_read_time) || undefined,
     lastreadtime: typeof lastReadTime === 'number' && Number.isFinite(lastReadTime) ? Math.trunc(lastReadTime) : undefined,
     file_size: typeof fileSize === 'number' && Number.isFinite(fileSize) ? fileSize : undefined,
     size: typeof fileSize === 'number' && Number.isFinite(fileSize) ? fileSize : undefined,
@@ -279,6 +278,7 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
   const archiveCount = readNumber(row.archive_count);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
+  const lastReadTime = readNumber(row.lastreadtime);
   const releaseAt = readString(row.release_at ?? row.releaseAt ?? metadata.release_at);
   const updatedAt = readString(row.updated_at ?? row.updatedAt ?? metadata.updated_at);
   const createdAt = readString(row.created_at ?? row.createdAt);
@@ -297,7 +297,7 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
     archive_count: typeof archiveCount === 'number' && Number.isFinite(archiveCount) ? Math.trunc(archiveCount) : children.length,
     pagecount: typeof pagecount === 'number' && Number.isFinite(pagecount) ? Math.trunc(pagecount) : undefined,
     progress: typeof progress === 'number' && Number.isFinite(progress) ? Math.trunc(progress) : undefined,
-    lastreadtime: readString(row.lastreadtime || row.last_read_time) || undefined,
+    lastreadtime: typeof lastReadTime === 'number' && Number.isFinite(lastReadTime) ? Math.trunc(lastReadTime) : undefined,
     isnew: row.isnew === true,
     isfavorite: row.isfavorite === true,
     release_at: releaseAt || undefined,

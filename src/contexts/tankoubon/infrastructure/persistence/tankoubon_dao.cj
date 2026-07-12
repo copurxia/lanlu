@@ -47,7 +47,7 @@ public class TankoubonAggregatedData {
     public var tags: String = ""  // 合并的标签：tankoubon tags + 所有 archive tags
     public var pagecount: Int32 = 0  // 所有归档的页数总和
     public var progress: Int32 = 0  // 所有归档的平均进度
-    public var last_read_time: String = ""  // 最新的阅读时间
+    public var last_read_time: Int64 = 0  // 最新的阅读时间（unix epoch 秒）
     public var isnew: Bool = true  // 如果任何归档是新的，则为true
     public var archive_count: Int32 = 0  // 归档数量
 }
@@ -106,7 +106,7 @@ private class TankoubonAggregatedDataCacheCodec {
                     case "tags" => data.tags = reader.readValue<String>()
                     case "pagecount" => data.pagecount = reader.readValue<Int32>()
                     case "progress" => data.progress = reader.readValue<Int32>()
-                    case "last_read_time" => data.last_read_time = reader.readValue<String>()
+                    case "last_read_time" => data.last_read_time = reader.readValue<Int64>()
                     case "isnew" => data.isnew = reader.readValue<Bool>()
                     case "archive_count" => data.archive_count = reader.readValue<Int32>()
                     case _ => reader.skip()
@@ -1007,7 +1007,7 @@ public class TankoubonDao {
                 COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
                 COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                 COUNT(a.id)::INT as archive_count,
-                COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
+                COALESCE(MAX(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT), 0) as last_read_time,
                 COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
                 COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
             FROM tankoubons t
@@ -1050,7 +1050,7 @@ public class TankoubonDao {
                         if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
                         data.pagecount = row.getOrNullInt32(8) ?? 0
                         data.archive_count = row.getOrNullInt32(9) ?? 0
-                        data.last_read_time = row.getOrNullText(10) ?? ""
+                        data.last_read_time = row.getOrNullInt64(10) ?? 0
                         data.progress = row.getOrNullInt32(11) ?? 0
                         data.isnew = row.getOrNullBool(12) ?? true
                         data
@@ -1304,7 +1304,7 @@ public class TankoubonDao {
                 COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
                 COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                 COUNT(a.id)::INT as archive_count,
-                COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
+                COALESCE(MAX(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT), 0) as last_read_time,
                 COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
                 COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
             FROM tankoubons t
@@ -1354,7 +1354,7 @@ public class TankoubonDao {
                         if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
                         data.pagecount = row.getOrNullInt32(8) ?? 0
                         data.archive_count = row.getOrNullInt32(9) ?? 0
-                        data.last_read_time = row.getOrNullText(10) ?? ""
+                        data.last_read_time = row.getOrNullInt64(10) ?? 0
                         data.progress = row.getOrNullInt32(11) ?? 0
                         data.isnew = row.getOrNullBool(12) ?? true
                         data

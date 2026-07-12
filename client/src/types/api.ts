@@ -42,6 +42,7 @@ export type Tankoubon = {
   favoritetime?: string;
   progress?: number;
   pagecount?: number;
+  lastreadtime?: number;
 };
 
 export type TankoubonMetadata = {

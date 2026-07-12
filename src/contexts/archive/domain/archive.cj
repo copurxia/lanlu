@@ -28,7 +28,7 @@ public class Archive {
     public var tags: String = ""
     // last_read_time 和 progress 不再存储在 archives 表中，而是从 user_archive_status 表获取
     // 这些字段仅用于 API 响应，由 UserArchiveStatusDao 填充
-    public var last_read_time: String = ""
+    public var last_read_time: Int64 = 0
     public var progress: Int32 = 0
 
     public mut prop archiveType: ArchiveType {

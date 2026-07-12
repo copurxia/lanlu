@@ -11,13 +11,13 @@ export interface TimeGroup<T extends object = Record<string, unknown>> {
 /**
  * 根据时间戳将档案分组
  * @param archives 档案列表
- * @param timeField 时间字段名（默认为 'last_read_time'）
+ * @param timeField 时间字段名（默认为 'lastreadtime'）
  * @param t 翻译函数
  * @returns 分组后的对象
  */
 export function groupArchivesByTime<T extends object>(
   archives: T[],
-  timeField: string = 'last_read_time',
+  timeField: string = 'lastreadtime',
   t?: (key: string) => string
 ): TimeGroup<T>[] {
   // 使用用户的本地时间

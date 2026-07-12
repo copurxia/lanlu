@@ -33,7 +33,7 @@ public class ArchiveDataMappers {
         archive.relative_path = row.getOrNullText(offset + 9) ?? ""
         archive.file_size = row.getOrNullInt64(offset + 10) ?? 0
         archive.pagecount = row.getOrNullInt32(offset + 11) ?? 0
-        archive.last_read_time = row.getOrNullText(offset + 12) ?? ""
+        archive.last_read_time = row.getOrNullInt64(offset + 12) ?? 0
         archive.progress = row.getOrNullInt32(offset + 13) ?? 0
         archive.tags = row.getOrNullText(offset + 14) ?? ""
         return archive

@@ -132,6 +132,11 @@ public class MetadataPluginCallbackRunner {
             }
         }
 
+        // 资产安装完成后，清理本次回调涉及的 archive 在插件运行时目录的导出产物。
+        // 此时封面/歌词已转成 AVIF 资产存入 ASSET_PATH 并写库，源文件不再被引用，可安全删除。
+        // 仅清理本回调涉及的 exports/{archiveId}/ 子目录，避免误删并发回调正在使用的其他归档。
+        cleanupProcessedPluginRuntimeExports(taskId, effectiveType, targetId, archivePatches, resolvedNamespace)
+
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
         let resultJson = buildResultJson(
@@ -612,6 +617,57 @@ public class MetadataPluginCallbackRunner {
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
+    }
+
+    /**
+     * 回调完成后清理本次涉及的 archive 在插件运行时目录（data/cache/plugins/<ns>/exports/）的导出产物。
+     *
+     * 时机安全性：此函数在所有 applyXxxMetadataPatch（含资产安装）完成之后调用，
+     * 封面/歌词已转为 AVIF 资产存入 ASSET_PATH 并写入数据库，源文件不再被任何流程引用。
+     * 仅删除本回调涉及的 exports/{archiveId}/ 子目录，不影响并发回调正在使用的其他归档。
+     */
+    private static func cleanupProcessedPluginRuntimeExports(
+        taskId: Int64,
+        targetType: String,
+        targetId: String,
+        archivePatches: Array<ArchiveMetadataPatch>,
+        pluginNamespace: String
+    ): Unit {
+        let ns = pluginNamespace.trimAscii()
+        if (ns.size == 0) {
+            return
+        }
+        // 收集本次回调涉及的 archiveId（exports 子目录名即 archiveId）。
+        var archiveIds = HashSet<String>()
+        if (targetType == "tankoubon" || targetType == "tank") {
+            for (patch in archivePatches) {
+                let id = patch.archiveId.trimAscii()
+                if (id.size > 0) {
+                    archiveIds.add(id)
+                }
+            }
+        } else {
+            if (targetId.trimAscii().size > 0) {
+                archiveIds.add(targetId.trimAscii())
+            }
+        }
+        if (archiveIds.size == 0) {
+            return
+        }
+
+        let runtimeRoot = PluginPaths.getPluginRuntimeRoot()
+        let exportsRoot = FileUtils.joinPath(FileUtils.joinPath(runtimeRoot, ns), "exports")
+        for (archiveId in archiveIds) {
+            let dirPath = FileUtils.joinPath(exportsRoot, archiveId)
+            try {
+                if (DirectoryScanner.directoryExists(dirPath)) {
+                    let _ = FileUtils.removeFileOrDirectory(dirPath)
+                    TaskIO.appendLog(taskId, "cleaned plugin runtime exports for archive=${archiveId}")
+                }
+            } catch (e: Exception) {
+                TaskIO.appendLog(taskId, "skip cleanup plugin runtime exports for archive=${archiveId}: ${e.message}")
+            }
+        }
     }
 
 }

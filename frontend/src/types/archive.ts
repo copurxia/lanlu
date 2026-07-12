@@ -164,7 +164,6 @@ export interface ArchiveMetadata extends MetadataObject {
   isfavorite?: boolean;
   pagecount?: number;
   progress?: number;
-  last_read_time?: string;
   lastreadtime?: number;
   file_size?: number;
   size?: number;

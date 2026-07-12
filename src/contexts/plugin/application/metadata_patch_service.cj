@@ -845,7 +845,7 @@ public class MetadataPatchService {
         progress!: Int32 = 0i32,
         isNew!: Bool = false,
         isFavorite!: Bool = false,
-        lastReadTime!: String = "",
+        lastReadTime!: Int64 = 0i64,
         lang!: String = ""
     ): (Bool, String, String) {
         match (TankoubonDao.getTankoubonById(tankoubonId)) {

@@ -35,7 +35,7 @@ public class ArchiveData {
     public var tags: String = ""
     // last_read_time 和 progress 不再存储在 archives 表中，而是从 user_archive_status 表获取
     // 这些字段仅用于 API 响应，由 UserArchiveStatusDao 填充
-    public var last_read_time: String = ""
+    public var last_read_time: Int64 = 0
     public var progress: Int32 = 0
     // favorite_time 存储用户收藏该档案的时间，从 user_favorites 表获取
     public var favorite_time: String = ""

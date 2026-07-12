@@ -23,7 +23,7 @@ public class Tankoubon {
     // 聚合字段（用于搜索结果显示）
     public var pagecount: Int32 = 0
     public var progress: Int32 = 0
-    public var last_read_time: String = ""
+    public var last_read_time: Int64 = 0
     public var isnew: Bool = false
     public var archive_count: Int32 = 0
     public var isfavorite: Bool = false

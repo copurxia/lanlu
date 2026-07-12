@@ -376,7 +376,7 @@ public class UserArchiveStatusDao {
         archive.relative_path = row.getOrNullText(9) ?? ""
         archive.file_size = row.getOrNullInt64(10) ?? 0
         archive.pagecount = row.getOrNullInt32(11) ?? 0
-        archive.last_read_time = row.getOrNullText(12) ?? ""
+        archive.last_read_time = row.getOrNullInt64(12) ?? 0
         archive.progress = row.getOrNullInt32(13) ?? 0
         archive.tags = row.getOrNullText(14) ?? ""
         return archive
@@ -409,7 +409,7 @@ public class UserArchiveStatusDao {
                     let sql = """
                         SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash, awt.cover_asset_id,
                                awt.created_at, awt.updated_at, awt.release_at, awt.relative_path, awt.file_size,
-                               awt.pagecount, uas.updated_at as last_read_time,
+                               awt.pagecount, COALESCE(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT, 0) as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
                         FROM archive_metadata_search awt
                         INNER JOIN archives a ON awt.arcid = a.arcid

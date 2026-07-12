@@ -118,7 +118,7 @@ public class TankoubonController {
                 w.writeName("archive_count").writeValue(archiveChildCount)
                 w.writeName("pagecount").writeValue(detail.pageCount)
                 w.writeName("progress").writeValue(0)
-                w.writeName("lastreadtime").writeValue("")
+                w.writeName("lastreadtime").writeValue(0i64)
                 w.writeName("isnew").writeValue(true)
                 w.writeName("isfavorite").writeValue(false)
                 w.writeName("release_at").writeValue("")

@@ -12,7 +12,7 @@ export interface Tankoubon {
   children?: string[];
   pagecount?: number;
   progress?: number;
-  lastreadtime?: string;
+  lastreadtime?: number;
   isnew?: boolean;
   archive_count?: number;
   isfavorite?: boolean;
@@ -54,7 +54,7 @@ export interface TankoubonMetadata extends MetadataObject {
   archive_count?: number;
   pagecount?: number;
   progress?: number;
-  lastreadtime?: string;
+  lastreadtime?: number;
   isnew?: boolean;
   isfavorite?: boolean;
   release_at?: string;
