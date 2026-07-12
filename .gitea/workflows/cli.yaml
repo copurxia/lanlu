@@ -1,0 +1,85 @@
+name: Build lanlu-cli
+run-name: ${{ github.actor }} is building lanlu-cli 🚀
+on:
+  push:
+    paths:
+      - "packages/lanlu-cli/**"
+      - ".agents/skills/lanlu-cli/**"
+  pull_request:
+    paths:
+      - "packages/lanlu-cli/**"
+      - ".agents/skills/lanlu-cli/**"
+jobs:
+  build-cli:
+    runs-on: ubuntu-latest
+    env:
+      XMAKE_ROOT: 'y'
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          set -eux
+
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build cmake binutils \
+              xmake \
+              pkg-config \
+              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev libsqlite3-dev libmysqlclient-dev
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build cmake binutils \
+              xmake \
+              pkg-config \
+              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev libsqlite3-dev libmysqlclient-dev
+          fi
+
+      - name: Verify xmake
+        run: |
+          set -eux
+          xmake --version
+
+      - name: Unzip Cangjie + stdx
+        run: |
+          set -eux
+          wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
+          tar -xzvf c.tar.gz
+          wget -O s.zip "${{ vars.STDX_URL }}"
+          unzip -q s.zip -d stdx
+
+      - name: Build lanlu-cli
+        run: |
+          set -eux
+          export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
+          unset GIT_DIR GIT_WORK_TREE
+          source cangjie/envsetup.sh
+          cd packages/lanlu-cli
+          ./build.sh
+
+      - name: Package lanlu-cli skill zip
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist/lanlu-cli/scripts
+          cp packages/lanlu-cli/lanlu-cli dist/lanlu-cli/scripts/
+          cp .agents/skills/lanlu-cli/SKILL.md dist/lanlu-cli/
+          cd dist
+          zip -qr "lanlu-cli-skill-${{ github.sha }}.zip" lanlu-cli
+          ls -lah .
+
+      - name: Upload lanlu-cli artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: lanlu-cli-skill
+          path: dist/lanlu-cli-skill-*.zip
+          retention-days: 30

@@ -284,7 +284,93 @@ $:
             attachments:
               - client/android/app/build/outputs/apk/release/app-release.apk
 
+    - &cli_pipeline
+      name: cli
+      ifModify:
+        - packages/lanlu-cli/**
+        - .agents/skills/lanlu-cli/**
+      runner:
+        tags: cnb:arch:amd64
+      docker:
+        build:
+          dockerfile: .ide/Dockerfile
+          by:
+            - .ide/Dockerfile
+          versionBy:
+            - .ide/Dockerfile
+        volumes:
+          - main:/root/.cache:copy-on-write
+          - main:/root/.cjpm:copy-on-write
+          - main:./build-script-cache:copy-on-write
+      env:
+        TZ: Asia/Shanghai
+      stages:
+        - name: Show build environment versions
+          script: |
+            bash -lc '
+              set -eux
+              cat /etc/os-release || true
+              bash --version | head -n 1
+              node -v || true
+              pnpm -v || true
+              clang --version | head -n 1
+            '
+
+        - name: Download Cangjie SDK + stdx
+          script: |
+            bash -lc '
+              set -eux
+              : "${CANGJIE_URL:?Missing env CANGJIE_URL (configure in CNB project variables)}"
+              : "${STDX_URL:?Missing env STDX_URL (configure in CNB project variables)}"
+
+              mkdir -p build-script-cache
+
+              if [ ! -d "./cangjie" ]; then
+                wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
+                tar -xzf build-script-cache/cangjie.tar.gz
+              fi
+
+              if [ ! -d "./stdx" ]; then
+                wget -O build-script-cache/stdx.zip "$STDX_URL"
+                unzip -q build-script-cache/stdx.zip -d stdx
+              fi
+            '
+
+        - name: Build lanlu-cli
+          script: |
+            bash -lc '
+              set -eux
+              export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
+              unset GIT_DIR GIT_WORK_TREE
+              export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+              set +u
+              source ./cangjie/envsetup.sh
+              set -u
+              cd packages/lanlu-cli
+              ./build.sh
+            '
+
+        - name: Package lanlu-cli skill zip
+          script: |
+            bash -lc '
+              set -eux
+              rm -rf dist
+              mkdir -p dist/lanlu-cli/scripts
+              cp packages/lanlu-cli/lanlu-cli dist/lanlu-cli/scripts/
+              cp .agents/skills/lanlu-cli/SKILL.md dist/lanlu-cli/
+              cd dist
+              zip -qr "lanlu-cli-skill-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-cli
+              ls -lah .
+            '
+
+        - name: Upload lanlu-cli artifacts
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - dist/lanlu-cli-skill-*.zip
+
   pull_request:
     - *build_pipeline
     - *extension_pipeline
     - *client_pipeline
+    - *cli_pipeline

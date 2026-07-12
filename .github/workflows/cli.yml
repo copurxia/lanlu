@@ -1,0 +1,62 @@
+name: Build lanlu-cli
+run-name: ${{ github.actor }} is building lanlu-cli 🚀
+
+on:
+  push:
+    paths:
+      - "packages/lanlu-cli/**"
+      - ".agents/skills/lanlu-cli/**"
+  pull_request:
+    paths:
+      - "packages/lanlu-cli/**"
+      - ".agents/skills/lanlu-cli/**"
+
+jobs:
+  build-cli:
+    runs-on: ubuntu-latest
+    env:
+      XMAKE_ROOT: "y"
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Cangjie
+        uses: Zxilly/setup-cangjie@v2
+        with:
+          channel: sts
+          version: latest
+
+      - name: Download stdx
+        env:
+          STDX_URL: ${{ vars.STDX_URL }}
+        run: |
+          set -eux
+          : "${STDX_URL:?Missing repository variable STDX_URL}"
+          wget -O s.zip "$STDX_URL"
+          unzip -q s.zip -d stdx
+
+      - name: Build lanlu-cli
+        env:
+          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
+        run: |
+          set -eux
+          cd packages/lanlu-cli
+          ./build.sh
+
+      - name: Package lanlu-cli skill zip
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist/lanlu-cli/scripts
+          cp packages/lanlu-cli/lanlu-cli dist/lanlu-cli/scripts/
+          cp .agents/skills/lanlu-cli/SKILL.md dist/lanlu-cli/
+          cd dist
+          zip -qr "lanlu-cli-skill-${{ github.sha }}.zip" lanlu-cli
+          ls -lah .
+
+      - name: Upload lanlu-cli artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanlu-cli-skill
+          path: dist/lanlu-cli-skill-*.zip
+          retention-days: 30
