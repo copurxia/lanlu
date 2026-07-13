@@ -218,7 +218,9 @@ $CLI source-download nhentai 123456 --category-id 1
 $CLI source-download nhentai 123456 --category-id 1 --wait --kind archive
 ```
 
-### download-url
+### download-url（服务端拉取下载）
+
+将 URL 提交给服务端，由服务端下载该 URL 对应的文件并入库。不是本地直链下载。
 
 ```bash
 $CLI download-url <url> --category-id <id> [options]
@@ -235,7 +237,7 @@ $CLI download-url <url> --category-id <id> [options]
 $CLI download-url "https://example.com/file.zip" --category-id 1 --wait
 ```
 
-注意：`--category-id` 必填，下载的文件会自动归类到指定分类。
+注意：`--category-id` 必填，服务端下载的文件会自动归类到指定分类。
 
 ### upload
 

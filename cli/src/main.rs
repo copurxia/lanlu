@@ -170,7 +170,7 @@ enum Commands {
         #[arg(long, default_value = "300000")]
         timeout: u64,
     },
-    /// Download from URL
+    /// Submit URL to server for server-side download
     #[command(name = "download-url")]
     DownloadUrl {
         /// URL to download
