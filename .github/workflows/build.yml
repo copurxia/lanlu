@@ -176,31 +176,27 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24.14.1"
+      - name: Install musl toolchain
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Build lanlu-cli (static musl)
+        run: |
+          cd cli
+          CC_x86_64_unknown_linux_musl=musl-gcc \
+            cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Package lanlu-cli skill zip
         run: |
           set -eux
           rm -rf dist
-          mkdir -p dist/lanlu-cli/scripts
+          mkdir -p dist/lanlu-cli
+          cp cli/target/x86_64-unknown-linux-musl/release/lanlu-cli dist/lanlu-cli/
           cp cli/SKILL.md dist/lanlu-cli/
-          cp cli/package.json dist/lanlu-cli/
-          cp cli/scripts/main.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/api_client.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/json_utils.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/archive_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/source_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/task_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/poll.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/info_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/cover_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/tankoubon_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/update_metadata_cmds.mjs dist/lanlu-cli/scripts/
-          cp cli/scripts/lanlu-cli dist/lanlu-cli/scripts/
-          chmod +x dist/lanlu-cli/scripts/lanlu-cli dist/lanlu-cli/scripts/main.mjs
+          chmod +x dist/lanlu-cli/lanlu-cli
           cd dist
           zip -qr "lanlu-cli-skill-${GITHUB_SHA::7}.zip" lanlu-cli
           ls -lah .

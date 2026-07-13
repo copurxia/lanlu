@@ -1,4 +1,51 @@
 name: Build lanlu-cli
+run-name: ${{ github.actor }} is building lanlu-cli (Rust musl) 
+on:
+  push:
+    paths:
+      - "cli/**"
+  pull_request:
+    paths:
+      - "cli/**"
+jobs:
+  build-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Install musl toolchain
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
+      - name: Build lanlu-cli (static musl)
+        run: |
+          cd cli
+          CC_x86_64_unknown_linux_musl=musl-gcc \
+            cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Package lanlu-cli skill zip
+        run: |
+          set -eux
+          rm -rf dist
+          mkdir -p dist/lanlu-cli
+          cp cli/target/x86_64-unknown-linux-musl/release/lanlu-cli dist/lanlu-cli/
+          cp cli/SKILL.md dist/lanlu-cli/
+          chmod +x dist/lanlu-cli/lanlu-cli
+          cd dist
+          zip -qr "lanlu-cli-skill-${{ github.sha }}.zip" lanlu-cli
+          ls -lah .
+
+      - name: Upload lanlu-cli artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: lanlu-cli-skill
+          path: dist/lanlu-cli-skill-*.zip
+          retention-days: 30
+name: Build lanlu-cli
 run-name: ${{ github.actor }} is building lanlu-cli 🚀
 on:
   push:

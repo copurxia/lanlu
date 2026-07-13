@@ -1,15 +1,11 @@
 ---
 name: lanlu-cli
-description: "通过本 Skill 附带的 scripts/lanlu-cli 脚本调用 Lanlu 搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力（Node.js ESM 重写，无需编译，仅需 Node 18+）。"
+description: "通过本 Skill 附带的 lanlu-cli 二进制调用 Lanlu 搜索、归档详情、分类查询、Source 插件搜索/下载、URL 下载、归档上传以及元数据插件执行等能力（Rust 静态编译，musl 链接，零外部依赖）。"
 ---
 
 # lanlu-cli Skill
 
-本 Skill 附带一个可执行脚本 `scripts/lanlu-cli`，通过 HTTP API 与 Lanlu 后端交互。
-
-## 前置要求
-
-- **Node.js 18+**（内置 `fetch` 支持）
+本 Skill 附带一个可执行二进制 `lanlu-cli`，通过 HTTP API 与 Lanlu 后端交互。
 
 ## 可执行文件位置
 
@@ -18,29 +14,17 @@ description: "通过本 Skill 附带的 scripts/lanlu-cli 脚本调用 Lanlu 搜
 ```
 lanlu-cli/
 ├── SKILL.md
-├── package.json
-└── scripts/
-    ├── lanlu-cli
-    ├── main.mjs
-    ├── api_client.mjs
-    ├── json_utils.mjs
-    ├── archive_cmds.mjs
-    ├── source_cmds.mjs
-    ├── task_cmds.mjs
-    ├── info_cmds.mjs
-    ├── cover_cmds.mjs
-    ├── tankoubon_cmds.mjs
-    └── poll.mjs
+└── lanlu-cli
 ```
 
 调用时请将 `lanlu-cli` 替换为 Skill 目录下的实际路径，例如：
 
 ```bash
 # 项目内安装
-CLI=.agents/skills/lanlu-cli/scripts/lanlu-cli
+CLI=.agents/skills/lanlu-cli/lanlu-cli
 
 # 用户级安装
-CLI=~/.agents/skills/lanlu-cli/scripts/lanlu-cli
+CLI=~/.agents/skills/lanlu-cli/lanlu-cli
 ```
 
 ## 选项

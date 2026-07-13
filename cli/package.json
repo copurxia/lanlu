@@ -1,9 +1,0 @@
-{
-  "name": "lanlu-cli",
-  "version": "1.0.0",
-  "type": "module",
-  "bin": {
-    "lanlu-cli": "./main.mjs"
-  },
-  "description": "Lanlu command line client (Node.js ESM)"
-}
