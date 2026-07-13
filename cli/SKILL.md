@@ -33,116 +33,259 @@ CLI=~/.agents/skills/lanlu-cli/lanlu-cli
 -o, --output <mode>       text|json|pretty-json (default: text)
     --no-proxy            忽略 http_proxy / https_proxy 环境变量
 -h, --help                帮助
+-V, --version             版本
 ```
+
+## 环境变量
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `LANLU_TOKEN` | 是 | Bearer Token |
+| `LANLU_HOST` | 否 | 服务端地址，默认 `http://localhost:8082` |
 
 ## 命令速查
 
-### 归档 & 封面
+### info
 
 ```bash
 $CLI info
-$CLI search "tag:artist:foo"
-$CLI search --category 1 --page 1 --page-size 50
-$CLI search --group-by-tanks --new-only
-$CLI archive-show <arcid>
-$CLI archive-show <arcid> --include-pages
-$CLI cover <arcid|tankoubon-id>
-$CLI cover --asset-id 1234
 ```
 
-### 分类
+### search
+
+```bash
+$CLI search [filter] [options]
+```
+
+选项：
+
+| 选项 | 说明 |
+|---|---|
+| `[filter]` | 搜索过滤条件（可选），如 `"title:foo"` / `"tag:artist:bar"` |
+| `-c, --category <id>` | 按分类 ID 过滤 |
+| `--page <n>` | 页码 |
+| `--page-size <n>` | 每页数量 |
+| `--sortby <field>` | 排序字段 |
+| `--order <asc\|desc>` | 排序方向 |
+| `--new-only` | 仅显示新归档 |
+| `--untagged-only` | 仅显示无标签归档 |
+| `--favorite-only` | 仅显示收藏归档 |
+| `--group-by-tanks` | 按合集分组显示 |
+
+示例：
+
+```bash
+$CLI search "tag:artist:foo"
+$CLI search --category 1 --page 1 --page-size 50
+$CLI search --sortby title --order asc
+$CLI search --group-by-tanks --new-only --favorite-only
+```
+
+### archive-show
+
+```bash
+$CLI archive-show <arcid> [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--include-pages` | 同时返回页面列表 |
+
+```bash
+$CLI archive-show 123
+$CLI archive-show 123 --include-pages
+```
+
+### category-list
 
 ```bash
 $CLI category-list
 ```
 
-### 合集(Tankoubon)
+### cover
+
+```bash
+$CLI cover [id|--asset-id <id>]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `[id]` | 归档或合集 ID，查询其封面 |
+| `--asset-id <id>` | 已知道封面 asset_id 时直接查看 URL |
+
+```bash
+$CLI cover 123
+$CLI cover --asset-id 456
+```
+
+### tankoubon-list
 
 ```bash
 $CLI tankoubon-list
+```
+
+### tankoubon-show
+
+```bash
 $CLI tankoubon-show <id>
 ```
 
-### Source 插件
+```bash
+$CLI tankoubon-show tk_001
+```
+
+### update-metadata
+
+```bash
+$CLI update-metadata <id> [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--title <str>` | 新标题 |
+| `--description <str>` | 新描述 |
+| `--tags <str\|json>` | 新标签，逗号分隔或 JSON 数组 |
+| `--release-at <str>` | 发布日期 |
+| `--cover <id>` | 封面 asset_id |
+| `--namespace <str>` | 元数据命名空间 |
+| `--target-type <type>` | 目标类型：`archive`（默认）或 `tankoubon` |
+
+```bash
+$CLI update-metadata 123 --title "new title" --description "..." --tags "tag1, tag2"
+$CLI update-metadata 123 --cover 456
+$CLI update-metadata tk_001 --title "new" --target-type tankoubon
+```
+
+### source-list
 
 ```bash
 $CLI source-list
+```
+
+### source-home
+
+```bash
 $CLI source-home <namespace>
-$CLI source-search <namespace> "keyword"
-$CLI source-search <namespace> "keyword" --page 2 --filters '{"sort":"popular"}'
+```
+
+```bash
+$CLI source-home nhentai
+```
+
+### source-search
+
+```bash
+$CLI source-search <namespace> [query] [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `[query]` | 搜索关键词（可选） |
+| `--page <n>` | 页码 |
+| `--filters <json>` | 筛选条件 JSON |
+
+```bash
+$CLI source-search nhentai "foo"
+$CLI source-search nhentai "foo" --page 2 --filters '{"sort":"popular"}'
+```
+
+### source-filters
+
+```bash
 $CLI source-filters <namespace>
-$CLI source-download <namespace> <remote-id> --category-id <id> --wait
 ```
-
-### 下载与上传
 
 ```bash
-$CLI download-url "https://example.com/file.zip" --category-id <id>
-$CLI upload /path/to/file.zip --category-id <id> --wait
-
-注意：`download-url` 必须指定 `--category-id`，下载的文件会自动归类到指定分类。
+$CLI source-filters nhentai
 ```
 
-### 元数据插件
+### source-download
 
 ```bash
-$CLI metadata-run <namespace> <arcid>
-$CLI metadata-run <namespace> <arcid> --write-back --wait
+$CLI source-download <namespace> <remote-id> --category-id <id> [options]
 ```
 
-### 元数据更新
-
-直接修改归档或合集的标题、描述、标签等字段：
+| 选项 | 说明 |
+|---|---|
+| `--category-id <id>` | **必填**。目标分类 ID |
+| `--kind <type>` | 条目类型，默认 `archive` |
+| `--wait` | 等待任务完成 |
+| `--interval <ms>` | 轮询间隔，默认 `1000` |
+| `--timeout <ms>` | 超时时间，默认 `300000` |
 
 ```bash
-$CLI update-metadata <arcid> --title "new title" --description "..." --tags "tag1, tag2"
-$CLI update-metadata <arcid> --cover 1234
-$CLI update-metadata <tankoubon-id> --title "new" --target-type tankoubon
+$CLI source-download nhentai 123456 --category-id 1
+$CLI source-download nhentai 123456 --category-id 1 --wait --kind archive
 ```
 
-支持字段：`--title` `--description` `--tags` `--release-at` `--cover` `--namespace`
+### download-url
 
-### 任务
+```bash
+$CLI download-url <url> --category-id <id> [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--category-id <id>` | **必填**。目标分类 ID |
+| `--wait` | 等待任务完成 |
+| `--interval <ms>` | 轮询间隔，默认 `1000` |
+| `--timeout <ms>` | 超时时间，默认 `300000` |
+
+```bash
+$CLI download-url "https://example.com/file.zip" --category-id 1 --wait
+```
+
+注意：`--category-id` 必填，下载的文件会自动归类到指定分类。
+
+### upload
+
+```bash
+$CLI upload <file> --category-id <id> [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--category-id <id>` | **必填**。目标分类 ID |
+| `--chunk-size <bytes>` | 分片大小，默认 `8388608` (8MB) |
+| `--target-type <type>` | 目标类型，默认 `archive` |
+| `--overwrite` | 覆盖已存在文件 |
+| `--wait` | 等待任务完成 |
+| `--interval <ms>` | 轮询间隔，默认 `1000` |
+| `--timeout <ms>` | 超时时间，默认 `300000` |
+
+```bash
+$CLI upload /path/to/file.zip --category-id 1 --wait
+$CLI upload /path/to/file.zip --category-id 1 --overwrite --chunk-size 4194304
+```
+
+### metadata-run
+
+```bash
+$CLI metadata-run <namespace> <target-id> [options]
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--target-type <type>` | 目标类型，默认 `archive` |
+| `--param <str>` | 插件参数 |
+| `--write-back` | 写回元数据 |
+| `--wait` | 等待任务完成 |
+| `--interval <ms>` | 轮询间隔，默认 `1000` |
+| `--timeout <ms>` | 超时时间，默认 `300000` |
+
+```bash
+$CLI metadata-run ehplugin 123
+$CLI metadata-run ehplugin 123 --write-back --wait
+```
+
+### task
 
 ```bash
 $CLI task <id>
 ```
 
-## 轮询选项
-
-`source-download`、`download-url`、`upload`、`metadata-run` 支持创建任务后自动轮询（`--wait`、`--interval`、`--timeout`）。
-
-## 封面获取说明
-
-每个归档和合集都有一个封面图片，通过 `cover_asset_id` 或 `assets.cover` 字段关联。
-
-- **搜索/归档详情**返回的 `cover_asset_id` 或 `assets.cover` 是一个数字 ID
-- 封面图片 URL 格式：**`{LANLU_HOST}/api/assets/{asset_id}`**
-- 下载方式：`GET /api/assets/{id}` 带上 Bearer Token 即可获取图片内容
-
 ```bash
-# 用 curl 下载封面
-curl -H "Authorization: Bearer $LANLU_TOKEN" \
-  "$LANLU_HOST/api/assets/1234" -o cover.avif
-
-# 查询归档/合集的封面 asset_id
-$CLI cover <arcid>
-$CLI cover --asset-id 1234
-```
-
-封面图片文件以 `.avif` 格式存储在服务器 `ASSET_PATH` 下。
-
-## 合集(Tankoubon)说明
-
-合集是对归档的分组管理。使用 `--group-by-tanks` 搜索时，结果中会包含 `[tank]` 开头的合集条目，显示合集的标题、归档数量和封面 asset_id。
-
-查看合集内容：
-
-```bash
-$CLI tankoubon-list                     # 列出所有合集
-$CLI tankoubon-show <tankoubon_id>       # 显示合集详情和子归档列表
-$CLI search --group-by-tanks             # 搜索时按合集分组显示
-$CLI archive-show <arcid>                # 查看归档所属的 tankoubon_ids
+$CLI task 42
 ```
 
 ## 典型工作流
