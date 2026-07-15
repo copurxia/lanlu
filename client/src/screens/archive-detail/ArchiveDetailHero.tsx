@@ -6,6 +6,17 @@ import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 import type {ArchiveMetadata} from '../../types/api';
 
+function formatDate(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 type TvMetaSummary = {
   season?: string;
   episode?: string;
@@ -235,7 +246,7 @@ export function ArchiveDetailHero({metadata, cover, backdrop, t}: Props) {
               <>
                 <Text style={styles.statDot}>•</Text>
                 <Text style={styles.statText} numberOfLines={1}>
-                  {t('archive.releaseAt', {date: metadata.release_at})}
+                  {t('archive.releaseAt', {date: formatDate(metadata.release_at)})}
                 </Text>
               </>
             ) : null}
@@ -243,7 +254,7 @@ export function ArchiveDetailHero({metadata, cover, backdrop, t}: Props) {
               <>
                 <Text style={styles.statDot}>•</Text>
                 <Text style={styles.statText} numberOfLines={1}>
-                  {t('archive.updatedAt', {date: metadata.updated_at})}
+                  {t('archive.updatedAt', {date: formatDate(metadata.updated_at)})}
                 </Text>
               </>
             ) : null}

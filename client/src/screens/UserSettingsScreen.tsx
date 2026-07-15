@@ -19,6 +19,17 @@ import {
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
+function formatDate(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 export function UserSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
@@ -195,7 +206,7 @@ export function UserSettingsScreen() {
                   </View>
                 </View>
                 {user.createdAt ? (
-                  <Text style={styles.createdAt}>{user.createdAt}</Text>
+                  <Text style={styles.createdAt}>{formatDate(user.createdAt)}</Text>
                 ) : null}
                 <View style={styles.toggleRow}>
                   <Text style={styles.toggleLabel}>{t('auth.admin')}</Text>

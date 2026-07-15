@@ -16,6 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useStepUpDialog } from '@/hooks/use-step-up-dialog';
 import { extractApiError } from '@/lib/utils/api-utils';
+import { formatDate } from '@/lib/utils/utils';
 
 interface CreateUserForm {
   username: string;
@@ -307,7 +308,7 @@ export default function UsersSettingsPage() {
                     </div>
                     {u.createdAt && (
                       <p className="text-xs text-muted-foreground">
-                        {t('auth.createdAt')}: {u.createdAt}
+                        {t('auth.createdAt')}: {formatDate(u.createdAt)}
                       </p>
                     )}
                   </div>

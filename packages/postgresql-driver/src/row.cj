@@ -103,7 +103,7 @@ public class PgRowData {
     public func getText(col: Int64): String {
         let i = idxChecked(col)
         if (nulls[i]) { return "" }
-        values[i]
+        normalizeTextValue(oids[i], values[i])
     }
 
     public func getText(col: String): String { getText(idx(col)) }
@@ -111,7 +111,7 @@ public class PgRowData {
     public func getOrNullText(col: Int64): ?String {
         let i = idxChecked(col)
         if (nulls[i]) { return None }
-        Some(values[i])
+        Some(normalizeTextValue(oids[i], values[i]))
     }
 
     public func getOrNullText(col: String): ?String { getOrNullText(idx(col)) }
@@ -265,4 +265,38 @@ func parseBool(oid: Int32, raw: String): Bool {
 
 func parseFloat64(raw: String): Float64 {
     try { Float64.parse(raw.trimAscii()) } catch (_: Exception) { 0.0 }
+}
+
+/**
+ * 对 timestamp/timestamptz 列的原始 libpq 文本做格式归一化。
+ *
+ * libpq 文本协议下，timestamp/timestamptz 的输出依赖会话 DateStyle/timezone，
+ * 常见形式为 `2026-07-14 06:52:35.23705+08`（空格分隔日期与时间）。
+ * 这里将首个空格替换为 `T`，归一化为 ISO-8601 形式 `2026-07-14T06:52:35.23705+08`，
+ * 使前端 `new Date(str)` 可可靠解析，同时消除 SQL 层 `::text` cast 的需要
+ * （ORDER BY 仍引用原始 timestamp 列，排序天然正确）。
+ *
+ * 非 timestamp OID 原样返回。
+ */
+func normalizeTextValue(oid: Int32, raw: String): String {
+    if (oid != OID_TIMESTAMP && oid != OID_TIMESTAMPTZ) {
+        return raw
+    }
+    // 若已经是 `T` 分隔（部分 DateStyle 可能如此），原样返回。
+    let bytes = raw.toArray()
+    let spaceByte: UInt8 = 32   // ' '
+    let tByte: UInt8 = 84        // 'T'
+    for (i in 0..bytes.size) {
+        let c = bytes[i]
+        if (c == tByte) {
+            break
+        }
+        if (c == spaceByte) {
+            // 将首个空格替换为 T
+            var out = Array<UInt8>(bytes.size, { j => bytes[j] })
+            out[i] = tByte
+            return String.fromUtf8(out)
+        }
+    }
+    raw
 }

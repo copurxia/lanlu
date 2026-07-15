@@ -8,6 +8,7 @@ import { useLocalStorage } from '@/hooks/common-hooks';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
+import { formatDate } from '@/lib/utils/utils';
 
 const SIDEBAR_HORIZONTAL_PADDING_PX = 24;
 const SIDEBAR_GRID_GAP_PX = 8;
@@ -82,7 +83,8 @@ function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
   const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
-  return description ? `${releaseAt} · ${description}` : releaseAt;
+  const formattedReleaseAt = formatDate(releaseAt);
+  return description ? `${formattedReleaseAt} · ${description}` : formattedReleaseAt;
 }
 
 export function ReaderSidebar({

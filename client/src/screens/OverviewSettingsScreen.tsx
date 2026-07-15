@@ -10,6 +10,17 @@ import {spacing, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 import {useAuth} from '../auth/AuthContext';
 
+function formatDate(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 export function OverviewSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
@@ -50,7 +61,7 @@ export function OverviewSettingsScreen() {
           {user?.createdAt ? (
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>{'Created at'}</Text>
-              <Text style={styles.infoValue}>{user.createdAt}</Text>
+              <Text style={styles.infoValue}>{formatDate(user.createdAt)}</Text>
             </View>
           ) : null}
         </FluentCard>

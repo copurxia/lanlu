@@ -17,6 +17,17 @@ import {
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
+function formatDate(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 const STATUS_LABELS: Record<string, string> = {
   All: 'common.all',
   Pending: 'common.statusPending',
@@ -234,13 +245,13 @@ export function TaskSettingsScreen() {
                 ) : null}
 
                 {task.createdAt ? (
-                  <Text style={styles.timestamp}>{t('common.created')}: {task.createdAt}</Text>
+                  <Text style={styles.timestamp}>{t('common.created')}: {formatDate(task.createdAt)}</Text>
                 ) : null}
                 {task.startedAt ? (
-                  <Text style={styles.timestamp}>{t('common.started')}: {task.startedAt}</Text>
+                  <Text style={styles.timestamp}>{t('common.started')}: {formatDate(task.startedAt)}</Text>
                 ) : null}
                 {task.completedAt ? (
-                  <Text style={styles.timestamp}>Completed: {task.completedAt}</Text>
+                  <Text style={styles.timestamp}>Completed: {formatDate(task.completedAt)}</Text>
                 ) : null}
 
                 {longMessage ? (

@@ -21,6 +21,7 @@ import { logger } from '@/lib/utils/logger';
 import { useMounted } from '@/hooks/common-hooks';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { extractApiError } from '@/lib/utils/api-utils';
+import { formatDate } from '@/lib/utils/utils';
 
 import { getTvMetaSummary, isTvArchiveMetadata } from '@/lib/utils/tv-media';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
@@ -389,11 +390,11 @@ export function ArchiveDetailContent() {
       </span>
       <span className="text-muted-foreground/60">•</span>
       <span className="tabular-nums truncate" title={metadata.release_at}>
-        {t('archive.releaseAt')} {metadata.release_at || t('archive.unknown')}
+        {t('archive.releaseAt')} {metadata.release_at ? formatDate(metadata.release_at) : t('archive.unknown')}
       </span>
       <span className="text-muted-foreground/60">•</span>
       <span className="tabular-nums truncate" title={metadata.updated_at}>
-        {t('archive.updatedAt')} {metadata.updated_at || t('archive.unknown')}
+        {t('archive.updatedAt')} {metadata.updated_at ? formatDate(metadata.updated_at) : t('archive.unknown')}
       </span>
       <span className="text-muted-foreground/60">•</span>
       <span className="tabular-nums">{t('archive.progress')} {progressPercent}%</span>

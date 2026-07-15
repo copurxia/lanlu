@@ -11,6 +11,7 @@ import { MasonryThumbnailGrid } from '@/components/ui/masonry-thumbnail-grid';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLocalStorage } from '@/hooks/common-hooks';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
+import { formatDate } from '@/lib/utils/utils';
 
 type ArchivePreviewViewMode = 'thumbnails' | 'list' | 'tree';
 
@@ -33,7 +34,8 @@ function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
   const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
-  return description ? `${releaseAt} · ${description}` : releaseAt;
+  const formattedReleaseAt = formatDate(releaseAt);
+  return description ? `${formattedReleaseAt} · ${description}` : formattedReleaseAt;
 }
 
 function getPagePathSegments(path: string): string[] {

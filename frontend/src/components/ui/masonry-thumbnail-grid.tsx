@@ -7,6 +7,7 @@ import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { useVirtualMasonryLayout, type VirtualMasonryLayoutItem } from '@/components/ui/hooks/useVirtualMasonryLayout';
 import type React from 'react';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
+import { formatDate } from '@/lib/utils/utils';
 
 const GRID_GAP_PX = 8;
 const OVERSCAN_PX = 480;
@@ -39,7 +40,7 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 
 function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
-  return releaseAt || '';
+  return releaseAt ? formatDate(releaseAt) : '';
 }
 
 function getColumnCount(contentWidth: number): number {

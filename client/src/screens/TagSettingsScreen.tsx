@@ -13,6 +13,17 @@ import type {AdminTag} from '../api/admin';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
+function formatDate(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 const PAGE_SIZE = 20;
 
 export function TagSettingsScreen() {
@@ -273,7 +284,7 @@ export function TagSettingsScreen() {
                 </Text>
               ) : null}
               {tag.created_at ? (
-                <FluentCaption>{tag.created_at}</FluentCaption>
+                <FluentCaption>{formatDate(tag.created_at)}</FluentCaption>
               ) : null}
             </TouchableOpacity>
             <View style={styles.cardActions}>
