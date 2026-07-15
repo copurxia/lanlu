@@ -231,7 +231,7 @@ function HomePageContent() {
 
   const isSearchMode = Boolean(searchQuery);
   const isHomeLanding = !isSearchMode && categoryId === 'all';
-  const homeViewSurface = resolveHomeViewSurface(homeViewMode, isHomeLanding);
+  const homeViewSurface = isSearchMode ? 'archive-feed-continuous' : resolveHomeViewSurface(homeViewMode, isHomeLanding);
   const showCategoryRowsView = isHomeLanding && homeViewMode === 'category-rows';
   const showArchiveFeed = !showCategoryRowsView;
   const isContinuousFeed = homeViewSurface === 'archive-feed-continuous';
