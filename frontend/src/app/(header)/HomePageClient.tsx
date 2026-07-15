@@ -374,8 +374,9 @@ function HomePageContent() {
     setDateTo(urlDateTo);
     setGroupByTanks(urlGroupByTanks);
     setCategoryId(urlQuery ? 'all' : urlCategoryId);
+    setCurrentPage(Number.isFinite(urlPage) && urlPage > 0 ? urlPage : 0);
     setIsInitialized(true);
-  }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
+  }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
 
   useEffect(() => {
     setHomeViewMode(getStoredHomeViewMode());
@@ -431,7 +432,8 @@ function HomePageContent() {
       dateFrom === urlDateFrom &&
       dateTo === urlDateTo &&
       groupByTanks === urlGroupByTanks &&
-      (searchQuery ? 'all' : categoryId) === (urlQuery ? 'all' : urlCategoryId);
+      (searchQuery ? 'all' : categoryId) === (urlQuery ? 'all' : urlCategoryId) &&
+      currentPage === urlPage;
     if (!urlStateSynced) return;
 
     const params = new URLSearchParams();
@@ -455,7 +457,7 @@ function HomePageContent() {
       return;
     }
     router.replace(newUrl);
-  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isContinuousFeed, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly, urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
+  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isContinuousFeed, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly, urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlPage, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
 
   // Fetch archives on filter change
   useEffect(() => {
