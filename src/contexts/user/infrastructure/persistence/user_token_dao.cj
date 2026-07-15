@@ -88,7 +88,7 @@ public class UserTokenDao {
     public static func findActiveByHash(tokenHash: String): UserTokenRow {
         let params: Array<Value> = [vtext(tokenHash)]
         let sql = """
-            SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+            SELECT id, user_id, name, token_type, token_prefix, token_hash, COALESCE(created_at::text, ''),
                    COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
                    COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
             FROM user_tokens
@@ -161,7 +161,7 @@ public class UserTokenDao {
         var out: ArrayList<UserTokenRow> = ArrayList<UserTokenRow>()
         let (sql, params) = match (tokenType) {
             case Some(t) => ("""
-                SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+                SELECT id, user_id, name, token_type, token_prefix, token_hash, COALESCE(created_at::text, ''),
                        COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
                        COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
                 FROM user_tokens
@@ -169,7 +169,7 @@ public class UserTokenDao {
                 ORDER BY id DESC
             """, [vint(userId), vtext(t)])
             case None => ("""
-                SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
+                SELECT id, user_id, name, token_type, token_prefix, token_hash, COALESCE(created_at::text, ''),
                        COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
                        COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
                 FROM user_tokens
