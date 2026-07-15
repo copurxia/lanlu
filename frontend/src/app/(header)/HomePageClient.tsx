@@ -18,7 +18,7 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 import { ChevronRight, RefreshCw } from 'lucide-react';
 import { startTransition, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
+import { useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
 import { useHomeSelection } from '@/hooks/use-home-selection';
 import {
   DEFAULT_SCROLLABLE_CARD_COVER_ASPECT_RATIO,
@@ -227,7 +227,7 @@ function HomePageContent() {
   const fetchInputRef = useRef(fetchInput);
   useEffect(() => { fetchInputRef.current = fetchInput; }, [fetchInput]);
 
-  const debouncedFetchInput = useDebounce(fetchInput, 250);
+  const debouncedFetchInput = fetchInput;
 
   const isSearchMode = Boolean(searchQuery);
   const isHomeLanding = !isSearchMode && categoryId === 'all';
