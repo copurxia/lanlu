@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -348,13 +349,22 @@ export default function UsersSettingsPage() {
         </CardContent>
       </Card>
 
-      {resetPasswordUser && (
-        <Card className="border-dashed">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">{t('auth.resetPassword')}</CardTitle>
-            <CardDescription>{t('auth.resetPasswordFor', { username: resetPasswordUser.username })}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <Dialog open={!!resetPasswordUser} onOpenChange={(open) => {
+        if (!open) {
+          setResetPasswordUser(null);
+          setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+        }
+      }}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t('auth.resetPassword')}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="space-y-4">
+            {resetPasswordUser && (
+              <p className="text-sm text-muted-foreground">
+                {t('auth.resetPasswordFor', { username: resetPasswordUser.username })}
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="newPassword">{t('auth.newPassword')}</Label>
@@ -382,20 +392,20 @@ export default function UsersSettingsPage() {
             {(resetPasswordForm.newPassword && resetPasswordForm.confirmPassword && resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) && (
               <p className="text-sm text-destructive">{t('auth.passwordMismatch')}</p>
             )}
-            <div className="flex gap-2">
-              <Button onClick={handleResetPassword} disabled={loading}>
-                {loading ? t('common.saving') : t('auth.resetPassword')}
-              </Button>
-              <Button variant="outline" onClick={() => {
-                setResetPasswordUser(null);
-                setResetPasswordForm({ newPassword: '', confirmPassword: '' });
-              }}>
-                {t('common.cancel')}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setResetPasswordUser(null);
+              setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+            }} disabled={loading}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={handleResetPassword} disabled={loading}>
+              {loading ? t('common.saving') : t('auth.resetPassword')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
