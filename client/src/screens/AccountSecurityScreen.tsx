@@ -74,6 +74,17 @@ function delay(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
+function formatDateTime(value?: string, fallback = '-'): string {
+  if (!value) return fallback;
+  try {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return fallback;
+    return d.toLocaleString();
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
   const response = await apiClient.get<TaskDetail>(`/api/admin/taskpool/${taskId}`);
   return response.data;
@@ -863,7 +874,7 @@ export function AccountSecurityScreen() {
               {totpStatus?.enabled && (
                 <Text style={styles.statusDetail}>
                   {totpStatus.credentialName || t('auth.totpDefaultCredential')}
-                  {totpStatus.createdAt ? ` · ${totpStatus.createdAt}` : ''}
+                  {totpStatus.createdAt ? ` · ${formatDateTime(totpStatus.createdAt)}` : ''}
                 </Text>
               )}
               {!totpStatus?.enabled && (
@@ -1066,7 +1077,7 @@ export function AccountSecurityScreen() {
                         ) : null}
                       </View>
                       {pk.lastUsedAt ? (
-                        <Text style={styles.hintMuted}>{t('auth.lastUsed')}: {pk.lastUsedAt}</Text>
+                        <Text style={styles.hintMuted}>{t('auth.lastUsed')}: {formatDateTime(pk.lastUsedAt)}</Text>
                       ) : null}
                     </View>
                     <TouchableOpacity
@@ -1131,10 +1142,10 @@ export function AccountSecurityScreen() {
                     ) : null}
                   </View>
                   {session.createdAt ? (
-                    <Text style={styles.hintMuted}>{t('auth.createdAt')}: {session.createdAt}</Text>
+                    <Text style={styles.hintMuted}>{t('auth.createdAt')}: {formatDateTime(session.createdAt)}</Text>
                   ) : null}
                   {session.lastUsedAt ? (
-                    <Text style={styles.hintMuted}>{t('auth.lastUsed')}: {session.lastUsedAt}</Text>
+                    <Text style={styles.hintMuted}>{t('auth.lastUsed')}: {formatDateTime(session.lastUsedAt)}</Text>
                   ) : null}
                   {session.lastUsedIp ? (
                     <Text style={styles.hintMuted}>IP: {session.lastUsedIp}</Text>

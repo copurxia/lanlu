@@ -24,6 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { User } from 'lucide-react';
 import { extractApiError } from '@/lib/utils/api-utils';
+import { formatDate } from '@/lib/utils/utils';
 
 export default function AuthSettingsPage() {
   const { t } = useLanguage();
@@ -886,7 +887,7 @@ export default function AuthSettingsPage() {
               {totpStatus?.enabled ? (
                 <p className="text-sm text-muted-foreground">
                   {totpStatus.credentialName || t('auth.totpDefaultCredential')}
-                  {totpStatus.createdAt ? ` · ${totpStatus.createdAt}` : ''}
+                  {totpStatus.createdAt ? ` · ${formatDate(totpStatus.createdAt)}` : ''}
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">{t('auth.totpSetupHint')}</p>
@@ -1082,7 +1083,7 @@ export default function AuthSettingsPage() {
                         </p>
                         {passkey.lastUsedAt ? (
                           <p className="text-xs text-muted-foreground">
-                            {t('auth.lastUsed')}: {passkey.lastUsedAt}
+                            {t('auth.lastUsed')}: {formatDate(passkey.lastUsedAt)}
                           </p>
                         ) : null}
                       </div>
@@ -1136,12 +1137,12 @@ export default function AuthSettingsPage() {
                     </div>
                     {session.createdAt && (
                       <p className="text-xs text-muted-foreground">
-                        {t('auth.createdAt')}: {session.createdAt}
+                        {t('auth.createdAt')}: {formatDate(session.createdAt)}
                       </p>
                     )}
                     {session.lastUsedAt && (
                       <p className="text-xs text-muted-foreground">
-                        {t('auth.lastUsed')}: {session.lastUsedAt}
+                        {t('auth.lastUsed')}: {formatDate(session.lastUsedAt)}
                       </p>
                     )}
                     {session.lastUsedIp ? (
