@@ -459,7 +459,7 @@ public class WasmTaskRunner {
         FileUtils.ensureDirectoryExists(Path(pluginRuntimeHostDir))
         let pluginGuestDir = "/plugin"
         let inputJson = if (effectiveAction == "download_archive") {
-            buildDownloadArchiveInputJson(targetType.trimAscii(), targetId.trimAscii(), finalParams)
+            buildDownloadArchiveInputJson(targetType.trimAscii(), targetId.trimAscii(), pluginGuestDir, finalParams)
         } else {
             buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams)
         }
@@ -1599,6 +1599,7 @@ public class WasmTaskRunner {
     private static func buildDownloadArchiveInputJson(
         targetType: String,
         targetId: String,
+        pluginDir: String,
         params: String
     ): String {
         let out = ByteBuffer()
@@ -1606,6 +1607,7 @@ public class WasmTaskRunner {
         w.startObject()
         w.writeName("action").writeValue("download_archive")
         w.writeName("pluginType").writeValue("Download")
+        w.writeName("pluginDir").writeValue(pluginDir)
         w.writeName("targetType").writeValue(targetType)
         w.writeName("targetId").writeValue(targetId)
 
