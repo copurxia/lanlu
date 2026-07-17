@@ -284,10 +284,10 @@ $:
             attachments:
               - client/android/app/build/outputs/apk/release/app-release.apk
 
-    - &cli_pipeline
-      name: cli
+    - &mcp_pipeline
+      name: mcp
       ifModify:
-        - cli/**
+        - mcp/**
       runner:
         tags: cnb:arch:amd64
       env:
@@ -302,37 +302,37 @@ $:
               rustup target add x86_64-unknown-linux-musl
             '
 
-        - name: Build lanlu-cli (static musl)
+        - name: Build lanlu-mcp (static musl)
           script: |
             bash -lc '
               set -eux
-              cd cli
+              cd mcp
               CC_x86_64_unknown_linux_musl=musl-gcc \
                 cargo build --release --target x86_64-unknown-linux-musl
             '
 
-        - name: Package lanlu-cli skill zip
+        - name: Package lanlu-mcp zip
           script: |
             bash -lc '
               set -eux
               rm -rf dist
-              mkdir -p dist/lanlu-cli
-              cp cli/target/x86_64-unknown-linux-musl/release/lanlu-cli dist/lanlu-cli/
-              cp cli/SKILL.md dist/lanlu-cli/
-              chmod +x dist/lanlu-cli/lanlu-cli
+              mkdir -p dist/lanlu-mcp
+              cp mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
+              cp mcp/README.md dist/lanlu-mcp/
+              chmod +x dist/lanlu-mcp/lanlu-mcp
               cd dist
-              zip -qr "lanlu-cli-skill-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-cli
+              zip -qr "lanlu-mcp-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-mcp
               ls -lah .
             '
 
-        - name: Upload lanlu-cli artifacts
+        - name: Upload lanlu-mcp artifacts
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - dist/lanlu-cli-skill-*.zip
+              - dist/lanlu-mcp-*.zip
 
   pull_request:
     - *build_pipeline
     - *extension_pipeline
     - *client_pipeline
-    - *cli_pipeline
+    - *mcp_pipeline

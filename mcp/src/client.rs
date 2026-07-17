@@ -1,3 +1,4 @@
+use crate::utils::url_encode;
 use reqwest::Client;
 use std::collections::HashMap;
 
@@ -38,17 +39,13 @@ impl LanluApiClient {
         }
         let qs: Vec<String> = query
             .iter()
-            .map(|(k, v)| format!(
-                "{}={}",
-                url_encode(k),
-                url_encode(v)
-            ))
+            .map(|(k, v)| format!("{}={}", url_encode(k), url_encode(v)))
             .collect();
         format!("{}?{}", base, qs.join("&"))
     }
 
     fn headers(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, ACCEPT};
+        use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION};
         let mut h = HeaderMap::new();
         h.insert(
             AUTHORIZATION,
@@ -64,11 +61,7 @@ impl LanluApiClient {
         h
     }
 
-    pub async fn get(
-        &self,
-        path: &str,
-        query: HashMap<&str, String>,
-    ) -> Result<String, String> {
+    pub async fn get(&self, path: &str, query: HashMap<&str, String>) -> Result<String, String> {
         let url = self.build_url(path, &query);
         let resp = self
             .inner
@@ -78,7 +71,10 @@ impl LanluApiClient {
             .await
             .map_err(|e| format!("HTTP request failed: {}", e))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| format!("read response failed: {}", e))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("read response failed: {}", e))?;
         if !status.is_success() {
             return Err(format!("HTTP {}: {}", status.as_u16(), body));
         }
@@ -97,7 +93,10 @@ impl LanluApiClient {
             .await
             .map_err(|e| format!("HTTP request failed: {}", e))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| format!("read response failed: {}", e))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("read response failed: {}", e))?;
         if !status.is_success() {
             return Err(format!("HTTP {}: {}", status.as_u16(), body));
         }
@@ -116,7 +115,10 @@ impl LanluApiClient {
             .await
             .map_err(|e| format!("HTTP request failed: {}", e))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| format!("read response failed: {}", e))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("read response failed: {}", e))?;
         if !status.is_success() {
             return Err(format!("HTTP {}: {}", status.as_u16(), body));
         }
@@ -140,26 +142,13 @@ impl LanluApiClient {
             .await
             .map_err(|e| format!("HTTP request failed: {}", e))?;
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| format!("read response failed: {}", e))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("read response failed: {}", e))?;
         if !status.is_success() {
             return Err(format!("HTTP {}: {}", status.as_u16(), body));
         }
         Ok(body)
     }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut result = String::new();
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            b' ' => result.push_str("%20"),
-            _ => {
-                result.push_str(&format!("%{:02X}", byte));
-            }
-        }
-    }
-    result
 }

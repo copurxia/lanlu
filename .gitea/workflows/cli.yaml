@@ -1,14 +1,14 @@
-name: Build lanlu-cli
-run-name: ${{ github.actor }} is building lanlu-cli (Rust musl) 
+name: Build lanlu-mcp
+run-name: ${{ github.actor }} is building lanlu-mcp (Rust musl)
 on:
   push:
     paths:
-      - "cli/**"
+      - "mcp/**"
   pull_request:
     paths:
-      - "cli/**"
+      - "mcp/**"
 jobs:
-  build-cli:
+  build-mcp:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository code
@@ -21,110 +21,27 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
           rustup target add x86_64-unknown-linux-musl
 
-      - name: Build lanlu-cli (static musl)
+      - name: Build lanlu-mcp (static musl)
         run: |
-          cd cli
+          cd mcp
           CC_x86_64_unknown_linux_musl=musl-gcc \
             cargo build --release --target x86_64-unknown-linux-musl
 
-      - name: Package lanlu-cli skill zip
+      - name: Package lanlu-mcp zip
         run: |
           set -eux
           rm -rf dist
-          mkdir -p dist/lanlu-cli
-          cp cli/target/x86_64-unknown-linux-musl/release/lanlu-cli dist/lanlu-cli/
-          cp cli/SKILL.md dist/lanlu-cli/
-          chmod +x dist/lanlu-cli/lanlu-cli
+          mkdir -p dist/lanlu-mcp
+          cp mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
+          cp mcp/README.md dist/lanlu-mcp/
+          chmod +x dist/lanlu-mcp/lanlu-mcp
           cd dist
-          zip -qr "lanlu-cli-skill-${{ github.sha }}.zip" lanlu-cli
+          zip -qr "lanlu-mcp-${{ github.sha }}.zip" lanlu-mcp
           ls -lah .
 
-      - name: Upload lanlu-cli artifacts
+      - name: Upload lanlu-mcp artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: lanlu-cli-skill
-          path: dist/lanlu-cli-skill-*.zip
-          retention-days: 30
-name: Build lanlu-cli
-run-name: ${{ github.actor }} is building lanlu-cli 🚀
-on:
-  push:
-    paths:
-      - "lanlu/cli/**"
-  pull_request:
-    paths:
-      - "lanlu/cli/**"
-jobs:
-  build-cli:
-    runs-on: ubuntu-latest
-    env:
-      XMAKE_ROOT: 'y'
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-
-      - name: Install build tools
-        run: |
-          set -eux
-
-          if command -v sudo >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          else
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          fi
-
-      - name: Verify xmake
-        run: |
-          set -eux
-          xmake --version
-
-      - name: Unzip Cangjie + stdx
-        run: |
-          set -eux
-          wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
-          tar -xzvf c.tar.gz
-          wget -O s.zip "${{ vars.STDX_URL }}"
-          unzip -q s.zip -d stdx
-
-      - name: Build lanlu-cli
-        run: |
-          set -eux
-          export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
-          unset GIT_DIR GIT_WORK_TREE
-          source cangjie/envsetup.sh
-          cd lanlu/cli
-          cjpm build -V
-
-      - name: Package lanlu-cli skill zip
-        run: |
-          set -eux
-          rm -rf dist
-          mkdir -p dist/lanlu-cli/scripts
-          cp lanlu/cli/target/release/bin/cli dist/lanlu-cli/scripts/lanlu-cli
-          cp lanlu/cli/SKILL.md dist/lanlu-cli/
-          cd dist
-          zip -qr "lanlu-cli-skill-${{ github.sha }}.zip" lanlu-cli
-          ls -lah .
-
-      - name: Upload lanlu-cli artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: lanlu-cli-skill
-          path: dist/lanlu-cli-skill-*.zip
+          name: lanlu-mcp
+          path: dist/lanlu-mcp-*.zip
           retention-days: 30
