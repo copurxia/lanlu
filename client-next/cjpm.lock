@@ -1,0 +1,6 @@
+version = 0
+
+[requires]
+  ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "887723da036ab3676f5789e167f077ae47bb4e8e", branch = "stdx"}
+  jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "4d7875db5cd2ee1030aa973bf62a10bf8de5d05b", branch = "jg062"}
+  lisi = {git = "https://gitcode.com/copur/lisi.git", commitId = "421bf86379ab5b80511d53a703dcf89cb4138eb5"}
