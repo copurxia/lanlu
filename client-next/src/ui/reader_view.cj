@@ -54,9 +54,9 @@ private func readerBody(model: AppModel): Unit {
         model.prefetchAround()
     }
     // flex 让页面区吃掉顶条之外的剩余高度（ZStack 默认非 flexible，
-    // 不加 flex 时 ImageView 自然高只有 preferredHeight 96vp）。
+    // 不加 flex 时 PixelImageView 量不出页面区高度）。
     ZStack {
-        // 点击区叠在页面之下：ImageView 不消费事件，落到底层照样翻页；
+        // 点击区叠在页面之下：PixelImageView 不消费事件，落到底层照样翻页；
         // 失败态的重试 ClickArea 在上层才能接到点击（不被翻页区遮蔽）。
         HStack {
             // 透明撑开：Panel 会绘制不透明底色盖住页面，故用 Spacer。
@@ -81,8 +81,10 @@ private func pageImage(model: AppModel, key: String, url: String): Unit {
         ClickArea(onClick: {=> model.retryImage(key, url) }) {
             Panel { Label("加载失败，点击重试").muted() }
         }
-    } else if (st.value.startsWith("/")) {
-        ImageView(st.value).fit(ImageFit.Contain)
+    } else if (st.value == "ready") {
+        // ZStack layout 会把子组件拉伸到整页区域（acceptsStretch 默认 true），
+        // 0.vp 只参与 measure；fit 默认 Contain，与原 ImageView 行为一致。
+        PixelImageView(key, 0.vp, 0.vp)
     } else {
         Panel { Label("加载中…").muted() }
     }

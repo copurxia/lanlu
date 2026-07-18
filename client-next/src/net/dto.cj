@@ -62,6 +62,32 @@ public func parseStringArray(raw: String): ArrayList<String> {
     return list
 }
 
+// 部分端点（metadata、info 等）返回裸 JSON 对象，无 {code,message,data} 包络。
+// 顶层存在 "data" 键时返回其原始 JSON 文本；否则原样返回整个 body（含空串）。
+func unwrapDataRaw(body: String): String {
+    var raw = ""
+    let r = readerOf(body)
+    try {
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        match (r.readName()) {
+                            case "data" => raw = rawText(r.readValueBytes())
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => break
+            }
+        }
+    } catch (_: Exception) { return body }
+    if (raw.size == 0) { return body }
+    raw
+}
+
 public class ServerInfo <: JsonDeserializable<ServerInfo> {
     public var name: String = ""
     public var version: String = ""
@@ -349,6 +375,7 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
                             case "capabilities" => res.capabilities = parseStringArray(rawText(r.readValueBytes()))
                             case "pagecount" => res.pagecount = decodeRaw<Int64>(r.readValueBytes(), 0)
                             case "progress" => res.progress = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "file_size" => res.size = decodeRaw<Int64>(r.readValueBytes(), 0)
                             case "size" => res.size = decodeRaw<Int64>(r.readValueBytes(), 0)
                             case "isnew" => res.isnew = decodeRaw<Bool>(r.readValueBytes(), false)
                             case "isfavorite" => res.isfavorite = decodeRaw<Bool>(r.readValueBytes(), false)
@@ -392,9 +419,10 @@ private func parseCoverFromAssetsArray(raw: String): Int64 {
 }
 
 public func parseArchiveMeta(body: String): ArchiveMeta {
-    let env = parseEnvelope(body)
-    if (env.dataRaw.size == 0) { throw Exception("empty metadata") }
-    JsonCodec.decode<ArchiveMeta>(env.dataRaw)
+    // 服务端 metadata 端点返回裸对象（无包络），先经 unwrapDataRaw 兼容两种形态。
+    let raw = unwrapDataRaw(body)
+    if (raw.size == 0) { throw Exception("empty metadata") }
+    JsonCodec.decode<ArchiveMeta>(raw)
 }
 
 public class PageInfo {

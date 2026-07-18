@@ -71,8 +71,8 @@ public class LanluApi {
     }
 
     public func info(): ServerInfo {
-        let env = parseEnvelope(checkedBody(client.get("/api/info")))
-        JsonCodec.decode<ServerInfo>(env.dataRaw)
+        // /api/info 返回裸 JSON 对象（无包络），unwrapDataRaw 兼容两种形态。
+        JsonCodec.decode<ServerInfo>(unwrapDataRaw(checkedBody(client.get("/api/info"))))
     }
 
     public func login(username: String, password: String): LoginData {

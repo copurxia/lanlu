@@ -67,7 +67,8 @@ public func remoteImage(model: AppModel, key: String, url: String, w: Length, h:
             Panel { Label("加载失败，点击重试").muted() }.width(w).height(h)
         }
     } else {
-        // preferredWidth/preferredHeight 只有构造参（无链式修饰器）；fit 可链也可走构造参。
-        ImageView(st.value, fit: ImageFit.Cover, preferredWidth: w, preferredHeight: h)
+        // 状态为 "ready"：像素已 stage 进 cui 像素纹理缓存，PixelImageView 首帧惰性建纹理。
+        // 封面用 Cover 裁满卡片（对齐 C2 之前 ImageView 的行为）；width/height 为首选尺寸。
+        PixelImageView(key, w, h, fit: ImageFit.Cover)
     }
 }

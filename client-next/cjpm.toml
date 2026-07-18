@@ -8,7 +8,7 @@ output-type = "executable"
 link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
 
 [dependencies]
-cui = { path = "../ref/CangjieGUI" }
+cui = { path = "../packages/cangjie-gui" }
 vips_ffi = { path = "../packages/vips_ffi" }
 ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx" }
 

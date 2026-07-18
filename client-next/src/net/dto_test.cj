@@ -45,6 +45,62 @@ func archiveMetaParsesArrayTagsAndAssetsArray(): Unit {
 }
 
 @Test
+func archiveMetaParsesRawObjectWithoutEnvelope(): Unit {
+    // 服务端真实形态：/api/archives/:id/metadata 返回裸 JSON 对象（无 code/message/data 包络），大小字段为 file_size。
+    let body = "{\"arcid\":\"a9\",\"title\":\"Raw Title\",\"type\":0,\"description\":\"raw desc\",\"tags\":[\"t1\",\"ns:t2\"],\"assets\":[{\"key\":\"cover\",\"value\":123}],\"children\":[],\"filename\":\"raw.cbz\",\"relative_path\":\"dir/raw.cbz\",\"file_size\":987654,\"pagecount\":30,\"progress\":5,\"isnew\":true,\"isfavorite\":false,\"lastreadtime\":0,\"archivetype\":\"archive\",\"release_at\":0,\"created_at\":0,\"updated_at\":0,\"thumbnail_hash\":\"deadbeef\",\"capabilities\":[\"read\",\"download_cover\"]}"
+    let m = parseArchiveMeta(body)
+    @Expect(m.arcid, "a9")
+    @Expect(m.title, "Raw Title")
+    @Expect(m.tags.size, 2)
+    @Expect(m.tags[1], "ns:t2")
+    @Expect(m.coverAssetId, 123)
+    @Expect(m.size, 987654)
+    @Expect(m.pagecount, 30)
+}
+
+@Test
+func archiveMetaEnvelopeWithFileSizeStillParses(): Unit {
+    // 回归：包络形态 + file_size 字段名仍正确解析（size 写入 res.size）。
+    let body = "{\"code\":200,\"message\":\"ok\",\"data\":{\"arcid\":\"a1\",\"title\":\"T\",\"tags\":[\"x\"],\"assets\":[{\"key\":\"cover\",\"value\":7}],\"file_size\":2048,\"pagecount\":10,\"isnew\":false,\"isfavorite\":true}}"
+    let m = parseArchiveMeta(body)
+    @Expect(m.arcid, "a1")
+    @Expect(m.size, 2048)
+    @Expect(m.coverAssetId, 7)
+    @Expect(m.isfavorite, true)
+}
+
+@Test
+func unwrapDataRawReturnsDataContentWhenPresent(): Unit {
+    // 有 "data" 键 → 返回 data 的原始 JSON 文本。
+    let raw = unwrapDataRaw("{\"code\":200,\"message\":\"ok\",\"data\":{\"x\":1}}")
+    @Expect(raw.contains("\"x\":1"))
+}
+
+@Test
+func unwrapDataRawReturnsBodyWhenNoDataKey(): Unit {
+    // 无 "data" 键 → 原样返回整个 body。
+    let body = "{\"name\":\"lanlu\",\"version\":\"1.2.3\"}"
+    @Expect(unwrapDataRaw(body), body)
+}
+
+@Test
+func unwrapDataRawEmptyStringReturnedAsIs(): Unit {
+    // 空串 → 原样返回。
+    @Expect(unwrapDataRaw(""), "")
+}
+
+@Test
+func serverInfoDecodesFromRawInfoObject(): Unit {
+    // 服务端真实形态：/api/info 返回裸对象（无包络），经 unwrapDataRaw 后解码。
+    let body = "{\"motd\":\"hello\",\"name\":\"lanlu\",\"total_archives\":57,\"total_pages_read\":1234,\"version\":\"1.2.3\",\"version_desc\":\"desc\",\"version_name\":\"Cangjie\",\"db_extensions\":[]}"
+    let info = JsonCodec.decode<ServerInfo>(unwrapDataRaw(body))
+    @Expect(info.name, "lanlu")
+    @Expect(info.version, "1.2.3")
+    @Expect(info.totalArchives, 57)
+    @Expect(info.motd, "hello")
+}
+
+@Test
 func categoriesParseFromEnvelopeDataArray(): Unit {
     let body = "{\"code\":200,\"message\":\"ok\",\"data\":{\"operation\":\"get_categories\",\"data\":[{\"id\":1,\"catid\":\"CAT_1\",\"name\":\"默认\",\"archive_count\":12}],\"success\":1}}"
     // 注意：若真实响应里 categories 数组在 envelope data 内再嵌套一层，本测试驱动实现按真实形态解析。

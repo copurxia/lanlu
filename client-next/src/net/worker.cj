@@ -15,7 +15,7 @@ public class ApiResult {
 }
 
 // UI 线程提交任务 → spawn 执行 → 结果进信箱；FrameHandler 每帧 drain 回 UI 线程。
-// 模式与 ref/CangjieGUI/examples/process_manager/src/worker.cj 一致。
+// 模式与 packages/cangjie-gui/examples/process_manager/src/worker.cj 一致。
 public class ApiWorker {
     private let mutex = Mutex()
     private var results = ArrayList<ApiResult>()

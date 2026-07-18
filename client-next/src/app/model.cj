@@ -1,6 +1,6 @@
 package lanlu_client_next.app
 
-import cui.{State, Toaster, ToastKind, clearImageCache, invalidateImage}
+import cui.{State, Toaster, ToastKind, clearImageCache, clearPixelImages, stagePixelImage}
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap}
@@ -39,7 +39,7 @@ public class AppModel {
     public let serverInfo = State<?ServerInfo>(None)
     public let cacheInfo = State<String>("")
 
-    // 图片：key → 状态（""=未开始/"loading"=在途/"error"=失败/否则为 png 路径）
+    // 图片：key → 状态（""=未开始/"loading"=在途/"error"=失败/"ready"=像素已就绪）
     public let imageStates = HashMap<String, State<String>>()
     private let imageMutex = Mutex()
 
@@ -110,7 +110,7 @@ public class AppModel {
 
     // ---- 图片 ----
 
-    // key → png 路径的磁盘缓存（按服务器地址分目录），首次使用时创建。
+    // key → 原始编码字节的磁盘缓存（按服务器地址分目录），首次使用时创建。
     private var imageCache: ?ImageCache = None
 
     private func cache(): ImageCache {
@@ -146,7 +146,7 @@ public class AppModel {
     // key 约定：asset:<assetId>（封面/资产）与 page:<arcid>:<pagePath>。
     public func requestImage(key: String, url: String): Unit {
         let st = imageState(key)
-        if (st.value == "loading" || st.value.startsWith("/")) { return }
+        if (st.value == "loading" || st.value == "ready") { return }
         st.value = "loading"
         if (activeImages >= 4) {
             imageQueue.add((key, url))
@@ -186,7 +186,11 @@ public class AppModel {
                 }
                 throw Exception("未知图片 key: ${key}")
             }
-            c.ensurePng(key, fetch)
+            // 缓存原始字节 → 工作线程上 vips 解码 RGBA；纹理创建留给 UI 线程首帧惰性完成。
+            // 解码失败时 decodeCachedOrEvict 会先剔除坏缓存再抛出，重试可重新拉取。
+            let path = c.ensureCached(key, fetch)
+            let d = decodeCachedOrEvict(c, key, path)
+            return (key, d)
         })
         // 同名任务在途时 submit 去重返回 false：回滚并发计数，否则旧任务只减一次导致额度泄漏。
         // 状态保持 loading，由在途任务完成时经 dispatch/finishImageTask 正常设置，
@@ -296,11 +300,12 @@ public class AppModel {
         cacheInfo.value = "图片缓存 ${bytes / 1048576} MB"
     }
 
-    // 清图片缓存：磁盘目录 + cui 纹理缓存 + imageStates 三处一起复位。
-    // 注意命名：cui 有全局 clearImageCache()（纹理缓存），model 方法起名 clearCache 避免遮蔽歧义。
+    // 清图片缓存：磁盘目录 + cui 纹理缓存（路径纹理 + 像素纹理）+ imageStates 三处一起复位。
+    // 注意命名：cui 有全局 clearImageCache()（路径纹理缓存），model 方法起名 clearCache 避免遮蔽歧义。
     public func clearCache(): Unit {
         cache().clear()
-        clearImageCache()   // cui 框架纹理缓存（已解码的 GPU 纹理）
+        clearImageCache()    // cui 路径纹理缓存（按文件路径解码的 GPU 纹理）
+        clearPixelImages()   // cui 像素纹理缓存（含已建纹理与 staged 像素）
         synchronized(imageMutex) { imageStates.clear() }
         refreshCacheInfo()
         toaster.show("缓存已清理", kind: ToastKind.Success)
@@ -350,7 +355,7 @@ public class AppModel {
                     // 换服登录必须复位图片缓存：缓存目录按 serverUrl 派生，而 imageStates
                     // 的 key（asset:42 等）与服务器无关，不复位会把旧服务器的图误判为
                     // “已加载”，新下载也会落进旧目录。同服重登无害：磁盘文件仍在，
-                    // ensurePng 直接命中，只是重新加载一遍。
+                    // ensureCached 直接命中，只是重新加载一遍。
                     imageCache = None
                     synchronized(imageMutex) { imageStates.clear() }
                     page.value = Page.Library
@@ -428,9 +433,11 @@ public class AppModel {
             let key = name.removePrefix("img:")
             match (r.payload) {
                 case Some(p) =>
-                    let path = (p as String).getOrThrow()
-                    invalidateImage(path)   // cui 纹理缓存失效，覆盖旧图时必需
-                    imageState(key).value = path
+                    // 像素已在工作线程解好；这里只登记 staged 像素（UI 线程），
+                    // 纹理由 PixelImageView 首帧绘制时惰性创建。
+                    let (k, d) = (p as (String, DecodedImage)).getOrThrow()
+                    stagePixelImage(k, d.width, d.height, d.pixels)
+                    imageState(k).value = "ready"
                 case None => imageState(key).value = "error"
             }
         }
