@@ -79,4 +79,6 @@ EOF
 
 - 传输：stdio，每行一个 JSON-RPC 2.0 消息
 - 支持方法：`initialize`、`initialized`、`tools/list`、`tools/call`
+- 支持通知：`notifications/cancelled`（携带 `requestId`，可中断正在执行的 `tools/call`，被取消的请求返回错误码 `-32800`）
+- 请求并发：每个带 id 的请求在独立任务中执行，慢调用（如长轮询任务）不会阻塞后续请求读取
 - 返回内容类型：text（JSON 字符串）

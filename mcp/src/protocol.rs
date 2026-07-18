@@ -66,6 +66,63 @@ pub mod error_code {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const INTERNAL_ERROR: i32 = -32603;
+    /// Request was cancelled via `notifications/cancelled` (LSP-style extension).
+    pub const REQUEST_CANCELLED: i32 = -32800;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_cancelled_code_is_neg32800() {
+        assert_eq!(error_code::REQUEST_CANCELLED, -32800);
+    }
+
+    #[test]
+    fn cancelled_response_carries_request_cancelled_code() {
+        let resp = JsonRpcResponse::error(
+            Some(serde_json::json!(5)),
+            error_code::REQUEST_CANCELLED,
+            "request cancelled".to_string(),
+            None,
+        );
+        let err = resp.error.expect("error field set");
+        assert_eq!(err.code, -32800);
+        assert_eq!(resp.id, Some(serde_json::json!(5)));
+    }
+
+    #[test]
+    fn call_tool_error_result_sets_is_error() {
+        let r = CallToolResult::error("boom".to_string());
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["is_error"], true);
+        assert_eq!(v["content"][0]["type"], "text");
+        assert_eq!(v["content"][0]["text"], "boom");
+    }
+
+    #[test]
+    fn success_response_omits_error_field() {
+        let resp =
+            JsonRpcResponse::success(Some(serde_json::json!(1)), serde_json::json!({"ok": true}));
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(!s.contains("error"), "error field leaked into success: {}", s);
+        assert!(s.contains("\"result\""));
+    }
+
+    #[test]
+    fn error_response_omits_result_field() {
+        let resp = JsonRpcResponse::error(
+            Some(serde_json::json!(2)),
+            error_code::METHOD_NOT_FOUND,
+            "nope".to_string(),
+            None,
+        );
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(!s.contains("\"result\""));
+        assert!(s.contains("\"error\""));
+        assert!(s.contains("-32601"));
+    }
 }
 
 /// initialize request params.

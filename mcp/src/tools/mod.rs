@@ -117,3 +117,62 @@ pub fn object_schema(
         "additionalProperties": false
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn require_str_returns_value_when_present() {
+        let args = json!({"id": "abc"});
+        assert_eq!(require_str(&args, "id").unwrap(), "abc");
+    }
+
+    #[test]
+    fn require_str_errors_when_missing() {
+        let args = json!({});
+        assert!(require_str(&args, "id").is_err());
+    }
+
+    #[test]
+    fn require_str_errors_when_not_a_string() {
+        let args = json!({"id": 5});
+        assert!(require_str(&args, "id").is_err());
+    }
+
+    #[test]
+    fn optional_str_roundtrips() {
+        assert_eq!(optional_str(&json!({}), "x"), None);
+        assert_eq!(optional_str(&json!({"x": "y"}), "x"), Some("y".to_string()));
+    }
+
+    #[test]
+    fn optional_i64_parses_integers_only() {
+        assert_eq!(optional_i64(&json!({"n": 5}), "n"), Some(5));
+        assert_eq!(optional_i64(&json!({"n": "5"}), "n"), None);
+        assert_eq!(optional_i64(&json!({}), "n"), None);
+    }
+
+    #[test]
+    fn optional_bool_defaults_false_and_only_accepts_bools() {
+        assert_eq!(optional_bool(&json!({}), "b"), false);
+        assert_eq!(optional_bool(&json!({"b": true}), "b"), true);
+        assert_eq!(optional_bool(&json!({"b": false}), "b"), false);
+        assert_eq!(optional_bool(&json!({"b": "true"}), "b"), false);
+    }
+
+    #[test]
+    fn object_schema_is_strict_and_shaped() {
+        let schema = object_schema(
+            "desc",
+            &["id"],
+            vec![("id", serde_json::json!({"type": "string"}))],
+        );
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["description"], "desc");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"][0], "id");
+        assert_eq!(schema["properties"]["id"]["type"], "string");
+    }
+}

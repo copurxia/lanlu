@@ -2,6 +2,20 @@ use crate::utils::url_encode;
 use reqwest::Client;
 use std::collections::HashMap;
 
+/// Validate that `LANLU_TOKEN` can be used as a Bearer header value.
+///
+/// Returns `Err` for empty tokens or tokens containing bytes that are illegal
+/// in an HTTP header field value (e.g. CR/LF), which would otherwise panic
+/// when the header is constructed.
+pub fn validate_token(token: &str) -> Result<(), String> {
+    if token.is_empty() {
+        return Err("LANLU_TOKEN must not be empty".to_string());
+    }
+    reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token))
+        .map(|_| ())
+        .map_err(|e| format!("LANLU_TOKEN contains invalid characters: {}", e))
+}
+
 pub struct LanluApiClient {
     host: String,
     token: String,
@@ -11,8 +25,13 @@ pub struct LanluApiClient {
 
 impl LanluApiClient {
     pub fn new(host: String, token: String, no_proxy: bool) -> Self {
-        let inner = Client::builder()
-            .no_proxy()
+        let mut builder = Client::builder();
+        // Only bypass system/http proxies when the caller explicitly opted in
+        // via LANLU_NO_PROXY; otherwise reqwest honours http_proxy/https_proxy.
+        if no_proxy {
+            builder = builder.no_proxy();
+        }
+        let inner = builder
             .build()
             .expect("failed to build reqwest Client");
         Self {
@@ -150,5 +169,31 @@ impl LanluApiClient {
             return Err(format!("HTTP {}: {}", status.as_u16(), body));
         }
         Ok(body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_token_accepts_plain_ascii() {
+        assert!(validate_token("good-token-123").is_ok());
+    }
+
+    #[test]
+    fn validate_token_rejects_empty() {
+        assert!(validate_token("").is_err());
+    }
+
+    #[test]
+    fn validate_token_rejects_newline_bytes() {
+        assert!(validate_token("bad\nvalue").is_err());
+        assert!(validate_token("bad\rvalue").is_err());
+    }
+
+    #[test]
+    fn validate_token_rejects_nul_byte() {
+        assert!(validate_token("bad\0value").is_err());
     }
 }

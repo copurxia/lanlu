@@ -3,8 +3,15 @@ use crate::protocol::{boolean_prop, integer_prop, string_prop, Tool};
 use crate::tools::{object_schema, optional_bool, optional_i64, optional_str, require_str};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
+use tokio::io::AsyncReadExt;
+
+/// Number of chunks of `chunk_size` needed to cover `file_size` bytes.
+///
+/// Uses ceiling division so a partial final chunk still counts.
+pub fn total_chunks(file_size: usize, chunk_size: usize) -> usize {
+    file_size.div_ceil(chunk_size)
+}
 
 pub fn download_url_tool() -> Tool {
     Tool {
@@ -109,14 +116,16 @@ pub async fn run_upload(client: &LanluApiClient, args: &Value) -> Result<String,
     let interval = optional_i64(args, "interval").unwrap_or(1000) as u64;
     let timeout = optional_i64(args, "timeout").unwrap_or(300000) as u64;
 
-    let all_bytes = fs::read(&file_path).map_err(|e| format!("read file failed: {}", e))?;
-    let file_size = all_bytes.len();
+    let metadata = tokio::fs::metadata(&file_path)
+        .await
+        .map_err(|e| format!("stat file failed: {}", e))?;
+    let file_size = metadata.len() as usize;
     let filename = Path::new(&file_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    let total_chunks = (file_size + chunk_size - 1) / chunk_size;
+    let total_chunks = total_chunks(file_size, chunk_size);
 
     let init_payload = serde_json::json!({
         "filename": filename,
@@ -142,10 +151,19 @@ pub async fn run_upload(client: &LanluApiClient, args: &Value) -> Result<String,
         .parse()
         .map_err(|_| "invalid taskId".to_string())?;
 
-    let mut offset = 0;
+    // Stream the file off disk one chunk at a time rather than loading the
+    // whole archive into memory, so large uploads stay within a bounded
+    // resident footprint.
+    let mut file = tokio::fs::File::open(&file_path)
+        .await
+        .map_err(|e| format!("open file failed: {}", e))?;
+
     for i in 0..total_chunks {
-        let end = std::cmp::min(offset + chunk_size, file_size);
-        let chunk = all_bytes[offset..end].to_vec();
+        let remaining = file_size - i * chunk_size;
+        let mut chunk = vec![0u8; std::cmp::min(chunk_size, remaining)];
+        file.read_exact(&mut chunk)
+            .await
+            .map_err(|e| format!("read chunk {} failed: {}", i, e))?;
 
         let mut query = HashMap::new();
         query.insert("taskId", task_id_str.to_string());
@@ -155,8 +173,6 @@ pub async fn run_upload(client: &LanluApiClient, args: &Value) -> Result<String,
         client
             .put_bytes("/api/assets/upload/chunk", query, chunk)
             .await?;
-
-        offset = end;
     }
 
     if wait {
@@ -195,4 +211,29 @@ pub async fn run_metadata_run(client: &LanluApiClient, args: &Value) -> Result<S
         .post("/api/metadata_plugin", &payload.to_string())
         .await?;
     super::source::handle_task_response(client, &resp, wait, interval, timeout).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn total_chunks_exact_multiple() {
+        assert_eq!(total_chunks(16, 8), 2);
+    }
+
+    #[test]
+    fn total_chunks_with_remainder() {
+        assert_eq!(total_chunks(20, 8), 3);
+    }
+
+    #[test]
+    fn total_chunks_single_partial_chunk() {
+        assert_eq!(total_chunks(1, 8), 1);
+    }
+
+    #[test]
+    fn total_chunks_zero_size_is_zero() {
+        assert_eq!(total_chunks(0, 8), 0);
+    }
 }
