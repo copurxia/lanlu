@@ -1,5 +1,6 @@
 import {apiClient, buildApiUrl} from './client';
-import type {ApiEnvelope} from '../types/api';
+import type {ApiEnvelope, Category} from '../types/api';
+import {normalizeCategories} from './lanlu';
 import EventSource from 'react-native-sse';
 import {getStoredToken} from '../storage/token';
 import {getActiveServer} from '../storage/servers';
@@ -96,6 +97,17 @@ export type TagCloudItem = {
 };
 
 // ─── Categories ────────────────────────────────────────────────────────────
+
+/**
+ * 管理侧获取所有分类（含禁用）。用户侧列表请使用 lanlu.ts 的 fetchCategories。
+ */
+export async function adminFetchCategories(): Promise<Category[]> {
+  const response = await apiClient.get<{
+    success?: number;
+    data?: Category | Category[];
+  }>('/api/admin/categories');
+  return normalizeCategories(response.data?.data);
+}
 
 export async function createCategory(params: {
   name: string;

@@ -106,12 +106,7 @@ public class CategoryController {
         return String.fromUtf8(readToEnd(out))
     }
 
-    /**
-     * GET /api/categories - 获取所有分类
-     */
-    public static func getCategories(ctx: Ctx) {
-        let categories = CategoryDao.getAllCategories()
-
+    private static func writeCategoryListJson(ctx: Ctx, categories: Array<CategoryData>): Unit {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -126,6 +121,20 @@ public class CategoryController {
         w.endObject()
         w.flush()
         ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+    }
+
+    /**
+     * GET /api/categories - 获取启用的分类（用户侧，不返回 enabled=false 的分类）
+     */
+    public static func getCategories(ctx: Ctx) {
+        writeCategoryListJson(ctx, CategoryDao.getEnabledCategories())
+    }
+
+    /**
+     * GET /api/admin/categories - 获取所有分类（管理侧，含禁用）
+     */
+    public static func getAdminCategories(ctx: Ctx) {
+        writeCategoryListJson(ctx, CategoryDao.getAllCategories())
     }
 
     /**

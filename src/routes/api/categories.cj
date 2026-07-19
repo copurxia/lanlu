@@ -11,9 +11,17 @@ public func registerCategoryRoutes(router: App) {
     let userCategories = router.group("/api/categories")
     userCategories.use(AuthMiddleware.requiredAuthMiddleware())
 
-    // 获取所有分类（所有登录用户）
+    // 获取启用的分类（所有登录用户，不返回 enabled=false 的分类）
     userCategories.get("", { ctx =>
         CategoryController.getCategories(ctx)
+    })
+
+    let adminCategoriesRead = router.group("/api/admin/categories")
+    adminCategoriesRead.use(AuthMiddleware.requireAdminMiddleware())
+
+    // 获取所有分类（含禁用，需要管理员权限）
+    adminCategoriesRead.get("", { ctx =>
+        CategoryController.getAdminCategories(ctx)
     })
 
     let adminCategories = router.group("/api/categories")
