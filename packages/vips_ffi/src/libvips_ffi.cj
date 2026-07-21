@@ -31,6 +31,9 @@ foreign func vips_autorot(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, ...): 
 // Resize by a scale factor.
 foreign func vips_resize(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, scale: Float64, ...): Int32
 
+// Gaussian blur with sigma in pixels (vips_gaussblur, convolution.h)。
+foreign func vips_gaussblur(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, sigma: Float64, ...): Int32
+
 // Crop/extract.
 foreign func vips_extract_area(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32, ...): Int32
 
@@ -113,6 +116,10 @@ public class VipsApi {
 
     public static func resize(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, scale: Float64): Int32 {
         return unsafe { vips_resize(_in, out, scale, CPointer<Unit>()) }
+    }
+
+    public static func gaussblur(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, sigma: Float64): Int32 {
+        return unsafe { vips_gaussblur(_in, out, sigma, CPointer<Unit>()) }
     }
 
     public static func extractArea(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32): Int32 {

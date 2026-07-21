@@ -5,6 +5,7 @@ public enum Page {
     | Login
     | Library
     | Detail(String)          // arcid
+    | Tank(String)            // tankoubon_id
     | Reader(String, Int64)   // arcid, 起始页（1 基）
     | Settings
 }

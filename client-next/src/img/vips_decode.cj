@@ -43,12 +43,15 @@ public class DecodedImage {
 }
 
 // 任意格式图片文件 → RGBA 像素。失败抛异常（信息带 vips 错误串）。
-// 管线：imageNewFromFile → autorot（按 EXIF 方向转正）→ colourspace(sRGB) → castUchar
-// → bands 归一到 4 波段 → writeToMemory → 拷进 Array<UInt8>。
+// 管线：imageNewFromFile → （可选）vips_resize 缩小 → autorot（按 EXIF 方向转正）
+// → colourspace(sRGB) → castUchar → bands 归一到 4 波段 → writeToMemory → 拷进 Array<UInt8>。
+// maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
+// 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
 // 仅在工作线程调用（vips 解码是 CPU 重活，UI 线程纪律见 model.startImageTask）。
-public func decodeFileToRgba(path: String): DecodedImage {
+public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): DecodedImage {
     ensureVips()
     var inImg: VipsImagePtr = CPointer<VipsImage>()
+    var resizedImg: VipsImagePtr = CPointer<VipsImage>()
     var rotImg: VipsImagePtr = CPointer<VipsImage>()
     var srgbImg: VipsImagePtr = CPointer<VipsImage>()
     var u8Img: VipsImagePtr = CPointer<VipsImage>()
@@ -60,7 +63,24 @@ public func decodeFileToRgba(path: String): DecodedImage {
         unsafe { LibC.free(inC) }
         if (inImg.isNull()) { throw Exception("vips 解码失败: ${VipsApi.takeErrorString()}") }
 
-        let rotRc = VipsApi.autorot(inImg, CPointer<VipsImagePtr>(inout rotImg))
+        // 可选缩小解码：最长边超过 maxDimension 时按比例缩（封面/阅读页省内存与解码耗时）。
+        var src = inImg
+        if (maxDimension > 0) {
+            let w0 = VipsApi.imageWidth(inImg)
+            let h0 = VipsApi.imageHeight(inImg)
+            let longest = max(Int64(w0), Int64(h0))
+            if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
+            if (longest > Int64(maxDimension)) {
+                let scale = Float64(maxDimension) / Float64(longest)
+                let resizeRc = VipsApi.resize(inImg, CPointer<VipsImagePtr>(inout resizedImg), scale)
+                if (resizeRc != 0 || resizedImg.isNull()) {
+                    throw Exception("vips resize 失败: ${VipsApi.takeErrorString()}")
+                }
+                src = resizedImg
+            }
+        }
+
+        let rotRc = VipsApi.autorot(src, CPointer<VipsImagePtr>(inout rotImg))
         if (rotRc != 0 || rotImg.isNull()) { throw Exception("vips autorot 失败: ${VipsApi.takeErrorString()}") }
 
         let csRc = VipsApi.colourspaceSRgb(rotImg, CPointer<VipsImagePtr>(inout srgbImg))
@@ -108,6 +128,7 @@ public func decodeFileToRgba(path: String): DecodedImage {
     } finally {
         // VipsApi.unref/free 内部自带空指针判断；未走到的步骤保持空指针，自然跳过。
         VipsApi.unref(inImg)
+        VipsApi.unref(resizedImg)
         VipsApi.unref(rotImg)
         VipsApi.unref(srgbImg)
         VipsApi.unref(u8Img)
@@ -119,12 +140,113 @@ public func decodeFileToRgba(path: String): DecodedImage {
 // 解码缓存定稿文件（图片管线用）：解码失败说明 .img 字节损坏（如截断的下载），
 // 先剔除该 key 的缓存条目再原样抛出——坏字节留在缓存里会让每次重试都命中同一份坏数据。
 // 剔除本身的 I/O 失败静默吞掉，保证抛出的始终是原始解码错误。
-public func decodeCachedOrEvict(cache: ImageCache, key: String, path: String): DecodedImage {
+// maxDimension 透传 decodeFileToRgba（缩小解码，见上）；evict 的 key 是磁盘缓存
+// 条目 key（原始字节），与尺寸档位无关。
+public func decodeCachedOrEvict(cache: ImageCache, key: String, path: String,
+    maxDimension!: Int32 = 0): DecodedImage {
     try {
-        return decodeFileToRgba(path)
+        return decodeFileToRgba(path, maxDimension: maxDimension)
     } catch (e: Exception) {
         try { cache.evict(key) } catch (_: Exception) { () }
         throw e
+    }
+}
+
+// backdrop 解码：加载文件 → vips_resize 缩到 targetWidth 像素宽（保持比例）→ vips_gaussblur
+// 真高斯模糊 → 后续管线同 decodeFileToRgba。仅在工作线程调用。用于详情页 backdrop 模糊背景：
+// 旧实现只缩到 ~48px 宽靠 SDL Linear 放大得到"模糊"，高对比内容（漫画线稿）会糊成脏块；
+// 改为中间尺寸（~256px）+ sigma 高斯模糊，质感对齐原型 filter: blur(36px)。
+// blurSigma 为高斯核 sigma（中间图像素单位），0 表示不模糊（回退旧行为的逃生口）。
+public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0): DecodedImage {
+    ensureVips()
+    var inImg: VipsImagePtr = CPointer<VipsImage>()
+    var resizedImg: VipsImagePtr = CPointer<VipsImage>()
+    var blurImg: VipsImagePtr = CPointer<VipsImage>()
+    var rotImg: VipsImagePtr = CPointer<VipsImage>()
+    var srgbImg: VipsImagePtr = CPointer<VipsImage>()
+    var u8Img: VipsImagePtr = CPointer<VipsImage>()
+    var normImg: VipsImagePtr = CPointer<VipsImage>()
+    var mem = CPointer<Unit>()
+    try {
+        // 1. 加载原始文件
+        let inC = unsafe { LibC.mallocCString(path) }
+        inImg = VipsApi.imageNewFromFile(inC)
+        unsafe { LibC.free(inC) }
+        if (inImg.isNull()) { throw Exception("vips 解码失败: ${VipsApi.takeErrorString()}") }
+
+        // 2. 缩放到 targetWidth 宽（scale = target / originalWidth，保比例）
+        let w = VipsApi.imageWidth(inImg)
+        if (w <= 0) { throw Exception("vips 尺寸非法: ${w}") }
+        let scale = Float64(targetWidth) / Float64(w)
+        let resizeRc = VipsApi.resize(inImg, CPointer<VipsImagePtr>(inout resizedImg), scale)
+        if (resizeRc != 0 || resizedImg.isNull()) {
+            throw Exception("vips resize 失败: ${VipsApi.takeErrorString()}")
+        }
+
+        // 3. 真高斯模糊（sigma > 0 时）：在中间尺寸上模糊，放大后保持柔和
+        var src = resizedImg
+        if (blurSigma > 0.0) {
+            let blurRc = VipsApi.gaussblur(resizedImg, CPointer<VipsImagePtr>(inout blurImg), blurSigma)
+            if (blurRc != 0 || blurImg.isNull()) {
+                throw Exception("vips gaussblur 失败: ${VipsApi.takeErrorString()}")
+            }
+            src = blurImg
+        }
+
+        // 4. autorot → colourspace → cast → normalize bands（同 decodeFileToRgba 管线）
+        let rotRc = VipsApi.autorot(src, CPointer<VipsImagePtr>(inout rotImg))
+        if (rotRc != 0 || rotImg.isNull()) { throw Exception("vips autorot 失败: ${VipsApi.takeErrorString()}") }
+
+        let csRc = VipsApi.colourspaceSRgb(rotImg, CPointer<VipsImagePtr>(inout srgbImg))
+        if (csRc != 0 || srgbImg.isNull()) { throw Exception("vips colourspace 失败: ${VipsApi.takeErrorString()}") }
+
+        let castRc = VipsApi.castUChar(srgbImg, CPointer<VipsImagePtr>(inout u8Img))
+        if (castRc != 0 || u8Img.isNull()) { throw Exception("vips cast_uchar 失败: ${VipsApi.takeErrorString()}") }
+
+        let bands = VipsApi.imageBands(u8Img)
+        if (bands == 4) {
+            normImg = u8Img
+            u8Img = CPointer<VipsImage>()
+        } else if (bands == 3) {
+            let rc = VipsApi.bandjoinConstAlpha255(u8Img, CPointer<VipsImagePtr>(inout normImg))
+            if (rc != 0 || normImg.isNull()) { throw Exception("vips 补 alpha 失败: ${VipsApi.takeErrorString()}") }
+        } else if (bands == 1) {
+            normImg = greyToRgba(u8Img)
+        } else if (bands == 2) {
+            normImg = greyAlphaToRgba(u8Img)
+        } else if (bands > 4) {
+            normImg = takeFirst4Bands(u8Img)
+        } else {
+            throw Exception("vips 波段数非法: ${bands}")
+        }
+
+        let bw = VipsApi.imageWidth(normImg)
+        let bh = VipsApi.imageHeight(normImg)
+        if (bw <= 0 || bh <= 0) { throw Exception("vips 尺寸非法: ${bw}x${bh}") }
+
+        var size: UIntNative = 0
+        mem = VipsApi.writeToMemory(normImg, CPointer<UIntNative>(inout size))
+        if (mem.isNull() || size == 0) { throw Exception("vips 写内存失败: ${VipsApi.takeErrorString()}") }
+        let n = Int64(size)
+        let expected = Int64(bw) * Int64(bh) * 4
+        if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected}") }
+
+        let pixels = Array<UInt8>(n, repeat: 0u8)
+        unsafe {
+            let handle = acquireArrayRawData(pixels)
+            memcpy(handle.pointer, CPointer<UInt8>(mem), size)
+            releaseArrayRawData(handle)
+        }
+        return DecodedImage(bw, bh, pixels)
+    } finally {
+        VipsApi.unref(inImg)
+        VipsApi.unref(resizedImg)
+        VipsApi.unref(blurImg)
+        VipsApi.unref(rotImg)
+        VipsApi.unref(srgbImg)
+        VipsApi.unref(u8Img)
+        VipsApi.unref(normImg)
+        VipsApi.free(mem)
     }
 }
 

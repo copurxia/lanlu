@@ -56,6 +56,11 @@ func archiveMetaParsesRawObjectWithoutEnvelope(): Unit {
     @Expect(m.coverAssetId, 123)
     @Expect(m.size, 987654)
     @Expect(m.pagecount, 30)
+    // 时间戳字段：服务端真实响应包含 release_at/created_at/updated_at/lastreadtime
+    @Expect(m.release_at, 0)
+    @Expect(m.created_at, 0)
+    @Expect(m.updated_at, 0)
+    @Expect(m.lastreadtime, 0)
 }
 
 @Test
@@ -134,4 +139,332 @@ func nullScalarFieldsFallBackToDefaults(): Unit {
     let p = parseSearchPage(body)
     @Expect(p.items[0].lastreadtime, 0)
     @Expect(p.items[0].description, "")
+}
+
+// E4: 时间戳字段解析与格式化
+@Test
+func archiveMetaParsesTimestamps(): Unit {
+    let body = "{\"arcid\":\"a1\",\"title\":\"T\",\"release_at\":1716076800,\"created_at\":1715904000,\"updated_at\":1716163200,\"lastreadtime\":1716249600,\"pagecount\":10,\"tags\":[]}"
+    let m = parseArchiveMeta(body)
+    @Expect(m.release_at, 1716076800)
+    @Expect(m.created_at, 1715904000)
+    @Expect(m.updated_at, 1716163200)
+    @Expect(m.lastreadtime, 1716249600)
+}
+
+@Test
+func formatTimestampReturnsDateString(): Unit {
+    // 2024-05-19 00:00:00 UTC = 1716076800
+    @Expect(formatTimestamp(1716076800), "2024-05-19")
+    // 2024-01-01 00:00:00 UTC = 1704067200
+    @Expect(formatTimestamp(1704067200), "2024-01-01")
+    // 0 → "未知"
+    @Expect(formatTimestamp(0), "未知")
+    // 负数 → "未知"
+    @Expect(formatTimestamp(-1), "未知")
+}
+
+// ===== T10: 合集（tankoubon）DTO + 混合页统计 + HomeItem =====
+
+// 服务端真实形态（Tankoubon.writeJson）：GET /api/tankoubons 返回裸 JSON
+// {"filtered":N,"result":[...],"total":N}，无 code/message/data 包络；
+// children 为字符串数组，assets 为对象。
+@Test
+func tankoubonListParsesBareResultArray(): Unit {
+    let body = "{\"filtered\":2,\"result\":[{\"tankoubon_id\":\"TANK_1\",\"title\":\"合集一\",\"description\":\"d1\",\"tags\":\"t1\",\"assets\":{\"cover\":42},\"children\":[\"a1\",\"a2\"],\"archive_count\":2,\"pagecount\":48,\"progress\":12,\"lastreadtime\":0,\"release_at\":\"\",\"created_at\":\"\",\"updated_at\":\"2024-05-01\",\"isnew\":true,\"isfavorite\":false},{\"tankoubon_id\":\"TANK_2\",\"title\":\"合集二\",\"description\":\"\",\"tags\":\"\",\"assets\":{},\"children\":[],\"archive_count\":0,\"pagecount\":0,\"progress\":0,\"lastreadtime\":0,\"release_at\":\"\",\"created_at\":\"\",\"updated_at\":\"\",\"isnew\":false,\"isfavorite\":false}],\"total\":2}"
+    let list = parseTankoubonList(body)
+    @Expect(list.size, 2)
+    @Expect(list[0].id, "TANK_1")
+    @Expect(list[0].name, "合集一")
+    @Expect(list[0].archiveCount, 2)
+    @Expect(list[0].totalPages, 48)
+    @Expect(list[0].progress, Float32(12.0))
+    // 封面档案 id = 首个成员（children[0]），对齐 frontend TankoubonCard firstArchiveId。
+    @Expect(list[0].coverArcid, "a1")
+    @Expect(list[0].updatedAt, "2024-05-01")
+    @Expect(list[1].id, "TANK_2")
+    @Expect(list[1].coverArcid, "")
+}
+
+// frontend normalizeResult 兼容 result 为单个对象的形态。
+@Test
+func tankoubonListParsesSingleObjectResult(): Unit {
+    let body = "{\"filtered\":1,\"result\":{\"tankoubon_id\":\"TANK_S\",\"title\":\"单本\",\"children\":[\"a9\"],\"archive_count\":1,\"pagecount\":24,\"progress\":3,\"updated_at\":\"2024-05-02\"},\"total\":1}"
+    let list = parseTankoubonList(body)
+    @Expect(list.size, 1)
+    @Expect(list[0].id, "TANK_S")
+    @Expect(list[0].coverArcid, "a9")
+}
+
+// 单个合集：GET /api/tankoubons/:id/metadata 返回裸对象，children 为 member
+// 对象数组（entity_id 指向档案 arcid），assets 为 [{key,value}] 数组。
+@Test
+func tankoubonParsesMetadataObjectShape(): Unit {
+    let body = "{\"title\":\"合集M\",\"type\":1,\"description\":\"d\",\"tags\":[\"x\"],\"assets\":[{\"key\":\"cover\",\"value\":7}],\"tankoubon_id\":\"TANK_M\",\"children\":[{\"entity_type\":\"archive\",\"entity_id\":\"a88\",\"volume_no\":1}],\"archive_count\":3,\"pagecount\":72,\"progress\":6,\"lastreadtime\":0,\"isnew\":false,\"isfavorite\":true,\"release_at\":\"\",\"created_at\":\"\",\"updated_at\":\"2024-06-02\"}"
+    let t = parseTankoubon(body)
+    @Expect(t.id, "TANK_M")
+    @Expect(t.name, "合集M")
+    @Expect(t.archiveCount, 3)
+    @Expect(t.totalPages, 72)
+    @Expect(t.progress, Float32(6.0))
+    @Expect(t.coverArcid, "a88")
+    @Expect(t.updatedAt, "2024-06-02")
+}
+
+// ===== T11: TankoubonInfo 详情扩展（description/tags/coverAssetId/createdAt 容忍两形态）=====
+
+// 列表形态：assets 为 {"cover":N} 对象、tags 为 CSV 字符串（Tankoubon.writeJson 真实形态）。
+@Test
+func tankoubonListParsesCoverTagsDescription(): Unit {
+    let body = "{\"filtered\":1,\"result\":[{\"tankoubon_id\":\"TANK_C\",\"title\":\"合集C\",\"description\":\"系列总集篇\",\"tags\":\"artist:某某, full color\",\"assets\":{\"cover\":42,\"backdrop\":43},\"children\":[\"a1\"],\"archive_count\":5,\"pagecount\":200,\"progress\":50,\"created_at\":\"2024-06-12 10:00:00\",\"updated_at\":\"2024-11-02 22:14:00\"}],\"total\":1}"
+    let list = parseTankoubonList(body)
+    @Expect(list.size, 1)
+    @Expect(list[0].coverAssetId, 42)
+    @Expect(list[0].description, "系列总集篇")
+    @Expect(list[0].tags.size, 2)
+    @Expect(list[0].tags[0], "artist:某某")
+    @Expect(list[0].tags[1], "full color")
+    @Expect(list[0].createdAt, "2024-06-12 10:00:00")
+}
+
+// metadata 形态：assets 为 [{key,value}] 数组、tags 为字符串数组（详情页数据同源）。
+@Test
+func tankoubonMetadataParsesAssetsArrayAndTagsArray(): Unit {
+    let body = "{\"title\":\"合集D\",\"description\":\"d\",\"tags\":[\"artist:某某\",\"group:某社团\"],\"assets\":[{\"key\":\"cover\",\"value\":77}],\"tankoubon_id\":\"TANK_D\",\"children\":[{\"entity_type\":\"archive\",\"entity_id\":\"a1\"}],\"archive_count\":2,\"pagecount\":90,\"progress\":30,\"created_at\":\"2024-06-12\",\"updated_at\":\"2024-11-02\"}"
+    let t = parseTankoubon(body)
+    @Expect(t.coverAssetId, 77)
+    @Expect(t.tags.size, 2)
+    @Expect(t.tags[1], "group:某社团")
+    @Expect(t.createdAt, "2024-06-12")
+}
+
+// 缺省容忍：assets 空对象/缺字段时 coverAssetId 为 0、tags 为空。
+@Test
+func tankoubonMissingAssetsAndTagsFallBack(): Unit {
+    let body = "{\"result\":[{\"tankoubon_id\":\"TANK_E\",\"title\":\"\",\"assets\":{},\"children\":[]}],\"total\":1}"
+    let list = parseTankoubonList(body)
+    @Expect(list[0].coverAssetId, 0)
+    @Expect(list[0].tags.size, 0)
+    @Expect(list[0].description, "")
+}
+
+// 混合页统计：按 pageType 字符串计数，未知类型忽略。
+private func pageOf(id: String, t: String): PageInfo {
+    let p = PageInfo()
+    p.id = id
+    p.pageType = t
+    return p
+}
+
+@Test
+func statPagesCountsMixedPageTypes(): Unit {
+    let pages = [
+        pageOf("p1", "image"), pageOf("p2", "image"),
+        pageOf("p3", "video"),
+        pageOf("p4", "audio"),
+        pageOf("p5", "html"),
+        pageOf("p6", "unknown")
+    ]
+    let s = statPages(pages)
+    @Expect(s.image, 2)
+    @Expect(s.video, 1)
+    @Expect(s.audio, 1)
+    @Expect(s.html, 1)
+}
+
+@Test
+func statPagesEmptyArrayIsAllZero(): Unit {
+    let s = statPages([])
+    @Expect(s.image, 0)
+    @Expect(s.video, 0)
+    @Expect(s.audio, 0)
+    @Expect(s.html, 0)
+}
+
+// HomeItem 去重 key，对齐 frontend HomePageClient :290-309。
+@Test
+func homeItemDedupKeys(): Unit {
+    let a = SearchItem()
+    a.arcid = "abc123"
+    let t = TankoubonInfo()
+    t.id = "TANK_9"
+    @Expect(HomeItem.Arc(a).key(), "archive:abc123")
+    @Expect(HomeItem.Tank(t).key(), "tankoubon:TANK_9")
+}
+
+@Test
+func loginPendingTotpDecode(): Unit {
+    let d = JsonCodec.decode<LoginPendingTotp>(
+        "{\"requiresTotp\":true,\"challengeId\":\"abc123\",\"methods\":[\"totp\",\"recovery_code\"]}")
+    @Expect(d.challengeId, "abc123")
+}
+
+@Test
+func archiveMetaDecodesRelativePath(): Unit {
+    let json = "{\"arcid\":\"A1\",\"relative_path\":\"doujin/2024/\",\"pagecount\":1}"
+    let m = parseArchiveMeta(json)
+    @Expect(m.relativePath, "doujin/2024/")
+}
+
+@Test
+func archiveMetaRelativePathDefaultsEmpty(): Unit {
+    let m = parseArchiveMeta("{\"arcid\":\"A1\"}")
+    @Expect(m.relativePath, "")
+}
+
+@Test
+func sourceNamespaceParsesCompositeId(): Unit {
+    @Expect(sourceNamespace("source:nhentai:12345"), "nhentai")
+    @Expect(sourceNamespace("ARC123"), "")
+    @Expect(sourceNamespace("source:"), "")
+    @Expect(sourceNamespace(""), "")
+}
+
+// 设置区扩展 DTO：统计/账户安全/用户管理/系统设置/词云（Task 1）
+// 注：仓颉多行字符串必须换行起始，行内 JSON 一律用转义双引号，与文件内既有测试一致。
+@Test
+func parseSettingsDtos(): Unit {
+    // UserStats：envelope + camelCase data 对象
+    let stats = parseUserStats("{\"code\":200,\"message\":\"ok\",\"data\":{\"favoriteCount\":328,\"readCount\":542,\"totalPagesRead\":18964,\"totalArchives\":1286}}")
+    @Expect(stats.favoriteCount, 328)
+    @Expect(stats.totalArchives, 1286)
+
+    // 阅读趋势数组
+    let trend = parseTrendList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"date\":\"2026-07-18\",\"count\":17},{\"date\":\"2026-07-19\",\"count\":9}]}")
+    @Expect(trend.size, 2)
+    @Expect(trend[0].count, 17)
+
+    // 词云：display 缺省回落 tag
+    let cloud = parseCloudTags("{\"code\":200,\"message\":\"ok\",\"data\":[{\"tag\":\"female:swimsuit\",\"display\":\"泳装\",\"count\":24},{\"tag\":\"original\",\"count\":38}]}")
+    @Expect(cloud.size, 2)
+    @Expect(cloud[0].display, "泳装")
+    @Expect(cloud[1].display, "original")
+
+    // TOTP 状态
+    let totp = parseTotpStatus("{\"code\":200,\"message\":\"ok\",\"data\":{\"enabled\":true,\"credentialName\":\"认证器应用\",\"createdAt\":\"2026-03-18\",\"recoveryCodesRemaining\":8}}")
+    @Expect(totp.enabled, true)
+    @Expect(totp.recoveryCodesRemaining, 8)
+
+    // 会话列表：裸数组形态
+    let sessions = parseSessionList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"id\":11,\"name\":\"Windows · Chrome 138\",\"prefix\":\"lanlu_Kd82\",\"createdAt\":\"2026-07-12\",\"lastUsedAt\":\"2026-07-19 10:00\",\"lastUsedIp\":\"192.168.1.23\",\"current\":true}]}")
+    @Expect(sessions.size, 1)
+    @Expect(sessions[0].current, true)
+
+    // 会话列表：{sessions: [...]} 包裹形态也要容忍
+    let sessions2 = parseSessionList("{\"code\":200,\"message\":\"ok\",\"data\":{\"sessions\":[{\"id\":12,\"name\":\"iPhone\",\"prefix\":\"lanlu_Pq19\"}]}}")
+    @Expect(sessions2.size, 1)
+    @Expect(sessions2[0].id, 12)
+
+    // Token / Passkey
+    let tokens = parseTokenList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"id\":3,\"name\":\"automation\",\"prefix\":\"lanlu_n3Kx\"}]}")
+    @Expect(tokens[0].prefix, "lanlu_n3Kx")
+    let passkeys = parsePasskeyList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"id\":7,\"name\":\"我的工作电脑\",\"credentialId\":\"9f3a21c7\",\"algorithm\":\"ES256\",\"userVerified\":true}]}")
+    @Expect(passkeys[0].algorithm, "ES256")
+    @Expect(passkeys[0].userVerified, true)
+
+    // 管理用户：data.users 包裹
+    let users = parseAdminUserList("{\"code\":200,\"message\":\"ok\",\"data\":{\"users\":[{\"id\":1,\"username\":\"admin\",\"isAdmin\":true,\"createdAt\":\"2025-12-01\"},{\"id\":2,\"username\":\"alice\",\"isAdmin\":false,\"createdAt\":\"2026-02-14\"}]}}")
+    @Expect(users.size, 2)
+    @Expect(users[0].isAdmin, true)
+
+    // 系统设置：success/data 裸包络 + description.zh
+    let settings = parseSysSettings("{\"success\":true,\"data\":[{\"key\":\"SERVER_NAME\",\"value\":\"兰鹿\",\"valueType\":\"string\",\"category\":\"server\",\"description\":{\"zh\":\"服务器名称\",\"en\":\"Server name\"}},{\"key\":\"MAX_CONCURRENT_JOBS\",\"value\":\"8\",\"value_type\":\"integer\",\"category\":\"performance\"}]}")
+    @Expect(settings.size, 2)
+    @Expect(settings[0].descriptionZh, "服务器名称")
+    @Expect(settings[1].valueType, "integer")
+
+    // 创建用户返回的生成密码
+    @Expect(parseGeneratedPassword("{\"code\":200,\"message\":\"ok\",\"data\":{\"username\":\"bob\",\"password\":\"kX3f-9Qm2\"}}"), "kX3f-9Qm2")
+}
+
+
+// 设置区扩展 DTO 第二批：分类/标签/智能分类/任务记录/cron/插件（Task 2）
+// 注：仓颉不支持行内多行字符串，行内 JSON 一律用转义双引号，与上文 Task 1 测试一致。
+@Test
+func parseSettingsAdminDtos(): Unit {
+    // 管理分类：蛇形键 + plugins 数组
+    let cats = parseAdminCategoryList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"id\":1,\"catid\":\"doujin\",\"name\":\"同人志\",\"scan_path\":\"/library/doujinshi\",\"description\":\"CM 扫本\",\"sort_order\":0,\"enabled\":true,\"plugins\":[\"ehmeta\",\"bzmeta\"],\"cover_asset_id\":42,\"archive_count\":486}]}")
+    @Expect(cats.size, 1)
+    @Expect(cats[0].scanPath, "/library/doujinshi")
+    @Expect(cats[0].plugins.size, 2)
+    @Expect(cats[0].archiveCount, 486)
+
+    // 标签分页：translations 展平
+    let page = parseTagListPage("{\"code\":200,\"message\":\"ok\",\"data\":{\"items\":[{\"id\":9,\"namespace\":\"artist\",\"name\":\"alpha\",\"translations\":{\"zh\":{\"text\":\"阿尔法\"},\"en\":{\"text\":\"alpha\"}},\"links\":\"https://x\"}],\"total\":342,\"limit\":20,\"offset\":0}}")
+    @Expect(page.total, 342)
+    @Expect(page.items[0].zhText, "阿尔法")
+
+    // 智能分类：data.items 包裹
+    let filters = parseSmartFilterList("{\"code\":200,\"message\":\"ok\",\"data\":{\"items\":[{\"id\":1,\"name\":\"本周新增\",\"icon\":\"BookOpen\",\"query\":\"\",\"sort_by\":\"created_at\",\"sort_order\":\"desc\",\"date_from\":\"-7\",\"date_to\":\"\",\"newonly\":false,\"untaggedonly\":false,\"sort_order_num\":0,\"enabled\":true}]}}")
+    @Expect(filters.size, 1)
+    @Expect(filters[0].sortBy, "created_at")
+    @Expect(filters[0].enabled, true)
+
+    // 任务列表：SSE data 帧（裸 JSON，无 envelope）
+    let tp = parseTaskListPage("{\"tasks\":[{\"id\":1284,\"name\":\"扫描分类「同人志」\",\"status\":\"running\",\"progress\":62,\"message\":\"已处理 301/486\",\"taskType\":\"scan_category\",\"priority\":10,\"createdAt\":\"10:21:58\",\"triggerSource\":\"手动\"}],\"total\":128}")
+    @Expect(tp.total, 128)
+    @Expect(tp.tasks[0].status, "running")
+    @Expect(tp.tasks[0].progress, 62)
+
+    // cron 状态 / 任务 / 类型 / 校验
+    let st = parseCronStatus("{\"code\":200,\"message\":\"ok\",\"data\":{\"running\":true,\"totalTasks\":4,\"enabledTasks\":3}}")
+    @Expect(st.running, true)
+    @Expect(st.enabledTasks, 3)
+    let ct = parseCronTaskList("{\"code\":200,\"message\":\"ok\",\"data\":{\"tasks\":[{\"id\":1,\"name\":\"每日全库扫描\",\"cronExpression\":\"0 2 * * *\",\"taskType\":\"scan_all_categories\",\"enabled\":true,\"priority\":50,\"timeoutSeconds\":3600,\"runCount\":46,\"lastRunAt\":\"2026-07-19 02:00\",\"lastRunSuccess\":true,\"nextRunAt\":\"2026-07-20 02:00\"}],\"total\":1}}")
+    @Expect(ct.size, 1)
+    @Expect(ct[0].hasLastRun, true)
+    @Expect(ct[0].lastRunSuccess, true)
+    let types = parseCronTaskTypes("{\"code\":200,\"message\":\"ok\",\"data\":{\"types\":[{\"value\":\"scan_all_categories\",\"label\":\"扫描所有分类\",\"description\":\"扫描所有启用的分类\"}]}}")
+    @Expect(types[0].value, "scan_all_categories")
+    let vr = parseCronValidate("{\"code\":200,\"message\":\"ok\",\"data\":{\"valid\":true,\"error\":\"\",\"nextRuns\":[\"2026-07-20 02:00:00\"]}}")
+    @Expect(vr.valid, true)
+    @Expect(vr.nextRuns.size, 1)
+
+    // 插件：data 裸数组；参数数组
+    let plugins = parsePluginList("{\"code\":200,\"message\":\"ok\",\"data\":[{\"name\":\"EhMeta\",\"namespace\":\"ehmeta\",\"version\":\"1.4.2\",\"plugin_type\":\"metadata\",\"author\":\"lanlup\",\"description\":\"E站元数据\",\"enabled\":true,\"installed\":true,\"update_url\":\"https://x\",\"has_schema\":true}]}")
+    @Expect(plugins.size, 1)
+    @Expect(plugins[0].pluginType, "metadata")
+    @Expect(plugins[0].hasSchema, true)
+    let params = parsePluginParams("{\"code\":200,\"message\":\"ok\",\"data\":{\"parameters\":[{\"name\":\"interval\",\"type\":\"int\",\"desc\":\"请求间隔\",\"default_value\":\"3\",\"value\":\"5\"}]}}")
+    @Expect(params[0].`type`, "int")
+    @Expect(params[0].value, "5")
+}
+
+@Test
+func parseCreatedTokenShape(): Unit {
+    let t = parseCreatedToken("{\"code\":201,\"message\":\"ok\",\"data\":{\"id\":1,\"name\":\"automation\",\"prefix\":\"lanlu_n3Kx\",\"token\":\"lanlu_n3Kx9dQp2mR8vL1s\"}}")
+    @Expect(t.id, 1)
+    @Expect(t.prefix, "lanlu_n3Kx")
+    @Expect(t.token, "lanlu_n3Kx9dQp2mR8vL1s")
+}
+
+@Test
+func loginDataFromMeShape(): Unit {
+    // /api/auth/me 的 dataRaw 形态：{"user":{...}}（UserDataView），直接解 LoginData。
+    let d = JsonCodec.decode<LoginData>("{\"user\":{\"id\":2,\"username\":\"testtest\",\"isAdmin\":true}}")
+    @Expect(d.userId, 2)
+    @Expect(d.username, "testtest")
+    @Expect(d.isAdmin, true)
+    @Expect(d.token, "")
+}
+
+@Test
+func parseRealServerShapes(): Unit {
+    // 插件列表：裸 JSON 数组（无包络），plugin_type 大写转小写
+    let plugins = parsePluginList("[{\"name\":\"Bangumi\",\"namespace\":\"btvmeta\",\"plugin_type\":\"Metadata\",\"version\":\"1.0\",\"enabled\":true,\"installed\":true}]")
+    @Expect(plugins.size, 1)
+    @Expect(plugins[0].pluginType, "metadata")
+
+    // 词云：data 为 {"items": [...], "total": N}
+    let cloud = parseCloudTags("{\"code\":200,\"message\":\"ok\",\"data\":{\"items\":[{\"tag\":\"original\",\"display\":\"原创\",\"count\":38}],\"total\":1}}")
+    @Expect(cloud.size, 1)
+    @Expect(cloud[0].display, "原创")
+
+    // 任务快照：外层 {"v":2,"event_type":"snapshot","data":{...}} 嵌套 + 蛇形键
+    let tp = parseTaskListPage("{\"v\":2,\"event_type\":\"snapshot\",\"data\":{\"tasks\":[{\"id\":1284,\"name\":\"扫描分类\",\"task_type\":\"scan_category\",\"status\":\"running\",\"progress\":62,\"trigger_source\":\"手动\",\"created_at\":\"10:21:58\"}],\"total\":52334}}")
+    @Expect(tp.total, 52334)
+    @Expect(tp.tasks.size, 1)
+    @Expect(tp.tasks[0].taskType, "scan_category")
+    @Expect(tp.tasks[0].triggerSource, "手动")
+    @Expect(tp.tasks[0].createdAt, "10:21:58")
 }

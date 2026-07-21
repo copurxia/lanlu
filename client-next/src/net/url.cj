@@ -28,6 +28,8 @@ private func hexUpper(n: UInt8): Rune {
 public class SearchQuery {
     public var filter: String = ""
     public var categoryId: String = ""
+    // 合集成员过滤（tankoubon_id）：服务端 search_controller 支持，配合 sortby=tank_order 按合集内序。
+    public var tankoubonId: String = ""
     public var sortby: String = "title"
     public var order: String = "asc"
     public var page: Int64 = 1
@@ -35,12 +37,16 @@ public class SearchQuery {
     public var newonly: Bool = false
     public var untaggedonly: Bool = false
     public var favoriteonly: Bool = false
+    // 合集聚合（groupby_tanks=true）：服务端 search_controller 支持，命中合集的档案
+    // 按合集折叠返回（工具条「合集聚合」开关消费，见 model.submitSearch/submitRowTask）。
+    public var groupbyTanks: Bool = false
 }
 
 public func buildSearchQuery(q: SearchQuery): String {
     let parts = ArrayList<String>()
     if (q.filter.size > 0) { parts.add("filter=${percentEncode(q.filter)}") }
     if (q.categoryId.size > 0) { parts.add("category_id=${percentEncode(q.categoryId)}") }
+    if (q.tankoubonId.size > 0) { parts.add("tankoubon_id=${percentEncode(q.tankoubonId)}") }
     parts.add("page=${q.page}")
     parts.add("pageSize=${q.pageSize}")
     if (q.sortby.size > 0) { parts.add("sortby=${percentEncode(q.sortby)}") }
@@ -48,5 +54,6 @@ public func buildSearchQuery(q: SearchQuery): String {
     if (q.newonly) { parts.add("newonly=1") }
     if (q.untaggedonly) { parts.add("untaggedonly=1") }
     if (q.favoriteonly) { parts.add("favoriteonly=1") }
+    if (q.groupbyTanks) { parts.add("groupby_tanks=true") }
     "?" + String.join(parts.toArray(), delimiter: "&")
 }

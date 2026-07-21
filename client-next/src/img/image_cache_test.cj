@@ -113,3 +113,17 @@ func decodeFailureEvictsCache(): Unit {
     cache.evict("asset:nonexistent")
     remove(dir, recursive: true)
 }
+
+// E4: backdrop 解码缩放到目标宽度后仍能正确输出 RGBA 像素。
+@Test
+func decodeBackdropResizesToTargetWidth(): Unit {
+    let dir = Directory.createTemp(Path("."))
+    let cache = ImageCache("${dir}/cache")
+    let path = cache.ensureCached("asset:backdrop_test", {=> testPngBytes() })
+    // 1x1 PNG 缩放到 48px 宽：scale = 48.0 / 1.0 = 48.0，输出 48×48
+    let d = decodeBackdrop(path, 48)
+    @Expect(d.width, 48)
+    @Expect(d.height, 48)
+    @Expect(d.pixels.size, 48 * 48 * 4)
+    remove(dir, recursive: true)
+}
