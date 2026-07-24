@@ -574,7 +574,7 @@ class ReaderStage <: Widget {
         ctx.renderer.popClip()
     }
 
-    // 歌词是独立视口：当前行固定在区域中心，超出内容被裁掉。
+    // Apple Music 风格歌词视口：大字号左对齐、当前行强对比，切行时上移并放大。
     private func drawAudioLyrics(ctx: UiContext): Unit {
         let pb = model.playback
         let area = audioLayout.lyrics
@@ -586,18 +586,25 @@ class ReaderStage <: Widget {
                 st.lyricFocusTween.reset(0.0)
             }
             let focusT = st.lyricFocusTween.animate(ctx, target: 1.0)
+            let baseX = area.x + min(44.0, area.w * 0.07)
+            let slideY = 12.0 * (1.0 - focusT)
             var row: Int64 = -3
             while (row <= 3) {
                 let idx = lyricIndex + row
                 if (idx >= 0 && idx < pb.lyricsLines.size) {
                     let line = pb.lyricsLines[idx]
-                    let color = if (row == 0) { ctx.theme.accent.withAlpha(Int64(170.0 + 85.0 * focusT)) }
-                        else { ctx.theme.onMediaDim.withAlpha(if (row == -1 || row == 1) { 170 } else { 95 }) }
-                    let size: Float32 = if (row == 0) { 14.0 + 6.0 * focusT } else { 14.0 }
-                    let spacing = 34.0 + 4.0 * focusT
-                    let lineRect = Rect(area.x, area.centerY() + Float32(row) * spacing - 14.0,
-                        area.w, 28.0 + 4.0 * focusT)
-                    ctx.renderer.textCenter(line.text, lineRect, color, pointSize: size)
+                    let color = if (row == 0) { ctx.theme.onMedia.withAlpha(Int64(190.0 + 65.0 * focusT)) }
+                        else { ctx.theme.onMedia.withAlpha(if (row == -1 || row == 1) { 112 } else { 58 }) }
+                    let size: Float32 = if (row == 0) { 22.0 + 8.0 * focusT } else { 18.0 }
+                    let spacing = 51.0 + 5.0 * focusT
+                    let y = area.centerY() + Float32(row) * spacing - size / 2.0 + slideY
+                    if (row == 0) {
+                        // 当前行轻微光晕 + 双绘近似粗体；非当前行保持柔和。
+                        ctx.renderer.text(line.text, baseX + 1.0, y + 2.0,
+                            ctx.theme.onMedia.withAlpha(Int64(35.0 * focusT)), pointSize: size)
+                        ctx.renderer.text(line.text, baseX + 0.7, y, color, pointSize: size)
+                    }
+                    ctx.renderer.text(line.text, baseX, y, color, pointSize: size)
                 }
                 row++
             }
