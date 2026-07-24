@@ -62,13 +62,17 @@ func dirLabel(d: Option<Bool>): String {
 
 func spreadLabel(spread: Array<Int64>): String {
     let parts = ArrayList<String>()
-    for (i in spread) { parts.add("${i}") }
+    for (i in spread) {
+        parts.add("${i}")
+    }
     "[" + String.join(parts.toArray(), delimiter: ",") + "]"
 }
 
 func lanesLabel(lanes: Array<LaneId>): String {
     let parts = ArrayList<String>()
-    for (l in lanes) { parts.add(l.toString()) }
+    for (l in lanes) {
+        parts.add(l.toString())
+    }
     "[" + String.join(parts.toArray(), delimiter: ",") + "]"
 }
 
@@ -309,6 +313,32 @@ func laneAutoActivateOnSpreadChange(): Unit {
     // 不在当前 lanes 里的 setActiveLane 被忽略
     r.setActiveLane(Video(4))
     @Expect(r.activeLane.toString(), "Audio(7)")
+}
+
+@Test
+func laneExpansionDoesNotChangeSpreadMedia(): Unit {
+    let r = newReader(mkMixedPages())
+    r.gotoPage(4)
+    @Expect(r.spreadMediaLane().toString(), "Video(4)")
+    r.setActiveLane(Book)
+    // activeLane 只是 dock 展开项；内容仍然是当前 spread 的视频。
+    @Expect(r.activeLane.toString(), "Book")
+    @Expect(r.spreadMediaLane().toString(), "Video(4)")
+}
+
+@Test
+func appLaneSwitchDoesNotReloadOrStopPlayback(): Unit {
+    let m = AppModel(AppSettings())
+    m.reader.open("arc1", 0)
+    m.reader.setPages(mkMixedPages())
+    m.reader.gotoPage(4)
+    m.playback.loadRemote("arc1", 4, "http://media/video", "", video: true)
+    let key = m.playback.mediaKey
+    m.syncReaderLane(Book)
+    @Expect(m.reader.activeLane.toString(), "Book")
+    @Expect(m.playback.mediaKey, key)
+    @Expect(m.playback.loaded, true)
+    @Expect(m.playback.isVideo, true)
 }
 
 // ---- 进度上报：900ms 防抖，尾巴不丢 ----

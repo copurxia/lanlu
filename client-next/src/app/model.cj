@@ -1099,8 +1099,7 @@ public class AppModel {
     public let readerVersion = State<Int64>(0)
     // chrome 可见性镜像（pump 比对同步；autoHide 超时/open 复位等非视图路径的兜底出口）。
     private var lastChromeSync: Bool = true
-    // lane 镜像（pump 比对同步）：ReaderModel.refreshLaneForSpread 自动激活媒体 lane
-    // 时不经过 syncReaderLane，靠它在下一帧补上播放联动。
+    // 当前 spread 的媒体镜像。媒体加载只随内容 spread 变化，绝不能随 dock 展开项变化。
     private var lastLane: LaneId = Book
     // 自动播放计时：上次自动翻页（或开关/间隔变更）的时钟读数（reader.clock 基准）。
     private var lastAutoPlayTurnMs: Int64 = 0
@@ -1231,12 +1230,10 @@ public class AppModel {
 
     // ---- lane ⇄ 播放同步 ----
 
-    // UI 手动切 lane：状态机校验 + 播放联动（pump 的 lastLane 镜像同步更新，
-    // 避免下一帧被当成「自动激活」再同步一次）。
+    // UI 手动切 lane：只改变 dock 展开的控制组。frontend 的 lane 不是内容源选择器，
+    // 因此这里不得加载、停止或替换当前 spread 的媒体。
     public func syncReaderLane(l: LaneId): Unit {
         reader.setActiveLane(l)
-        lastLane = l
-        syncPlaybackToLane(l)
         readerVersion.value += 1
     }
 
@@ -1317,7 +1314,8 @@ public class AppModel {
         )
     }
 
-    // lane → 播放联动：音视频统一走 libVLC，视频额外读取内存帧；Book 停播。
+    // spread 内容 → 播放联动：音视频统一走 libVLC，视频额外读取内存帧；
+    // 无媒体的 spread 才停播。调用方只传 reader.spreadMediaLane()。
     private func syncPlaybackToLane(l: LaneId): Unit {
         match (l) {
             case Audio(i) => match (reader.pageAt(i)) {
@@ -1591,10 +1589,10 @@ public class AppModel {
             lastChromeSync = reader.chromeVisible
             readerVersion.value += 1
         }
-        // lane 镜像：翻 spread 时 ReaderModel.refreshLaneForSpread 会自动激活媒体 lane
-        //（不经过 syncReaderLane），这里比对出变化后补同一套播放联动。
-        if (!reader.activeLane.equals(lastLane)) {
-            lastLane = reader.activeLane
+        // 媒体生命周期只跟当前 spread 走；点击 dock lane 不进入这条链。
+        let spreadLane = reader.spreadMediaLane()
+        if (!spreadLane.equals(lastLane)) {
+            lastLane = spreadLane
             syncPlaybackToLane(lastLane)
             readerVersion.value += 1
         }

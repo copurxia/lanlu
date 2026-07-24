@@ -15,7 +15,9 @@ import std.collection.ArrayList
 // ── 长图滚动（frontend .long-page-scroll-container 简化版）──
 // 宽适配后的图高（纯函数，可单测）：图按舞台宽等比放大。
 func longPageFittedHeight(imgW: Float32, imgH: Float32, frameW: Float32): Float32 {
-    if (imgW <= 0.0 || frameW <= 0.0) { return 0.0 }
+    if (imgW <= 0.0 || frameW <= 0.0) {
+        return 0.0
+    }
     imgH * (frameW / imgW)
 }
 
@@ -32,9 +34,24 @@ private let LONG_PAGE_WHEEL_PX: Float32 = 48.0
 // webtoon 返回零向量：滚动驱动模式不做位移翻页动画（原型 #stage.webtoon 豁免）。
 func pageTurnVector(mode: ReadingMode, forward: Bool): (Float32, Float32) {
     match (mode) {
-        case ReadingMode.SingleLtr => if (forward) { (1.0, 0.0) } else { (-1.0, 0.0) }
-        case ReadingMode.SingleRtl => if (forward) { (-1.0, 0.0) } else { (1.0, 0.0) }
-        case ReadingMode.SingleTtb => if (forward) { (0.0, 1.0) } else { (0.0, -1.0) }
+        case ReadingMode.SingleLtr =>
+            if (forward) {
+                (1.0, 0.0)
+            } else {
+                (-1.0, 0.0)
+            }
+        case ReadingMode.SingleRtl =>
+            if (forward) {
+                (-1.0, 0.0)
+            } else {
+                (1.0, 0.0)
+            }
+        case ReadingMode.SingleTtb =>
+            if (forward) {
+                (0.0, 1.0)
+            } else {
+                (0.0, -1.0)
+            }
         case ReadingMode.Webtoon => (0.0, 0.0)
     }
 }
@@ -87,12 +104,10 @@ class AudioStageLayout {
             // 桌面横屏：内容网格垂直居中；Transport 是跨栏的独立底层。
             // 为全局 lane dock 留出底部安全区，舞台 Transport 不与其重叠。
             transport = Rect(frame.x + pad, frame.bottom() - 122.0, frame.w - pad * 2.0, 52.0)
-            scene = Rect(frame.x + pad, frame.y + 32.0, frame.w - pad * 2.0,
-                max(0.0, transport.y - frame.y - 48.0))
+            scene = Rect(frame.x + pad, frame.y + 32.0, frame.w - pad * 2.0, max(0.0, transport.y - frame.y - 48.0))
             let leftW = min(400.0, max(300.0, scene.w * 0.32))
             hero = Rect(scene.x, scene.y, leftW, scene.h)
-            lyrics = Rect(hero.right() + 40.0, scene.y,
-                max(0.0, scene.right() - hero.right() - 40.0), scene.h)
+            lyrics = Rect(hero.right() + 40.0, scene.y, max(0.0, scene.right() - hero.right() - 40.0), scene.h)
             let coverSide = min(min(280.0, hero.w), max(164.0, hero.h - 110.0))
             let groupH = coverSide + 76.0
             let groupY = hero.centerY() - groupH / 2.0
@@ -105,8 +120,7 @@ class AudioStageLayout {
             cover = Rect(hero.x, hero.y, coverSide, coverSide)
             meta = Rect(cover.right() + 20.0, hero.y, max(0.0, hero.right() - cover.right() - 20.0), hero.h)
             transport = Rect(frame.x + 24.0, frame.bottom() - 116.0, frame.w - 48.0, 52.0)
-            scene = Rect(frame.x + 24.0, frame.y + 24.0, frame.w - 48.0,
-                max(0.0, transport.y - frame.y - 40.0))
+            scene = Rect(frame.x + 24.0, frame.y + 24.0, frame.w - 48.0, max(0.0, transport.y - frame.y - 40.0))
             lyrics = Rect(frame.x + 24.0, hero.bottom() + 16.0, frame.w - 48.0,
                 max(0.0, transport.y - hero.bottom() - 32.0))
         }
@@ -124,6 +138,7 @@ class AudioStageLayout {
 func readerPageKey(arcid: String, pid: String): String {
     "page:${arcid}:${pid}"
 }
+
 func readerPageUrl(arcid: String, pid: String): String {
     "/api/archives/${arcid}/page?path=${percentEncode(pid)}"
 }
@@ -202,7 +217,11 @@ func drawLaneGlyph(renderer: Renderer, lane: LaneId, cx: Float32, cy: Float32, c
 // ‹ › 翻页箭头（dock Book lane 用）：forward=true 画 ›（尖朝右），false 画 ‹。
 func drawChevronGlyph(renderer: Renderer, cx: Float32, cy: Float32, forward: Bool, color: Color): Unit {
     let pen = Pen(width: 1.8, color: color)
-    let s: Float32 = if (forward) { -1.0 } else { 1.0 }
+    let s: Float32 = if (forward) {
+        -1.0
+    } else {
+        1.0
+    }
     renderer.strokeLine(cx + 2.5 * s, cy - 5.0, cx - 2.5 * s, cy, pen)
     renderer.strokeLine(cx - 2.5 * s, cy, cx + 2.5 * s, cy + 5.0, pen)
 }
@@ -214,15 +233,24 @@ func drawPlaybackSeekBar(ctx: UiContext, rect: Rect, pb: PlaybackModel): Unit {
     let cy = rect.centerY()
     let dur = pb.durationSec
     let enabled = dur > 0.0 && pb.loaded
-    let amount: Float32 = if (enabled) { Float32(max(0.0, min(1.0, pb.positionSec / dur))) } else { 0.0 }
-    let trackColor = if (enabled) { ctx.theme.onMedia.withAlpha(51) } else { ctx.theme.onMedia.withAlpha(25) }
+    let amount: Float32 = if (enabled) {
+        Float32(max(0.0, min(1.0, pb.positionSec / dur)))
+    } else {
+        0.0
+    }
+    let trackColor = if (enabled) {
+        ctx.theme.onMedia.withAlpha(51)
+    } else {
+        ctx.theme.onMedia.withAlpha(25)
+    }
     ctx.renderer.fillRoundedRect(Rect(rect.x, cy - 2.0, rect.w, 4.0), 2.0, trackColor)
     if (amount > 0.0) {
-        ctx.renderer.fillRoundedRect(Rect(rect.x, cy - 2.0, rect.w * amount, 4.0), 2.0,
-            ctx.theme.accent)
+        ctx.renderer.fillRoundedRect(Rect(rect.x, cy - 2.0, rect.w * amount, 4.0), 2.0, ctx.theme.accent)
         ctx.renderer.fillCircle(rect.x + rect.w * amount, cy, 5.0, ctx.theme.accent)
     }
-    if (pb.playing) { ctx.requestFrame() }
+    if (pb.playing) {
+        ctx.requestFrame()
+    }
 }
 
 // 阅读舞台。请求/预取在 init 发起（与旧 reader_view 的构建期副作用同款：
@@ -234,7 +262,7 @@ class ReaderStage <: Widget {
     // 构建期快照：spread 页索引与对应纹理 key（非图片页 key=""）
     private let spreadIdx: Array<Int64>
     private let keys: Array<String>
-    // 音频舞台目标页（activeLane=Audio 优先，否则 spread 内首个 audio 页）
+    // 音频/视频舞台目标页只由当前 spread 决定，dock lane 仅控制哪组控件展开。
     private let audioPage: ?Int64
     private var audioCoverKey: String = ""
     private var audioBackdropKey: String = ""
@@ -269,9 +297,10 @@ class ReaderStage <: Widget {
                         kl.add(key)
                         if (model.imageState(key).value == "") {
                             // spread 首页是用户正等着的图：高优先级插队；配页低优先级。
-                            model.requestImage(key, readerPageUrl(pageArc, p.id),
-                                highPriority: !firstRequested)
-                            if (!firstRequested) { model.prefetchAround() }
+                            model.requestImage(key, readerPageUrl(pageArc, p.id), highPriority: !firstRequested)
+                            if (!firstRequested) {
+                                model.prefetchAround()
+                            }
                             firstRequested = true
                         }
                     } else {
@@ -281,19 +310,18 @@ class ReaderStage <: Widget {
             }
         }
         keys = kl.toArray()
-        // 音频舞台判定：只看 activeLane（Audio(i) → 该页舞台）。不做「spread 内首个
-        // audio 页」兜底——refreshLaneForSpread 在 gotoPage/setPages 内同步执行（moveTo
-        // 同步链），UI 重建时 activeLane 已是新 lane，不存在帧延迟；兜底反而让舞台在
-        // activeLane=Video 时错显音频舞台、与 dock/播放状态脱节（实机回归）。
+        // 内容舞台不能读取 activeLane：切 Book/媒体 lane 只展开控制条，不切换页面内容。
         var ap: ?Int64 = None
-        match (r.activeLane) {
+        let mediaLane = r.spreadMediaLane()
+        match (mediaLane) {
             case LaneId.Audio(i) => ap = Some(i)
             case _ => ()
         }
         audioPage = ap
         match (ap) {
             case Some(i) => match (r.pageAt(i)) {
-                case Some(p) => if (p.thumbAssetId > 0) {
+                case Some(p) =>
+                    if (p.thumbAssetId > 0) {
                     audioCoverKey = "asset:${p.thumbAssetId}"
                     audioBackdropKey = model.requestAudioBackdrop(p.thumbAssetId)
                     if (model.imageState(audioCoverKey).value == "") {
@@ -305,7 +333,7 @@ class ReaderStage <: Widget {
             case None => ()
         }
         var vp: ?Int64 = None
-        match (r.activeLane) {
+        match (mediaLane) {
             case LaneId.Video(i) => vp = Some(i)
             case _ => ()
         }
@@ -370,8 +398,7 @@ class ReaderStage <: Widget {
                 ctx.renderer.fill(frame, Color.rgb(0, 0, 0))
                 drawVideoStage(ctx, i)
             case None => match (audioPage) {
-            case Some(i) =>
-                drawAudioStage(ctx, i)
+                case Some(i) => drawAudioStage(ctx, i)
             case None =>
                 ctx.renderer.fill(frame, ctx.theme.stageBg)
                 drawImageStage(ctx)
@@ -385,7 +412,9 @@ class ReaderStage <: Widget {
     // ── 图片舞台 ──
 
     private func pageCell(i: Int64): Rect {
-        if (keys.size <= 1) { return frame }
+        if (keys.size <= 1) {
+            return frame
+        }
         // 双页并排（原型 #stage.double：row + gap 2）；顺序已含 RTL 校正（spreadPages）。
         let w = (frame.w - 2.0) / 2.0
         if (i == 0) {
@@ -414,9 +443,11 @@ class ReaderStage <: Widget {
         ctx.renderer.popClip()
     }
 
-    private func drawSpread(ctx: UiContext, ks: Array<String>, ox: Float32, oy: Float32,
-        alpha: Float32, zoomed: Bool, curPages: Bool): Unit {
-        if (alpha <= 0.0) { return }
+    private func drawSpread(ctx: UiContext, ks: Array<String>, ox: Float32, oy: Float32, alpha: Float32, zoomed: Bool,
+        curPages: Bool): Unit {
+        if (alpha <= 0.0) {
+            return
+        }
         for (i in 0..ks.size) {
             let cell = pageCell(Int64(i))
             let key = ks[i]
@@ -449,8 +480,7 @@ class ReaderStage <: Widget {
                             let maxOff = longPageMaxOffset(fittedH, frame.h)
                             st.scrollY = max(0.0, min(maxOff, st.scrollY))
                             ctx.renderer.pushClip(frame)
-                            drawTextureAlpha(ctx, tex,
-                                Rect(frame.x, frame.y - st.scrollY, frame.w, fittedH), alpha)
+                            drawTextureAlpha(ctx, tex, Rect(frame.x, frame.y - st.scrollY, frame.w, fittedH), alpha)
                             ctx.renderer.popClip()
                         } else {
                             drawTextureAlpha(ctx, tex, dest.shift(ox, oy), alpha)
@@ -488,21 +518,33 @@ class ReaderStage <: Widget {
             case None => ()
         }
         match (pixelTexture(ctx.renderer, key)) {
-            case Some(texture) =>
-                ctx.renderer.texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
+            case Some(texture) => ctx
+                .renderer
+                .texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
             case None =>
                 var title = "视频"
                 match (model.reader.pageAt(pageIdx)) {
-                    case Some(p) => title = if (p.title.size > 0) { p.title } else { p.id }
+                    case Some(p) => title = if (p.title.size > 0) {
+                        p.title
+                    } else {
+                        p.id
+                    }
                     case None => ()
                 }
-                let status = if (pb.error.size > 0) { "加载失败：${pb.error}" }
-                    else if (pb.loading) { "正在下载 ${title}…" }
-                    else if (pb.loaded) { "点击底部播放按钮" }
-                    else { "准备视频…" }
+                let status = if (pb.error.size > 0) {
+                    "加载失败：${pb.error}"
+                } else if (pb.loading) {
+                    "正在下载 ${title}…"
+                } else if (pb.loaded) {
+                    "点击底部播放按钮"
+                } else {
+                    "准备视频…"
+                }
                 ctx.renderer.textCenter(status, frame, ctx.theme.onMediaDim, pointSize: 14.0)
         }
-        if (pb.playing) { ctx.requestFrame() }
+        if (pb.playing) {
+            ctx.requestFrame()
+        }
     }
 
     // ── 音频舞台：区域编排，不在这里计算任何子区域坐标 ──
@@ -528,8 +570,7 @@ class ReaderStage <: Widget {
         }
         // extraDark 等价遮罩；左右内容仍保留封面色彩，不退化为纯黑。
         ctx.renderer.fill(frame, Color.rgba(0, 0, 0, 132))
-        ctx.renderer.fillHorizontalGradient(frame, Color.rgba(0, 0, 0, 6),
-            Color.rgba(0, 0, 0, 58))
+        ctx.renderer.fillHorizontalGradient(frame, Color.rgba(0, 0, 0, 6), Color.rgba(0, 0, 0, 58))
     }
 
     // 左侧 Hero 只负责封面和曲目信息。
@@ -555,22 +596,32 @@ class ReaderStage <: Widget {
             let cy = audioLayout.cover.centerY()
             let noteW = ctx.renderer.textWidth("♪", pointSize: 26.0)
             let noteH = ctx.renderer.textHeight(pointSize: 26.0)
-            ctx.renderer.text("♪", cx - noteW / 2.0, cy - noteH / 2.0, ctx.theme.accent,
-                pointSize: 26.0)
+            ctx.renderer.text("♪", cx - noteW / 2.0, cy - noteH / 2.0, ctx.theme.accent, pointSize: 26.0)
         }
         var title = ""
         match (model.reader.pageAt(pageIdx)) {
-            case Some(p) => title = if (p.title.size > 0) { p.title } else { p.id }
+            case Some(p) => title = if (p.title.size > 0) {
+                p.title
+            } else {
+                p.id
+            }
             case None => ()
         }
         let titleRect = Rect(audioLayout.meta.x, audioLayout.meta.y, audioLayout.meta.w, 28.0)
         ctx.renderer.textCenter(title, titleRect, onMedia, pointSize: 20.0)
-        let sub = if (pb.error.size > 0) { "加载失败：${pb.error}" }
-            else if (pb.loading) { "加载中…" }
-            else if (!pb.loaded) { "未加载" }
-            else { "${formatMediaClock(pb.positionSec)} / ${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}" }
-        ctx.renderer.textCenter(sub, Rect(audioLayout.meta.x, audioLayout.meta.y + 32.0,
-            audioLayout.meta.w, 20.0), onMediaDim, pointSize: 13.0)
+        let sub = if (pb.error.size > 0) {
+            "加载失败：${pb.error}"
+        } else if (pb.loading) {
+            "加载中…"
+        } else if (!pb.loaded) {
+            "未加载"
+        } else {
+            "${formatMediaClock(pb.positionSec)} / ${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}"
+        }
+        ctx
+            .renderer
+            .textCenter(sub, Rect(audioLayout.meta.x, audioLayout.meta.y + 32.0, audioLayout.meta.w, 20.0), onMediaDim,
+                pointSize: 13.0)
         ctx.renderer.popClip()
     }
 
@@ -593,15 +644,28 @@ class ReaderStage <: Widget {
                 let idx = lyricIndex + row
                 if (idx >= 0 && idx < pb.lyricsLines.size) {
                     let line = pb.lyricsLines[idx]
-                    let color = if (row == 0) { ctx.theme.onMedia.withAlpha(Int64(190.0 + 65.0 * focusT)) }
-                        else { ctx.theme.onMedia.withAlpha(if (row == -1 || row == 1) { 112 } else { 58 }) }
-                    let size: Float32 = if (row == 0) { 22.0 + 8.0 * focusT } else { 18.0 }
+                    let color = if (row == 0) {
+                        ctx.theme.onMedia.withAlpha(Int64(190.0 + 65.0 * focusT))
+                    } else {
+                        ctx.theme.onMedia.withAlpha(if (row == -1 || row == 1) {
+                            112
+                        } else {
+                            58
+                        })
+                    }
+                    let size: Float32 = if (row == 0) {
+                        22.0 + 8.0 * focusT
+                    } else {
+                        18.0
+                    }
                     let spacing = 51.0 + 5.0 * focusT
                     let y = area.centerY() + Float32(row) * spacing - size / 2.0 + slideY
                     if (row == 0) {
                         // 当前行轻微光晕 + 双绘近似粗体；非当前行保持柔和。
-                        ctx.renderer.text(line.text, baseX + 1.0, y + 2.0,
-                            ctx.theme.onMedia.withAlpha(Int64(35.0 * focusT)), pointSize: size)
+                        ctx
+                            .renderer
+                            .text(line.text, baseX + 1.0, y + 2.0, ctx.theme.onMedia.withAlpha(Int64(35.0 * focusT)),
+                                pointSize: size)
                         ctx.renderer.text(line.text, baseX + 0.7, y, color, pointSize: size)
                     }
                     ctx.renderer.text(line.text, baseX, y, color, pointSize: size)
@@ -622,30 +686,35 @@ class ReaderStage <: Widget {
         let current = formatMediaClock(pb.positionSec)
         let currentX = fwdRect.right() + 10.0
         ctx.renderer.text(current, currentX, seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
-        let duration = if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }
+        let duration = if (pb.durationSec > 0.0) {
+            formatMediaClock(pb.durationSec)
+        } else {
+            "--:--"
+        }
         let durationW = ctx.renderer.textWidth(duration, pointSize: 11.0)
-        ctx.renderer.text(duration, muteRect.x - 8.0 - durationW,
-            seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
-        drawCircleButton(ctx, backRect, "reader:stage:back", {=>
-            drawSkipGlyph(ctx.renderer, backRect.centerX(), backRect.centerY(), -1.0, onMedia)
+        ctx.renderer.text(duration, muteRect.x - 8.0 - durationW, seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
+        drawCircleButton(ctx, backRect, "reader:stage:back", {
+            => drawSkipGlyph(ctx.renderer, backRect.centerX(), backRect.centerY(), -1.0, onMedia)
         })
-        let playBg = if (ctx.isHovered("reader:stage:play")) { onMedia.withAlpha(220) } else { onMedia }
+        let playBg = if (ctx.isHovered("reader:stage:play")) {
+            onMedia.withAlpha(220)
+        } else {
+            onMedia
+        }
         ctx.renderer.fillCircle(playRect.centerX(), playRect.centerY(), playRect.w / 2.0, playBg)
-        drawPlayPauseGlyph(ctx.renderer, playRect.centerX(), playRect.centerY(), pb.playing,
-            Color.rgb(0, 0, 0))
-        drawCircleButton(ctx, fwdRect, "reader:stage:fwd", {=>
-            drawSkipGlyph(ctx.renderer, fwdRect.centerX(), fwdRect.centerY(), 1.0, onMedia)
+        drawPlayPauseGlyph(ctx.renderer, playRect.centerX(), playRect.centerY(), pb.playing, Color.rgb(0, 0, 0))
+        drawCircleButton(ctx, fwdRect, "reader:stage:fwd", {
+            => drawSkipGlyph(ctx.renderer, fwdRect.centerX(), fwdRect.centerY(), 1.0, onMedia)
         })
         drawPlaybackSeekBar(ctx, seekRect, pb)
-        drawCircleButton(ctx, muteRect, "reader:stage:mute", {=>
-            drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY(), pb.muted, onMedia)
+        drawCircleButton(ctx, muteRect, "reader:stage:mute", {
+            => drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY(), pb.muted, onMedia)
         })
         let vcy = volumeRect.centerY()
         ctx.renderer.fillRoundedRect(Rect(volumeRect.x, vcy - 2.0, volumeRect.w, 4.0), 2.0,
             ctx.theme.onMedia.withAlpha(50))
         let amount = Float32(pb.volume)
-        ctx.renderer.fillRoundedRect(Rect(volumeRect.x, vcy - 2.0, volumeRect.w * amount, 4.0), 2.0,
-            ctx.theme.onMedia)
+        ctx.renderer.fillRoundedRect(Rect(volumeRect.x, vcy - 2.0, volumeRect.w * amount, 4.0), 2.0, ctx.theme.onMedia)
         ctx.renderer.fillCircle(volumeRect.x + volumeRect.w * amount, vcy, 4.0, ctx.theme.onMedia)
         ctx.renderer.popClip()
     }
@@ -666,8 +735,7 @@ class ReaderStage <: Widget {
     // 圆形热区钮：hover 铺浅色圆底，图标绘制由闭包给（圆底与图标色配对）。
     private func drawCircleButton(ctx: UiContext, rect: Rect, hoverId: String, glyph: () -> Unit): Unit {
         if (ctx.isHovered(hoverId)) {
-            ctx.renderer.fillCircle(rect.centerX(), rect.centerY(), rect.w / 2.0,
-                ctx.theme.onMedia.withAlpha(30))
+            ctx.renderer.fillCircle(rect.centerX(), rect.centerY(), rect.w / 2.0, ctx.theme.onMedia.withAlpha(30))
         }
         glyph()
     }
@@ -687,12 +755,15 @@ class ReaderStage <: Widget {
         var title = r.activeSegmentTitle
         if (title.size == 0) {
             match (model.meta.value) {
-                case Some(m) => if (m.arcid == model.readerArcid) { title = m.title }
+                case Some(m) =>
+                    if (m.arcid == model.readerArcid) {
+                        title = m.title
+                    }
                 case None => ()
             }
         }
-        ctx.renderer.textCenter("《${title}》", Rect(c.x + 24.0, y, c.w - 48.0, 20.0),
-            ctx.theme.mutedText, pointSize: 13.0)
+        ctx.renderer.textCenter("《${title}》", Rect(c.x + 24.0, y, c.w - 48.0, 20.0), ctx.theme.mutedText,
+            pointSize: 13.0)
         y += 48.0
         // 下一档案行：可选封面（AppModel 解析候选后经 asset 管线请求）+ 状态文案。
         let nextTitle = r.nextSegmentTitle
@@ -709,8 +780,7 @@ class ReaderStage <: Widget {
         }
         // 按钮（seamless 关）：打开下一档案（候选未解析到时灰显）/ 查看详情。
         if (!r.seamlessNext) {
-            drawEndButton(ctx, endOpenRect, "reader:end:open", "打开下一档案",
-                model.hasNextCandidate(), true)
+            drawEndButton(ctx, endOpenRect, "reader:end:open", "打开下一档案", model.hasNextCandidate(), true)
             drawEndButton(ctx, endDetailRect, "reader:end:detail", "查看详情", true, false)
         }
     }
@@ -719,12 +789,10 @@ class ReaderStage <: Widget {
         let c = endCardRect
         var tx = c.x + 32.0
         // 候选封面 48×64（asset 管线；未就绪/无封面跳过不编）。
-        if (cover && model.readerNextCoverKey.size > 0 &&
-            model.imageState(model.readerNextCoverKey).value == "ready") {
+        if (cover && model.readerNextCoverKey.size > 0 && model.imageState(model.readerNextCoverKey).value == "ready") {
             match (pixelTexture(ctx.renderer, model.readerNextCoverKey)) {
                 case Some(tex) =>
-                    let dest = fittedRect(Size(tex.width, tex.height), Rect(tx, y - 8.0, 48.0, 64.0),
-                        ImageFit.Cover)
+                    let dest = fittedRect(Size(tex.width, tex.height), Rect(tx, y - 8.0, 48.0, 64.0), ImageFit.Cover)
                     ctx.renderer.pushClip(Rect(tx, y - 8.0, 48.0, 64.0))
                     ctx.renderer.texture(tex, dest)
                     ctx.renderer.popClip()
@@ -737,27 +805,40 @@ class ReaderStage <: Widget {
     }
 
     // 结束页按钮：主操作 accent 底 / 次操作 field 底；disabled 灰显不响应。
-    private func drawEndButton(ctx: UiContext, rect: Rect, hoverId: String, label: String,
-        enabled: Bool, primary: Bool): Unit {
+    private func drawEndButton(ctx: UiContext, rect: Rect, hoverId: String, label: String, enabled: Bool, primary: Bool): Unit {
         let hovered = enabled && ctx.isHovered(hoverId)
         let bg = if (!enabled) {
             ctx.theme.field
         } else if (primary) {
-            if (hovered) { ctx.theme.accent.withAlpha(220) } else { ctx.theme.accent }
+            if (hovered) {
+                ctx.theme.accent.withAlpha(220)
         } else {
-            if (hovered) { ctx.theme.overlayHover } else { ctx.theme.field }
+                ctx.theme.accent
+            }
+        } else {
+            if (hovered) {
+                ctx.theme.overlayHover
+            } else {
+                ctx.theme.field
+            }
         }
         ctx.renderer.fillRoundedRect(rect, 9.0, bg)
-        let fg = if (!enabled) { ctx.theme.mutedText }
-                 else if (primary) { ctx.theme.accentText }
-                 else { ctx.theme.text }
+        let fg = if (!enabled) {
+            ctx.theme.mutedText
+        } else if (primary) {
+            ctx.theme.accentText
+        } else {
+            ctx.theme.text
+        }
         ctx.renderer.textCenter(label, rect, fg, pointSize: 13.0)
     }
 
     // ── 媒体信息浮层（原型 #media-info；readerShowInfo 开时显示，左下角小字半透明底）──
 
     private func drawMediaInfo(ctx: UiContext): Unit {
-        if (model.reader.onVirtualEnd) { return } // 结束页无媒体信息
+        if (model.reader.onVirtualEnd) {
+            return
+        } // 结束页无媒体信息
         var parts = ArrayList<String>()
         parts.add("p.${model.reader.displayPage}")
         let realIdx = match (model.reader.currentReal) {
@@ -766,7 +847,11 @@ class ReaderStage <: Widget {
         }
         match (model.reader.pageAt(realIdx)) {
             case Some(p) =>
-                parts.add(if (p.pageType.size > 0) { p.pageType } else { "image" })
+                parts.add(if (p.pageType.size > 0) {
+                    p.pageType
+                } else {
+                    "image"
+                })
                 if (p.pageType == "image" || p.pageType == "") {
                     let key = readerPageKey(model.reader.arcidOfReal(realIdx), p.id)
                     match (pixelTexture(ctx.renderer, key)) {
@@ -786,7 +871,9 @@ class ReaderStage <: Widget {
         }
         let sb = StringBuilder()
         for (i in 0..parts.size) {
-            if (i > 0) { sb.append(" · ") }
+            if (i > 0) {
+                sb.append(" · ")
+            }
             sb.append(parts[Int64(i)])
         }
         let text = sb.toString()
@@ -805,17 +892,25 @@ class ReaderStage <: Widget {
     // 溢出舞台。返回最大滚动偏移；不启用返回 None（双页 spread/音频页/未就绪天然不满足）。
     private func longPageMax(ctx: UiContext): ?Float32 {
         let r = model.reader
-        if (!r.longPage || keys.size != 1 || st.zoomed) { return None }
+        if (!r.longPage || keys.size != 1 || st.zoomed) {
+            return None
+        }
         match (r.mode) {
             case ReadingMode.Webtoon => return None
             case _ => ()
         }
         let key = keys[0]
-        if (key.size == 0 || model.imageState(key).value != "ready") { return None }
+        if (key.size == 0 || model.imageState(key).value != "ready") {
+            return None
+        }
         match (pixelTexture(ctx.renderer, key)) {
             case Some(tex) =>
                 let maxOff = longPageMaxOffset(longPageFittedHeight(tex.width, tex.height, frame.w), frame.h)
-                if (maxOff > 0.0) { Some(maxOff) } else { None }
+                if (maxOff > 0.0) {
+                    Some(maxOff)
+                } else {
+                    None
+                }
             case None => None
         }
     }
@@ -824,8 +919,11 @@ class ReaderStage <: Widget {
     // 其余模式走 spread 步进。
     private func wheelTurn(forward: Bool): Unit {
         match (model.reader.mode) {
-            case ReadingMode.Webtoon =>
-                model.gotoPage(model.readerIndex.value + if (forward) { 1 } else { -1 })
+            case ReadingMode.Webtoon => model.gotoPage(model.readerIndex.value + if (forward) {
+                1
+            } else {
+                -1
+            })
             case _ => model.readerTurnPage(forward)
         }
     }
@@ -833,21 +931,33 @@ class ReaderStage <: Widget {
     public func handle(ctx: UiContext, event: UiEvent): Bool {
         match (event) {
             case UiEvent.MouseWheel(_, dy, x, y) =>
-                if (!frame.contains(x, y)) { return false }
+                if (!frame.contains(x, y)) {
+                    return false
+                }
                 model.noteReaderActivity()
                 // 长图滚动：滚轮先滚图；滚到顶再向上 → 上一页、滚到底再向下 → 下一页
                 //（frontend 边缘倒计时 toast 省略：直接翻页）。滚动跟手无惯性。
                 match (longPageMax(ctx)) {
                     case Some(maxOff) =>
                         if (dy > 0.0) {
-                            if (st.scrollY >= maxOff - 0.5) { wheelTurn(true) }
-                            else { st.scrollY = min(maxOff, st.scrollY + dy * LONG_PAGE_WHEEL_PX) }
+                            if (st.scrollY >= maxOff - 0.5) {
+                                wheelTurn(true)
+                            } else {
+                                st.scrollY = min(maxOff, st.scrollY + dy * LONG_PAGE_WHEEL_PX)
+                            }
                         } else if (dy < 0.0) {
-                            if (st.scrollY <= 0.5) { wheelTurn(false) }
-                            else { st.scrollY = max(0.0, st.scrollY + dy * LONG_PAGE_WHEEL_PX) }
+                            if (st.scrollY <= 0.5) {
+                                wheelTurn(false)
+                            } else {
+                                st.scrollY = max(0.0, st.scrollY + dy * LONG_PAGE_WHEEL_PX)
+                            }
                         }
                     case None =>
-                        if (dy > 0.0) { wheelTurn(true) } else if (dy < 0.0) { wheelTurn(false) }
+                        if (dy > 0.0) {
+                            wheelTurn(true)
+                        } else if (dy < 0.0) {
+                            wheelTurn(false)
+                        }
                 }
                 return true
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
@@ -873,8 +983,7 @@ class ReaderStage <: Widget {
                         model.playback.skip(5.0)
                         return true
                     }
-                    if (seekRect.contains(x, y) && model.playback.durationSec > 0.0 &&
-                        model.playback.loaded) {
+                    if (seekRect.contains(x, y) && model.playback.durationSec > 0.0 && model.playback.loaded) {
                         ctx.beginDrag("reader:stage:seek")
                         seekFromX(x, seekRect)
                         return true
@@ -899,12 +1008,24 @@ class ReaderStage <: Widget {
                     }
                 }
                 if (audioPage.isSome() || videoPage.isSome()) {
-                    if (playRect.contains(x, y)) { ctx.claimHover("reader:stage:play", CursorShape.Interactive) }
-                    if (backRect.contains(x, y)) { ctx.claimHover("reader:stage:back", CursorShape.Interactive) }
-                    if (fwdRect.contains(x, y)) { ctx.claimHover("reader:stage:fwd", CursorShape.Interactive) }
-                    if (seekRect.contains(x, y)) { ctx.claimHover("reader:stage:seek", CursorShape.Interactive) }
-                    if (muteRect.contains(x, y)) { ctx.claimHover("reader:stage:mute", CursorShape.Interactive) }
-                    if (volumeRect.contains(x, y)) { ctx.claimHover("reader:stage:volume", CursorShape.Interactive) }
+                    if (playRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:play", CursorShape.Interactive)
+                    }
+                    if (backRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:back", CursorShape.Interactive)
+                    }
+                    if (fwdRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:fwd", CursorShape.Interactive)
+                    }
+                    if (seekRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:seek", CursorShape.Interactive)
+                    }
+                    if (muteRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:mute", CursorShape.Interactive)
+                    }
+                    if (volumeRect.contains(x, y)) {
+                        ctx.claimHover("reader:stage:volume", CursorShape.Interactive)
+                    }
                     if (ctx.isDragging("reader:stage:seek") && ctx.leftMouseDown) {
                         seekFromX(x, seekRect)
                         return true
@@ -939,8 +1060,7 @@ class ReaderStage <: Widget {
                 if (audioPage.isNone() && videoPage.isNone() && frame.contains(x, y)) {
                     for (i in 0..keys.size) {
                         let key = keys[i]
-                        if (key.size > 0 && model.imageState(key).value == "error" &&
-                            pageCell(Int64(i)).contains(x, y)) {
+                        if (key.size > 0 && model.imageState(key).value == "error" && pageCell(Int64(i)).contains(x, y)) {
                             match (model.reader.pageAt(spreadIdx[Int64(i)])) {
                                 case Some(p) =>
                                     model.retryImage(key, readerPageUrl(model.reader.arcid, p.id))
@@ -957,14 +1077,17 @@ class ReaderStage <: Widget {
 
     private func seekFromX(x: Float32, rect: Rect): Unit {
         let dur = model.playback.durationSec
-        if (dur <= 0.0 || rect.w <= 0.0) { return }
+        if (dur <= 0.0 || rect.w <= 0.0) {
+            return
+        }
         let amount = Float64(max(0.0, min(1.0, (x - rect.x) / rect.w)))
         model.playback.seekTo(amount * dur)
     }
 
     private func volumeFromX(x: Float32): Unit {
-        if (volumeRect.w <= 0.0) { return }
-        model.playback.setVolume(Float64(max(0.0, min(1.0,
-            (x - volumeRect.x) / volumeRect.w))))
+        if (volumeRect.w <= 0.0) {
+            return
+        }
+        model.playback.setVolume(Float64(max(0.0, min(1.0, (x - volumeRect.x) / volumeRect.w))))
     }
 }

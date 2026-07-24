@@ -167,28 +167,40 @@ public class ReaderModel {
     }
 
     public prop arcid: String {
-        get() { _arcid }
+        get() {
+            _arcid
+        }
     }
     public prop index: Int64 {
-        get() { _index }
+        get() {
+            _index
+        }
     }
     public prop pageCount: Int64 {
-        get() { pageList.size }
+        get() {
+            pageList.size
+        }
     }
 
     // ---- 流/segment 只读 API（视图层不直接摸流索引，经 display* 系列取值）----
 
     // 全部 segment（侧边栏分组用；返回快照数组）。
     public prop segmentList: Array<ReaderSegment> {
-        get() { segments.toArray() }
+        get() {
+            segments.toArray()
+        }
     }
     // 已拼接过的 arcid 集（含首档案；AppModel 候选解析去重用，提交 worker 前取快照）。
     public prop appendedArcids: Array<String> {
-        get() { _appendedArcids.toArray() }
+        get() {
+            _appendedArcids.toArray()
+        }
     }
     // 拼接失败原因（""=无；结束页卡片显示「没有下一档案」态）。
     public prop appendError: String {
-        get() { _appendError }
+        get() {
+            _appendError
+        }
     }
     // 当前流项所属 segment 下标。
     public func activeSegmentIndex(): Int64 {
@@ -196,18 +208,26 @@ public class ReaderModel {
     }
     // 当前 spread 是否为虚拟结束页。
     public prop onVirtualEnd: Bool {
-        get() { realOfStream(_index).isNone() && pageList.size > 0 }
+        get() {
+            realOfStream(_index).isNone() && pageList.size > 0
+        }
     }
     // 当前 spread 首页的真实页 pageList 索引（虚拟页/空表为 None）。
     public prop currentReal: ?Int64 {
-        get() { realOfStream(_index) }
+        get() {
+            realOfStream(_index)
+        }
     }
     // 显示总页数：seamless 开 = 当前 segment 页数；关 = 全量真实页（frontend
     // sliderTotalPages 语义）。
     public prop displayTotal: Int64 {
         get() {
-            if (pageList.size == 0) { return 0 }
-            if (_seamlessNext) { return segments[segmentOfStream(_index)].count }
+            if (pageList.size == 0) {
+                return 0
+            }
+            if (_seamlessNext) {
+                return segments[segmentOfStream(_index)].count
+            }
             pageList.size
         }
     }
@@ -230,7 +250,9 @@ public class ReaderModel {
     // 当前 segment 标题（结束页卡片「已读完《X》」；元数据未回填时为空串，UI 回退元数据）。
     public prop activeSegmentTitle: String {
         get() {
-            if (segments.size == 0) { return "" }
+            if (segments.size == 0) {
+                return ""
+            }
             segments[segmentOfStream(_index)].title
         }
     }
@@ -238,61 +260,93 @@ public class ReaderModel {
     public prop nextSegmentTitle: String {
         get() {
             let i = segmentOfStream(_index)
-            if (realOfStream(_index).isSome() || i + 1 >= segments.size) { return "" }
+            if (realOfStream(_index).isSome() || i + 1 >= segments.size) {
+                return ""
+            }
             segments[i + 1].title
         }
     }
     public prop mode: ReadingMode {
-        get() { _mode }
+        get() {
+            _mode
+        }
     }
     public prop doublePage: Bool {
-        get() { _doublePage }
+        get() {
+            _doublePage
+        }
     }
     public prop splitCover: Bool {
-        get() { _splitCover }
+        get() {
+            _splitCover
+        }
     }
     public prop longPage: Bool {
-        get() { _longPage }
+        get() {
+            _longPage
+        }
     }
     public prop tapTurnPage: Bool {
-        get() { _tapTurnPage }
+        get() {
+            _tapTurnPage
+        }
     }
     public prop doubleTapZoom: Bool {
-        get() { _doubleTapZoom }
+        get() {
+            _doubleTapZoom
+        }
     }
     public prop autoHide: Bool {
-        get() { _autoHide }
+        get() {
+            _autoHide
+        }
     }
     public prop seamlessNext: Bool {
-        get() { _seamlessNext }
+        get() {
+            _seamlessNext
+        }
     }
     public prop autoPlay: Bool {
-        get() { _autoPlay }
+        get() {
+            _autoPlay
+        }
     }
     public prop autoPlayIntervalSec: Int64 {
-        get() { _autoPlayIntervalSec }
+        get() {
+            _autoPlayIntervalSec
+        }
     }
     public prop activeLane: LaneId {
-        get() { _activeLane }
+        get() {
+            _activeLane
+        }
     }
     public prop chromeVisible: Bool {
-        get() { _chromeVisible }
+        get() {
+            _chromeVisible
+        }
     }
     // 最近一次活动（noteActivity/toggleChrome/open）的时钟读数，供 T13 每帧算 elapsed。
     public prop lastActivityMs: Int64 {
-        get() { _lastActivityMs }
+        get() {
+            _lastActivityMs
+        }
     }
 
     // 页信息只读访问（T13 渲染取 id/pageType 用）；越界返回 None。
     public func pageAt(i: Int64): ?PageInfo {
-        if (i < 0 || i >= pageList.size) { return None }
+        if (i < 0 || i >= pageList.size) {
+            return None
+        }
         pageList[i]
     }
 
     // 真实页所属档案 arcid（无缝续读拼接后，不同 segment 的页属不同档案：
     // 图片 key/url、媒体下载都必须按页取 arcid，不能再用档案级 _arcid）。
     public func arcidOfReal(p: Int64): String {
-        if (segments.size == 0) { return _arcid }
+        if (segments.size == 0) {
+            return _arcid
+        }
         segments[segmentOfReal(p)].arcid
     }
 
@@ -301,7 +355,9 @@ public class ReaderModel {
     // 打开档案：startIndex 为 0 基页索引（可能来自过期 progress，页表到货时再钳制）。
     // 换档案前把上一档案的 pending 尾巴发掉（去重丢尾教训）。
     public func open(arcid: String, startIndex: Int64): Unit {
-        if (pendingReport) { fireProgress() }
+        if (pendingReport) {
+            fireProgress()
+        }
         _arcid = arcid
         pageList = ArrayList<PageInfo>()
         segments.clear()
@@ -309,7 +365,11 @@ public class ReaderModel {
         _appendedArcids.clear()
         _appendedArcids.add(arcid)
         _appendError = ""
-        _index = if (startIndex < 0) { 0 } else { startIndex }
+        _index = if (startIndex < 0) {
+            0
+        } else {
+            startIndex
+        }
         _activeLane = Book
         _chromeVisible = true
         pendingReport = false
@@ -327,7 +387,9 @@ public class ReaderModel {
             _activeLane = Book
             return
         }
-        if (_index > streamLength() - 1) { _index = streamLength() - 1 }
+        if (_index > streamLength() - 1) {
+            _index = streamLength() - 1
+        }
         _index = snapToSpreadStart(_index)
         refreshLaneForSpread()
         firePrefetch() // 页表到货补一次预取（open 时没有 moveTo，邻居页全靠这次）
@@ -339,28 +401,44 @@ public class ReaderModel {
     // lane → 上报（防抖）→ 预取 → 末尾虚拟页触发续读解析。
     public func gotoPage(n: Int64): Unit {
         let total = streamLength()
-        if (total == 0) { return }
+        if (total == 0) {
+            return
+        }
         var next = n
-        if (next < 0) { next = 0 }
-        if (next > total - 1) { next = total - 1 }
+        if (next < 0) {
+            next = 0
+        }
+        if (next > total - 1) {
+            next = total - 1
+        }
         moveTo(next)
     }
 
     // 按 0 基显示页码翻页（UI/AppModel 入口；流索引由模型内部换算）：
     // seamless 开 = 当前 segment 内页码（0 基），关 = 全局真实页码（0 基）。
     public func gotoDisplayPage(d0: Int64): Unit {
-        if (pageList.size == 0) { return }
+        if (pageList.size == 0) {
+            return
+        }
         if (_seamlessNext) {
             let i = segmentOfStream(_index)
             var local = d0
-            if (local < 0) { local = 0 }
-            if (local > segments[i].count - 1) { local = segments[i].count - 1 }
+            if (local < 0) {
+                local = 0
+            }
+            if (local > segments[i].count - 1) {
+                local = segments[i].count - 1
+            }
             gotoPage(streamStartOf(i) + local)
             return
         }
         var p = d0
-        if (p < 0) { p = 0 }
-        if (p > pageList.size - 1) { p = pageList.size - 1 }
+        if (p < 0) {
+            p = 0
+        }
+        if (p > pageList.size - 1) {
+            p = pageList.size - 1
+        }
         gotoPage(streamOfReal(p))
     }
 
@@ -369,15 +447,23 @@ public class ReaderModel {
     // webtoon 由滚动驱动，不响应按键翻页。虚拟页上「上一页」回本 segment 最后真实页
     //（moveTo 内按双页/拆分封面规则吸附，对齐 frontend computeCollectionEndReturnRealPage）。
     public func turnPage(forward: Bool): Unit {
-        if (isWebtoon()) { return }
+        if (isWebtoon()) {
+            return
+        }
         let total = streamLength()
-        if (total == 0) { return }
+        if (total == 0) {
+            return
+        }
         if (forward) {
             let c = _index + spreadSizeAt(_index)
-            if (c > total - 1) { return } // 已在末流项（末尾虚拟页）
+            if (c > total - 1) {
+                return
+            } // 已在末流项（末尾虚拟页）
             moveTo(c)
         } else {
-            if (_index <= 0) { return } // 已在首 spread
+            if (_index <= 0) {
+                return
+            } // 已在首 spread
             match (realOfStream(_index)) {
                 case Some(_) => moveTo(_index - 1)
                 case None =>
@@ -398,21 +484,18 @@ public class ReaderModel {
     public func keyDirection(key: KeyCode): Option<Bool> {
         match (_mode) {
             case Webtoon => None
-            case SingleRtl =>
-                match (key) {
+            case SingleRtl => match (key) {
                     case KeyLeft => Some(true)
                     case KeyRight => Some(false)
                     case _ => None
                 }
-            case SingleTtb =>
-                match (key) {
+            case SingleTtb => match (key) {
                     case KeyDown => Some(true)
                     case KeyUp => Some(false)
                     case KeyLeft => Some(false)
                     case KeyRight => Some(true)
                 }
-            case SingleLtr =>
-                match (key) {
+            case SingleLtr => match (key) {
                     case KeyRight => Some(true)
                     case KeyLeft => Some(false)
                     case _ => None
@@ -427,13 +510,19 @@ public class ReaderModel {
     // [0,1],[2,3]…），RTL 双页顺序反转（对齐 frontend ReaderPageContainer :2520-2565
     // 校正规则）。虚拟结束页不参配，返回空数组（UI 经 onVirtualEnd 走结束卡片）。
     public func spreadPages(): Array<Int64> {
-        if (pageList.size == 0) { return Array<Int64>(0, repeat: 0) }
+        if (pageList.size == 0) {
+            return Array<Int64>(0, repeat: 0)
+        }
         let s = snapToSpreadStart(_index)
         match (realOfStream(s)) {
             case None => Array<Int64>(0, repeat: 0)
             case Some(p) =>
-                if (spreadSizeAt(s) == 1) { return [p] }
-                if (isRtl()) { return [p + 1, p] }
+                if (spreadSizeAt(s) == 1) {
+                    return [p]
+                }
+                if (isRtl()) {
+                    return [p + 1, p]
+                }
                 [p, p + 1]
         }
     }
@@ -464,6 +553,18 @@ public class ReaderModel {
         lanes.toArray()
     }
 
+    // 当前 spread 自身承载的媒体内容。它只由页表/布局决定，与 dock 当前展开哪条
+    // lane 无关；AppModel 用它管理媒体生命周期，ReaderStage 用它选择内容舞台。
+    public func spreadMediaLane(): LaneId {
+        for (lane in laneSpecs()) {
+            match (lane) {
+                case Book => ()
+                case _ => return lane
+            }
+        }
+        Book
+    }
+
     // 手动切 lane：不翻页；不在当前 lanes 里的 lane 忽略（参考实现 activeLane 落回 lanes[0]，
     // 这里选择静默忽略以保持状态机简单）。
     public func setActiveLane(l: LaneId): Unit {
@@ -485,7 +586,9 @@ public class ReaderModel {
     // 有用户活动（鼠标移动/按键等）时调用：刷新活动时间；autoHide 开启时重新亮出 chrome。
     public func noteActivity(): Unit {
         _lastActivityMs = clock()
-        if (_autoHide) { _chromeVisible = true }
+        if (_autoHide) {
+            _chromeVisible = true
+        }
     }
 
     // ---- 进度 ----
@@ -504,16 +607,23 @@ public class ReaderModel {
 
     // 周期驱动（T13 FrameHandler / AppModel.pump 每帧调用）：防抖窗口到后补发 pending 尾巴。
     public func tick(): Unit {
-        if (!pendingReport) { return }
+        if (!pendingReport) {
+            return
+        }
         match (lastReportAtMs) {
-            case Some(t) => if (clock() - t >= READER_PROGRESS_DEBOUNCE_MS) { fireProgress() }
+            case Some(t) =>
+                if (clock() - t >= READER_PROGRESS_DEBOUNCE_MS) {
+                    fireProgress()
+                }
             case None => fireProgress()
         }
     }
 
     // 离开阅读器/换档案前调用：pending 立即发，不等防抖窗口（尾巴不丢）。
     public func flushProgress(): Unit {
-        if (pendingReport) { fireProgress() }
+        if (pendingReport) {
+            fireProgress()
+        }
     }
 
     // ---- 阅读选项变更（写 settings + 落盘）----
@@ -566,13 +676,18 @@ public class ReaderModel {
     // 无缝续读开关：持久化 + 流映射重建（segment 间虚拟页随开关出现/消失），
     // 尽量保持当前位置不跳（真实页按 pageList 索引换算回新流索引；虚拟页留原 segment）。
     public func setSeamlessNext(v: Bool): Unit {
-        if (v == _seamlessNext) { return }
+        if (v == _seamlessNext) {
+            return
+        }
         let real = realOfStream(_index)
         let seg = segmentOfStream(_index)
         _seamlessNext = v
         settings.readerSeamlessNext = v
         persist()
-        if (pageList.size == 0) { _index = 0; return }
+        if (pageList.size == 0) {
+            _index = 0
+            return
+        }
         match (real) {
             case Some(p) => _index = snapToSpreadStart(streamOfReal(p))
             case None => _index = virtualStreamIndexOf(seg)
@@ -600,8 +715,12 @@ public class ReaderModel {
         let next = snapToSpreadStart(n)
         let spreadChanged = next != _index
         _index = next
-        if (spreadChanged) { refreshLaneForSpread() }
-        if (spreadChanged) { _appendError = "" } // 离开失败现场：结束页回到解析/加载态
+        if (spreadChanged) {
+            refreshLaneForSpread()
+        }
+        if (spreadChanged) {
+            _appendError = ""
+        } // 离开失败现场：结束页回到解析/加载态
         maybeReport()
         firePrefetch()
         maybeFireAppendNext()
@@ -611,12 +730,18 @@ public class ReaderModel {
 
     // 流总长：真实页 + 虚拟页（末尾恒 1；segment 间仅 seamlessNext 开时计入）。
     private func streamLength(): Int64 {
-        pageList.size + if (_seamlessNext) { segments.size } else { min(segments.size, 1) }
+        pageList.size + if (_seamlessNext) {
+            segments.size
+        } else {
+            min(segments.size, 1)
+        }
     }
 
     // segment i 之前流内的虚拟页数。
     private func virtualsBeforeSegment(i: Int64): Int64 {
-        if (_seamlessNext) { return i }
+        if (_seamlessNext) {
+            return i
+        }
         0
     }
 
@@ -633,7 +758,9 @@ public class ReaderModel {
     // 真实页 pageList 索引 → 所属 segment 下标。
     private func segmentOfReal(p: Int64): Int64 {
         var i = segments.size - 1
-        while (i > 0 && segments[i].start > p) { i-- }
+        while (i > 0 && segments[i].start > p) {
+            i--
+        }
         i
     }
 
@@ -646,24 +773,36 @@ public class ReaderModel {
     // 流索引 → 所属 segment 下标（虚拟页归本 segment）。
     private func segmentOfStream(s: Int64): Int64 {
         var i = segments.size - 1
-        while (i > 0 && streamStartOf(i) > s) { i-- }
+        while (i > 0 && streamStartOf(i) > s) {
+            i--
+        }
         i
     }
 
     // 流索引 → 真实页 pageList 索引；虚拟页/越界返回 None。
     private func realOfStream(s: Int64): ?Int64 {
-        if (s < 0 || segments.size == 0) { return None }
+        if (s < 0 || segments.size == 0) {
+            return None
+        }
         let i = segmentOfStream(s)
         let local = s - streamStartOf(i)
-        if (local < 0 || local >= segments[i].count) { return None }
+        if (local < 0 || local >= segments[i].count) {
+            return None
+        }
         segments[i].start + local
     }
 
     // 进入末尾虚拟页 → 触发续读解析（中间虚拟页的下一档案已在流内，不触发）。
     private func maybeFireAppendNext(): Unit {
-        if (segments.size == 0) { return }
-        if (realOfStream(_index).isSome()) { return }
-        if (segmentOfStream(_index) != segments.size - 1) { return }
+        if (segments.size == 0) {
+            return
+        }
+        if (realOfStream(_index).isSome()) {
+            return
+        }
+        if (segmentOfStream(_index) != segments.size - 1) {
+            return
+        }
         match (onAppendNext) {
             case Some(cb) => cb(segments[segments.size - 1].arcid)
             case None => ()
@@ -703,12 +842,24 @@ public class ReaderModel {
 
     // segment 内局部页码 → 所属 spread 的首页局部页码。
     private func snapLocalToSpreadStart(seg: ReaderSegment, local: Int64): Int64 {
-        if (!doublePageEffective()) { return local }
-        if (_splitCover) {
-            if (local == 0) { return 0 }
-            return if (local % 2 == 1) { local } else { local - 1 }
+        if (!doublePageEffective()) {
+            return local
         }
-        if (local % 2 == 0) { local } else { local - 1 }
+        if (_splitCover) {
+            if (local == 0) {
+                return 0
+            }
+            return if (local % 2 == 1) {
+                local
+            } else {
+                local - 1
+            }
+        }
+        if (local % 2 == 0) {
+            local
+        } else {
+            local - 1
+        }
     }
 
     // 首项为流索引 s 的 spread 的页数（1 或 2；虚拟页/末页落单/splitCover 封面为 1）。
@@ -718,9 +869,15 @@ public class ReaderModel {
             case Some(p) =>
                 let seg = segments[segmentOfReal(p)]
                 let local = p - seg.start
-                if (!doublePageEffective()) { return 1 }
-                if (local == 0 && _splitCover) { return 1 }
-                if (local + 1 > seg.count - 1) { return 1 }
+                if (!doublePageEffective()) {
+                    return 1
+                }
+                if (local == 0 && _splitCover) {
+                    return 1
+                }
+                if (local + 1 > seg.count - 1) {
+                    return 1
+                }
                 2
         }
     }
@@ -742,7 +899,9 @@ public class ReaderModel {
     // 布局相关选项（模式/双页/splitCover）变更后：当前页重新吸附 spread 首页，
     // spread 变了就重算 lane（对齐 frontend 容器切换 splitCover 时的页码校正）。
     private func afterLayoutChange(): Unit {
-        if (pageList.size == 0) { return }
+        if (pageList.size == 0) {
+            return
+        }
         let next = snapToSpreadStart(_index)
         if (next != _index) {
             _index = next
@@ -751,7 +910,9 @@ public class ReaderModel {
     }
 
     private func maybeReport(): Unit {
-        if (realOfStream(_index).isNone()) { return } // 虚拟页不上报（也不记 pending）
+        if (realOfStream(_index).isNone()) {
+            return
+        } // 虚拟页不上报（也不记 pending）
         match (lastReportAtMs) {
             case Some(t) =>
                 if (clock() - t >= READER_PROGRESS_DEBOUNCE_MS) {
@@ -789,14 +950,18 @@ public class ReaderModel {
     public func prefetchTargets(): Array<Int64> {
         let total = pageList.size
         let out = ArrayList<Int64>()
-        if (total == 0) { return out.toArray() }
+        if (total == 0) {
+            return out.toArray()
+        }
         let base = match (realOfStream(_index)) {
             case Some(p) => p
             case None => total - 1
         }
         for (d in [-2, -1, 1, 2]) {
             let i = base + d
-            if (i >= 0 && i < total) { out.add(i) }
+            if (i >= 0 && i < total) {
+                out.add(i)
+            }
         }
         out.toArray()
     }
@@ -806,10 +971,14 @@ public class ReaderModel {
     // 追加下一档案：segment 追加到流尾并重建映射（当前位置不变，末尾虚拟页顺延）。
     // appendedArcids 去重——同一档案重复回调静默忽略。
     public func appendArchive(arcid: String, title: String, pages: ArrayList<PageInfo>): Unit {
-        if (arcid.size == 0 || _appendedArcids.contains(arcid)) { return }
+        if (arcid.size == 0 || _appendedArcids.contains(arcid)) {
+            return
+        }
         _appendedArcids.add(arcid)
         let start = pageList.size
-        for (p in pages) { pageList.add(p) }
+        for (p in pages) {
+            pageList.add(p)
+        }
         segments.add(ReaderSegment(arcid, title, start, pages.size))
         _appendError = ""
     }
