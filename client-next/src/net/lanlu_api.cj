@@ -25,10 +25,14 @@ class TokenStore {
     private let mutex = Mutex()
     private var token: String = ""
     func set(t: String): Unit {
-        synchronized(mutex) { token = t }
+        synchronized(mutex) {
+            token = t
+        }
     }
     func get(): String {
-        synchronized(mutex) { return token }
+        synchronized(mutex) {
+            return token
+        }
     }
 }
 
@@ -39,36 +43,59 @@ public class LanluApi {
 
     public init(baseUrl: String) {
         var b = baseUrl.trimAscii()
-        while (b.endsWith("/")) { b = b[0..b.size - 1] }
+        while (b.endsWith("/")) {
+            b = b[0..b.size - 1]
+        }
         base = b
         let s = store
         client = RestClient(readTimeout: Duration.second * 30, writeTimeout: Duration.second * 30, poolSize: 8)
             .baseUrl(base)
-            .onRequest({ req =>
-                let t = s.get()
-                if (t.size > 0) { req.header("Authorization", "Bearer ${t}") }
-            })
+            .onRequest(
+                {
+                    req =>
+                        let t = s.get()
+                        if (t.size > 0) {
+                            req.header("Authorization", "Bearer ${t}")
+                        }
+                }
+            )
     }
 
-    public func setToken(token: String): Unit { store.set(token) }
-    public func close(): Unit { client.close() }
+    public func setToken(token: String): Unit {
+        store.set(token)
+    }
+    public func close(): Unit {
+        client.close()
+    }
 
     private func checked(resp: ClientResponse): Envelope {
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, resp.body()) }
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, resp.body())
+        }
         parseEnvelope(resp.body())
     }
 
     private func checkedBytes(resp: ClientResponse): Array<UInt8> {
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, "HTTP ${resp.status}") }
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, "HTTP ${resp.status}")
+        }
         resp.bodyBytes()
     }
 
     // parseCategoryList/parseArchiveMeta 需要完整响应体而非已解包的 envelope。
     private func checkedBody(resp: ClientResponse): String {
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, resp.body()) }
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, resp.body())
+        }
         resp.body()
     }
 
@@ -86,10 +113,14 @@ public class LanluApi {
         }
         // 服务端对用户名/密码错误也返回 401（{"code":401,"message":"invalid credentials"}），
         // 不能走 checked() 的“登录状态已失效”文案——那是会话过期专用，此处特判为凭据错误。
-        if (resp.status == 401) { throw ApiException(401, "用户名或密码错误") }
+        if (resp.status == 401) {
+            throw ApiException(401, "用户名或密码错误")
+        }
         let env = checked(resp)
         let d = JsonCodec.decode<LoginData>(env.dataRaw)
-        if (d.token.size == 0) { throw ApiException(0, "登录响应缺少 token") }
+        if (d.token.size == 0) {
+            throw ApiException(0, "登录响应缺少 token")
+        }
         setToken(d.token)
         return d
     }
@@ -99,10 +130,14 @@ public class LanluApi {
     public func verifyTotpLogin(challengeId: String, code: String, recoveryCode: String): LoginData {
         let body = "{\"challengeId\":${jsonQuote(challengeId)},\"code\":${jsonQuote(code)},\"recoveryCode\":${jsonQuote(recoveryCode)}}"
         let resp = client.postJson("/api/auth/login/totp/verify", body)
-        if (resp.status == 401) { throw ApiException(401, "验证码或恢复码错误") }
+        if (resp.status == 401) {
+            throw ApiException(401, "验证码或恢复码错误")
+        }
         let env = checked(resp)
         let d = JsonCodec.decode<LoginData>(env.dataRaw)
-        if (d.token.size == 0) { throw ApiException(0, "登录响应缺少 token") }
+        if (d.token.size == 0) {
+            throw ApiException(0, "登录响应缺少 token")
+        }
         setToken(d.token)
         return d
     }
@@ -117,8 +152,12 @@ public class LanluApi {
 
     public func search(q: SearchQuery): SearchPage {
         let resp = client.get("/api/search${buildSearchQuery(q)}")
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, resp.body()) }
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, resp.body())
+        }
         parseSearchPage(resp.body())
     }
 
@@ -131,8 +170,12 @@ public class LanluApi {
         q.sortby = "RANDOM()"
         q.pageSize = count
         let resp = client.get("/api/search${buildSearchQuery(q)}")
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, resp.body()) }
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, resp.body())
+        }
         parseSearchPage(resp.body())
     }
 
@@ -171,12 +214,14 @@ public class LanluApi {
     // 返回裸 {"scene":...,"data":[...]}，data 数组元素与 search 条目同构，复用 parseSearchPage；
     // 混进的合集项没有 arcid，过滤丢弃（对齐 frontend getArchiveRelated 的 isArchiveItem 过滤）。
     public func relatedArchives(arcid: String, count: Int64): ArrayList<SearchItem> {
-        let body = checkedBody(client.get(
-            "/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}"))
+        let body = checkedBody(
+            client.get("/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}"))
         let page = parseSearchPage(body)
         let list = ArrayList<SearchItem>()
         for (it in page.items) {
-            if (it.arcid.size > 0) { list.add(it) }
+            if (it.arcid.size > 0) {
+                list.add(it)
+            }
         }
         list
     }
@@ -184,12 +229,15 @@ public class LanluApi {
     // 相关推荐（合集详情）：scene=tankoubon_related，元素为合集对象（recommendations 形态，
     // assets 为对象），复用 parseTankoubonList；过滤掉无 id 的档案项。
     public func relatedTankoubons(tankid: String, count: Int64): ArrayList<TankoubonInfo> {
-        let body = checkedBody(client.get(
-            "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}"))
+        let body = checkedBody(
+            client.get(
+                "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}"))
         let all = parseTankoubonList(body)
         let list = ArrayList<TankoubonInfo>()
         for (t in all) {
-            if (t.id.size > 0) { list.add(t) }
+            if (t.id.size > 0) {
+                list.add(t)
+            }
         }
         list
     }
@@ -198,7 +246,9 @@ public class LanluApi {
         checkedBytes(client.get(pageUrl(arcid, pagePath)))
     }
 
-    public func assetUrl(assetId: Int64): String { "/api/assets/${assetId}" }
+    public func assetUrl(assetId: Int64): String {
+        "/api/assets/${assetId}"
+    }
     public func pageUrl(arcid: String, pagePath: String): String {
         "/api/archives/${arcid}/page?path=${percentEncode(pagePath)}"
     }
@@ -208,13 +258,19 @@ public class LanluApi {
     }
 
     public func setFavorite(arcid: String, fav: Bool): Unit {
-        if (fav) { let _ = checked(client.put("/api/archives/${arcid}/favorite", "")) }
-        else { let _ = checked(client.delete("/api/archives/${arcid}/favorite")) }
+        if (fav) {
+            let _ = checked(client.put("/api/archives/${arcid}/favorite", ""))
+        } else {
+            let _ = checked(client.delete("/api/archives/${arcid}/favorite"))
+        }
     }
 
     public func setIsNew(arcid: String, isNew: Bool): Unit {
-        if (isNew) { let _ = checked(client.put("/api/archives/${arcid}/isnew", "")) }
-        else { let _ = checked(client.delete("/api/archives/${arcid}/isnew")) }
+        if (isNew) {
+            let _ = checked(client.put("/api/archives/${arcid}/isnew", ""))
+        } else {
+            let _ = checked(client.delete("/api/archives/${arcid}/isnew"))
+        }
     }
 
     // ==================== 设置区扩展：统计 / 账户安全 ====================
@@ -307,8 +363,8 @@ public class LanluApi {
     }
 
     public func adminResetUserPassword(id: Int64, newPassword: String): Unit {
-        let _ = checked(client.postJson("/api/auth/admin/users/${id}/reset-password",
-            "{\"password\":${jsonQuote(newPassword)}}"))
+        let _ = checked(
+            client.postJson("/api/auth/admin/users/${id}/reset-password", "{\"password\":${jsonQuote(newPassword)}}"))
     }
 
     // ==================== 设置区扩展：系统设置 ====================
@@ -322,7 +378,9 @@ public class LanluApi {
         var inner = ""
         for (i in 0..entries.size) {
             let (k, v) = entries[i]
-            if (i > 0) { inner += "," }
+            if (i > 0) {
+                inner += ","
+            }
             inner += "${jsonQuote(k)}:${jsonQuote(v)}"
         }
         let _ = checked(client.put("/api/admin/system/settings/batch", "{\"settings\":{${inner}}}"))
@@ -359,8 +417,12 @@ public class LanluApi {
     // 标签列表用公开组 /api/tags（分页/筛选），写操作走 /api/admin/tags。
     public func adminTagPage(q: String, ns: String, offset: Int64, limit: Int64): TagListPage {
         var url = "/api/tags?offset=${offset}&limit=${limit}"
-        if (q.size > 0) { url += "&q=${percentEncode(q)}" }
-        if (ns.size > 0) { url += "&namespace=${percentEncode(ns)}" }
+        if (q.size > 0) {
+            url += "&q=${percentEncode(q)}"
+        }
+        if (ns.size > 0) {
+            url += "&namespace=${percentEncode(ns)}"
+        }
         parseTagListPage(checkedBody(client.get(url)))
     }
 
@@ -406,7 +468,9 @@ public class LanluApi {
     public func reorderSmartFilters(ids: ArrayList<Int64>): Unit {
         var arr = ""
         for (i in 0..ids.size) {
-            if (i > 0) { arr += "," }
+            if (i > 0) {
+                arr += ","
+            }
             arr += "${ids[i]}"
         }
         let _ = checked(client.postJson("/api/admin/smart_filters/reorder", "{\"ids\":[${arr}]}"))
@@ -457,8 +521,8 @@ public class LanluApi {
     }
 
     public func cronValidate(expr: String): CronValidateResult {
-        parseCronValidate(checkedBody(client.postJson("/api/admin/cron/validate",
-            "{\"expression\":${jsonQuote(expr)}}")))
+        parseCronValidate(
+            checkedBody(client.postJson("/api/admin/cron/validate", "{\"expression\":${jsonQuote(expr)}}")))
     }
 
     public func cronCreateTask(jsonBody: String): Unit {
@@ -478,7 +542,11 @@ public class LanluApi {
     }
 
     public func cronSetEnabled(id: Int64, enabled: Bool): Unit {
-        let action = if (enabled) { "enable" } else { "disable" }
+        let action = if (enabled) {
+            "enable"
+        } else {
+            "disable"
+        }
         let _ = checked(client.postJson("/api/admin/cron/tasks/${id}/${action}", "{}"))
     }
 
@@ -497,11 +565,16 @@ public class LanluApi {
     // 必须显式关闭流释放底层连接（try/finally 覆盖解析异常路径）。
     public func taskListSnapshot(status: String, page: Int64, pageSize: Int64): TaskListPage {
         var url = "/api/admin/taskpool/tasks?page=${page}&pageSize=${pageSize}"
-        if (status != "all" && status.size > 0) { url += "&status=${status}" }
-        let resp = client.request().method("GET").url(url)
-            .header("Accept", "text/event-stream").send()
-        if (resp.status == 401) { throw ApiException(401, "登录状态已失效，请重新登录") }
-        if (!resp.isSuccess()) { throw ApiException(resp.status, "HTTP ${resp.status}") }
+        if (status != "all" && status.size > 0) {
+            url += "&status=${status}"
+        }
+        let resp = client.request().method("GET").url(url).header("Accept", "text/event-stream").send()
+        if (resp.status == 401) {
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            throw ApiException(resp.status, "HTTP ${resp.status}")
+        }
         let stream = resp.bodyStream()
         try {
             let text = readSseSnapshot(stream)

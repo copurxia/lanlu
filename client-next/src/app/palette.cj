@@ -44,8 +44,8 @@ public let LANLU_TANK_STACK_HI = Color.rgb(0x22, 0x30, 0x4A)
 public let LANLU_TANK_STACK_LO = Color.rgb(0x10, 0x15, 0x1F)
 
 // ── 亮色 ──
-// 页面底取 #F4F4F6（原型 --bg #f4f4f6；与亮色 scrim 的 244,244,246 一致）
-public let LANLU_L_BG = Color.rgb(0xF4, 0xF4, 0xF6)
+// 页面底比原型的 #F4F4F6 提亮一档，减少大面积灰感，同时与纯白卡片保留轻微层次。
+public let LANLU_L_BG = Color.rgb(0xF8, 0xF8, 0xFA)
 public let LANLU_L_PANEL = Color.rgb(0xFF, 0xFF, 0xFF)
 public let LANLU_L_PANEL_RAISED = Color.rgb(0xF0, 0xF0, 0xF3)
 public let LANLU_L_PANEL_EDGE = Color.rgba(0, 0, 0, 26)

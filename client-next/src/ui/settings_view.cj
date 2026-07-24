@@ -244,6 +244,7 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
             }
                 .mainAxisAlignment(MainAxisAlignment.Center)
                 .crossAxisAlignment(CrossAxisAlignment.Center)
+                .flexible(false)
                 .width(48.vp)
                 .height(48.vp)
                 .background(Color.rgb(0x3B, 0x55, 0x7D), 24.vp)
@@ -649,6 +650,7 @@ private func authPage(model: AppModel): Unit {
             }
                 .mainAxisAlignment(MainAxisAlignment.Center)
                 .crossAxisAlignment(CrossAxisAlignment.Center)
+                .flexible(false)
                 .width(48.vp)
                 .height(48.vp)
                 .background(Color.rgb(0x3B, 0x55, 0x7D), 24.vp)

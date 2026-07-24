@@ -13,11 +13,15 @@ import std.collection.ArrayList
 // 保证两个 State 始终同假。抽屉挂在 readerView 的 ZStack 里（不占布局空间，
 // Drawer 经 overlay 自锚定视口边缘）。
 
-// 抽屉宽（vp；原型 #sidebar 300px / #settings 320px）。
-private let READER_SIDEBAR_WIDTH: Float32 = 300.0
-private let READER_SETTINGS_WIDTH: Float32 = 320.0
+// 设计稿窗口为 1280 CSS px、导出图按 1.125 倍呈现；桌面端默认 1440 宽时保持
+// sidebar/settings 约 23.5%/25% 的视觉占比，避免原 300/320 在实机上显得过窄。
+private let READER_SIDEBAR_WIDTH: Float32 = 338.0
+private let READER_SETTINGS_WIDTH: Float32 = 360.0
 // 页列表行高（vp；原型 .sb-list .row padding 8+8 + 12.5px 字 ≈ 34，取 36 留命中余量）。
 private let READER_SIDEBAR_ROW_H: Float32 = 36.0
+private let READER_THUMB_W: Float32 = 99.0
+private let READER_THUMB_H: Float32 = 132.0
+private let READER_THUMB_ROW_H: Float32 = 140.0
 
 // ── #settings 控件精确几何/色值（原型 275-295 行 CSS；cui 标准 Switch/SegmentedControl
 // 规格与设计稿不符，故自绘）──
@@ -39,10 +43,19 @@ private let SEG_PS: Float32 = 12.0
 
 // 轨道/底槽的透明白黑（主题分支；palette.cj 无对应 token，属原型 CSS 直接换算）。
 private func segTrackColor(light: Bool): Color {
-    if (light) { Color.rgba(0, 0, 0, 15) } else { Color.rgba(255, 255, 255, 18) }
+    if (light) {
+        Color.rgba(0, 0, 0, 15)
+    } else {
+        Color.rgba(255, 255, 255, 18)
+    }
 }
+
 private func switchOffColor(light: Bool): Color {
-    if (light) { Color.rgba(0, 0, 0, 46) } else { Color.rgba(255, 255, 255, 38) }
+    if (light) {
+        Color.rgba(0, 0, 0, 46)
+    } else {
+        Color.rgba(255, 255, 255, 38)
+    }
 }
 
 private func readerModeIndex(m: ReadingMode): Int64 {
@@ -81,12 +94,13 @@ private class ReaderSwitch <: Widget {
         this.onToggle = onToggle
         this.hoverId = "readerswitch:${key}"
         // 弹簧初值取当前态（静态首帧即停稳，快照稳定，同 cui Switch 惯例）。
-        this.spring = rememberState<Spring>("readerswitch:${key}:knob",
-            {=> Spring(if (on) {
+        this.spring = rememberState<Spring>("readerswitch:${key}:knob", {
+            => Spring(if (on) {
                 1.0
             } else {
                 0.0
-            }, stiffness: 300.0, damping: 30.0) }).value
+            }, stiffness: 300.0, damping: 30.0)
+        }).value
         emit(this)
     }
 
@@ -104,8 +118,7 @@ private class ReaderSwitch <: Widget {
         } else {
             0.0
         })
-        ctx.renderer.fillRoundedRect(frame, SWITCH_H / 2.0,
-            switchOffColor(light).lerp(ctx.theme.accent, t))
+        ctx.renderer.fillRoundedRect(frame, SWITCH_H / 2.0, switchOffColor(light).lerp(ctx.theme.accent, t))
         let kx = frame.x + SWITCH_KNOB_OFF_CX + (SWITCH_KNOB_ON_CX - SWITCH_KNOB_OFF_CX) * t
         ctx.renderer.fillCircle(kx, frame.centerY(), SWITCH_KNOB_R, Color.rgb(255, 255, 255))
     }
@@ -140,7 +153,7 @@ private class ReaderModeSeg <: Widget {
     public init(model: AppModel) {
         this.model = model
         this.spring = rememberState<Spring>("readerpanel:mode:pill",
-            {=> Spring(Float32(readerModeIndex(model.reader.mode)), stiffness: 260.0, damping: 26.0) }).value
+            {=> Spring(Float32(readerModeIndex(model.reader.mode)), stiffness: 260.0, damping: 26.0)}).value
         emit(this)
     }
 
@@ -158,8 +171,7 @@ private class ReaderModeSeg <: Widget {
         let current = readerModeIndex(model.reader.mode)
         ctx.renderer.fillRoundedRect(frame, SEG_RADIUS, segTrackColor(model.isLight()))
         let pos = spring.animate(ctx, target: Float32(current))
-        let pill = Rect(frame.x + SEG_PAD + pos * (segW + SEG_GAP), frame.y + SEG_PAD, segW,
-            frame.h - SEG_PAD * 2.0)
+        let pill = Rect(frame.x + SEG_PAD + pos * (segW + SEG_GAP), frame.y + SEG_PAD, segW, frame.h - SEG_PAD * 2.0)
         ctx.renderer.fillRoundedRect(pill, SEG_BTN_RADIUS, ctx.theme.accentSoft)
         for (i in 0..4) {
             let r = Rect(frame.x + SEG_PAD + Float32(i) * (segW + SEG_GAP), frame.y + SEG_PAD, segW,
@@ -203,8 +215,7 @@ private func panelSection(text: String): Unit {
 // 开关行（原型 .set-row：13px、padding 9px 2px、label flex:1 居左、开关居右）。
 // 真值直读模型（见 ReaderSwitch 注释），onToggle 走 AppModel 的 toggle 入口
 //（持久化 + bump readerVersion 已在模型内完成）。
-private func panelSwitchRow(model: AppModel, key: String, label: String, on: Bool,
-    onToggle: () -> Unit): Unit {
+private func panelSwitchRow(model: AppModel, key: String, label: String, on: Bool, onToggle: () -> Unit): Unit {
     HStack {
         Label(label).fontSize(13.fp).flex()
         ReaderSwitch(key, model.isLight(), on, onToggle)
@@ -220,17 +231,15 @@ private func autoPlayIntervalRow(model: AppModel): Unit {
         model.setReaderAutoPlayInterval(dragged)
     }
     HStack {
-        Slider(model.autoPlayIntervalSlider, key: "reader:autoPlayInterval",
-            lower: 1.0, upper: 10.0, step: 1.0).flex()
-        Label("${model.reader.autoPlayIntervalSec}秒").fontSize(12.fp).muted()
-            .padding(8.0, 0.0, 0.0, 0.0)
+        Slider(model.autoPlayIntervalSlider, key: "reader:autoPlayInterval", lower: 1.0, upper: 10.0, step: 1.0).flex()
+        Label("${model.reader.autoPlayIntervalSec}秒").fontSize(12.fp).muted().padding(8.0, 0.0, 0.0, 0.0)
     }.crossAxisAlignment(CrossAxisAlignment.Center).padding(2.0, 0.0, 10.0, 9.0)
 }
 
 // ── 阅读设置抽屉（原型 #settings）──
 public func readerSettingsDrawer(model: AppModel): Unit {
     Drawer(model.readerSettingsOpen, edge: DrawerEdge.Right, width: READER_SETTINGS_WIDTH,
-        onDismiss: {=> model.closeReaderPanels() }) {
+        onDismiss: {=> model.closeReaderPanels()}) {
         readerSettingsBody(model)
     }
 }
@@ -238,62 +247,63 @@ public func readerSettingsDrawer(model: AppModel): Unit {
 private func readerSettingsBody(model: AppModel): Unit {
     // 副标题：档案标题 · N 页（档案名取法同 reader_bar：元数据未到货/非当前档案时不显示）。
     let archiveTitle = match (model.meta.value) {
-        case Some(m) => if (m.arcid == model.readerArcid) { m.title } else { "" }
+        case Some(m) =>
+            if (m.arcid == model.readerArcid) {
+                m.title
+            } else {
+                ""
+            }
         case None => ""
     }
     // 排版对齐原型：面板 padding 18；h3 14 底距 4；sub 12 dim 底距 16；
     // 之后各节由 panelSection 自带 18/8 外边距。
     VStack {
-        Label("阅读设置").fontSize(14.fp)
-        Spacer().height(4.0)
-        ReaderSettingsSubtitle(archiveTitle, model.reader.pageCount)
-        Spacer().height(16.0)
+        Label("阅读设置").fontSize(14.fp).padding(0.0, 0.0, 0.0, 4.0)
+        ReaderSettingsSubtitle(archiveTitle, model.reader.pageCount).padding(0.0, 0.0, 0.0, 16.0)
         panelSection("阅读模式")
         ReaderModeSeg(model)
         panelSection("页面布局")
-        panelSwitchRow(model, "reader.doublePage", "双页模式", model.reader.doublePage) {=>
-            model.toggleReaderDoublePage()
+        panelSwitchRow(model, "reader.doublePage", "双页模式", model.reader.doublePage) {
+            => model.toggleReaderDoublePage()
         }
-        panelSwitchRow(model, "reader.splitCover", "拆分封面", model.reader.splitCover) {=>
-            model.toggleReaderSplitCover()
+        panelSwitchRow(model, "reader.splitCover", "拆分封面", model.reader.splitCover) {
+            => model.toggleReaderSplitCover()
         }
-        panelSwitchRow(model, "reader.longPage", "长图滚动", model.reader.longPage) {=>
-            model.toggleReaderLongPage()
+        panelSwitchRow(model, "reader.longPage", "长图滚动", model.reader.longPage) {
+            => model.toggleReaderLongPage()
         }
         panelSection("行为")
-        panelSwitchRow(model, "reader.tapTurnPage", "点击翻页", model.reader.tapTurnPage) {=>
-            model.toggleReaderTapTurnPage()
+        panelSwitchRow(model, "reader.tapTurnPage", "点击翻页", model.reader.tapTurnPage) {
+            => model.toggleReaderTapTurnPage()
         }
         // 自动播放（frontend ReaderSettingsSheet:287-295）：开关打开时行下露出间隔
         // 滑条（1..10s step 1）与秒数标签；间隔变更即生效（下次计时重置，模型侧处理）。
-        panelSwitchRow(model, "reader.autoPlay", "自动播放", model.reader.autoPlay) {=>
-            model.toggleReaderAutoPlay()
+        panelSwitchRow(model, "reader.autoPlay", "自动播放", model.reader.autoPlay) {
+            => model.toggleReaderAutoPlay()
         }
         if (model.reader.autoPlay) {
             autoPlayIntervalRow(model)
         }
-        panelSwitchRow(model, "reader.doubleTapZoom", "双击缩放", model.reader.doubleTapZoom) {=>
-            model.toggleReaderDoubleTapZoom()
+        panelSwitchRow(model, "reader.doubleTapZoom", "双击缩放", model.reader.doubleTapZoom) {
+            => model.toggleReaderDoubleTapZoom()
         }
-        panelSwitchRow(model, "reader.autoHide", "工具栏自动隐藏", model.reader.autoHide) {=>
-            model.toggleReaderAutoHide()
+        panelSwitchRow(model, "reader.autoHide", "工具栏自动隐藏", model.reader.autoHide) {
+            => model.toggleReaderAutoHide()
         }
-        panelSwitchRow(model, "reader.seamlessNext", "无缝续读下一档案", model.reader.seamlessNext) {=>
-            model.toggleReaderSeamlessNext()
+        panelSwitchRow(model, "reader.seamlessNext", "无缝续读下一档案", model.reader.seamlessNext) {
+            => model.toggleReaderSeamlessNext()
         }
         panelSection("调试")
-        panelSwitchRow(model, "reader.showInfo", "媒体信息浮层", model.readerShowInfo.value) {=>
-            model.toggleReaderShowInfo()
+        panelSwitchRow(model, "reader.showInfo", "媒体信息浮层", model.readerShowInfo.value) {
+            => model.toggleReaderShowInfo()
         }
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).padding(18.0)
 }
 
-// ── 页面导航抽屉（原型 #sidebar）──
-// 只落地页列表页签；原型的缩略图网格/文件树 tab 依赖缩略图管线与目录接口，
-// 桌面端首版不做（YAGNI）。
+// ── 页面导航抽屉（原型 #sidebar）：缩略图 / 列表 / 文件树三态。──
 public func readerSidebarDrawer(model: AppModel): Unit {
     Drawer(model.readerSidebarOpen, edge: DrawerEdge.Left, width: READER_SIDEBAR_WIDTH,
-        onDismiss: {=> model.closeReaderPanels() }) {
+        onDismiss: {=> model.closeReaderPanels()}) {
         readerSidebarBody(model)
     }
 }
@@ -315,7 +325,11 @@ private func sidebarRows(model: AppModel): ArrayList<SidebarRow> {
         if (multi) {
             let h = SidebarRow()
             h.isHeader = true
-            h.title = if (seg.title.size > 0) { seg.title } else { seg.arcid }
+            h.title = if (seg.title.size > 0) {
+                seg.title
+            } else {
+                seg.arcid
+            }
             rows.add(h)
         }
         for (l in 0..seg.count) {
@@ -328,34 +342,220 @@ private func sidebarRows(model: AppModel): ArrayList<SidebarRow> {
 }
 
 private func readerSidebarBody(model: AppModel): Unit {
-    let total = model.reader.pageCount
+    let tab = rememberState<Int64>("reader:sidebar:tab", {=> 0})
     let rows = sidebarRows(model)
     VStack {
-        Label("页面导航").fontSize(14.fp)
-        Label("${total} 页").fontSize(12.fp).muted()
-        // 页数可达几百：LazyList 只物化可见行（heightOf 为 O(1) 常量行高）；
-        // key 取页 id/分组标题，跳页重建时行状态（hover）不串位。
-        LazyList(Int64(rows.size), { _ => READER_SIDEBAR_ROW_H }, spacing: 2.0, id: "reader:sidebar:pages",
-            key: { i =>
+        ReaderSidebarTabs(tab)
+        if (tab.value == 0) {
+            readerThumbnailPane(model)
+        } else if (tab.value == 1) {
+            readerPageList(model, rows, false)
+        } else {
+            readerPageList(model, rows, true)
+        }
+    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start)
+}
+
+private class ReaderSidebarTabs <: Widget {
+    private let selected: State<Int64>
+    private var frame = Rect.zero()
+
+    public init(selected: State<Int64>) {
+        this.selected = selected
+        emit(this)
+    }
+
+    public func measure(_: UiContext, available: Size): Size {
+        Size(available.w, 52.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let labels = ["缩略图", "列表", "文件树"]
+        let inner = Rect(frame.x + 10.0, frame.y + 10.0, frame.w - 20.0, 34.0)
+        let gap: Float32 = 2.0
+        let w = (inner.w - gap * 2.0) / 3.0
+        for (i in 0..3) {
+            let r = Rect(inner.x + Float32(i) * (w + gap), inner.y, w, inner.h)
+            if (selected.value == Int64(i)) {
+                ctx.renderer.fillRoundedRect(r, 9.0, ctx.theme.accentSoft)
+            } else if (ctx.isHovered("reader:sidebar:tab:${i}")) {
+                ctx.renderer.fillRoundedRect(r, 9.0, ctx.theme.overlayHover)
+            }
+            ctx.renderer.textCenter(labels[Int64(i)], r, if (selected.value == Int64(i)) {
+                ctx.theme.accent
+            } else {
+                ctx.theme.mutedText
+            }, pointSize: 12.5)
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        let inner = Rect(frame.x + 10.0, frame.y + 10.0, frame.w - 20.0, 34.0)
+        let gap: Float32 = 2.0
+        let w = (inner.w - gap * 2.0) / 3.0
+        match (event) {
+            case UiEvent.MouseMove(x, y) => for (i in 0..3) {
+                let r = Rect(inner.x + Float32(i) * (w + gap), inner.y, w, inner.h)
+                if (r.contains(x, y)) {
+                    ctx.claimHover("reader:sidebar:tab:${i}", CursorShape.Interactive)
+                }
+            }
+            case UiEvent.MouseDown(MouseButton.Left, x, y) => for (i in 0..3) {
+                let r = Rect(inner.x + Float32(i) * (w + gap), inner.y, w, inner.h)
+                if (r.contains(x, y)) {
+                    selected.value = Int64(i)
+                    return true
+                }
+            }
+            case _ => ()
+        }
+        false
+    }
+}
+
+private func readerThumbnailPane(model: AppModel): Unit {
+    let count = model.reader.pageCount
+    let rowCount = (count + 2) / 3
+    LazyList(rowCount, {_ => READER_THUMB_ROW_H}, spacing: 8.0, id: "reader:sidebar:thumbs",
+        key: {i => "thumb-row:${i}"}) {
+        row => HStack {
+            for (column in 0..3) {
+                let page = row * 3 + Int64(column)
+                if (page < count) {
+                    ReaderPageThumb(model, page)
+                } else {
+                    VStack {}.width(READER_THUMB_W).height(READER_THUMB_H)
+                }
+            }
+        }.spacing(8.0)
+    }.flex().padding(12.0, 0.0, 12.0, 12.0)
+}
+
+private func readerPageList(model: AppModel, rows: ArrayList<SidebarRow>, tree: Bool): Unit {
+    VStack {
+        if (tree && model.reader.segmentList.size == 1) {
+            let title = match (model.meta.value) {
+                case Some(m) => m.title
+                case None => model.reader.arcid
+            }
+            let _ = ReaderSegmentHeader(title)
+        }
+        LazyList(
+            Int64(rows.size),
+            {_ => READER_SIDEBAR_ROW_H},
+            spacing: 2.0,
+            id: if (tree) {
+                "reader:sidebar:tree"
+            } else {
+                "reader:sidebar:list"
+            },
+            key: {
+                i =>
+                    let row = rows[i]
+                    if (row.isHeader) {
+                        "header:${row.title}"
+                    } else {
+                        "page:${row.realIdx}"
+                    }
+            }
+        ) {
+            i =>
                 let row = rows[i]
                 if (row.isHeader) {
-                    "header:${row.title}"
+                    let _ = ReaderSegmentHeader(row.title)
                 } else {
-                    match (model.reader.pageAt(row.realIdx)) {
-                        case Some(p) => p.id
-                        case None => "${row.realIdx}"
+                    let _ = ReaderPageRow(model, row.realIdx, tree: tree)
+                }
+        }.flex()
+    }.spacing(2.0).flex().padding(12.0, 0.0, 12.0, 12.0)
+}
+
+private class ReaderPageThumb <: Widget {
+    private let model: AppModel
+    private let index: Int64
+    private let key: String
+    private let hoverId: String
+    private var frame = Rect.zero()
+
+    public init(model: AppModel, index: Int64) {
+        this.model = model
+        this.index = index
+        hoverId = "reader:sidebar:thumb:${index}"
+        var imageKey = ""
+        match (model.reader.pageAt(index)) {
+            case Some(p) =>
+                if (p.pageType == "image" || p.pageType == "") {
+                    let arcid = model.reader.arcidOfReal(index)
+                    imageKey = readerPageKey(arcid, p.id)
+                    if (model.imageState(imageKey).value == "") {
+                        model.requestImage(imageKey, readerPageUrl(arcid, p.id))
                     }
                 }
-            }) { i =>
-            let row = rows[i]
-            // 两分支类型不同，显式丢弃（构造即 emit 进树）。
-            if (row.isHeader) {
-                let _ = ReaderSegmentHeader(row.title)
-            } else {
-                let _ = ReaderPageRow(model, row.realIdx)
-            }
-        }.flex()
-    }.spacing(8.0).crossAxisAlignment(CrossAxisAlignment.Start).padding(16.0)
+            case None => ()
+        }
+        key = imageKey
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(READER_THUMB_W, READER_THUMB_H)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        ctx.renderer.fillRoundedRect(frame, 8.0, ctx.theme.panel)
+        match (pixelTexture(ctx.renderer, key)) {
+            case Some(tex) =>
+                let scale = min(frame.w / Float32(tex.width), frame.h / Float32(tex.height))
+                let w = Float32(tex.width) * scale
+                let h = Float32(tex.height) * scale
+                ctx.renderer.pushClip(frame)
+                ctx.renderer.texture(tex, Rect(frame.centerX() - w / 2.0, frame.centerY() - h / 2.0, w, h))
+                ctx.renderer.popClip()
+            case None => ctx
+                .renderer
+                .textCenter("${model.reader.displayPageOfReal(index)}", frame, ctx.theme.mutedText, pointSize: 11.0)
+        }
+        let current = match (model.reader.currentReal) {
+            case Some(i) => i == index
+            case None => false
+        }
+        if (current) {
+            ctx.renderer.strokeRoundedRect(frame.inset(1.0), 7.0, Pen(width: 2.0, color: ctx.theme.accent))
+        } else {
+            ctx
+                .renderer
+                .strokeRoundedRect(frame.inset(0.5), 7.5, Pen(width: 1.0, color: if (ctx.isHovered(hoverId)) {
+                    ctx.theme.text
+                } else {
+                    ctx.theme.panelEdge
+                }))
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(hoverId, CursorShape.Interactive)
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    model.gotoPage(model.reader.displayPageOfReal(index))
+                    model.closeReaderPanels()
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
 }
 
 // segment 分组标题行（原型 .sb-tree .row.dir：主文字色、略小字号、上间距）。
@@ -380,8 +580,7 @@ private class ReaderSegmentHeader <: Widget {
         let ps: Float32 = 12.0
         let th = ctx.renderer.textHeight(pointSize: ps)
         let fitted = sidebarEllipsize(ctx, "▾ ${title}", frame.w - 20.0, ps)
-        ctx.renderer.text(fitted, frame.x + 10.0, frame.centerY() - th / 2.0, ctx.theme.text,
-            pointSize: ps)
+        ctx.renderer.text(fitted, frame.x + 10.0, frame.centerY() - th / 2.0, ctx.theme.text, pointSize: ps)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -394,12 +593,14 @@ private class ReaderSegmentHeader <: Widget {
 private class ReaderPageRow <: Widget {
     private let model: AppModel
     private let index: Int64 // 0 基页索引
+    private let tree: Bool
     private let hoverId: String
     private var frame = Rect.zero()
 
-    public init(model: AppModel, index: Int64) {
+    public init(model: AppModel, index: Int64, tree!: Bool = false) {
         this.model = model
         this.index = index
+        this.tree = tree
         this.hoverId = "reader:sidebar:row:${index}"
         emit(this)
     }
@@ -450,8 +651,13 @@ private class ReaderPageRow <: Widget {
         // 显示语义同顶栏/dock：seamless 开 = segment 内页码。
         let num = "${model.reader.displayPageOfReal(index)}"
         let numW = ctx.renderer.textWidth(num, pointSize: ps)
-        ctx.renderer.text(num, frame.x + 10.0 + 26.0 - numW, ty, color, pointSize: ps)
-        var x = frame.x + 10.0 + 26.0 + 10.0
+        let indent: Float32 = if (tree) {
+            12.0
+        } else {
+            0.0
+        }
+        ctx.renderer.text(num, frame.x + 10.0 + indent + 26.0 - numW, ty, color, pointSize: ps)
+        var x = frame.x + 10.0 + indent + 26.0 + 10.0
         var name = ""
         match (model.reader.pageAt(index)) {
             case Some(p) =>
@@ -460,7 +666,11 @@ private class ReaderPageRow <: Widget {
                     ctx.renderer.text(tag, x, ty, color, pointSize: ps)
                     x += ctx.renderer.textWidth(tag, pointSize: ps) + 6.0
                 }
-                name = if (p.title.size > 0) { p.title } else { p.id }
+                name = if (p.title.size > 0) {
+                    p.title
+                } else {
+                    p.id
+                }
             case None => ()
         }
         let fitted = sidebarEllipsize(ctx, name, frame.right() - 10.0 - x, ps)
@@ -531,9 +741,16 @@ private class ReaderSettingsSubtitle <: Widget {
 }
 
 // 单行省略号截断（reader_bar 的 ellipsizeText 为文件私有，这里按同一思路自备二分前缀）。
-private func sidebarEllipsize(ctx: UiContext, text: String, maxWidth: Float32, ps: Float32): String {    if (text.size == 0 || maxWidth <= 0.0) { return "" }
-    if (ctx.renderer.textWidth(text, pointSize: ps) <= maxWidth) { return text }
-    if (ctx.renderer.textWidth("…", pointSize: ps) > maxWidth) { return "" }
+private func sidebarEllipsize(ctx: UiContext, text: String, maxWidth: Float32, ps: Float32): String {
+    if (text.size == 0 || maxWidth <= 0.0) {
+        return ""
+    }
+    if (ctx.renderer.textWidth(text, pointSize: ps) <= maxWidth) {
+        return text
+    }
+    if (ctx.renderer.textWidth("…", pointSize: ps) > maxWidth) {
+        return ""
+    }
     let runes = text.toRuneArray()
     var low: Int64 = 0
     var high = runes.size - 1

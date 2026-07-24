@@ -2,7 +2,8 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, TankoubonInfo, SearchItem, PageInfo, statPages}
+import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, TankoubonInfo, SearchItem, PageInfo,
+    statPages}
 import std.collection.ArrayList
 
 // 详情页（档案 / 合集共用骨架；原型 home-detail-redesign.html「档案详情/合集详情」视图）：
@@ -19,8 +20,7 @@ import std.collection.ArrayList
 
 public func detailView(model: AppModel): Unit {
     match (model.meta.value) {
-        case None =>
-            Panel { Label("加载中…").muted() }
+        case None => Panel {Label("加载中…").muted()}
         case Some(m) => archiveDetailBody(model, m)
     }
 }
@@ -51,50 +51,56 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     hero.tags = m.tags.toArray()
     hero.primaryLabel = readButtonLabel(m)
     hero.primaryEnabled = m.pagecount > 0
-    hero.onPrimary = {=>
-        let start = if (m.progress >= m.pagecount) { 1 } else { m.progress + 1 }
-        model.openReader(m.arcid, start)
+    hero.onPrimary = {
+        =>
+            let start = if (m.progress >= m.pagecount) {
+                1
+            } else {
+                m.progress + 1
+            }
+            model.openReader(m.arcid, start)
     }
 
-    let actionIcons: () -> Unit = {=>
-        // 矢量图标钮（28vp 紧凑尺寸）：编辑走 sdl 图标库 Pencil，下载/加入合集/更多
-        // 为 GhostGlyph 手绘矢量（替代原 ⬇/⊕/编/⋯ 文本兜底）。
-        // 下载/加入合集/编辑/更多动作留 TODO（T11 范围外）。
-        GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {=>
-            model.toggleFavorite(m.arcid, !m.isfavorite)
+    let actionIcons: () -> Unit = {
+        =>
+            // 矢量图标钮（28vp 紧凑尺寸）：编辑走 sdl 图标库 Pencil，下载/加入合集/更多
+            // 为 GhostGlyph 手绘矢量（替代原 ⬇/⊕/编/⋯ 文本兜底）。
+            // 下载/加入合集/编辑/更多动作留 TODO（T11 范围外）。
+            GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
+                => model.toggleFavorite(m.arcid, !m.isfavorite)
+            }
+            GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {=> model.todoToast("下载")}
+            GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> model.todoToast("加入合集")}
+        GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
+            => model.todoToast("编辑")
         }
-        GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {=> model.todoToast("下载") }
-        GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> model.todoToast("加入合集") }
-        GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {=>
-            model.todoToast("编辑")
-        }
-        GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {=> model.todoToast("更多操作") }
+            GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
 
     // 主列：页面预览（到货才显示）→ 所属合集（无数据隐藏）→ 相关推荐（无数据隐藏）
     let mainCards = ArrayList<() -> Unit>()
     if (model.detailPages.value.size > 0) {
-        mainCards.add({=>
-            detailCard(model, "页面预览", count: "${model.detailPages.value.size} 页", tools: {=>
-                MiniSeg(["缩略图", "列表", "树"], model.pageViewIndex, key: "pv-seg")
-            }) {=>
-                pagePreview(model, model.detailPages.value.toArray(), m.progress) { no =>
-                    model.openReader(m.arcid, no)
+        mainCards.add({
+            => detailCard(model, "页面预览", count: "${model.detailPages.value.size} 页", tools: {
+                => MiniSeg(["缩略图", "列表", "树"], model.pageViewIndex, key: "pv-seg")
+            }) {
+                => pagePreview(model, model.detailPages.value.toArray(), m.progress) {
+                    no => model.openReader(m.arcid, no)
                 }
             }
         })
     }
     if (model.parentTanks.value.size > 0) {
-        mainCards.add({=>
-            detailCard(model, "所属合集", count: "${model.parentTanks.value.size}") {=>
-                tankCardRow(model, model.parentTanks.value.toArray(), "parent-tanks")
+        mainCards.add({
+            => detailCard(model, "所属合集", count: "${model.parentTanks.value.size}") {
+                => tankCardRow(model, model.parentTanks.value.toArray(), "parent-tanks")
             }
         })
     }
     if (model.relatedItems.value.size > 0) {
-        mainCards.add({=>
-            detailCard(model, "相关推荐") {=>
-                cardRow(model, "related", model.relatedItems.value.toArray(), 132.0, 238.0)
+        mainCards.add({
+            => detailCard(model, "相关推荐") {
+                => cardRow(model, "related", model.relatedItems.value.toArray(), 132.0, 238.0)
             }
         })
     }
@@ -106,29 +112,32 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     } else {
         "${m.pagecount} 页 · 尚未开始阅读"
     }
-    sideCards.add({=> progressCard(model, "${pct}%", ofText, pct) })
-    sideCards.add({=>
-        detailCard(model, "基础信息") {=>
-            infoList(model, archiveInfoRows(m, model.detailPages.value.toArray()))
+    sideCards.add({=> progressCard(model, "${pct}%", ofText, pct)})
+    sideCards.add({
+        => detailCard(model, "基础信息") {
+            => infoList(model, archiveInfoRows(m, model.detailPages.value.toArray()))
         }
     })
     if (m.tags.size > 0) {
-        sideCards.add({=>
-            detailCard(model, "标签") {=> tagGroups(model, m.tags.toArray()) }
+        sideCards.add({
+            => detailCard(model, "标签") {=> tagGroups(model, m.tags.toArray())}
         })
     }
 
-    let backdropKey = if (m.coverAssetId > 0) { "backdrop:${m.arcid}" } else { "" }
-    detailSkeleton(model, backdropKey, hero, m.coverAssetId, actionIcons,
-        mainCards.toArray(), sideCards.toArray(), tank: false)
+    let backdropKey = if (m.coverAssetId > 0) {
+        "backdrop:${m.arcid}"
+    } else {
+        ""
+    }
+    detailSkeleton(model, backdropKey, hero, m.coverAssetId, actionIcons, mainCards.toArray(), sideCards.toArray(),
+        tank: false)
 }
 
 // ---- 合集详情 ----
 
 public func tankView(model: AppModel): Unit {
     match (model.tank.value) {
-        case None =>
-            Panel { Label("加载中…").muted() }
+        case None => Panel {Label("加载中…").muted()}
         case Some(t) => tankDetailBody(model, t)
     }
 }
@@ -146,43 +155,45 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     hero.tags = t.tags.toArray()
     hero.primaryLabel = "▶ 从头开始阅读"
     hero.primaryEnabled = members.size > 0
-    hero.onPrimary = {=> model.startTankReading() }
+    hero.onPrimary = {=> model.startTankReading()}
 
-    let actionIcons: () -> Unit = {=>
-        // 合集 3 图标（用户决定：不与档案同构；设计稿 tank 视图下载/加入合集为 only-archive）。
-        // 收藏/编辑/更多动作留 TODO。矢量图标钮（28vp）。
-        GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0) {=> model.todoToast("合集收藏") }
-        GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {=>
-            model.todoToast("编辑")
-        }
-        GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作") }
+    let actionIcons: () -> Unit = {
+        =>
+            // 合集 3 图标（用户决定：不与档案同构；设计稿 tank 视图下载/加入合集为 only-archive）。
+            // 收藏/编辑/更多动作留 TODO。矢量图标钮（28vp）。
+            GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0) {=> model.todoToast("合集收藏")}
+            GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {
+                => model.todoToast("编辑")
+            }
+            GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
 
     // 主列：收录档案（网格/列表切换 + 即时筛选 + 计数）→ 相关推荐（无数据隐藏）
     let mainCards = ArrayList<() -> Unit>()
     if (members.size > 0) {
-        mainCards.add({=>
-            detailCard(model, "收录档案", count: "${members.size}", tools: {=>
-                HStack {
+        mainCards.add({
+            => detailCard(model, "收录档案", count: "${members.size}", tools: {
+                => HStack {
                     TextField(model.tankFilter, key: "tank-filter").width(130.vp)
                     MiniSeg(["网格", "列表"], model.tankMemberViewIndex, key: "mb-seg")
                 }.spacing(8.vp).hug()
-            }) {=>
-                let shown = filteredMembers(model)
-                if (shown.size == 0) {
-                    Label("无匹配档案").fontSize(12.fp).muted()
-                } else if (model.tankMemberViewIndex.value == 1) {
-                    memberListContent(model, shown)
-                } else {
-                    memberGridContent(model, shown)
-                }
+            }) {
+                =>
+                    let shown = filteredMembers(model)
+                    if (shown.size == 0) {
+                        Label("无匹配档案").fontSize(12.fp).muted()
+                    } else if (model.tankMemberViewIndex.value == 1) {
+                        memberListContent(model, shown)
+                    } else {
+                        memberGridContent(model, shown)
+                    }
             }
         })
     }
     if (model.tankRelated.value.size > 0) {
-        mainCards.add({=>
-            detailCard(model, "相关推荐") {=>
-                tankCardRow(model, model.tankRelated.value.toArray(), "tank-related")
+        mainCards.add({
+            => detailCard(model, "相关推荐") {
+                => tankCardRow(model, model.tankRelated.value.toArray(), "tank-related")
             }
         })
     }
@@ -190,30 +201,38 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     // 侧栏：进度大卡（大数字 + 已读完 N 个）→ 基础信息 → 标签分组
     let done = countFinishedMembers(members)
     let sideCards = ArrayList<() -> Unit>()
-    sideCards.add({=> progressCard(model, "${pct}%", "${t.archiveCount} 个档案 · 已读完 ${done} 个", pct) })
-    sideCards.add({=>
-        detailCard(model, "基础信息") {=> infoList(model, tankInfoRows(t)) }
+    sideCards.add({=> progressCard(model, "${pct}%", "${t.archiveCount} 个档案 · 已读完 ${done} 个", pct)})
+    sideCards.add({
+        => detailCard(model, "基础信息") {=> infoList(model, tankInfoRows(t))}
     })
     if (t.tags.size > 0) {
-        sideCards.add({=>
-            detailCard(model, "标签") {=> tagGroups(model, t.tags.toArray()) }
+        sideCards.add({
+            => detailCard(model, "标签") {=> tagGroups(model, t.tags.toArray())}
         })
     }
 
-    let backdropKey = if (t.coverAssetId > 0) { "backdrop:tank:${t.id}" } else { "" }
-    detailSkeleton(model, backdropKey, hero, t.coverAssetId, actionIcons,
-        mainCards.toArray(), sideCards.toArray(), tank: true)
+    let backdropKey = if (t.coverAssetId > 0) {
+        "backdrop:tank:${t.id}"
+    } else {
+        ""
+    }
+    detailSkeleton(model, backdropKey, hero, t.coverAssetId, actionIcons, mainCards.toArray(), sideCards.toArray(),
+        tank: true)
 }
 
 // 成员即时筛选：标题包含（ASCII 大小写不敏感；空串返回全部）。
 private func filteredMembers(model: AppModel): Array<SearchItem> {
     let filter = model.tankFilter.value.trimAscii()
     let members = model.tankMembers.value
-    if (filter.size == 0) { return members.toArray() }
+    if (filter.size == 0) {
+        return members.toArray()
+    }
     let lf = filter.toAsciiLower()
     let list = ArrayList<SearchItem>()
     for (it in members) {
-        if (it.title.toAsciiLower().contains(lf)) { list.add(it) }
+        if (it.title.toAsciiLower().contains(lf)) {
+            list.add(it)
+        }
     }
     list.toArray()
 }
@@ -222,7 +241,9 @@ private func filteredMembers(model: AppModel): Array<SearchItem> {
 private func countFinishedMembers(members: ArrayList<SearchItem>): Int64 {
     var n: Int64 = 0
     for (it in members) {
-        if (it.pagecount > 0 && it.progress >= it.pagecount) { n++ }
+        if (it.pagecount > 0 && it.progress >= it.pagecount) {
+            n++
+        }
     }
     n
 }
@@ -251,30 +272,46 @@ private func oneLineSummary(s: String): String {
 }
 
 private func readButtonLabel(m: ArchiveMeta): String {
-    if (m.progress <= 0) { return "▶ 开始阅读" }
-    if (m.progress >= m.pagecount) { return "▶ 重新阅读" }
+    if (m.progress <= 0) {
+        return "▶ 开始阅读"
+    }
+    if (m.progress >= m.pagecount) {
+        return "▶ 重新阅读"
+    }
     "▶ 继续阅读 · P.${m.progress + 1}"
 }
 
 // 档案 meta 行（原型：48 页 · 96.2 MB · 发布于 … · 更新于 …）。
 private func archiveMetaLine(m: ArchiveMeta): String {
     var s = ""
-    if (m.pagecount > 0) { s = "${m.pagecount} 页" }
-    if (m.size > 0) { s = joinMeta(s, formatSize(m.size)) }
-    if (m.release_at > 0) { s = joinMeta(s, "发布于 ${formatTimestamp(m.release_at)}") }
-    if (m.updated_at > 0) { s = joinMeta(s, "更新于 ${formatTimestamp(m.updated_at)}") }
+    if (m.pagecount > 0) {
+        s = "${m.pagecount} 页"
+    }
+    if (m.size > 0) {
+        s = joinMeta(s, formatSize(m.size))
+    }
+    if (m.release_at > 0) {
+        s = joinMeta(s, "发布于 ${formatTimestamp(m.release_at)}")
+    }
+    if (m.updated_at > 0) {
+        s = joinMeta(s, "更新于 ${formatTimestamp(m.updated_at)}")
+    }
     s
 }
 
 // 合集 meta 行（原型：12 个档案 · 共 486 页 · 更新于 …）。
 private func tankMetaLine(t: TankoubonInfo): String {
     var s = "${t.archiveCount} 个档案 · 共 ${t.totalPages} 页"
-    if (t.updatedAt.size > 0) { s = joinMeta(s, "更新于 ${tankDate(t.updatedAt)}") }
+    if (t.updatedAt.size > 0) {
+        s = joinMeta(s, "更新于 ${tankDate(t.updatedAt)}")
+    }
     s
 }
 
 private func joinMeta(a: String, b: String): String {
-    if (a.size == 0) { return b }
+    if (a.size == 0) {
+        return b
+    }
     "${a} · ${b}"
 }
 
@@ -282,31 +319,65 @@ private func joinMeta(a: String, b: String): String {
 // 「更新时间」「状态」「文件类型」为保留的额外行，置尾）。路径/来源无数据即隐藏。
 private func archiveInfoRows(m: ArchiveMeta, pages: Array<PageInfo>): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
-    if (m.filename.size > 0) { rows.add(("文件名", m.filename)) }
-    if (m.size > 0) { rows.add(("大小", formatSize(m.size))) }
+    if (m.filename.size > 0) {
+        rows.add(("文件名", m.filename))
+    }
+    if (m.size > 0) {
+        rows.add(("大小", formatSize(m.size)))
+    }
     rows.add(("页数", pageStatText(m.pagecount, pages)))
-    if (m.relativePath.size > 0) { rows.add(("路径", m.relativePath)) }
+    if (m.relativePath.size > 0) {
+        rows.add(("路径", m.relativePath))
+    }
     let ns = sourceNamespace(m.arcid)
-    if (ns.size > 0) { rows.add(("来源", "${ns} 插件")) }
-    if (m.release_at > 0) { rows.add(("发布日期", formatTimestamp(m.release_at))) }
-    if (m.created_at > 0) { rows.add(("添加时间", formatTimestamp(m.created_at))) }
-    if (m.lastreadtime > 0) { rows.add(("最近阅读", formatTimestamp(m.lastreadtime))) }
-    if (m.updated_at > 0) { rows.add(("更新时间", formatTimestamp(m.updated_at))) }
-    rows.add(("状态", if (m.isnew) { "未读" } else { "已读" }))
-    if (m.archivetype.size > 0) { rows.add(("文件类型", m.archivetype)) }
+    if (ns.size > 0) {
+        rows.add(("来源", "${ns} 插件"))
+    }
+    if (m.release_at > 0) {
+        rows.add(("发布日期", formatTimestamp(m.release_at)))
+    }
+    if (m.created_at > 0) {
+        rows.add(("添加时间", formatTimestamp(m.created_at)))
+    }
+    if (m.lastreadtime > 0) {
+        rows.add(("最近阅读", formatTimestamp(m.lastreadtime)))
+    }
+    if (m.updated_at > 0) {
+        rows.add(("更新时间", formatTimestamp(m.updated_at)))
+    }
+    rows.add(("状态", if (m.isnew) {
+            "未读"
+        } else {
+            "已读"
+        }))
+    if (m.archivetype.size > 0) {
+        rows.add(("文件类型", m.archivetype))
+    }
     rows.toArray()
 }
 
 // 页数行：「48（图像 44 · 视频 2 · 音频 1 · 文本 1）」；无页表或无统计时仅总页数。
 private func pageStatText(pagecount: Int64, pages: Array<PageInfo>): String {
-    if (pages.size == 0) { return "${pagecount}" }
+    if (pages.size == 0) {
+        return "${pagecount}"
+    }
     let s = statPages(pages)
     let parts = ArrayList<String>()
-    if (s.image > 0) { parts.add("图像 ${s.image}") }
-    if (s.video > 0) { parts.add("视频 ${s.video}") }
-    if (s.audio > 0) { parts.add("音频 ${s.audio}") }
-    if (s.html > 0) { parts.add("文本 ${s.html}") }
-    if (parts.size == 0) { return "${pagecount}" }
+    if (s.image > 0) {
+        parts.add("图像 ${s.image}")
+    }
+    if (s.video > 0) {
+        parts.add("视频 ${s.video}")
+    }
+    if (s.audio > 0) {
+        parts.add("音频 ${s.audio}")
+    }
+    if (s.html > 0) {
+        parts.add("文本 ${s.html}")
+    }
+    if (parts.size == 0) {
+        return "${pagecount}"
+    }
     var inner = parts[0]
     for (i in 1..parts.size) {
         inner = "${inner} · ${parts[i]}"
@@ -320,21 +391,37 @@ private func tankInfoRows(t: TankoubonInfo): Array<(String, String)> {
     rows.add(("名称", t.name))
     rows.add(("档案数", "${t.archiveCount}"))
     rows.add(("总页数", "${t.totalPages}"))
-    rows.add(("封面", if (t.coverAssetId > 0) { "自定义" } else { "自动" }))
-    if (t.createdAt.size > 0) { rows.add(("创建时间", tankDate(t.createdAt))) }
-    if (t.updatedAt.size > 0) { rows.add(("更新时间", tankDate(t.updatedAt))) }
+    rows.add(("封面", if (t.coverAssetId > 0) {
+            "自定义"
+        } else {
+            "自动"
+        }))
+    if (t.createdAt.size > 0) {
+        rows.add(("创建时间", tankDate(t.createdAt)))
+    }
+    if (t.updatedAt.size > 0) {
+        rows.add(("更新时间", tankDate(t.updatedAt)))
+    }
     rows.toArray()
 }
 
 // 合集时间戳（postgres TEXT，如 "2024-06-12 10:30:00"）取日期段。
 private func tankDate(s: String): String {
-    if (s.size >= 10) { return s[0..10] }
+    if (s.size >= 10) {
+        return s[0..10]
+    }
     s
 }
 
 private func formatSize(bytes: Int64): String {
-    if (bytes >= 1073741824) { return "${bytes / 1048576 / 1024}.${(bytes / 1048576) % 1024 / 100} GB" }
-    if (bytes >= 1048576) { return "${bytes / 1048576} MB" }
-    if (bytes >= 1024) { return "${bytes / 1024} KB" }
+    if (bytes >= 1073741824) {
+        return "${bytes / 1048576 / 1024}.${(bytes / 1048576) % 1024 / 100} GB"
+    }
+    if (bytes >= 1048576) {
+        return "${bytes / 1048576} MB"
+    }
+    if (bytes >= 1024) {
+        return "${bytes / 1024} KB"
+    }
     "${bytes} B"
 }

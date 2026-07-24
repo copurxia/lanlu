@@ -104,33 +104,26 @@ private func categoryCard(model: AppModel, c: AdminCategoryItem, delCat: State<S
     let cellW = Float64(model.contentWidth.value - 24.0) / 3.0
     let bannerW = if (cellW > 100.0) { cellW } else { 100.0 }
     VStack {
-        // 条幅（设计增强：96vp 高满铺封面 + 底部渐变罩 + 名称/档案数/开关叠在条幅上）。
-        ZStack {
-            if (c.coverAssetId > 0) {
-                remoteImage(model, "asset:${c.coverAssetId}", "/api/assets/${c.coverAssetId}", bannerW.vp, 96.vp)
-            } else {
-                // 无封面：raised 色块 + 居中首字符，保持条幅高度一致。
-                VStack {
-                    Label(firstChar(c.name)).fontSize(22.fp).muted()
-                }.mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
-                    .height(96.vp).fillWidth().background(raised)
-            }
-            // 底部渐变罩（cui.media GradientScrim：透明 → 60% 黑，白字可读）。
-            GradientScrim(direction: GradientDirection.Bottom,
-                stops: [(0.3, Color.rgba(0, 0, 0, 0)), (1.0, Color.rgba(0, 0, 0, 175))])
+        // 条幅只展示封面；分类信息和开关放在下方内容区，避免遮挡图片。
+        if (c.coverAssetId > 0) {
+            remoteImage(model, "asset:${c.coverAssetId}", "/api/assets/${c.coverAssetId}", bannerW.vp, 96.vp)
+        } else {
+            // 无封面：raised 色块 + 居中首字符，保持条幅高度一致。
             VStack {
-                HStack {
-                    VStack {
-                        Label(c.name).fontSize(15.fp).foregroundColor(Color.rgb(255, 255, 255))
-                        Label("${c.archiveCount} 个档案").fontSize(10.fp).foregroundColor(Color.rgba(255, 255, 255, 200))
-                    }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start)
-                    Spacer()
-                    // cui Switch 两参数均位置参数；绑定件按 catid 唯一化 key（见 switchBindKeyed）。
-                    Switch("", switchBindKeyed("cats.${c.catid}", c.enabled, {v => model.actToggleCategory(c.catid, v) }))
-                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth().padding(8.vp, 12.vp)
-            }.mainAxisAlignment(MainAxisAlignment.End).fillWidth()
-        }.height(96.vp).fillWidth()
+                Label(firstChar(c.name)).fontSize(22.fp).muted()
+            }.mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
+                .height(96.vp).fillWidth().background(raised)
+        }
         VStack {
+            HStack {
+                VStack {
+                    Label(c.name).fontSize(15.fp)
+                    Label("${c.archiveCount} 个档案").fontSize(10.fp).muted()
+                }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+                Spacer()
+                // cui Switch 两参数均位置参数；绑定件按 catid 唯一化 key（见 switchBindKeyed）。
+                Switch("", switchBindKeyed("cats.${c.catid}", c.enabled, {v => model.actToggleCategory(c.catid, v) }))
+            }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
             Label(if (c.description.size > 0) { c.description } else { "暂无描述" })
                 .fontSize(11.fp).muted().maxLines(2)
             HStack {

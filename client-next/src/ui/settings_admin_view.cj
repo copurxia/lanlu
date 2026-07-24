@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{SysSetting, TaskRecord, PluginItem, AdminUserItem, CronTask, CloudTag}
+import lanlu_client_next.net.{SysSetting, TaskRecord, PluginItem, AdminUserItem, CronTask, ServerInfo, jsonQuote}
 import std.collection.ArrayList
 
 // 设置区·系统管理板块（用户/系统/任务记录/定时任务/插件/统计信息）。
@@ -447,46 +447,108 @@ func cronPage(model: AppModel): Unit {
         model.loadCron()
         model.loadSysSettings()
     }
-    pageHeader("定时任务管理", "配置定时执行的任务和启动时触发的任务")
+    let editorOpen = rememberState<Bool>("cron.editor.open", {=> false})
+    let editingId = rememberState<Int64>("cron.editor.id", {=> 0})
+    let draftName = rememberState<String>("cron.editor.name", {=> ""})
+    let draftExpression = rememberState<String>("cron.editor.expression", {=> "0 0 * * *"})
+    let draftType = rememberState<String>("cron.editor.type", {=> "scan_all_categories"})
+    let draftParameters = rememberState<String>("cron.editor.parameters", {=> ""})
+    let draftEnabled = rememberState<Bool>("cron.editor.enabled", {=> true})
+    let draftPriority = rememberState<Int64>("cron.editor.priority", {=> 50})
+    let draftTimeout = rememberState<Int64>("cron.editor.timeout", {=> 3600})
     HStack {
+        VStack {
+            Label("定时任务管理").fontSize(18.fp)
+            Label("配置定时执行的任务和启动时触发的任务").fontSize(12.fp).muted()
+        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
         Spacer()
-        Button("⟳ 刷新", {=> model.loadCron()})
-        // 创建/编辑弹窗首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("＋ 创建定时任务", {=> model.todoToast("定时任务编辑弹窗")}).role(ButtonRole.Primary)
-    }.hug()
+        IconButton(IconName.Refresh, label: Some("刷新"), style: Some(ghostStyleOf(model)),
+            onClick: {=> model.loadCron()})
+        Button(
+            "创建定时任务",
+            {
+                =>
+                    editingId.value = 0
+                    draftName.value = ""
+                    draftExpression.value = "0 0 * * *"
+                    draftType.value = "scan_all_categories"
+                    draftParameters.value = ""
+                    draftEnabled.value = true
+                    draftPriority.value = 50
+                    draftTimeout.value = 3600
+                    editorOpen.value = true
+            }
+        ).role(ButtonRole.Primary)
+    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
 
     // 服务状态卡（原型：运行中/已停止 + 启停 + 统计）。
-    detailCard(model, "服务状态") {
+    detailCard(model, "服务状态", tools: {
+        => match (model.cronStatus.value) {
+            case Some(st) => pill(model, if (st.running) {
+                "运行中"
+            } else {
+                "已停止"
+            }, if (st.running) {
+                PillTone.Green
+            } else {
+                PillTone.Gray
+            })
+            case None => ()
+        }
+    }) {
         match (model.cronStatus.value) {
             case Some(st) => HStack {
-                if (st.running) {
-                    pill(model, "运行中", PillTone.Green)
-                } else {
-                    pill(model, "已停止", PillTone.Gray)
-                }
-                Spacer()
-                Label("总任务数: ${st.totalTasks} · 已启用: ${st.enabledTasks}").fontSize(11.fp).muted()
                 Button(if (st.running) {
-                    "⏹ 停止服务"
+                    "停止服务"
                 } else {
-                    "▶ 启动服务"
+                    "启动服务"
                 }, {=> model.actCronServiceToggle()})
-            }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+                Spacer()
+                cronStatusMetric("总任务数", st.totalTasks)
+                cronStatusMetric("已启用", st.enabledTasks)
+            }.spacing(24.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
             case None => pageLoading(model, "加载中…")
         }
     }
 
     let tab = rememberState<Int64>("cron.tab", {=> 0})
-    SegmentedControl(["定时任务列表", "启动任务设置"], tab.project(get: {v => v}, set: {_, v => v}))
+    SegmentedControl(
+        ["定时任务列表", "启动任务设置"],
+        tab.project(get: {v => v}, set: {_, v => v}),
+        key: Some("cron.tabs")
+    ).width(300.vp).height(42.vp)
     if (tab.value == 0) {
-        cronTaskList(model)
+        cronTaskList(
+            model,
+            onEdit: {
+                task =>
+                    editingId.value = task.id
+                    draftName.value = task.name
+                    draftExpression.value = task.cronExpression
+                    draftType.value = task.taskType
+                    draftParameters.value = task.taskParameters
+                    draftEnabled.value = task.enabled
+                    draftPriority.value = task.priority
+                    draftTimeout.value = task.timeoutSeconds
+                    editorOpen.value = true
+            }
+        )
     } else {
         startupSettings(model)
     }
+    cronEditorModal(model, editorOpen, editingId, draftName, draftExpression, draftType, draftParameters, draftEnabled,
+        draftPriority, draftTimeout)
+}
+
+private func cronStatusMetric(label: String, value: Int64): Unit {
+    HStack {
+        Label("${label}:").fontSize(11.fp).muted()
+        Label("${value}").fontSize(12.fp)
+    }.spacing(5.vp).hug()
 }
 
 // 定时任务列表（原型：任务卡 + 立即执行/启停/编辑/删除）。
-private func cronTaskList(model: AppModel): Unit {
+private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
     let delId = rememberState<Int64>("cron.delId", {=> -1})
     let delOpen = rememberState<Bool>("cron.delOpen", {=> false})
     let tasks = model.cronTasks.value
@@ -502,7 +564,7 @@ private func cronTaskList(model: AppModel): Unit {
             }
             VStack {
                 HStack {
-                    Label(t.name).fontSize(13.fp)
+                    Label(t.name).fontSize(14.fp).maxLines(1)
                     if (t.enabled) {
                         pill(model, "启用", PillTone.Green)
                     } else {
@@ -510,29 +572,31 @@ private func cronTaskList(model: AppModel): Unit {
                     }
                     pill(model, taskTypeLabel(t.taskType), PillTone.Outline)
                     Spacer()
-                    Button("▶", {=> model.actCronTrigger(t.id)})
-                    // cui Switch 两参数均位置参数；绑定件按任务 id 唯一化 key（见 switchBindKeyed）。
+                    Button("立即执行", {=> model.actCronTrigger(t.id)})
                     Switch("", switchBindKeyed("cron.${t.id}", t.enabled, {v => model.actCronToggle(t.id, v)}))
-                    Button("编辑", {=> model.todoToast("定时任务编辑弹窗")})
-                    Button(
-                        "删除",
-                        {
+                    IconButton(IconName.Pencil, label: Some("编辑"), style: Some(ghostStyleOf(model)),
+                        onClick: {=> onEdit(t)})
+                    IconButton(
+                        IconName.Trash,
+                        label: Some("删除"),
+                        role: ButtonRole.Danger,
+                        onClick: {
                             =>
                                 delId.value = t.id
                                 delOpen.value = true
                         }
-                    ).role(ButtonRole.Danger)
-                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+                    )
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
                 HStack {
-                    taskTimeCell("Cron 表达式", t.cronExpression)
-                    taskTimeCell("优先级", "${t.priority}")
-                    taskTimeCell("执行次数", "${t.runCount}")
-                    taskTimeCell("上次执行", if (t.hasLastRun) {
+                    cronMetaCell("Cron 表达式", t.cronExpression)
+                    cronMetaCell("优先级", "${t.priority}")
+                    cronMetaCell("执行次数", "${t.runCount}")
+                    cronMetaCell("上次执行", if (t.hasLastRun) {
                         "${t.lastRunAt} ${if (t.lastRunSuccess) { "✓" } else { "✗" }}"
                     } else {
                         "从未执行"
                     })
-                }.spacing(12.vp)
+                }.spacing(24.vp).hug().fillWidth()
                 if (t.enabled && t.nextRunAt.size > 0) {
                     Label("下次执行: ${t.nextRunAt}").fontSize(11.fp).foregroundColor(if (model.isLight()) {
                         LANLU_L_ACCENT
@@ -550,6 +614,107 @@ private func cronTaskList(model: AppModel): Unit {
     }
     confirmModal(delOpen, "删除定时任务", "确定要删除此定时任务吗？此操作无法撤销。", "删除", {
         => model.actCronDelete(delId.value)
+    })
+}
+
+private func cronMetaCell(label: String, value: String): Unit {
+    HStack {
+        Label("${label}:").fontSize(10.fp).muted()
+        Label(value).fontSize(11.fp).maxLines(1)
+    }.spacing(5.vp).flex()
+}
+
+private let CRON_TYPE_VALUES = [
+    "scan_all_categories",
+    "scan_category",
+    "scan_archive",
+    "generate_thumbnail",
+    "check_database",
+    "clear_cache",
+    "clear_log",
+    "regenerate_cover",
+    "backfill_metadata",
+    "scan_plugins",
+    "metadata_plugin",
+    "tag_import",
+    "download_url",
+    "asset_upload"
+]
+
+private func cronEditorModal(
+    model: AppModel,
+    open: State<Bool>,
+    editingId: State<Int64>,
+    name: State<String>,
+    expression: State<String>,
+    taskType: State<String>,
+    parameters: State<String>,
+    enabled: State<Bool>,
+    priority: State<Int64>,
+    timeout: State<Int64>
+): Unit {
+    Modal(open, body: {
+        => VStack {
+            Label(if (editingId.value == 0) {
+                "创建定时任务"
+            } else {
+                "编辑定时任务"
+            }).fontSize(16.fp)
+            Label("配置执行计划、任务类型和运行参数").fontSize(11.fp).muted()
+            HStack {
+                VStack {formField("任务名称", name, "例如：每日全库扫描")}.flex()
+                VStack {
+                    Label("任务类型").fontSize(11.fp).muted()
+                    ComboBox(taskType, CRON_TYPE_VALUES, key: Some("cron.type"))
+                }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
+            }.spacing(14.vp).hug().fillWidth()
+            formField("Cron 表达式", expression, "例如：0 2 * * *")
+            Label("常用格式：0 0 * * *（每天） · 0 * * * *（每小时） · */30 * * * *（每 30 分钟）")
+                .fontSize(10.fp)
+                .muted()
+            VStack {
+                Label("任务参数（JSON，可选）").fontSize(11.fp).muted()
+                TextArea(parameters, key: Some("cron.parameters")).height(92.vp).fillWidth()
+            }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth()
+            HStack {
+                VStack {
+                    Label("优先级").fontSize(11.fp).muted()
+                    Stepper(priority, key: Some("cron.priority"), lower: 0, upper: 100, step: 5)
+                }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+                VStack {
+                    Label("超时时间（秒）").fontSize(11.fp).muted()
+                    Stepper(timeout, key: Some("cron.timeout"), lower: 60, upper: 86400, step: 60)
+                }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+                Spacer()
+                VStack {
+                    Label("启用任务").fontSize(11.fp).muted()
+                    Switch("", enabled)
+                }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+            }.spacing(18.vp).crossAxisAlignment(CrossAxisAlignment.End).hug().fillWidth()
+            HStack {
+                Spacer()
+                Button("取消", {=> open.value = false})
+                Button(
+                    "保存",
+                    {
+                        =>
+                            let trimmedName = name.value.trimAscii()
+                            let trimmedExpression = expression.value.trimAscii()
+                            if (trimmedName.size == 0 || trimmedExpression.size == 0 ||
+                                taskType.value.trimAscii().size == 0) {
+                                model.toaster.show("请填写任务名称、Cron 表达式和任务类型", kind: ToastKind.Warning)
+                                return
+                            }
+                            let body = "{\"name\":${jsonQuote(trimmedName)},\"cronExpression\":${jsonQuote(trimmedExpression)}," +
+                                "\"taskType\":${jsonQuote(taskType.value.trimAscii())}," +
+                                "\"taskParameters\":${jsonQuote(parameters.value.trimAscii())},\"enabled\":${enabled.value}," +
+                                "\"priority\":${priority.value},\"timeoutSeconds\":${timeout.value}}"
+                            model.actCronSave(editingId.value, body)
+                            open.value = false
+                    }
+                ).role(ButtonRole.Primary)
+            }.spacing(8.vp).hug().fillWidth()
+        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(620.vp)
     })
 }
 
@@ -766,50 +931,91 @@ func statsPage(model: AppModel): Unit {
     }
     pageHeader("统计信息", "查看系统信息与标签词云")
 
-    // 系统信息（原型 kv-grid 两列定义列表 + motd）。
-    detailCard(model, "系统信息") {
+    // 系统信息：双列关键指标、扩展状态和 MOTD，与 Web 端信息密度保持一致。
+    detailCard(model, "系统信息", tools: {
+        => IconButton(IconName.Refresh, label: Some("刷新"), style: Some(ghostStyleOf(model)),
+            onClick: {=> model.loadServerInfo()})
+    }) {
         match (model.serverInfo.value) {
-            case Some(info) => infoList(
-                model,
-                [
-                    ("服务器名称", info.name),
-                    ("版本", "${info.versionName} ${info.version}"),
-                    ("档案总数", "${info.totalArchives}"),
-                    ("地址", model.settings.serverUrl)
-                ]
-            )
+            case Some(info) => statsSystemInfo(model, info)
             case None => pageLoading(model, "加载中…")
         }
     }
 
-    // 标签词云（原型 WordCloud：字号随权重；点击跳书库搜索）。
+    // 标签词云：由 CangjieGUI 做权重缩放、中心螺旋布局与碰撞检测；点击跳书库搜索。
     detailCard(model, "标签词云") {
         let tags = model.tagCloud.value
         if (tags.size == 0) {
             let _ = Label("暂无标签数据").fontSize(12.fp).muted()
         } else {
-            var maxC = 1
+            let cloudItems = ArrayList<WordCloudItem>()
             for (t in tags) {
-                if (t.count > maxC) {
-                    maxC = t.count
-                }
+                cloudItems.add(WordCloudItem(t.tag, t.display, Float64(t.count)))
             }
-            // lambda 不能捕获可变局部变量，取不可变副本进 FlowRow 构建器。
-            let maxCount = maxC
-            let _ = FlowRow {
-                ForEach(tags.toArray(), key: {t: CloudTag => t.tag}) {
-                    t =>
-                        // 字号 11..22fp 随权重线性放大（原型 11+count*0.45px，上限收敛）。
-                        let fs = 11.0 + 11.0 * Float64(t.count) / Float64(maxCount)
-                        ClickArea(onClick: {=> model.searchFromSettings(t.tag)}) {
-                            Label(t.display).fontSize(fs.fp).foregroundColor(if (model.isLight()) {
-                                LANLU_L_MUTED
-                            } else {
-                                LANLU_MUTED
-                            })
-                        }
-                }
-            }.spacing(14.vp)
+            let _ = WordCloud(
+                cloudItems.toArray(),
+                minPointSize: 11.0,
+                maxPointSize: 34.0,
+                preferredHeight: 480.0,
+                onClick: {item => model.searchFromSettings(item.key)}
+            ).height(480.vp).fillWidth()
         }
     }
+}
+
+private func statsSystemInfo(model: AppModel, info: ServerInfo): Unit {
+    let version = if (info.versionDesc.size > 0) {
+        info.versionDesc
+    } else {
+        "${info.versionName} ${info.version}"
+    }
+    HStack {
+        VStack {
+            statsMetric(model, "服务器名称", info.name)
+            statsMetric(model, "档案总数", "${info.totalArchives}")
+        }.spacing(0.vp).flex()
+        VStack {
+            statsMetric(model, "版本", version)
+            statsMetric(model, "总阅读页数", "${info.totalPagesRead}")
+        }.spacing(0.vp).flex()
+    }.spacing(38.vp).hug().fillWidth()
+
+    HStack {
+        Label("数据库扩展").fontSize(12.fp).muted().width(96.vp)
+        if (info.dbExtensions.size == 0) {
+            let _ = Label("-").fontSize(12.fp)
+        } else {
+            let _ = FlowRow {
+                ForEach(info.dbExtensions.toArray(), key: {ext => ext.name}) {
+                    ext => pill(model, if (ext.version.size > 0) {
+                        "${ext.name} ${ext.version}"
+                    } else {
+                        ext.name
+                    }, if (ext.enabled) {
+                        PillTone.Green
+                    } else {
+                        PillTone.Outline
+                    })
+                }
+            }.spacing(7.vp)
+        }
+    }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(0.vp, 7.vp)
+
+    if (info.motd.size > 0) {
+        Label(info.motd).fontSize(12.fp).muted().wrap().tight().padding(0.vp, 5.vp)
+    }
+}
+
+private func statsMetric(model: AppModel, label: String, value: String): Unit {
+    let sep = if (model.isLight()) {
+        Color.rgba(0, 0, 0, 15)
+    } else {
+        Color.rgba(255, 255, 255, 10)
+    }
+    HStack {
+        Label(label).fontSize(12.fp).muted()
+        Spacer()
+        Label(value).fontSize(12.fp).maxLines(1)
+    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(0.vp, 7.vp)
+    Divider(color: sep)
 }

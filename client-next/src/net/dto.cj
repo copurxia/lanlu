@@ -45,7 +45,9 @@ private func readerOf(s: String): JsonReader {
 
 public func parseStringArray(raw: String): ArrayList<String> {
     let list = ArrayList<String>()
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -83,8 +85,12 @@ public func unwrapDataRaw(body: String): String {
                 case _ => break
             }
         }
-    } catch (_: Exception) { return body }
-    if (raw.size == 0) { return body }
+    } catch (_: Exception) {
+        return body
+    }
+    if (raw.size == 0) {
+        return body
+    }
     raw
 }
 
@@ -92,8 +98,11 @@ public class ServerInfo <: JsonDeserializable<ServerInfo> {
     public var name: String = ""
     public var version: String = ""
     public var versionName: String = ""
+    public var versionDesc: String = ""
     public var motd: String = ""
     public var totalArchives: Int64 = 0
+    public var totalPagesRead: Int64 = 0
+    public let dbExtensions = ArrayList<DbExtension>()
 
     public static func fromJson(r: JsonReader): ServerInfo {
         let res = ServerInfo()
@@ -107,8 +116,16 @@ public class ServerInfo <: JsonDeserializable<ServerInfo> {
                             case "name" => res.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "version" => res.version = decodeRaw<String>(r.readValueBytes(), "")
                             case "version_name" => res.versionName = decodeRaw<String>(r.readValueBytes(), "")
+                            case "version_desc" => res.versionDesc = decodeRaw<String>(r.readValueBytes(), "")
                             case "motd" => res.motd = decodeRaw<String>(r.readValueBytes(), "")
                             case "total_archives" => res.totalArchives = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "total_pages_read" => res.totalPagesRead = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "db_extensions" =>
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    res.dbExtensions.add(DbExtension.fromJson(r))
+                                }
+                                r.endArray()
                             case _ => r.skip()
                         }
                     }
@@ -118,6 +135,27 @@ public class ServerInfo <: JsonDeserializable<ServerInfo> {
             }
         }
         return res
+    }
+}
+
+public class DbExtension <: JsonDeserializable<DbExtension> {
+    public var name: String = ""
+    public var enabled: Bool = false
+    public var version: String = ""
+
+    public static func fromJson(r: JsonReader): DbExtension {
+        let ext = DbExtension()
+        r.startObject()
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "name" => ext.name = decodeRaw<String>(r.readValueBytes(), "")
+                case "enabled" => ext.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
+                case "version" => ext.version = decodeRaw<String>(r.readValueBytes(), "")
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        ext
     }
 }
 
@@ -320,14 +358,18 @@ public class CategoryItem {
 public func parseCategoryList(body: String): ArrayList<CategoryItem> {
     let list = ArrayList<CategoryItem>()
     let env = parseEnvelope(body)
-    if (env.dataRaw.size == 0) { return list }
+    if (env.dataRaw.size == 0) {
+        return list
+    }
     // 容忍两种形态：data 直接是数组；或 data 是对象、内部再嵌套一层 "data" 键。
     var raw = env.dataRaw
     let probe = readerOf(raw)
     if (let Some(BeginObject) <- probe.peek()) {
         raw = extractNestedDataRaw(raw)
     }
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -439,7 +481,9 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
 // metadata 的 assets 是 [{key,value}] 数组
 private func parseCoverFromAssetsArray(raw: String): Int64 {
     var id: Int64 = 0
-    if (raw.size == 0) { return id }
+    if (raw.size == 0) {
+        return id
+    }
     let r = readerOf(raw)
     try {
         r.startArray()
@@ -455,7 +499,9 @@ private func parseCoverFromAssetsArray(raw: String): Int64 {
                 }
             }
             r.endObject()
-            if (key == "cover") { id = value }
+            if (key == "cover") {
+                id = value
+            }
         }
         r.endArray()
     } catch (_: Exception) {}
@@ -465,13 +511,17 @@ private func parseCoverFromAssetsArray(raw: String): Int64 {
 public func parseArchiveMeta(body: String): ArchiveMeta {
     // 服务端 metadata 端点返回裸对象（无包络），先经 unwrapDataRaw 兼容两种形态。
     let raw = unwrapDataRaw(body)
-    if (raw.size == 0) { throw Exception("empty metadata") }
+    if (raw.size == 0) {
+        throw Exception("empty metadata")
+    }
     JsonCodec.decode<ArchiveMeta>(raw)
 }
 
 // 复合在线源 arcid（"source:<ns>:<id>"）→ 插件命名空间；本地档案（非复合 id）返回空串。
 public func sourceNamespace(arcid: String): String {
-    if (!arcid.startsWith("source:")) { return "" }
+    if (!arcid.startsWith("source:")) {
+        return ""
+    }
     let rest = arcid[7..arcid.size]
     match (rest.indexOf(":")) {
         case Some(i) => rest[0..i]
@@ -481,28 +531,49 @@ public func sourceNamespace(arcid: String): String {
 
 // Unix 时间戳（秒）→ "YYYY-MM-DD"；0 表示未知，返回 "未知"。
 public func formatTimestamp(ts: Int64): String {
-    if (ts <= 0) { return "未知" }
+    if (ts <= 0) {
+        return "未知"
+    }
     // 从 1970-01-01 起逐 year 减天数，再逐 month 减天数。
     var remaining = ts / 86400
     var year: Int64 = 1970
     while (true) {
-        let yd = if (isLeapYear(year)) { 366 } else { 365 }
-        if (remaining < yd) { break }
+        let yd = if (isLeapYear(year)) {
+            366
+        } else {
+            365
+        }
+        if (remaining < yd) {
+            break
+        }
         remaining -= yd
         year++
     }
     let leap = isLeapYear(year)
-    let monthDays = if (leap) { [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] }
-                    else { [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] }
+    let monthDays = if (leap) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    }
     var month: Int64 = 1
     for (md in monthDays) {
-        if (remaining < md) { break }
+        if (remaining < md) {
+            break
+        }
         remaining -= md
         month++
     }
     let day = remaining + 1
-    let mStr = if (month < 10) { "0${month}" } else { "${month}" }
-    let dStr = if (day < 10) { "0${day}" } else { "${day}" }
+    let mStr = if (month < 10) {
+        "0${month}"
+    } else {
+        "${month}"
+    }
+    let dStr = if (day < 10) {
+        "0${day}"
+    } else {
+        "${day}"
+    }
     "${year}-${mStr}-${dStr}"
 }
 
@@ -529,7 +600,9 @@ public func parsePages(body: String): ArrayList<PageInfo> {
                         case "pages" => raw = rawText(top.readValueBytes())
                         case "data" =>
                             let dataRaw = rawText(top.readValueBytes())
-                            if (raw.size == 0) { raw = extractPagesRaw(dataRaw) }
+                            if (raw.size == 0) {
+                                raw = extractPagesRaw(dataRaw)
+                            }
                         case _ => top.skip()
                     }
                 }
@@ -543,7 +616,9 @@ public func parsePages(body: String): ArrayList<PageInfo> {
 
 private func extractPagesRaw(dataRaw: String): String {
     var raw = ""
-    if (dataRaw.size == 0) { return raw }
+    if (dataRaw.size == 0) {
+        return raw
+    }
     let r = readerOf(dataRaw)
     try {
         r.startObject()
@@ -560,7 +635,9 @@ private func extractPagesRaw(dataRaw: String): String {
 
 private func parsePageArray(raw: String): ArrayList<PageInfo> {
     let list = ArrayList<PageInfo>()
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     try {
         r.startArray()
@@ -642,7 +719,9 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
 private func parseTankTags(b: Array<UInt8>): ArrayList<String> {
     let list = ArrayList<String>()
     let raw = rawText(b)
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let probe = readerOf(raw)
     match (probe.peek()) {
         case Some(BeginArray) => return parseStringArray(raw)
@@ -651,7 +730,9 @@ private func parseTankTags(b: Array<UInt8>): ArrayList<String> {
     let csv = decodeRaw<String>(b, "")
     for (t in csv.split(",")) {
         let trimmed = t.trimAscii()
-        if (trimmed.size > 0) { list.add(trimmed) }
+        if (trimmed.size > 0) {
+            list.add(trimmed)
+        }
     }
     list
 }
@@ -659,7 +740,9 @@ private func parseTankTags(b: Array<UInt8>): ArrayList<String> {
 // 合集 assets 两形态：对象 {"cover":N}（列表/recommendations）或 [{key,value}] 数组（metadata）。
 private func parseTankCoverAssets(b: Array<UInt8>): Int64 {
     let raw = rawText(b)
-    if (raw.size == 0) { return 0 }
+    if (raw.size == 0) {
+        return 0
+    }
     let probe = readerOf(raw)
     match (probe.peek()) {
         case Some(BeginArray) => return parseCoverFromAssetsArray(raw)
@@ -695,7 +778,9 @@ private func firstChildArcid(b: Array<UInt8>): String {
 public func parseTankoubonList(body: String): ArrayList<TankoubonInfo> {
     let list = ArrayList<TankoubonInfo>()
     let raw = unwrapDataRaw(body)
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -703,17 +788,16 @@ public func parseTankoubonList(body: String): ArrayList<TankoubonInfo> {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "result" =>
-                            match (r.peek()) {
-                                case Some(BeginArray) =>
-                                    r.startArray()
-                                    while (r.peek() != EndArray) {
-                                        list.add(TankoubonInfo.fromJson(r))
-                                    }
-                                    r.endArray()
-                                case Some(BeginObject) => list.add(TankoubonInfo.fromJson(r))
-                                case _ => r.skip()
-                            }
+                        case "result" => match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    list.add(TankoubonInfo.fromJson(r))
+                                }
+                                r.endArray()
+                            case Some(BeginObject) => list.add(TankoubonInfo.fromJson(r))
+                            case _ => r.skip()
+                        }
                         case _ => r.skip()
                     }
                 }
@@ -735,7 +819,9 @@ public func parseTankoubonList(body: String): ArrayList<TankoubonInfo> {
 // 单个合集：metadata 端点返回裸对象，unwrapDataRaw 兼容包络形态。
 public func parseTankoubon(body: String): TankoubonInfo {
     let raw = unwrapDataRaw(body)
-    if (raw.size == 0) { throw Exception("empty tankoubon") }
+    if (raw.size == 0) {
+        throw Exception("empty tankoubon")
+    }
     JsonCodec.decode<TankoubonInfo>(raw)
 }
 
@@ -790,8 +876,12 @@ public func parseUserStats(body: String): UserStats {
     let s = UserStats()
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return s }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return s
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -831,11 +921,17 @@ func dataArrayRaw(body: String, objectKey: String): String {
     // 部分端点直接返回裸 JSON 数组（如 /api/admin/plugins 的 getAllPlugins），
     // 无 {code,message,data} 包络——原样返回，不能走 parseEnvelope（会抛 invalid json envelope）。
     let trimmed = body.trimAscii()
-    if (trimmed.size > 0 && trimmed[0..1] == "[") { return trimmed }
+    if (trimmed.size > 0 && trimmed[0..1] == "[") {
+        return trimmed
+    }
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return "" }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return ""
+    }
     // data 是对象：取指定键（users/sessions/tokens/credentials/items…）；是数组则原样。
     let probe = readerOf(raw)
     if (let Some(BeginObject) <- probe.peek()) {
@@ -864,7 +960,9 @@ func dataArrayRaw(body: String, objectKey: String): String {
 public func parseTrendList(body: String): ArrayList<TrendPoint> {
     let list = ArrayList<TrendPoint>()
     let raw = dataArrayRaw(body, "trend")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -894,7 +992,9 @@ public func parseTrendList(body: String): ArrayList<TrendPoint> {
 public func parseCloudTags(body: String): ArrayList<CloudTag> {
     let list = ArrayList<CloudTag>()
     let raw = dataArrayRaw(body, "items")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -913,7 +1013,9 @@ public func parseCloudTags(body: String): ArrayList<CloudTag> {
                     }
                     r.endObject()
                     // 服务端 display 可缺省，前端列表直接展示，回落 tag。
-                    if (t.display.size == 0) { t.display = t.tag }
+                    if (t.display.size == 0) {
+                        t.display = t.tag
+                    }
                     list.add(t)
                 }
                 r.endArray()
@@ -935,8 +1037,12 @@ public func parseTotpStatus(body: String): TotpStatus {
     let s = TotpStatus()
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return s }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return s
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -947,7 +1053,8 @@ public func parseTotpStatus(body: String): TotpStatus {
                         case "enabled" => s.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
                         case "credentialName" => s.credentialName = decodeRaw<String>(r.readValueBytes(), "")
                         case "createdAt" => s.createdAt = decodeRaw<String>(r.readValueBytes(), "")
-                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = decodeRaw<Int64>(r.readValueBytes(),
+                            0)
                         case _ => r.skip()
                     }
                 }
@@ -972,7 +1079,9 @@ public class SessionItem {
 public func parseSessionList(body: String): ArrayList<SessionItem> {
     let list = ArrayList<SessionItem>()
     let raw = dataArrayRaw(body, "sessions")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1014,7 +1123,9 @@ public class TokenItem {
 public func parseTokenList(body: String): ArrayList<TokenItem> {
     let list = ArrayList<TokenItem>()
     let raw = dataArrayRaw(body, "tokens")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1056,7 +1167,9 @@ public class PasskeyItem {
 public func parsePasskeyList(body: String): ArrayList<PasskeyItem> {
     let list = ArrayList<PasskeyItem>()
     let raw = dataArrayRaw(body, "credentials")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1097,7 +1210,9 @@ public class AdminUserItem {
 public func parseAdminUserList(body: String): ArrayList<AdminUserItem> {
     let list = ArrayList<AdminUserItem>()
     let raw = dataArrayRaw(body, "users")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1137,7 +1252,9 @@ public class SysSetting {
 public func parseSysSettings(body: String): ArrayList<SysSetting> {
     let list = ArrayList<SysSetting>()
     let raw = dataArrayRaw(body, "settings")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1171,7 +1288,9 @@ public func parseSysSettings(body: String): ArrayList<SysSetting> {
 
 // description 是多语言对象 {"zh":"…","en":"…"}，设置页只取中文。
 private func parseDescriptionZh(raw: String): String {
-    if (raw.size == 0) { return "" }
+    if (raw.size == 0) {
+        return ""
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1196,8 +1315,12 @@ private func parseDescriptionZh(raw: String): String {
 public func parseGeneratedPassword(body: String): String {
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return "" }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return ""
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1218,7 +1341,6 @@ public func parseGeneratedPassword(body: String): String {
     return ""
 }
 
-
 // ==================== 设置区扩展 DTO 第二批（内容/任务/插件） ====================
 
 public class AdminCategoryItem {
@@ -1237,7 +1359,9 @@ public class AdminCategoryItem {
 public func parseAdminCategoryList(body: String): ArrayList<AdminCategoryItem> {
     let list = ArrayList<AdminCategoryItem>()
     let raw = dataArrayRaw(body, "categories")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1288,7 +1412,9 @@ public class TagListPage {
 
 // translations 是 {"zh":{"text":"…"},"en":{"text":"…"}}，展平到 zhText/enText。
 private func parseTranslationText(raw: String, lang: String): String {
-    if (raw.size == 0) { return "" }
+    if (raw.size == 0) {
+        return ""
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1330,8 +1456,12 @@ public func parseTagListPage(body: String): TagListPage {
     let page = TagListPage()
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return page }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return page
+    }
     var itemsRaw = ""
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
@@ -1350,7 +1480,9 @@ public func parseTagListPage(body: String): TagListPage {
             case _ => break
         }
     }
-    if (itemsRaw.size == 0) { return page }
+    if (itemsRaw.size == 0) {
+        return page
+    }
     let ir = readerOf(itemsRaw)
     while (let Some(tok) <- ir.peek()) {
         match (tok) {
@@ -1401,7 +1533,9 @@ public class SmartFilterItem {
 public func parseSmartFilterList(body: String): ArrayList<SmartFilterItem> {
     let list = ArrayList<SmartFilterItem>()
     let raw = dataArrayRaw(body, "items")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1465,7 +1599,9 @@ public class TaskListPage {
 // taskpool_controller.getTasks 是 SSE 端点，不走 parseEnvelope。
 public func parseTaskListPage(data: String): TaskListPage {
     let page = TaskListPage()
-    if (data.size == 0) { return page }
+    if (data.size == 0) {
+        return page
+    }
     // SSE 快照负载形态：{"v":2,"event_type":"snapshot","data":{"tasks":[...],"total":N}}——
     // tasks/total 在嵌套的 data 对象里（taskpool_controller.buildTaskListStreamData）。
     var payload = data
@@ -1508,7 +1644,9 @@ public func parseTaskListPage(data: String): TaskListPage {
             case _ => break
         }
     }
-    if (tasksRaw.size == 0) { return page }
+    if (tasksRaw.size == 0) {
+        return page
+    }
     let tr = readerOf(tasksRaw)
     while (let Some(tok) <- tr.peek()) {
         match (tok) {
@@ -1553,6 +1691,7 @@ public class CronTask {
     public var name: String = ""
     public var cronExpression: String = ""
     public var taskType: String = ""
+    public var taskParameters: String = ""
     public var enabled: Bool = false
     public var priority: Int64 = 0
     public var timeoutSeconds: Int64 = 0
@@ -1585,14 +1724,21 @@ public class CronValidateResult {
 private func cronDataReader(body: String): ?JsonReader {
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return None }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return None
+    }
     return readerOf(raw)
 }
 
 public func parseCronStatus(body: String): CronStatus {
     let s = CronStatus()
-    let r = match (cronDataReader(body)) { case Some(x) => x; case None => return s }
+    let r = match (cronDataReader(body)) {
+        case Some(x) => x;
+        case None => return s
+    }
     while (let Some(tok) <- r.peek()) {
         match (tok) {
             case BeginObject =>
@@ -1616,7 +1762,9 @@ public func parseCronStatus(body: String): CronStatus {
 public func parseCronTaskList(body: String): ArrayList<CronTask> {
     let list = ArrayList<CronTask>()
     let raw = dataArrayRaw(body, "tasks")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1631,6 +1779,16 @@ public func parseCronTaskList(body: String): ArrayList<CronTask> {
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "cronExpression" => it.cronExpression = decodeRaw<String>(r.readValueBytes(), "")
                             case "taskType" => it.taskType = decodeRaw<String>(r.readValueBytes(), "")
+                            case "taskParameters" =>
+                                let parameterBytes = r.readValueBytes()
+                                let parameterRaw = rawText(parameterBytes)
+                                it.taskParameters = if (parameterRaw.startsWith("\"")) {
+                                    decodeRaw<String>(parameterBytes, "")
+                                } else if (parameterRaw == "null") {
+                                    ""
+                                } else {
+                                    parameterRaw
+                                }
                             case "enabled" => it.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
                             case "priority" => it.priority = decodeRaw<Int64>(r.readValueBytes(), 0)
                             case "timeoutSeconds" => it.timeoutSeconds = decodeRaw<Int64>(r.readValueBytes(), 0)
@@ -1657,7 +1815,9 @@ public func parseCronTaskList(body: String): ArrayList<CronTask> {
 public func parseCronTaskTypes(body: String): ArrayList<CronTaskType> {
     let list = ArrayList<CronTaskType>()
     let raw = dataArrayRaw(body, "types")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1676,7 +1836,9 @@ public func parseCronTaskTypes(body: String): ArrayList<CronTaskType> {
                     }
                     r.endObject()
                     // label 缺省时回落 value，供下拉直接展示。
-                    if (it.label.size == 0) { it.label = it.value }
+                    if (it.label.size == 0) {
+                        it.label = it.value
+                    }
                     list.add(it)
                 }
                 r.endArray()
@@ -1689,7 +1851,10 @@ public func parseCronTaskTypes(body: String): ArrayList<CronTaskType> {
 
 public func parseCronValidate(body: String): CronValidateResult {
     let s = CronValidateResult()
-    let r = match (cronDataReader(body)) { case Some(x) => x; case None => return s }
+    let r = match (cronDataReader(body)) {
+        case Some(x) => x;
+        case None => return s
+    }
     while (let Some(tok) <- r.peek()) {
         match (tok) {
             case BeginObject =>
@@ -1726,7 +1891,9 @@ public class PluginItem {
 public func parsePluginList(body: String): ArrayList<PluginItem> {
     let list = ArrayList<PluginItem>()
     let raw = dataArrayRaw(body, "plugins")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1740,8 +1907,10 @@ public func parsePluginList(body: String): ArrayList<PluginItem> {
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "namespace" => it.namespace = decodeRaw<String>(r.readValueBytes(), "")
                             case "version" => it.version = decodeRaw<String>(r.readValueBytes(), "")
-                            case "plugin_type" => it.pluginType = decodeRaw<String>(r.readValueBytes(), "").toAsciiLower()
-                            case "pluginType" => it.pluginType = decodeRaw<String>(r.readValueBytes(), "").toAsciiLower()
+                            case "plugin_type" => it.pluginType = decodeRaw<String>(r.readValueBytes(), "")
+                                .toAsciiLower()
+                            case "pluginType" => it.pluginType = decodeRaw<String>(r.readValueBytes(), "")
+                                .toAsciiLower()
                             case "author" => it.author = decodeRaw<String>(r.readValueBytes(), "")
                             case "description" => it.description = decodeRaw<String>(r.readValueBytes(), "")
                             case "update_url" => it.updateUrl = decodeRaw<String>(r.readValueBytes(), "")
@@ -1773,7 +1942,9 @@ public class PluginParam {
 public func parsePluginParams(body: String): ArrayList<PluginParam> {
     let list = ArrayList<PluginParam>()
     let raw = dataArrayRaw(body, "parameters")
-    if (raw.size == 0) { return list }
+    if (raw.size == 0) {
+        return list
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -1808,8 +1979,12 @@ public func parseCreatedToken(body: String): TokenItem {
     let t = TokenItem()
     let env = parseEnvelope(body)
     var raw = env.dataRaw
-    if (raw.size == 0) { raw = unwrapDataRaw(body) }
-    if (raw.size == 0) { return t }
+    if (raw.size == 0) {
+        raw = unwrapDataRaw(body)
+    }
+    if (raw.size == 0) {
+        return t
+    }
     let r = readerOf(raw)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
