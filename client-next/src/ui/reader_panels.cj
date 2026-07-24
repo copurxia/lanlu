@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import std.collection.ArrayList
+import std.collection.{ArrayList, HashSet}
 
 // ── 阅读器两个边缘抽屉（reader-redesign.html #sidebar / #settings，T3）──
 // 右侧 #settings 阅读设置 / 左侧 #sidebar 页面导航，均直接复用 cui Drawer：
@@ -17,8 +17,9 @@ import std.collection.ArrayList
 // sidebar/settings 约 23.5%/25% 的视觉占比，避免原 300/320 在实机上显得过窄。
 private let READER_SIDEBAR_WIDTH: Float32 = 338.0
 private let READER_SETTINGS_WIDTH: Float32 = 360.0
-// 页列表行高（vp；原型 .sb-list .row padding 8+8 + 12.5px 字 ≈ 34，取 36 留命中余量）。
-private let READER_SIDEBAR_ROW_H: Float32 = 36.0
+// 对齐 frontend ReaderSidebar：列表项 p-2 + 40px 缩略图（约 56px），文件树项 h-7（28px）。
+private let READER_SIDEBAR_LIST_ROW_H: Float32 = 56.0
+private let READER_SIDEBAR_TREE_ROW_H: Float32 = 28.0
 private let READER_THUMB_W: Float32 = 99.0
 private let READER_THUMB_H: Float32 = 132.0
 private let READER_THUMB_ROW_H: Float32 = 140.0
@@ -314,6 +315,7 @@ class SidebarRow {
     var isHeader = false
     var realIdx: Int64 = 0
     var title = ""
+    var depth: Int64 = 0
 }
 
 private func sidebarRows(model: AppModel): ArrayList<SidebarRow> {
@@ -341,17 +343,59 @@ private func sidebarRows(model: AppModel): ArrayList<SidebarRow> {
     rows
 }
 
+// 按 frontend ReaderSidebar 的 getPagePathSegments 语义，从 sourcePath 建真实目录层级。
+// API 页顺序仍是阅读顺序；目录只在首次出现时插入，文件行保留原始 page index。
+private func sidebarTreeRows(model: AppModel): ArrayList<SidebarRow> {
+    let rows = ArrayList<SidebarRow>()
+    let seenFolders = HashSet<String>()
+    for (i in 0..model.reader.pageCount) {
+        match (model.reader.pageAt(i)) {
+            case Some(p) =>
+                let normalized = p.sourcePath.replace("\\", "/").trimAscii()
+                let parts = normalized.split("/")
+                var folderPath = ""
+                var depth: Int64 = 0
+                let folderCount = max(0, parts.size - 1)
+                for (j in 0..folderCount) {
+                    let name = parts[j].trimAscii()
+                    if (name.size == 0) {
+                        continue
+                    }
+                    folderPath = if (folderPath.size > 0) {
+                        "${folderPath}/${name}"
+                    } else {
+                        name
+                    }
+                    if (!seenFolders.contains(folderPath)) {
+                        seenFolders.add(folderPath)
+                        let folder = SidebarRow()
+                        folder.isHeader = true
+                        folder.title = name
+                        folder.depth = depth
+                        rows.add(folder)
+                    }
+                    depth++
+                }
+                let file = SidebarRow()
+                file.realIdx = i
+                file.depth = depth
+                rows.add(file)
+            case None => ()
+        }
+    }
+    rows
+}
+
 private func readerSidebarBody(model: AppModel): Unit {
     let tab = rememberState<Int64>("reader:sidebar:tab", {=> 0})
-    let rows = sidebarRows(model)
     VStack {
         ReaderSidebarTabs(tab)
         if (tab.value == 0) {
             readerThumbnailPane(model)
         } else if (tab.value == 1) {
-            readerPageList(model, rows, false)
+            readerPageList(model, sidebarRows(model), false)
         } else {
-            readerPageList(model, rows, true)
+            readerPageList(model, sidebarTreeRows(model), true)
         }
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start)
 }
@@ -437,17 +481,20 @@ private func readerThumbnailPane(model: AppModel): Unit {
 
 private func readerPageList(model: AppModel, rows: ArrayList<SidebarRow>, tree: Bool): Unit {
     VStack {
-        if (tree && model.reader.segmentList.size == 1) {
-            let title = match (model.meta.value) {
-                case Some(m) => m.title
-                case None => model.reader.arcid
-            }
-            let _ = ReaderSegmentHeader(title)
-        }
         LazyList(
             Int64(rows.size),
-            {_ => READER_SIDEBAR_ROW_H},
-            spacing: 2.0,
+            {
+                i => if (rows[i].isHeader || tree) {
+                    READER_SIDEBAR_TREE_ROW_H
+                } else {
+                    READER_SIDEBAR_LIST_ROW_H
+                }
+            },
+            spacing: if (tree) {
+                2.0
+            } else {
+                4.0
+            },
             id: if (tree) {
                 "reader:sidebar:tree"
             } else {
@@ -466,9 +513,9 @@ private func readerPageList(model: AppModel, rows: ArrayList<SidebarRow>, tree: 
             i =>
                 let row = rows[i]
                 if (row.isHeader) {
-                    let _ = ReaderSegmentHeader(row.title)
+                    let _ = ReaderSegmentHeader(row.title, depth: row.depth)
                 } else {
-                    let _ = ReaderPageRow(model, row.realIdx, tree: tree)
+                    let _ = ReaderPageRow(model, row.realIdx, tree: tree, depth: row.depth)
                 }
         }.flex()
     }.spacing(2.0).flex().padding(12.0, 0.0, 12.0, 12.0)
@@ -561,15 +608,17 @@ private class ReaderPageThumb <: Widget {
 // segment 分组标题行（原型 .sb-tree .row.dir：主文字色、略小字号、上间距）。
 private class ReaderSegmentHeader <: Widget {
     private let title: String
+    private let depth: Int64
     private var frame = Rect.zero()
 
-    public init(title: String) {
+    public init(title: String, depth!: Int64 = 0) {
         this.title = title
+        this.depth = depth
         emit(this)
     }
 
     public func measure(_: UiContext, available: Size): Size {
-        Size(available.w, READER_SIDEBAR_ROW_H)
+        Size(available.w, READER_SIDEBAR_TREE_ROW_H)
     }
 
     public func layout(_: UiContext, rect: Rect): Unit {
@@ -579,8 +628,9 @@ private class ReaderSegmentHeader <: Widget {
     public func draw(ctx: UiContext): Unit {
         let ps: Float32 = 12.0
         let th = ctx.renderer.textHeight(pointSize: ps)
-        let fitted = sidebarEllipsize(ctx, "▾ ${title}", frame.w - 20.0, ps)
-        ctx.renderer.text(fitted, frame.x + 10.0, frame.centerY() - th / 2.0, ctx.theme.text, pointSize: ps)
+        let x = frame.x + 6.0 + Float32(depth) * 14.0
+        let fitted = sidebarEllipsize(ctx, "▾  ${title}", frame.right() - 8.0 - x, ps)
+        ctx.renderer.text(fitted, x, frame.centerY() - th / 2.0, ctx.theme.accent, pointSize: ps)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -588,25 +638,46 @@ private class ReaderSegmentHeader <: Widget {
     }
 }
 
-// 页列表行（原型 .sb-list .row：页码右对齐 + 标题省略号 + 当前页 accent 软底高亮）。
-// 自绘而不用 ClickArea 组合——当前页/悬停底色与单行截断需要直接控绘制。
+// 页面行：列表态对齐 frontend ReaderSidebar 的 56px 卡片（缩略图/圆形页码、标题、
+// 文件名副标题、右侧媒体类型）；文件树态使用 28px 紧凑文件行。
 private class ReaderPageRow <: Widget {
     private let model: AppModel
     private let index: Int64 // 0 基页索引
     private let tree: Bool
+    private let depth: Int64
     private let hoverId: String
+    private let thumbKey: String
     private var frame = Rect.zero()
 
-    public init(model: AppModel, index: Int64, tree!: Bool = false) {
+    public init(model: AppModel, index: Int64, tree!: Bool = false, depth!: Int64 = 0) {
         this.model = model
         this.index = index
         this.tree = tree
+        this.depth = depth
         this.hoverId = "reader:sidebar:row:${index}"
+        var tk = ""
+        if (!tree) {
+            match (model.reader.pageAt(index)) {
+                case Some(p) =>
+                    if (p.thumbAssetId > 0) {
+                        tk = "asset:${p.thumbAssetId}"
+                        if (model.imageState(tk).value == "") {
+                            model.requestImage(tk, "/api/assets/${p.thumbAssetId}")
+                        }
+                    }
+                case None => ()
+            }
+        }
+        thumbKey = tk
         emit(this)
     }
 
     public func measure(_: UiContext, available: Size): Size {
-        Size(available.w, READER_SIDEBAR_ROW_H)
+        Size(available.w, if (tree) {
+            READER_SIDEBAR_TREE_ROW_H
+        } else {
+            READER_SIDEBAR_LIST_ROW_H
+        })
     }
 
     public func layout(_: UiContext, rect: Rect): Unit {
@@ -644,39 +715,98 @@ private class ReaderPageRow <: Widget {
         } else {
             ctx.theme.mutedText
         }
-        let ps: Float32 = 12.5
-        let th = ctx.renderer.textHeight(pointSize: ps)
-        let ty = frame.centerY() - th / 2.0
-        // 页码：26vp 槽右对齐（原型 .row .n；tabular-nums 以右对齐代替）。
-        // 显示语义同顶栏/dock：seamless 开 = segment 内页码。
-        let num = "${model.reader.displayPageOfReal(index)}"
-        let numW = ctx.renderer.textWidth(num, pointSize: ps)
-        let indent: Float32 = if (tree) {
-            12.0
+        if (!tree) {
+            drawListContent(ctx, color)
+            return
+        }
+        drawTreeFileContent(ctx, color)
+    }
+
+    private func drawListContent(ctx: UiContext, color: Color): Unit {
+        let media = Rect(frame.x + 8.0, frame.y + 8.0, 56.0, 40.0)
+        match (pixelTexture(ctx.renderer, thumbKey)) {
+            case Some(tex) =>
+                ctx.renderer.pushClip(media)
+                let scale = max(media.w / Float32(tex.width), media.h / Float32(tex.height))
+                let w = Float32(tex.width) * scale
+                let h = Float32(tex.height) * scale
+                ctx.renderer.texture(tex, Rect(media.centerX() - w / 2.0, media.centerY() - h / 2.0, w, h))
+                ctx.renderer.popClip()
+                ctx.renderer.strokeRoundedRect(media, 6.0, Pen(width: 1.0, color: ctx.theme.panelEdge))
+            case None =>
+                let circle = Rect(media.x + 14.0, media.y + 6.0, 28.0, 28.0)
+                ctx.renderer.fillRoundedRect(circle, 14.0, ctx.theme.accentSoft)
+                ctx.renderer.textCenter("${index + 1}", circle, ctx.theme.accent, pointSize: 11.0)
+        }
+        let textX = media.right() + 8.0
+        let iconSlot: Float32 = 22.0
+        let availableW = frame.right() - 8.0 - iconSlot - textX
+        let maxW: Float32 = if (availableW > 0.0) {
+            availableW
         } else {
             0.0
         }
-        ctx.renderer.text(num, frame.x + 10.0 + indent + 26.0 - numW, ty, color, pointSize: ps)
-        var x = frame.x + 10.0 + indent + 26.0 + 10.0
-        var name = ""
+        var title = "第 ${index + 1} 页"
+        var subtitle = ""
+        var pageType = ""
         match (model.reader.pageAt(index)) {
             case Some(p) =>
-                let tag = typeTag(p.pageType)
-                if (tag.size > 0) {
-                    ctx.renderer.text(tag, x, ty, color, pointSize: ps)
-                    x += ctx.renderer.textWidth(tag, pointSize: ps) + 6.0
+                if (p.title.size > 0) {
+                    title = p.title
                 }
-                name = if (p.title.size > 0) {
-                    p.title
-                } else {
-                    p.id
+                subtitle = fileNameOf(p.sourcePath)
+                if (subtitle == title) {
+                    subtitle = ""
                 }
+                pageType = p.pageType
             case None => ()
         }
-        let fitted = sidebarEllipsize(ctx, name, frame.right() - 10.0 - x, ps)
+        ctx.renderer.text(sidebarEllipsize(ctx, title, maxW, 12.5), textX, frame.y + 11.0, color, pointSize: 12.5)
+        if (subtitle.size > 0) {
+            ctx
+                .renderer
+                .text(sidebarEllipsize(ctx, subtitle, maxW, 10.5), textX, frame.y + 32.0, ctx.theme.mutedText,
+                    pointSize: 10.5)
+        }
+        let tag = typeTag(pageType)
+        if (tag.size > 0) {
+            ctx
+                .renderer
+                .textCenter(tag, Rect(frame.right() - 28.0, frame.y, 20.0, frame.h), ctx.theme.mutedText,
+                    pointSize: 11.0)
+        }
+    }
+
+    private func drawTreeFileContent(ctx: UiContext, color: Color): Unit {
+        let ps: Float32 = 12.0
+        let th = ctx.renderer.textHeight(pointSize: ps)
+        let ty = frame.centerY() - th / 2.0
+        var x = frame.x + 6.0 + Float32(depth) * 14.0
+        var name = ""
+        var pageType = ""
+        match (model.reader.pageAt(index)) {
+            case Some(p) =>
+                pageType = p.pageType
+                name = fileNameOf(p.sourcePath)
+            case None => ()
+        }
+        let tag = typeTag(pageType)
+        ctx.renderer.text(if (tag.size > 0) {
+            tag
+        } else {
+            "图"
+        }, x, ty, ctx.theme.mutedText, pointSize: 10.5)
+        x += 20.0
+        let num = "${index + 1}"
+        let numW = ctx.renderer.textWidth(num, pointSize: 10.0)
+        let fitted = sidebarEllipsize(ctx, name, frame.right() - 12.0 - numW - 8.0 - x, ps)
         if (fitted.size > 0) {
             ctx.renderer.text(fitted, x, ty, color, pointSize: ps)
         }
+        ctx
+            .renderer
+            .text(num, frame.right() - 8.0 - numW, frame.centerY() - ctx.renderer.textHeight(pointSize: 10.0) / 2.0,
+                ctx.theme.mutedText, pointSize: 10.0)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -763,6 +893,23 @@ private func sidebarEllipsize(ctx: UiContext, text: String, maxWidth: Float32, p
         }
     }
     runesSliceToString(runes, 0, low) + "…"
+}
+
+private func fileNameOf(path: String): String {
+    let normalized = path.replace("\\", "/").trimAscii()
+    if (normalized.size == 0) {
+        return ""
+    }
+    let parts = normalized.split("/")
+    var i = parts.size - 1
+    while (i >= 0) {
+        let part = parts[i].trimAscii()
+        if (part.size > 0) {
+            return part
+        }
+        i--
+    }
+    normalized
 }
 
 private func runesSliceToString(runes: Array<Rune>, start: Int64, end: Int64): String {
