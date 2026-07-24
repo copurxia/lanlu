@@ -1,0 +1,9 @@
+[package]
+cjc-version = "1.1.0"
+name = "libvlc_ffi"
+version = "0.1.0"
+description = "Small, safe libVLC playback and RGBA video-frame binding"
+output-type = "static"
+link-option = "-lvlc"
+
+[dependencies]

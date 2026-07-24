@@ -155,5 +155,6 @@ main(): Int64 {
             ToastLayer(model.toaster)
         }
     }
+    model.close()
     return 0
 }

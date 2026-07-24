@@ -181,6 +181,7 @@ class ReaderStage <: Widget {
     private let keys: Array<String>
     // 音频舞台目标页（activeLane=Audio 优先，否则 spread 内首个 audio 页）
     private let audioPage: ?Int64
+    private let videoPage: ?Int64
     // 音频舞台交互热区（layout 时算）
     private var vinylRect = Rect.zero()
     private var playRect = Rect.zero()
@@ -231,6 +232,12 @@ class ReaderStage <: Widget {
             case _ => ()
         }
         audioPage = ap
+        var vp: ?Int64 = None
+        match (r.activeLane) {
+            case LaneId.Video(i) => vp = Some(i)
+            case _ => ()
+        }
+        videoPage = vp
         // 翻页检测：index（恒为 spread 首页）变化即一次翻页。方向 = 阅读顺序
         //（index 增大 = forward），物理位移向量由模式换算（pageTurnVector）。
         if (!st.inited) {
@@ -289,7 +296,11 @@ class ReaderStage <: Widget {
             drawCollectionEnd(ctx)
             return
         }
-        match (audioPage) {
+        match (videoPage) {
+            case Some(i) =>
+                ctx.renderer.fill(frame, Color.rgb(0, 0, 0))
+                drawVideoStage(ctx, i)
+            case None => match (audioPage) {
             case Some(i) =>
                 // 音频舞台恒深（原型 #page-audio：媒体页不随主题翻转）。
                 ctx.renderer.fill(frame, Color.rgb(0, 0, 0))
@@ -297,6 +308,7 @@ class ReaderStage <: Widget {
             case None =>
                 ctx.renderer.fill(frame, ctx.theme.stageBg)
                 drawImageStage(ctx)
+            }
         }
         if (model.readerShowInfo.value) {
             drawMediaInfo(ctx)
@@ -397,12 +409,33 @@ class ReaderStage <: Widget {
             case Some(p) => pt = p.pageType
             case None => ()
         }
-        let hint = if (pt == "video") {
-            "视频播放后续接入，请翻页"
-        } else {
-            "该页类型（${pt}）不支持阅读，请翻页"
-        }
+        let hint = "该页类型（${pt}）不支持阅读，请翻页"
         ctx.renderer.textCenter(hint, cell, ctx.theme.mutedText, pointSize: 13.0)
+    }
+
+    private func drawVideoStage(ctx: UiContext, pageIdx: Int64): Unit {
+        let pb = model.playback
+        let key = "video:${pb.mediaKey}"
+        match (pb.takeVideoFrame()) {
+            case Some(video) => registerPixelImage(ctx.renderer, key, video.width, video.height, video.rgba)
+            case None => ()
+        }
+        match (pixelTexture(ctx.renderer, key)) {
+            case Some(texture) =>
+                ctx.renderer.texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
+            case None =>
+                var title = "视频"
+                match (model.reader.pageAt(pageIdx)) {
+                    case Some(p) => title = if (p.title.size > 0) { p.title } else { p.id }
+                    case None => ()
+                }
+                let status = if (pb.error.size > 0) { "加载失败：${pb.error}" }
+                    else if (pb.loading) { "正在下载 ${title}…" }
+                    else if (pb.loaded) { "点击底部播放按钮" }
+                    else { "准备视频…" }
+                ctx.renderer.textCenter(status, frame, ctx.theme.onMediaDim, pointSize: 14.0)
+        }
+        if (pb.playing) { ctx.requestFrame() }
     }
 
     // ── 音频舞台（原型 #page-audio：黑胶 + 标题 + 进度 + 控制，恒深底）──
@@ -671,13 +704,13 @@ class ReaderStage <: Widget {
                 // 双击缩放（cui 自带 clickCount：2=双击，见 UiContext）：
                 // 仅图片舞台且设置开启时 1×/2× 切换。消费 MouseDown 不阻断配套
                 // MouseUp——中央区双击=chrome 两次翻转（净零）+缩放切换，可接受。
-                if (audioPage.isNone() && model.reader.doubleTapZoom && ctx.clickCount >= 2 &&
+                if (audioPage.isNone() && videoPage.isNone() && model.reader.doubleTapZoom && ctx.clickCount >= 2 &&
                     frame.contains(x, y)) {
                     st.zoomed = !st.zoomed
                     return true
                 }
                 // 音频舞台：播放/±5s 按下即生效；进度条按下起拖。
-                if (audioPage.isSome()) {
+                if (audioPage.isSome() || videoPage.isSome()) {
                     if (playRect.contains(x, y)) {
                         model.playback.togglePlay()
                         return true
@@ -706,7 +739,7 @@ class ReaderStage <: Widget {
                         ctx.claimHover("reader:end:detail", CursorShape.Interactive)
                     }
                 }
-                if (audioPage.isSome()) {
+                if (audioPage.isSome() || videoPage.isSome()) {
                     if (playRect.contains(x, y)) { ctx.claimHover("reader:stage:play", CursorShape.Interactive) }
                     if (backRect.contains(x, y)) { ctx.claimHover("reader:stage:back", CursorShape.Interactive) }
                     if (fwdRect.contains(x, y)) { ctx.claimHover("reader:stage:fwd", CursorShape.Interactive) }
@@ -734,7 +767,7 @@ class ReaderStage <: Widget {
                 }
                 // 失败页点击重试：命中当前 spread 内 error 页 cell 才消费，
                 // 否则穿透给底层翻页/chrome 点击区（与旧视图层级语义一致）。
-                if (audioPage.isNone() && frame.contains(x, y)) {
+                if (audioPage.isNone() && videoPage.isNone() && frame.contains(x, y)) {
                     for (i in 0..keys.size) {
                         let key = keys[i]
                         if (key.size > 0 && model.imageState(key).value == "error" &&

@@ -87,6 +87,7 @@ public class AppModel {
     // 媒体 lane 播放引擎（ffplay 子进程方案，纯逻辑可单测；与 reader 一样是普通类，
     // 状态变更经 readerVersion 广播视图重建）。
     public let playback = PlaybackModel()
+    private var mediaProxy: ?MediaProxy = None
 
     // 详情页（档案）：页面预览页表、三视图切换（0=缩略图 1=列表 2=树）、所属合集、相关推荐。
     // detailWidth 由详情主列 SizeProbe 写入，驱动预览缩略图网格列数。
@@ -1251,16 +1252,48 @@ public class AppModel {
         )
     }
 
-    // lane → 播放联动：Audio lane 加载对应媒体页（下载+ffplay 在 PlaybackModel 内）；
-    // Book lane 停播。Video lane 本阶段不触发播放——视频播放后续接入（UI 侧另行处理）。
+    // lane → 播放联动：音频走 ffplay，视频走 libVLC 内存帧回调；Book 停播。
     private func syncPlaybackToLane(l: LaneId): Unit {
         match (l) {
             case Audio(i) => match (reader.pageAt(i)) {
-                case Some(p) => playback.load(reader.arcidOfReal(i), i, p.id)
+                case Some(p) => playback.load(reader.arcidOfReal(i), i, p.sourcePath, video: false)
                 case None => ()
             }
             case Book => playback.stop()
-            case Video(_) => () // 视频播放先不做（范围调整），留待后续任务
+            case Video(i) => match (reader.pageAt(i)) {
+                case Some(p) =>
+                    let arc = reader.arcidOfReal(i)
+                    let path = p.sourcePath
+                    let url = "${activeBaseUrl()}/api/archives/${arc}/page?path=${percentEncode(path)}"
+                    let token = match (settings.activeProfile()) {
+                        case Some(profile) => profile.token
+                        case None => match (selectedProfile()) {
+                            case Some(profile) => profile.token
+                            case None => ""
+                        }
+                    }
+                    let proxy = match (mediaProxy) {
+                        case Some(existing) => existing
+                        case None =>
+                            let created = MediaProxy()
+                            mediaProxy = Some(created)
+                            created
+                    }
+                    playback.loadRemote(arc, i, proxy.open(url, token), "")
+                case None => ()
+            }
+        }
+    }
+
+    public func close(): Unit {
+        playback.stop()
+        match (mediaProxy) {
+            case Some(proxy) => proxy.close()
+            case None => ()
+        }
+        match (api) {
+            case Some(a) => a.close()
+            case None => ()
         }
     }
 

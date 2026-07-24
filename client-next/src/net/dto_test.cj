@@ -132,10 +132,12 @@ func categoriesParseRealTopLevelArrayShape(): Unit {
 
 @Test
 func pagesParseBothShapes(): Unit {
-    let direct = "{\"pages\":[{\"id\":\"p/001.jpg\",\"type\":\"image\",\"title\":\"1\"}]}"
+    let direct = "{\"pages\":[{\"id\":\"video:path:F1.mkv\",\"type\":\"video\",\"title\":\"1\",\"default_source\":{\"path\":\"F1.mkv\"}}]}"
     let nested = "{\"code\":200,\"message\":\"ok\",\"data\":{\"pages\":[{\"id\":\"p/002.jpg\",\"type\":\"image\",\"title\":\"2\"}]}}"
-    @Expect(parsePages(direct)[0].id, "p/001.jpg")
+    @Expect(parsePages(direct)[0].id, "video:path:F1.mkv")
+    @Expect(parsePages(direct)[0].sourcePath, "F1.mkv")
     @Expect(parsePages(nested)[0].id, "p/002.jpg")
+    @Expect(parsePages(nested)[0].sourcePath, "p/002.jpg")
 }
 
 @Test

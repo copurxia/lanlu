@@ -583,6 +583,7 @@ private func isLeapYear(y: Int64): Bool {
 
 public class PageInfo {
     public var id: String = ""
+    public var sourcePath: String = ""
     public var pageType: String = ""
     public var title: String = ""
 }
@@ -647,17 +648,37 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
             while (r.peek() != EndObject) {
                 match (r.readName()) {
                     case "id" => p.id = decodeRaw<String>(r.readValueBytes(), "")
+                    case "default_source" => p.sourcePath = pageSourcePath(rawText(r.readValueBytes()))
+                    case "defaultSource" => p.sourcePath = pageSourcePath(rawText(r.readValueBytes()))
                     case "type" => p.pageType = decodeRaw<String>(r.readValueBytes(), "")
                     case "title" => p.title = decodeRaw<String>(r.readValueBytes(), "")
                     case _ => r.skip()
                 }
             }
             r.endObject()
+            if (p.sourcePath.size == 0) { p.sourcePath = p.id }
             list.add(p)
         }
         r.endArray()
     } catch (_: Exception) {}
     return list
+}
+
+private func pageSourcePath(raw: String): String {
+    if (raw.size == 0) { return "" }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var path = ""
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "path" => path = decodeRaw<String>(r.readValueBytes(), "")
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        path
+    } catch (_: Exception) { "" }
 }
 
 // ===== 合集（tankoubon）=====

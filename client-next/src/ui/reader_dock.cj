@@ -16,7 +16,7 @@ import std.collection.{ArrayList, HashMap}
 // lane-body 内容自然宽（原型 .lane-slider 200px 与控件排布推算；cap 400 同原型 .lane max-width）。
 private let DOCK_BOOK_BODY_W: Float32 = 356.0
 private let DOCK_AUDIO_BODY_W: Float32 = 390.0
-private let DOCK_VIDEO_BODY_W: Float32 = 170.0
+private let DOCK_VIDEO_BODY_W: Float32 = 426.0
 private let DOCK_TAB: Float32 = 36.0
 private let DOCK_PAD: Float32 = 6.0
 private let DOCK_GAP: Float32 = 4.0
@@ -73,6 +73,7 @@ class ReaderDock <: Widget {
     private var fwdRect = Rect.zero()
     private var audioSeekRect = Rect.zero()
     private var muteRect = Rect.zero()
+    private var subtitleRect = Rect.zero()
 
     public init(model: AppModel) {
         this.model = model
@@ -151,7 +152,13 @@ class ReaderDock <: Widget {
                 fwdRect = Rect(bx + 72.0, cy - 15.0, 30.0, 30.0)
                 audioSeekRect = Rect(bx + 108.0, cy - 10.0, 140.0, 20.0)
                 muteRect = Rect(bx + 108.0 + 140.0 + 94.0, cy - 15.0, 30.0, 30.0)
-            case LaneId.Video(_) => ()
+            case LaneId.Video(_) =>
+                backRect = Rect(bx, cy - 15.0, 30.0, 30.0)
+                playRect = Rect(bx + 34.0, cy - 17.0, 34.0, 34.0)
+                fwdRect = Rect(bx + 72.0, cy - 15.0, 30.0, 30.0)
+                audioSeekRect = Rect(bx + 108.0, cy - 10.0, 140.0, 20.0)
+                muteRect = Rect(bx + 108.0 + 140.0 + 94.0, cy - 15.0, 30.0, 30.0)
+                subtitleRect = Rect(bx + 376.0, cy - 15.0, 38.0, 30.0)
         }
     }
 
@@ -217,11 +224,7 @@ class ReaderDock <: Widget {
         match (lane) {
             case LaneId.Book => drawBookBody(ctx, dy, a)
             case LaneId.Audio(_) => drawAudioBody(ctx, dy, a)
-            case LaneId.Video(_) =>
-                let th = ctx.renderer.textHeight(pointSize: 12.0)
-                // 诚实占位（同项目 todoToast 惯例）：视频播放后续接入。
-                ctx.renderer.text("视频播放后续接入", bodyFullRect.x + 14.0,
-                    bodyFullRect.centerY() + dy - th / 2.0, dimColor(ctx, a), pointSize: 12.0)
+            case LaneId.Video(_) => drawVideoBody(ctx, dy, a)
         }
     }
 
@@ -285,6 +288,23 @@ class ReaderDock <: Widget {
             dimColor(ctx, a))
     }
 
+    private func drawVideoBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
+        drawAudioBody(ctx, dy, a)
+        let pb = model.playback
+        let hover = drawBodyButton(ctx, subtitleRect, dy, "reader:dock:subtitle", a)
+        let enabled = pb.subtitleTrackId >= 0
+        let color = if (enabled) { ctx.theme.accent.withAlpha(a) } else if (hover) {
+            mainColor(ctx, a)
+        } else {
+            dimColor(ctx, a)
+        }
+        let label = if (enabled) { "CC·" } else { "CC" }
+        let tw = ctx.renderer.textWidth(label, pointSize: 11.0)
+        let th = ctx.renderer.textHeight(pointSize: 11.0)
+        ctx.renderer.text(label, subtitleRect.centerX() - tw / 2.0,
+            subtitleRect.centerY() + dy - th / 2.0, color, pointSize: 11.0)
+    }
+
     // ±5s 小跳转图形（30×30 槽内 13px 规格，原型 .lane .icon-btn）。
     // 方向语义同 drawSkipGlyph（顶点在 -dir 侧，取 d=-dir 修正）。
     private func drawSkipSmall(renderer: Renderer, cx: Float32, cy: Float32, dir: Float32, color: Color): Unit {
@@ -320,7 +340,7 @@ class ReaderDock <: Widget {
                     return true
                 }
                 if (audioSeekRect.contains(x, y) && model.playback.durationSec > 0.0 &&
-                    model.playback.loaded && isAudioActive()) {
+                    model.playback.loaded && isMediaActive()) {
                     ctx.beginDrag("reader:dock:audioSeek")
                     audioSeekFromX(x)
                     return true
@@ -353,7 +373,7 @@ class ReaderDock <: Widget {
                         return true
                     }
                 }
-                if (isAudioActive()) {
+                if (isMediaActive()) {
                     if (playRect.contains(x, y)) {
                         model.playback.togglePlay()
                         return true
@@ -370,6 +390,10 @@ class ReaderDock <: Widget {
                         model.playback.toggleMute()
                         return true
                     }
+                    if (subtitleRect.contains(x, y) && model.playback.isVideo) {
+                        model.playback.cycleSubtitleTrack()
+                        return true
+                    }
                 }
                 return true
             case UiEvent.MouseWheel(_, _, x, y) =>
@@ -379,9 +403,10 @@ class ReaderDock <: Widget {
         }
     }
 
-    private func isAudioActive(): Bool {
+    private func isMediaActive(): Bool {
         match (active) {
             case LaneId.Audio(_) => true
+            case LaneId.Video(_) => true
             case _ => false
         }
     }
@@ -395,6 +420,7 @@ class ReaderDock <: Widget {
         let spots = [("reader:dock:prev", prevRect), ("reader:dock:next", nextRect),
             ("reader:dock:back", backRect), ("reader:dock:play", playRect),
             ("reader:dock:fwd", fwdRect), ("reader:dock:mute", muteRect),
+            ("reader:dock:subtitle", subtitleRect),
             ("reader:dock:bookSeek", bookSeekRect), ("reader:dock:audioSeek", audioSeekRect)]
         for ((id, rect) in spots) {
             if (rect.contains(x, y)) {

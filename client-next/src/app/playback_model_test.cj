@@ -88,6 +88,17 @@ func playbackRepeatedLoadIgnored(): Unit {
 }
 
 @Test
+func playbackRemoteVideoDoesNotDownload(): Unit {
+    let f = PbFixture()
+    f.model.loadRemote("arc1", 4, "http://server/api/archives/arc1/page?path=movie.mkv", "token")
+    @Expect(f.model.mediaKey, "arc1:4")
+    @Expect(f.model.loading, false)
+    @Expect(f.model.loaded, true)
+    @Expect(f.model.isVideo, true)
+    @Expect(f.downloads.count, 0)
+}
+
+@Test
 func playbackLoadFailed(): Unit {
     let f = PbFixture()
     f.model.load("arc1", 4, "p4")

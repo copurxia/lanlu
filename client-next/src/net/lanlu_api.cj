@@ -83,7 +83,11 @@ public class LanluApi {
             throw ApiException(401, "登录状态已失效，请重新登录")
         }
         if (!resp.isSuccess()) {
-            throw ApiException(resp.status, "HTTP ${resp.status}")
+            // 页面/媒体接口的服务端错误体包含归档路径、条目读取等具体原因。保留它，
+            // 否则播放层只能显示无诊断价值的 “HTTP 500”。
+            let detail = resp.body().trimAscii()
+            throw ApiException(resp.status,
+                if (detail.size > 0) { "HTTP ${resp.status}: ${detail}" } else { "HTTP ${resp.status}" })
         }
         resp.bodyBytes()
     }
