@@ -586,6 +586,8 @@ public class PageInfo {
     public var sourcePath: String = ""
     public var pageType: String = ""
     public var title: String = ""
+    public var lyricsAssetId: Int64 = 0
+    public var thumbAssetId: Int64 = 0
 }
 
 public func parsePages(body: String): ArrayList<PageInfo> {
@@ -648,8 +650,22 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
             while (r.peek() != EndObject) {
                 match (r.readName()) {
                     case "id" => p.id = decodeRaw<String>(r.readValueBytes(), "")
-                    case "default_source" => p.sourcePath = pageSourcePath(rawText(r.readValueBytes()))
-                    case "defaultSource" => p.sourcePath = pageSourcePath(rawText(r.readValueBytes()))
+                    case "default_source" =>
+                        let sourceRaw = rawText(r.readValueBytes())
+                        p.sourcePath = pageSourcePath(sourceRaw)
+                        p.lyricsAssetId = pageLyricsAssetId(sourceRaw)
+                        p.thumbAssetId = pageThumbAssetId(sourceRaw)
+                    case "defaultSource" =>
+                        let sourceRaw = rawText(r.readValueBytes())
+                        p.sourcePath = pageSourcePath(sourceRaw)
+                        p.lyricsAssetId = pageLyricsAssetId(sourceRaw)
+                        p.thumbAssetId = pageThumbAssetId(sourceRaw)
+                    case "metadata" =>
+                        let metadataRaw = rawText(r.readValueBytes())
+                        let assetId = metadataLyricsAssetId(metadataRaw)
+                        if (assetId > 0) { p.lyricsAssetId = assetId }
+                        let thumbId = metadataThumbAssetId(metadataRaw)
+                        if (thumbId > 0) { p.thumbAssetId = thumbId }
                     case "type" => p.pageType = decodeRaw<String>(r.readValueBytes(), "")
                     case "title" => p.title = decodeRaw<String>(r.readValueBytes(), "")
                     case _ => r.skip()
@@ -662,6 +678,90 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
         r.endArray()
     } catch (_: Exception) {}
     return list
+}
+
+private func pageThumbAssetId(raw: String): Int64 {
+    if (raw.size == 0) { return 0 }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var assetId: Int64 = 0
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "metadata" => assetId = metadataThumbAssetId(rawText(r.readValueBytes()))
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        assetId
+    } catch (_: Exception) { 0 }
+}
+
+private func metadataThumbAssetId(raw: String): Int64 {
+    if (raw.size == 0) { return 0 }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var assetId: Int64 = 0
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "thumb_asset_id" => assetId = decodeRaw<Int64>(r.readValueBytes(), 0)
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        assetId
+    } catch (_: Exception) { 0 }
+}
+
+private func pageLyricsAssetId(raw: String): Int64 {
+    if (raw.size == 0) { return 0 }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var assetId: Int64 = 0
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "metadata" => assetId = metadataLyricsAssetId(rawText(r.readValueBytes()))
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        assetId
+    } catch (_: Exception) { 0 }
+}
+
+private func metadataLyricsAssetId(raw: String): Int64 {
+    if (raw.size == 0) { return 0 }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var assetId: Int64 = 0
+        while (r.peek() != EndObject) {
+            if (r.readName() == "attachments") {
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    r.startObject()
+                    var slot = ""
+                    var id: Int64 = 0
+                    while (r.peek() != EndObject) {
+                        match (r.readName()) {
+                            case "slot" => slot = decodeRaw<String>(r.readValueBytes(), "").trimAscii().toAsciiLower()
+                            case "asset_id" => id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    if (assetId <= 0 && slot == "lyrics" && id > 0) { assetId = id }
+                }
+                r.endArray()
+            } else {
+                r.skip()
+            }
+        }
+        r.endObject()
+        assetId
+    } catch (_: Exception) { 0 }
 }
 
 private func pageSourcePath(raw: String): String {

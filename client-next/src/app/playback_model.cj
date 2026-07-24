@@ -1,22 +1,26 @@
 package lanlu_client_next.app
 
 import std.time.MonoTime
-import std.process.{launch, execute, executeWithOutput, ProcessRedirect, SubProcess}
+import std.process.executeWithOutput
 import std.convert.Parsable
 import std.collection.ArrayList
 import libvlc_ffi.{SubtitleTrack, VideoFrame, VlcPlayer}
 
 // 阅读器媒体 lane 的播放引擎（纯逻辑可单测：进程/时钟/下载全部注入，同 ReaderModel 风格）。
-// 音频沿用下载缓存后交给 ffplay 的路径；视频把鉴权 URL 交给 libVLC，按 HTTP Range 流式读取。
+// 音视频统一通过鉴权代理 URL 按 HTTP Range 交给 libVLC 流式读取。
 
-// 播放进程抽象：测试注入假实现断言调用序列；生产默认 FfplayRunner（见文件末尾）。
-// start 带 muted：ffplay 不支持运行期改音量，静音/取消静音 = 记录位置后以
-// -volume 0/100 重启进程（见 toggleMute），故音量必须是 start 的参数。
+// 播放器抽象保留为测试注入点；生产环境统一使用 LibVlcRunner。
 public interface ProcessRunner {
     func start(path: String, offsetSec: Float64, muted: Bool): Unit
     func pause(): Unit
     func resume(): Unit
     func stop(): Unit
+}
+
+public class LyricLine {
+    public let timeSec: Float64
+    public let text: String
+    init(timeSec: Float64, text: String) { this.timeSec = timeSec; this.text = text }
 }
 
 public class PlaybackModel {
@@ -31,13 +35,15 @@ public class PlaybackModel {
     public var isVideo: Bool = false
     public var subtitleTracks = ArrayList<SubtitleTrack>()
     public var subtitleTrackId: Int32 = -1
+    public var lyricsLines = ArrayList<LyricLine>()
 
     // ---- 注入点 ----
     // 单调时钟（毫秒）；测试注入假时钟驱动位置断言。
     public var clock: () -> Int64
     // 下载出口：(arcid, pageId) 触发后台下载；完成经 onDownloaded/onFailed 回填。
     public var onDownload: ?(String, String) -> Unit = None
-    // 播放进程；None 时惰性用默认 FfplayRunner（测试注入假 runner，不会碰 ffplay）。
+    public var onLyricsDownload: ?(String, Int64) -> Unit = None
+    // 播放器；None 时惰性使用 libVLC（测试可注入假 runner）。
     public var processRunner: ?ProcessRunner = None
 
     // ---- 内部 ----
@@ -47,8 +53,7 @@ public class PlaybackModel {
     private var startClockMs: Int64 = 0    // 本次（恢复）播放的时钟起点
     private var startOffsetSec: Float64 = 0.0
     private var pausedOffsetSec: Float64 = 0.0
-    private var defaultRunner: ?FfplayRunner = None
-    private var videoRunner: ?LibVlcRunner = None
+    private var vlcRunner: ?LibVlcRunner = None
 
     public init() {
         let start = MonoTime.now()
@@ -58,8 +63,8 @@ public class PlaybackModel {
     // 当前播放位置（秒）：播放中 = 起点偏移 + 时钟推进；暂停 = 暂停时快照。钳制到 [0, duration]。
     public prop positionSec: Float64 {
         get() {
-            if (isVideo) {
-                match (videoRunner) {
+            if (processRunner.isNone()) {
+                match (vlcRunner) {
                     case Some(r) => return clampPos(r.timeSec())
                     case None => ()
                 }
@@ -91,12 +96,13 @@ public class PlaybackModel {
     }
 
     // 视频由 libVLC 直接通过 HTTP Range 读取，不预下载完整文件。
-    public func loadRemote(arcid: String, pageIndex: Int64, url: String, token: String): Unit {
+    public func loadRemote(arcid: String, pageIndex: Int64, url: String, token: String,
+        video!: Bool = true): Unit {
         let key = "${arcid}:${pageIndex}"
         if (key == mediaKey && loaded && isVideo) { return }
         stopInternal()
         mediaKey = key
-        isVideo = true
+        isVideo = video
         loaded = true
         loading = false
         error = ""
@@ -104,14 +110,38 @@ public class PlaybackModel {
         authToken = token
     }
 
+    public func loadLyrics(assetId: Int64): Unit {
+        lyricsLines.clear()
+        if (assetId <= 0) { return }
+        match (onLyricsDownload) {
+            case Some(cb) => cb(mediaKey, assetId)
+            case None => ()
+        }
+    }
+
+    public func onLyricsDownloaded(key: String, lyrics: String): Unit {
+        if (key == mediaKey) { lyricsLines = parseTimedLyrics(lyrics) }
+    }
+
+    public func refreshVlcState(): Unit {
+        if (!started || processRunner.isSome()) { return }
+        match (vlcRunner) {
+            case Some(r) =>
+                let duration = r.durationSec()
+                if (duration > 0.0) { durationSec = duration }
+            case None => ()
+        }
+    }
+
     // 下载完成回填（AppModel worker drain 调用）：迟到结果按 key 对号入座，
     // 用户已切走（mediaKey 变了）时静默丢弃。
-    public func onDownloaded(key: String, path: String): Unit {
+    public func onDownloaded(key: String, path: String, lyrics!: String = ""): Unit {
         if (key != mediaKey) { return }
         loading = false
         loaded = true
         error = ""
         localPath = path
+        lyricsLines = parseTimedLyrics(lyrics)
     }
 
     // 下载失败回填（同 onDownloaded 的对号入座语义）。
@@ -157,12 +187,11 @@ public class PlaybackModel {
         if (playing) { pause() } else { resume() }
     }
 
-    // seek = 停掉进程后以新 offset 重启（ffplay 无运行期 seek 控制通道）。
-    // 暂停态只更新位置快照，进程在 resume 时按新位置重启。
+    // libVLC 生产路径使用原生 seek；测试注入的通用 runner 保留重启回退语义。
     public func seekTo(sec: Float64): Unit {
         let target = clampPos(sec)
-        if (isVideo && started) {
-            match (videoRunner) {
+        if (started && processRunner.isNone()) {
+            match (vlcRunner) {
                 case Some(r) =>
                     r.seek(target)
                     startOffsetSec = target
@@ -191,12 +220,11 @@ public class PlaybackModel {
         seekTo(positionSec + deltaSec)
     }
 
-    // 静音切换：ffplay 无运行期音量控制，记录位置后以 -volume 0/100 重启
-    //（简单可靠；暂停态只翻标志，下次 play/resume 生效）。
+    // libVLC 原生静音，不中断当前媒体或网络流。
     public func toggleMute(): Unit {
         muted = !muted
-        if (isVideo && started) {
-            match (videoRunner) {
+        if (started && processRunner.isNone()) {
+            match (vlcRunner) {
                 case Some(r) => r.setMuted(muted); return
                 case None => ()
             }
@@ -219,7 +247,7 @@ public class PlaybackModel {
 
     public func takeVideoFrame(): ?VideoFrame {
         if (!isVideo) { return None }
-        match (videoRunner) {
+        match (vlcRunner) {
             case Some(r) =>
                 let duration = r.durationSec()
                 if (duration > 0.0) { durationSec = duration }
@@ -241,13 +269,23 @@ public class PlaybackModel {
         isVideo = false
         subtitleTracks.clear()
         subtitleTrackId = -1
+        lyricsLines.clear()
         startOffsetSec = 0.0
         pausedOffsetSec = 0.0
     }
 
+    public func activeLyricIndex(): Int64 {
+        let now = positionSec
+        var active: Int64 = -1
+        for (i in 0..lyricsLines.size) {
+            if (lyricsLines[Int64(i)].timeSec <= now) { active = Int64(i) } else { break }
+        }
+        active
+    }
+
     public func cycleSubtitleTrack(): Unit {
         if (!isVideo || !started) { return }
-        match (videoRunner) {
+        match (vlcRunner) {
             case Some(r) =>
                 let tracks = r.subtitleTracks()
                 var nextId: Int32 = -1
@@ -273,26 +311,45 @@ public class PlaybackModel {
     private func runner(): ProcessRunner {
         match (processRunner) {
             case Some(r) => r
-            case None => if (isVideo) {
-                match (videoRunner) {
-                    case Some(r) => r.setAuthToken(authToken)
-                    case None =>
-                        let r = LibVlcRunner()
-                        let _ = r.setAuthToken(authToken)
-                        videoRunner = Some(r)
-                        r
-                }
-            } else {
-                match (defaultRunner) {
-                    case Some(r) => r
-                    case None =>
-                        let r = FfplayRunner()
-                        defaultRunner = r
-                        r
-                }
+            case None => match (vlcRunner) {
+                case Some(r) => r.setAuthToken(authToken)
+                case None =>
+                    let r = LibVlcRunner()
+                    let _ = r.setAuthToken(authToken)
+                    vlcRunner = Some(r)
+                    r
             }
         }
     }
+}
+
+public func parseTimedLyrics(raw: String): ArrayList<LyricLine> {
+    let result = ArrayList<LyricLine>()
+    if (raw.size == 0 || raw.size > 1048576) { return result }
+    for (line in raw.replace("\r", "").split("\n")) {
+        if (!line.startsWith("[")) { continue }
+        let close = line.indexOf("]")
+        match (close) {
+            case Some(end) =>
+                let stamp = line[1..end]
+                let parts = stamp.split(":")
+                if (parts.size != 2) { continue }
+                let secParts = parts[1].split(".")
+                try {
+                    let minutes = Float64.parse(parts[0])
+                    let seconds = Float64.parse(secParts[0])
+                    var fraction = 0.0
+                    if (secParts.size > 1) {
+                        let digits = secParts[1]
+                        fraction = Float64.parse(digits) / if (digits.size == 1) { 10.0 } else if (digits.size == 2) { 100.0 } else { 1000.0 }
+                    }
+                    result.add(LyricLine(minutes * 60.0 + seconds + fraction,
+                        line[(end + 1)..line.size].trimAscii()))
+                } catch (_: Exception) {}
+            case None => ()
+        }
+    }
+    result
 }
 
 public class LibVlcRunner <: ProcessRunner {
@@ -340,60 +397,5 @@ public func probeMediaDuration(path: String): Float64 {
         Float64.parse(String.fromUtf8(out).trimAscii())
     } catch (_: Exception) {
         0.0
-    }
-}
-
-// 默认 ProcessRunner：外部 ffplay 子进程（仅音频：恒 -nodisp 无窗口播放；
-// 视频 lane 本阶段不接入，见文件头注释）。
-// - 自然退出由 -autoexit 保证；调用方按 position>=duration 推断播完即可，不检测子进程退出。
-// - pause/resume：std.process 没有信号 API，仓颉也没有现成 kill(2) 绑定，
-//   最简可行方案是 shell out 到 /bin/kill 发 SIGSTOP/SIGCONT（Linux 桌面环境必有）。
-public class FfplayRunner <: ProcessRunner {
-    private var proc: ?SubProcess = None
-
-    public func start(path: String, offsetSec: Float64, muted: Bool): Unit {
-        stop()
-        let args = [
-            "-nodisp",
-            "-autoexit",
-            "-v",
-            "quiet",
-            "-ss",
-            "${offsetSec}",
-            "-volume",
-            if (muted) { "0" } else { "100" },
-            path
-        ]
-        try {
-            proc = Some(launch("ffplay", args,
-                stdOut: ProcessRedirect.Discard, stdErr: ProcessRedirect.Discard))
-        } catch (_: Exception) {
-            proc = None // ffplay 缺失等情况：静默失败，状态机侧不受影响
-        }
-    }
-
-    public func pause(): Unit {
-        signal("-STOP")
-    }
-
-    public func resume(): Unit {
-        signal("-CONT")
-    }
-
-    public func stop(): Unit {
-        match (proc) {
-            case Some(p) =>
-                try { p.terminate(force: true) } catch (_: Exception) {}
-                proc = None
-            case None => ()
-        }
-    }
-
-    private func signal(sig: String): Unit {
-        match (proc) {
-            case Some(p) =>
-                try { let _ = execute("kill", [sig, "${p.pid}"]) } catch (_: Exception) {}
-            case None => ()
-        }
     }
 }

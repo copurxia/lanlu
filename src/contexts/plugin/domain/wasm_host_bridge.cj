@@ -1338,7 +1338,7 @@ public class WasmHostBridge {
             var buf = ByteBuffer()
             unsafe { buf.write(trimmed.rawData()) }
             let r = JsonReader(buf)
-            rewriteJsonValue(r, w, "", pluginNamespace, targetType, targetId, executionId)
+            rewriteJsonValue(r, w, "", false, pluginNamespace, targetType, targetId, executionId)
             w.flush()
             return String.fromUtf8(readToEnd(out))
         } catch (_: Exception) {
@@ -1350,6 +1350,7 @@ public class WasmHostBridge {
         r: JsonReader,
         w: JsonWriter,
         currentField: String,
+        insideAssets: Bool,
         pluginNamespace: String,
         targetType: String,
         targetId: String,
@@ -1357,12 +1358,13 @@ public class WasmHostBridge {
     ): Unit {
         match (r.peek()) {
             case Some(BeginObject) =>
+                let objectInsideAssets = insideAssets || currentField == "assets"
                 r.startObject()
                 w.startObject()
                 while (r.peek() != EndObject) {
                     let name = r.readName()
                     w.writeName(name)
-                    rewriteJsonValue(r, w, name.trimAscii().toAsciiLower(), pluginNamespace, targetType, targetId, executionId)
+                    rewriteJsonValue(r, w, name.trimAscii().toAsciiLower(), objectInsideAssets, pluginNamespace, targetType, targetId, executionId)
                 }
                 r.endObject()
                 w.endObject()
@@ -1370,12 +1372,12 @@ public class WasmHostBridge {
                 r.startArray()
                 w.startArray()
                 while (r.peek() != EndArray) {
-                    rewriteJsonValue(r, w, currentField, pluginNamespace, targetType, targetId, executionId)
+                    rewriteJsonValue(r, w, currentField, insideAssets || currentField == "assets", pluginNamespace, targetType, targetId, executionId)
                 }
                 r.endArray()
                 w.endArray()
             case Some(_) =>
-                if (isAdjacentAssetField(currentField)) {
+                if (isAdjacentAssetField(currentField, insideAssets)) {
                     let rawValue = r.readValue<String>()
                     let normalized = maybeMaterializeAdjacentRef(rawValue, pluginNamespace, targetType, targetId, executionId)
                     w.writeValue(normalized)
@@ -1388,9 +1390,13 @@ public class WasmHostBridge {
         }
     }
 
-    private static func isAdjacentAssetField(field: String): Bool {
+    private static func isAdjacentAssetField(field: String, insideAssets: Bool): Bool {
         let f = field.trimAscii().toAsciiLower()
-        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb" || f == "path"
+        // Metadata image slots are represented only through `assets`. Keep page
+        // thumbnails and attachment paths because they are separate page-level
+        // protocol fields rather than metadata asset slots.
+        return (insideAssets && (f == "value" || f == "cover" || f == "backdrop" || f == "clearlogo")) ||
+               f == "thumb" || f == "path"
     }
 
     private static func maybeMaterializeAdjacentRef(

@@ -84,7 +84,7 @@ public class AppModel {
     // 阅读器状态机（T12 拆出，纯逻辑可单测）。旧 reader_view 仍读本类的
     // pages/readerIndex（1 基）并经 gotoPage 等委托方法驱动；T13 重写后直接消费 reader。
     public let reader: ReaderModel
-    // 媒体 lane 播放引擎（ffplay 子进程方案，纯逻辑可单测；与 reader 一样是普通类，
+    // 媒体 lane 播放引擎（libVLC 音视频统一方案，纯逻辑可单测；与 reader 一样是普通类，
     // 状态变更经 readerVersion 广播视图重建）。
     public let playback = PlaybackModel()
     private var mediaProxy: ?MediaProxy = None
@@ -195,6 +195,14 @@ public class AppModel {
             arc, pid => match (api) {
                 case Some(a) =>
                     let key = playback.mediaKey // load() 先置 mediaKey 再调本回调
+                    var lyricsAssetId: Int64 = 0
+                    for (pageInfo in pages.value) {
+                        if (pageInfo.id == pid || pageInfo.sourcePath == pid) {
+                            lyricsAssetId = pageInfo.lyricsAssetId
+                            break
+                        }
+                    }
+                    let lyricAsset = lyricsAssetId
                     let dir = "${defaultCacheRoot(activeBaseUrl())}/media/${arc}"
                     let path = "${dir}/${percentEncode(pid)}"
                     let _ = worker.submit(
@@ -207,11 +215,30 @@ public class AppModel {
                                     Directory.create(dirPath, recursive: true)
                                 }
                                 File.writeTo(Path(path), bytes)
-                                // 时长探测：ffplay 不回报总时长，进度条/seek 上限都需要它。
+                                // 音频缓存完成后预探测时长，让首次播放前进度条即可用。
                                 // 在 worker 线程跑 ffprobe（UI 线程不能阻塞），失败/缺失保持 0（未知）。
-                                (key, path, probeMediaDuration(path))
+                                let lyrics = if (lyricAsset > 0) {
+                                    try {
+                                        let lyricBytes = a.assetBytes(lyricAsset)
+                                        if (lyricBytes.size <= 1048576) { String.fromUtf8(lyricBytes) } else { "" }
+                                    } catch (_: Exception) { "" }
+                                } else { "" }
+                                (key, path, probeMediaDuration(path), lyrics)
                         }
                     )
+                case None => ()
+            }
+        }
+        // 流式音频只需单独获取体积很小的歌词资产；媒体本体不再整文件进内存。
+        playback.onLyricsDownload = {
+            key, assetId => match (api) {
+                case Some(a) =>
+                    let _ = worker.submit("lyrics:${key}", {
+                        =>
+                            let bytes = a.assetBytes(assetId)
+                            let lyrics = if (bytes.size <= 1048576) { String.fromUtf8(bytes) } else { "" }
+                            (key, lyrics)
+                    })
                 case None => ()
             }
         }
@@ -952,6 +979,26 @@ public class AppModel {
         )
     }
 
+    // 阅读器音频封面背景：与详情页相同，在图片工作线程完成缩放和真高斯模糊。
+    public func requestAudioBackdrop(assetId: Int64): String {
+        let imgKey = "backdrop:audio:${assetId}"
+        let state = imageState(imgKey)
+        if (state.value == "loading" || state.value == "ready") { return imgKey }
+        state.value = "loading"
+        let a = api ?? return imgKey
+        let c = cache()
+        let _ = worker.submit(
+            imgKey,
+            {
+                =>
+                    let path = c.ensureCached(imgKey, {=> a.assetBytes(assetId)})
+                    let d = decodeBackdrop(path, 320, blurSigma: 14.0)
+                    return (imgKey, d)
+            }
+        )
+        imgKey
+    }
+
     public func openReader(arcid: String, startPage: Int64): Unit {
         playback.stop() // 换档案/重进阅读器：停掉上一媒体（旧进程不得泄漏）
         lastLane = Book // 与 reader.open 的 activeLane=Book 复位对齐
@@ -1252,11 +1299,29 @@ public class AppModel {
         )
     }
 
-    // lane → 播放联动：音频走 ffplay，视频走 libVLC 内存帧回调；Book 停播。
+    // lane → 播放联动：音视频统一走 libVLC，视频额外读取内存帧；Book 停播。
     private func syncPlaybackToLane(l: LaneId): Unit {
         match (l) {
             case Audio(i) => match (reader.pageAt(i)) {
-                case Some(p) => playback.load(reader.arcidOfReal(i), i, p.sourcePath, video: false)
+                case Some(p) =>
+                    let arc = reader.arcidOfReal(i)
+                    let url = "${activeBaseUrl()}/api/archives/${arc}/page?path=${percentEncode(p.sourcePath)}"
+                    let token = match (settings.activeProfile()) {
+                        case Some(profile) => profile.token
+                        case None => match (selectedProfile()) {
+                            case Some(profile) => profile.token
+                            case None => ""
+                        }
+                    }
+                    let proxy = match (mediaProxy) {
+                        case Some(existing) => existing
+                        case None =>
+                            let created = MediaProxy()
+                            mediaProxy = Some(created)
+                            created
+                    }
+                    playback.loadRemote(arc, i, proxy.open(url, token), "", video: false)
+                    playback.loadLyrics(p.lyricsAssetId)
                 case None => ()
             }
             case Book => playback.stop()
@@ -1537,6 +1602,7 @@ public class AppModel {
         }
         // backdrop 解码失败静默（不 toast，不阻塞页面），backdrop 区域回退为纯色渐变。
         if (r.name.startsWith("backdrop:")) {
+            if (r.name.startsWith("backdrop:audio:")) { imageState(r.name).value = "error" }
             return
         }
         // 续读解析/拼接失败：结束页落「没有下一档案」态（不 toast，阅读器内联展示）。
@@ -1553,6 +1619,7 @@ public class AppModel {
             readerVersion.value += 1
             return
         }
+        if (r.name.startsWith("lyrics:")) { return }
         // 浏览模式行任务失败：不 toast（9 行并发失败会刷屏），行内呈现可点击重试；
         // 401/会话失效仍走全局 logout + 提示。
         if (r.name.startsWith("row:")) {
@@ -2001,16 +2068,25 @@ public class AppModel {
                 case Some(p) =>
                     let (k, d) = (p as (String, DecodedImage)).getOrThrow()
                     stagePixelImage(k, d.width, d.height, d.pixels)
+                    if (k.startsWith("backdrop:audio:")) { imageState(k).value = "ready" }
                 case None => ()
             }
         } else if (name.startsWith("playback:")) {
             // 媒体下载到货：回填 PlaybackModel（key 对号入座，迟到结果由模型内丢弃）。
             match (r.payload) {
                 case Some(p) =>
-                    // 载荷 (key, path, durationSec)：时长由 worker 内 ffprobe 探得（0=未知）。
-                    let (key, path, dur) = (p as (String, String, Float64)).getOrThrow()
-                    playback.onDownloaded(key, path)
+                    // 载荷包含音频缓存路径、时长及可选 LRC 歌词文本。
+                    let (key, path, dur, lyrics) = (p as (String, String, Float64, String)).getOrThrow()
+                    playback.onDownloaded(key, path, lyrics: lyrics)
                     playback.durationSec = dur
+                    readerVersion.value += 1
+                case None => ()
+            }
+        } else if (name.startsWith("lyrics:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, lyrics) = (p as (String, String)).getOrThrow()
+                    playback.onLyricsDownloaded(key, lyrics)
                     readerVersion.value += 1
                 case None => ()
             }

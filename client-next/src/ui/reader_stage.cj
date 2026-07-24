@@ -4,7 +4,6 @@ import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.percentEncode
 import std.collection.ArrayList
-import std.math.{cos, sin}
 
 // ── 阅读页舞台（reader-redesign #stage，T2）──
 // 自绘而非 PixelImageView 组合：方向性翻页动画（旧页滑出+淡出 / 新页反向滑入，原型
@@ -59,10 +58,62 @@ class ReaderStageState {
     var dx: Float32 = 0.0
     var dy: Float32 = 0.0
     var zoomed = false
-    var vinylAngle: Float64 = 0.0     // 黑胶转角（弧度，播放时按帧钟累积）
     var scrollY: Float32 = 0.0        // 长图滚动偏移（vp；翻页/切 spread 复位）
+    var lastLyricIndex: Int64 = -2
+    let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
     let outTween = Tween(TURN_OUT_MS, {t: Float32 => Easing.easeInOutCubic(t)})
     let inTween = Tween(TURN_IN_MS, {t: Float32 => Easing.easeOutCubic(t)})
+}
+
+// 音频舞台只在这里决定区域关系。各绘制函数只使用自己的 Rect，避免封面、歌词、
+// 元信息和控制条通过同一组绝对坐标互相侵占。
+class AudioStageLayout {
+    var scene = Rect.zero()
+    var hero = Rect.zero()
+    var cover = Rect.zero()
+    var meta = Rect.zero()
+    var lyrics = Rect.zero()
+    var transport = Rect.zero()
+    var back = Rect.zero()
+    var play = Rect.zero()
+    var forward = Rect.zero()
+    var seek = Rect.zero()
+
+    func resolve(frame: Rect): Unit {
+        let pad: Float32 = 48.0
+        if (frame.w >= 900.0 && frame.h >= 520.0) {
+            // 桌面横屏：内容网格垂直居中；Transport 是跨栏的独立底层。
+            // 为全局 lane dock 留出底部安全区，舞台 Transport 不与其重叠。
+            transport = Rect(frame.x + pad, frame.bottom() - 122.0, frame.w - pad * 2.0, 52.0)
+            scene = Rect(frame.x + pad, frame.y + 32.0, frame.w - pad * 2.0,
+                max(0.0, transport.y - frame.y - 48.0))
+            let leftW = min(400.0, max(300.0, scene.w * 0.32))
+            hero = Rect(scene.x, scene.y, leftW, scene.h)
+            lyrics = Rect(hero.right() + 40.0, scene.y,
+                max(0.0, scene.right() - hero.right() - 40.0), scene.h)
+            let coverSide = min(min(280.0, hero.w), max(164.0, hero.h - 110.0))
+            let groupH = coverSide + 76.0
+            let groupY = hero.centerY() - groupH / 2.0
+            cover = Rect(hero.centerX() - coverSide / 2.0, groupY, coverSide, coverSide)
+            meta = Rect(hero.x, cover.bottom() + 16.0, hero.w, 60.0)
+        } else {
+            // 紧凑窗口：上方封面/信息，中部歌词，下方控制条。
+            hero = Rect(frame.x + 24.0, frame.y + 24.0, frame.w - 48.0, min(230.0, frame.h * 0.38))
+            let coverSide = min(hero.h, min(190.0, hero.w * 0.34))
+            cover = Rect(hero.x, hero.y, coverSide, coverSide)
+            meta = Rect(cover.right() + 20.0, hero.y, max(0.0, hero.right() - cover.right() - 20.0), hero.h)
+            transport = Rect(frame.x + 24.0, frame.bottom() - 116.0, frame.w - 48.0, 52.0)
+            scene = Rect(frame.x + 24.0, frame.y + 24.0, frame.w - 48.0,
+                max(0.0, transport.y - frame.y - 40.0))
+            lyrics = Rect(frame.x + 24.0, hero.bottom() + 16.0, frame.w - 48.0,
+                max(0.0, transport.y - hero.bottom() - 32.0))
+        }
+        let cy = transport.centerY()
+        back = Rect(transport.x, cy - 17.0, 34.0, 34.0)
+        play = Rect(transport.x + 42.0, cy - 22.0, 44.0, 44.0)
+        forward = Rect(transport.x + 94.0, cy - 17.0, 34.0, 34.0)
+        seek = Rect(transport.x + 184.0, cy - 10.0, max(0.0, transport.w - 232.0), 20.0)
+    }
 }
 
 // 页 → 纹理 key / 下载 url（与 app 层 key 约定一致：page:<arcid>:<pagePath>）。
@@ -181,9 +232,11 @@ class ReaderStage <: Widget {
     private let keys: Array<String>
     // 音频舞台目标页（activeLane=Audio 优先，否则 spread 内首个 audio 页）
     private let audioPage: ?Int64
+    private var audioCoverKey: String = ""
+    private var audioBackdropKey: String = ""
     private let videoPage: ?Int64
     // 音频舞台交互热区（layout 时算）
-    private var vinylRect = Rect.zero()
+    private let audioLayout = AudioStageLayout()
     private var playRect = Rect.zero()
     private var backRect = Rect.zero()
     private var fwdRect = Rect.zero()
@@ -232,6 +285,19 @@ class ReaderStage <: Widget {
             case _ => ()
         }
         audioPage = ap
+        match (ap) {
+            case Some(i) => match (r.pageAt(i)) {
+                case Some(p) => if (p.thumbAssetId > 0) {
+                    audioCoverKey = "asset:${p.thumbAssetId}"
+                    audioBackdropKey = model.requestAudioBackdrop(p.thumbAssetId)
+                    if (model.imageState(audioCoverKey).value == "") {
+                        model.requestImage(audioCoverKey, "/api/assets/${p.thumbAssetId}", highPriority: true)
+                    }
+                }
+                case None => ()
+            }
+            case None => ()
+        }
         var vp: ?Int64 = None
         match (r.activeLane) {
             case LaneId.Video(i) => vp = Some(i)
@@ -270,16 +336,11 @@ class ReaderStage <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
-        // 音频舞台热区（与 drawAudioStage 的几何保持一致）。
-        let d = min(min(frame.h * 0.45, 240.0), frame.w * 0.3)
-        vinylRect = Rect(frame.x + 56.0, frame.centerY() - 30.0 - d / 2.0, d, d)
-        let rx = vinylRect.right() + 48.0
-        let rw = max(0.0, frame.right() - 56.0 - rx)
-        let by = frame.centerY() + 46.0
-        backRect = Rect(rx, by, 34.0, 34.0)
-        playRect = Rect(rx + 42.0, by - 6.0, 46.0, 46.0)
-        fwdRect = Rect(rx + 96.0, by, 34.0, 34.0)
-        seekRect = Rect(rx + 140.0, by + 7.0, max(0.0, rw - 140.0 - 110.0), 20.0)
+        audioLayout.resolve(frame)
+        backRect = audioLayout.back
+        playRect = audioLayout.play
+        fwdRect = audioLayout.forward
+        seekRect = audioLayout.seek
         // 结束页卡片：居中 420×320；按钮行在卡内底部（seamless 开时不画但热区保留零值）。
         let cw = min(420.0, frame.w - 48.0)
         let ch = min(320.0, frame.h - 48.0)
@@ -302,8 +363,6 @@ class ReaderStage <: Widget {
                 drawVideoStage(ctx, i)
             case None => match (audioPage) {
             case Some(i) =>
-                // 音频舞台恒深（原型 #page-audio：媒体页不随主题翻转）。
-                ctx.renderer.fill(frame, Color.rgb(0, 0, 0))
                 drawAudioStage(ctx, i)
             case None =>
                 ctx.renderer.fill(frame, ctx.theme.stageBg)
@@ -438,66 +497,132 @@ class ReaderStage <: Widget {
         if (pb.playing) { ctx.requestFrame() }
     }
 
-    // ── 音频舞台（原型 #page-audio：黑胶 + 标题 + 进度 + 控制，恒深底）──
+    // ── 音频舞台：区域编排，不在这里计算任何子区域坐标 ──
 
     private func drawAudioStage(ctx: UiContext, pageIdx: Int64): Unit {
+        model.playback.refreshVlcState()
+        drawAudioBackdrop(ctx)
+        drawAudioHero(ctx, pageIdx)
+        drawAudioLyrics(ctx)
+        drawAudioTransport(ctx)
+    }
+
+    private func drawAudioBackdrop(ctx: UiContext): Unit {
+        ctx.renderer.fill(frame, Color.rgb(8, 10, 14))
+        if (audioCoverKey.size > 0 && model.imageState(audioCoverKey).value == "ready") {
+            match (pixelTexture(ctx.renderer, audioBackdropKey)) {
+                case Some(tex) =>
+                    tex.setAlpha(210)
+                    ctx.renderer.texture(tex, fittedRect(Size(tex.width, tex.height), frame, ImageFit.Cover))
+                    tex.setAlpha(255)
+                case None => ()
+            }
+        }
+        // extraDark 等价遮罩；左右内容仍保留封面色彩，不退化为纯黑。
+        ctx.renderer.fill(frame, Color.rgba(0, 0, 0, 132))
+        ctx.renderer.fillHorizontalGradient(frame, Color.rgba(0, 0, 0, 6),
+            Color.rgba(0, 0, 0, 58))
+    }
+
+    // 左侧 Hero 只负责封面和曲目信息。
+    private func drawAudioHero(ctx: UiContext, pageIdx: Int64): Unit {
         let pb = model.playback
         let onMedia = ctx.theme.onMedia
         let onMediaDim = ctx.theme.onMediaDim
-        // 黑胶：重复径向纹用同心圆环近似（框架无 repeating-radial-gradient），
-        // 中心 accent 圆标 ♪；播放时圆周标记点随帧钟旋转（无旋转原语的替代方案）。
-        let cx = vinylRect.centerX()
-        let cy = vinylRect.centerY()
-        let r = vinylRect.w / 2.0
-        ctx.renderer.fillCircle(cx, cy, r, Color.rgb(10, 10, 10))
-        var ring: Float32 = r - 8.0
-        var dark = true
-        while (ring > r * 0.36) {
-            ctx.renderer.strokeCircle(cx, cy, ring,
-                Pen(width: 3.0, color: if (dark) { Color.rgb(17, 17, 17) } else { Color.rgb(28, 28, 28) }))
-            dark = !dark
-            ring -= 4.0
+        ctx.renderer.pushClip(audioLayout.hero)
+        var coverDrawn = false
+        if (audioCoverKey.size > 0 && model.imageState(audioCoverKey).value == "ready") {
+            match (pixelTexture(ctx.renderer, audioCoverKey)) {
+                case Some(tex) =>
+                    ctx.renderer.pushClip(audioLayout.cover)
+                    ctx.renderer.texture(tex, fittedRect(Size(tex.width, tex.height), audioLayout.cover, ImageFit.Cover))
+                    ctx.renderer.popClip()
+                    coverDrawn = true
+                case None => ()
+            }
         }
-        ctx.renderer.fillCircle(cx, cy, r * 0.35, ctx.theme.accent)
-        let noteW = ctx.renderer.textWidth("♪", pointSize: 26.0)
-        let noteH = ctx.renderer.textHeight(pointSize: 26.0)
-        ctx.renderer.text("♪", cx - noteW / 2.0, cy - noteH / 2.0, Color.rgb(20, 14, 4),
-            pointSize: 26.0)
-        if (pb.playing) {
-            // 18s/圈（原型 spin 动画），按帧 delta 累积角度。
-            st.vinylAngle += Float64(ctx.frame.deltaMs) / 18000.0 * 6.283185307179586
-            let mx = cx + (r - 14.0) * Float32(cos(st.vinylAngle))
-            let my = cy + (r - 14.0) * Float32(sin(st.vinylAngle))
-            ctx.renderer.fillCircle(mx, my, 3.0, ctx.theme.accent)
-            ctx.requestFrame()
+        if (!coverDrawn) {
+            ctx.renderer.fillRoundedRect(audioLayout.cover, 8.0, Color.rgb(18, 18, 18))
+            let cx = audioLayout.cover.centerX()
+            let cy = audioLayout.cover.centerY()
+            let noteW = ctx.renderer.textWidth("♪", pointSize: 26.0)
+            let noteH = ctx.renderer.textHeight(pointSize: 26.0)
+            ctx.renderer.text("♪", cx - noteW / 2.0, cy - noteH / 2.0, ctx.theme.accent,
+                pointSize: 26.0)
         }
-        // 右栏：标题（页标题或文件名）+ 状态/时间 + 控制行。
         var title = ""
         match (model.reader.pageAt(pageIdx)) {
             case Some(p) => title = if (p.title.size > 0) { p.title } else { p.id }
             case None => ()
         }
-        let rx = vinylRect.right() + 48.0
-        ctx.renderer.text(title, rx, frame.centerY() - 78.0, onMedia, pointSize: 20.0)
-        let sub = if (pb.error.size > 0) {
-            "加载失败：${pb.error}"
-        } else if (pb.loading) {
-            "下载中…"
-        } else if (!pb.loaded) {
-            "未加载"
+        let titleRect = Rect(audioLayout.meta.x, audioLayout.meta.y, audioLayout.meta.w, 28.0)
+        ctx.renderer.textCenter(title, titleRect, onMedia, pointSize: 20.0)
+        let sub = if (pb.error.size > 0) { "加载失败：${pb.error}" }
+            else if (pb.loading) { "加载中…" }
+            else if (!pb.loaded) { "未加载" }
+            else { "${formatMediaClock(pb.positionSec)} / ${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}" }
+        ctx.renderer.textCenter(sub, Rect(audioLayout.meta.x, audioLayout.meta.y + 32.0,
+            audioLayout.meta.w, 20.0), onMediaDim, pointSize: 13.0)
+        ctx.renderer.popClip()
+    }
+
+    // 歌词是独立视口：当前行固定在区域中心，超出内容被裁掉。
+    private func drawAudioLyrics(ctx: UiContext): Unit {
+        let pb = model.playback
+        let area = audioLayout.lyrics
+        ctx.renderer.pushClip(area)
+        let lyricIndex = pb.activeLyricIndex()
+        if (pb.lyricsLines.size > 0) {
+            if (lyricIndex != st.lastLyricIndex) {
+                st.lastLyricIndex = lyricIndex
+                st.lyricFocusTween.reset(0.0)
+            }
+            let focusT = st.lyricFocusTween.animate(ctx, target: 1.0)
+            var row: Int64 = -3
+            while (row <= 3) {
+                let idx = lyricIndex + row
+                if (idx >= 0 && idx < pb.lyricsLines.size) {
+                    let line = pb.lyricsLines[idx]
+                    let color = if (row == 0) { ctx.theme.accent.withAlpha(Int64(170.0 + 85.0 * focusT)) }
+                        else { ctx.theme.onMediaDim.withAlpha(if (row == -1 || row == 1) { 170 } else { 95 }) }
+                    let size: Float32 = if (row == 0) { 14.0 + 6.0 * focusT } else { 14.0 }
+                    let spacing = 34.0 + 4.0 * focusT
+                    let lineRect = Rect(area.x, area.centerY() + Float32(row) * spacing - 14.0,
+                        area.w, 28.0 + 4.0 * focusT)
+                    ctx.renderer.textCenter(line.text, lineRect, color, pointSize: size)
+                }
+                row++
+            }
         } else {
-            "${formatMediaClock(pb.positionSec)} / ${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}"
+            ctx.renderer.textCenter("暂无歌词", area, ctx.theme.onMediaDim, pointSize: 14.0)
         }
-        ctx.renderer.text(sub, rx, frame.centerY() - 48.0, onMediaDim, pointSize: 13.0)
-        // 控制行：−5s / 播放钮（accent 圆底反色）/ +5s / 进度条 / 时间。
-        drawCircleButton(ctx, backRect, "reader:stage:back", {=> drawSkipGlyph(ctx.renderer, backRect.centerX(), backRect.centerY(), -1.0, onMedia) })
+        ctx.renderer.popClip()
+    }
+
+    // Transport 拥有全部播放热区；seek 的几何与事件处理共享 AudioStageLayout。
+    private func drawAudioTransport(ctx: UiContext): Unit {
+        let pb = model.playback
+        let onMedia = ctx.theme.onMedia
+        ctx.renderer.pushClip(audioLayout.transport)
+        let current = formatMediaClock(pb.positionSec)
+        let currentX = fwdRect.right() + 10.0
+        ctx.renderer.text(current, currentX, seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
+        let duration = if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }
+        let durationW = ctx.renderer.textWidth(duration, pointSize: 11.0)
+        ctx.renderer.text(duration, audioLayout.transport.right() - durationW,
+            seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
+        drawCircleButton(ctx, backRect, "reader:stage:back", {=>
+            drawSkipGlyph(ctx.renderer, backRect.centerX(), backRect.centerY(), -1.0, onMedia)
+        })
         let playBg = if (ctx.isHovered("reader:stage:play")) { onMedia.withAlpha(220) } else { onMedia }
         ctx.renderer.fillCircle(playRect.centerX(), playRect.centerY(), playRect.w / 2.0, playBg)
         drawPlayPauseGlyph(ctx.renderer, playRect.centerX(), playRect.centerY(), pb.playing,
             Color.rgb(0, 0, 0))
-        drawCircleButton(ctx, fwdRect, "reader:stage:fwd", {=> drawSkipGlyph(ctx.renderer, fwdRect.centerX(), fwdRect.centerY(), 1.0, onMedia) })
-        // 进度条：durationSec==0（未知）时禁用，只显示已播时长（任务约束）。
-        drawPlaybackSeekBar(ctx, seekRect, model.playback)
+        drawCircleButton(ctx, fwdRect, "reader:stage:fwd", {=>
+            drawSkipGlyph(ctx.renderer, fwdRect.centerX(), fwdRect.centerY(), 1.0, onMedia)
+        })
+        drawPlaybackSeekBar(ctx, seekRect, pb)
+        ctx.renderer.popClip()
     }
 
     // ±5s 跳转图形：双三角 + 竖线（⏮/⏭ 的矢量等价）。
