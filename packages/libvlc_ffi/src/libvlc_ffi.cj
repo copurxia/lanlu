@@ -64,6 +64,7 @@ foreign func libvlc_media_player_get_time(player: PlayerPtr): Int64
 foreign func libvlc_media_player_get_length(player: PlayerPtr): Int64
 
 foreign func libvlc_audio_set_mute(player: PlayerPtr, muted: Int32): Int32
+foreign func libvlc_audio_set_volume(player: PlayerPtr, volume: Int32): Int32
 
 foreign func libvlc_video_get_spu(player: PlayerPtr): Int32
 
@@ -234,6 +235,11 @@ public class VlcPlayer <: Resource {
             } else {
                 0
             }) }
+        }
+    }
+    public func setVolume(volume: Int32): Unit {
+        if (!player.isNull()) {
+            unsafe { let _ = libvlc_audio_set_volume(player, max(0, min(100, volume))) }
         }
     }
     public func timeSec(): Float64 {

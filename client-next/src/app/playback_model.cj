@@ -32,6 +32,7 @@ public class PlaybackModel {
     public var loading: Bool = false       // 音频下载在途
     public var error: String = ""          // ""=无错
     public var muted: Bool = false
+    public var volume: Float64 = 1.0
     public var isVideo: Bool = false
     public var subtitleTracks = ArrayList<SubtitleTrack>()
     public var subtitleTrackId: Int32 = -1
@@ -160,6 +161,7 @@ public class PlaybackModel {
         startOffsetSec = positionSec
         startClockMs = clock()
         runner().start(localPath, startOffsetSec, muted)
+        applyVolume()
         started = true
         playing = true
     }
@@ -235,6 +237,22 @@ public class PlaybackModel {
             startOffsetSec = pos
             startClockMs = clock()
             runner().start(localPath, pos, muted)
+        }
+    }
+
+    public func setVolume(value: Float64): Unit {
+        volume = max(0.0, min(1.0, value))
+        if (volume > 0.0 && muted) { muted = false }
+        applyVolume()
+    }
+
+    private func applyVolume(): Unit {
+        if (processRunner.isSome()) { return }
+        match (vlcRunner) {
+            case Some(r) =>
+                r.setVolume(Int32(volume * 100.0))
+                r.setMuted(muted)
+            case None => ()
         }
     }
 
@@ -370,6 +388,7 @@ public class LibVlcRunner <: ProcessRunner {
     public func timeSec(): Float64 { player.timeSec() }
     public func seek(sec: Float64): Unit { player.seek(sec) }
     public func setMuted(muted: Bool): Unit { player.setMuted(muted) }
+    public func setVolume(volume: Int32): Unit { player.setVolume(volume) }
     public func subtitleTracks(): ArrayList<SubtitleTrack> { player.subtitleTracks() }
     public func currentSubtitleTrack(): Int32 { player.currentSubtitleTrack() }
     public func setSubtitleTrack(id: Int32): Bool { player.setSubtitleTrack(id) }

@@ -78,6 +78,8 @@ class AudioStageLayout {
     var play = Rect.zero()
     var forward = Rect.zero()
     var seek = Rect.zero()
+    var mute = Rect.zero()
+    var volume = Rect.zero()
 
     func resolve(frame: Rect): Unit {
         let pad: Float32 = 48.0
@@ -112,7 +114,9 @@ class AudioStageLayout {
         back = Rect(transport.x, cy - 17.0, 34.0, 34.0)
         play = Rect(transport.x + 42.0, cy - 22.0, 44.0, 44.0)
         forward = Rect(transport.x + 94.0, cy - 17.0, 34.0, 34.0)
-        seek = Rect(transport.x + 184.0, cy - 10.0, max(0.0, transport.w - 232.0), 20.0)
+        mute = Rect(transport.right() - 148.0, cy - 17.0, 34.0, 34.0)
+        volume = Rect(transport.right() - 106.0, cy - 10.0, 106.0, 20.0)
+        seek = Rect(transport.x + 184.0, cy - 10.0, max(0.0, mute.x - transport.x - 232.0), 20.0)
     }
 }
 
@@ -241,6 +245,8 @@ class ReaderStage <: Widget {
     private var backRect = Rect.zero()
     private var fwdRect = Rect.zero()
     private var seekRect = Rect.zero()
+    private var muteRect = Rect.zero()
+    private var volumeRect = Rect.zero()
     // 结束页卡片热区（虚拟页 layout 时算）
     private var endCardRect = Rect.zero()
     private var endOpenRect = Rect.zero()
@@ -341,6 +347,8 @@ class ReaderStage <: Widget {
         playRect = audioLayout.play
         fwdRect = audioLayout.forward
         seekRect = audioLayout.seek
+        muteRect = audioLayout.mute
+        volumeRect = audioLayout.volume
         // 结束页卡片：居中 420×320；按钮行在卡内底部（seamless 开时不画但热区保留零值）。
         let cw = min(420.0, frame.w - 48.0)
         let ch = min(320.0, frame.h - 48.0)
@@ -609,7 +617,7 @@ class ReaderStage <: Widget {
         ctx.renderer.text(current, currentX, seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
         let duration = if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }
         let durationW = ctx.renderer.textWidth(duration, pointSize: 11.0)
-        ctx.renderer.text(duration, audioLayout.transport.right() - durationW,
+        ctx.renderer.text(duration, muteRect.x - 8.0 - durationW,
             seekRect.y, ctx.theme.onMediaDim, pointSize: 11.0)
         drawCircleButton(ctx, backRect, "reader:stage:back", {=>
             drawSkipGlyph(ctx.renderer, backRect.centerX(), backRect.centerY(), -1.0, onMedia)
@@ -622,6 +630,16 @@ class ReaderStage <: Widget {
             drawSkipGlyph(ctx.renderer, fwdRect.centerX(), fwdRect.centerY(), 1.0, onMedia)
         })
         drawPlaybackSeekBar(ctx, seekRect, pb)
+        drawCircleButton(ctx, muteRect, "reader:stage:mute", {=>
+            drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY(), pb.muted, onMedia)
+        })
+        let vcy = volumeRect.centerY()
+        ctx.renderer.fillRoundedRect(Rect(volumeRect.x, vcy - 2.0, volumeRect.w, 4.0), 2.0,
+            ctx.theme.onMedia.withAlpha(50))
+        let amount = Float32(pb.volume)
+        ctx.renderer.fillRoundedRect(Rect(volumeRect.x, vcy - 2.0, volumeRect.w * amount, 4.0), 2.0,
+            ctx.theme.onMedia)
+        ctx.renderer.fillCircle(volumeRect.x + volumeRect.w * amount, vcy, 4.0, ctx.theme.onMedia)
         ctx.renderer.popClip()
     }
 
@@ -854,6 +872,15 @@ class ReaderStage <: Widget {
                         seekFromX(x, seekRect)
                         return true
                     }
+                    if (muteRect.contains(x, y)) {
+                        model.playback.toggleMute()
+                        return true
+                    }
+                    if (volumeRect.contains(x, y)) {
+                        ctx.beginDrag("reader:stage:volume")
+                        volumeFromX(x)
+                        return true
+                    }
                 }
             case UiEvent.MouseMove(x, y) =>
                 if (model.reader.onVirtualEnd && !model.reader.seamlessNext) {
@@ -869,8 +896,14 @@ class ReaderStage <: Widget {
                     if (backRect.contains(x, y)) { ctx.claimHover("reader:stage:back", CursorShape.Interactive) }
                     if (fwdRect.contains(x, y)) { ctx.claimHover("reader:stage:fwd", CursorShape.Interactive) }
                     if (seekRect.contains(x, y)) { ctx.claimHover("reader:stage:seek", CursorShape.Interactive) }
+                    if (muteRect.contains(x, y)) { ctx.claimHover("reader:stage:mute", CursorShape.Interactive) }
+                    if (volumeRect.contains(x, y)) { ctx.claimHover("reader:stage:volume", CursorShape.Interactive) }
                     if (ctx.isDragging("reader:stage:seek") && ctx.leftMouseDown) {
                         seekFromX(x, seekRect)
+                        return true
+                    }
+                    if (ctx.isDragging("reader:stage:volume") && ctx.leftMouseDown) {
+                        volumeFromX(x)
                         return true
                     }
                 }
@@ -888,6 +921,10 @@ class ReaderStage <: Widget {
                 }
                 if (ctx.isDragging("reader:stage:seek")) {
                     seekFromX(x, seekRect)
+                    return true
+                }
+                if (ctx.isDragging("reader:stage:volume")) {
+                    volumeFromX(x)
                     return true
                 }
                 // 失败页点击重试：命中当前 spread 内 error 页 cell 才消费，
@@ -916,5 +953,11 @@ class ReaderStage <: Widget {
         if (dur <= 0.0 || rect.w <= 0.0) { return }
         let amount = Float64(max(0.0, min(1.0, (x - rect.x) / rect.w)))
         model.playback.seekTo(amount * dur)
+    }
+
+    private func volumeFromX(x: Float32): Unit {
+        if (volumeRect.w <= 0.0) { return }
+        model.playback.setVolume(Float64(max(0.0, min(1.0,
+            (x - volumeRect.x) / volumeRect.w))))
     }
 }
