@@ -210,7 +210,7 @@ private class ReaderModeSeg <: Widget {
 private func panelSection(text: String): Unit {
     VStack {
         Label(text).fontSize(11.fp).muted()
-    }.crossAxisAlignment(CrossAxisAlignment.Start).padding(0.0, 18.0, 0.0, 8.0)
+    }.crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(0.0, 18.0, 0.0, 8.0)
 }
 
 // 开关行（原型 .set-row：13px、padding 9px 2px、label flex:1 居左、开关居右）。
@@ -220,7 +220,7 @@ private func panelSwitchRow(model: AppModel, key: String, label: String, on: Boo
     HStack {
         Label(label).fontSize(13.fp).flex()
         ReaderSwitch(key, model.isLight(), on, onToggle)
-    }.crossAxisAlignment(CrossAxisAlignment.Center).padding(2.0, 9.0)
+    }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(2.0, 9.0)
 }
 
 // 自动播放间隔行（开关打开时露出，frontend 同布局）：Slider 1..10 step 1 + 「N秒」。
@@ -234,7 +234,7 @@ private func autoPlayIntervalRow(model: AppModel): Unit {
     HStack {
         Slider(model.autoPlayIntervalSlider, key: "reader:autoPlayInterval", lower: 1.0, upper: 10.0, step: 1.0).flex()
         Label("${model.reader.autoPlayIntervalSec}秒").fontSize(12.fp).muted().padding(8.0, 0.0, 0.0, 0.0)
-    }.crossAxisAlignment(CrossAxisAlignment.Center).padding(2.0, 0.0, 10.0, 9.0)
+    }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(2.0, 0.0, 10.0, 9.0)
 }
 
 // ── 阅读设置抽屉（原型 #settings）──
@@ -256,11 +256,12 @@ private func readerSettingsBody(model: AppModel): Unit {
             }
         case None => ""
     }
+    let mediaSummary = readerMediaSummary(model)
     // 排版对齐原型：面板 padding 18；h3 14 底距 4；sub 12 dim 底距 16；
     // 之后各节由 panelSection 自带 18/8 外边距。
     VStack {
         Label("阅读设置").fontSize(14.fp).padding(0.0, 0.0, 0.0, 4.0)
-        ReaderSettingsSubtitle(archiveTitle, model.reader.pageCount).padding(0.0, 0.0, 0.0, 16.0)
+        ReaderSettingsSubtitle(archiveTitle, model.reader.pageCount, mediaSummary).padding(0.0, 0.0, 0.0, 16.0)
         panelSection("阅读模式")
         ReaderModeSeg(model)
         panelSection("页面布局")
@@ -277,16 +278,15 @@ private func readerSettingsBody(model: AppModel): Unit {
         panelSwitchRow(model, "reader.tapTurnPage", "点击翻页", model.reader.tapTurnPage) {
             => model.toggleReaderTapTurnPage()
         }
-        // 自动播放（frontend ReaderSettingsSheet:287-295）：开关打开时行下露出间隔
-        // 滑条（1..10s step 1）与秒数标签；间隔变更即生效（下次计时重置，模型侧处理）。
-        panelSwitchRow(model, "reader.autoPlay", "自动播放", model.reader.autoPlay) {
+        panelSwitchRow(model, "reader.doubleTapZoom", "双击缩放", model.reader.doubleTapZoom) {
+            => model.toggleReaderDoubleTapZoom()
+        }
+        // 自动播放：顺序和标签严格跟设计稿；打开后在本行下方露出间隔滑条。
+        panelSwitchRow(model, "reader.autoPlay", "自动播放（1–10s 间隔）", model.reader.autoPlay) {
             => model.toggleReaderAutoPlay()
         }
         if (model.reader.autoPlay) {
             autoPlayIntervalRow(model)
-        }
-        panelSwitchRow(model, "reader.doubleTapZoom", "双击缩放", model.reader.doubleTapZoom) {
-            => model.toggleReaderDoubleTapZoom()
         }
         panelSwitchRow(model, "reader.autoHide", "工具栏自动隐藏", model.reader.autoHide) {
             => model.toggleReaderAutoHide()
@@ -299,6 +299,39 @@ private func readerSettingsBody(model: AppModel): Unit {
             => model.toggleReaderShowInfo()
         }
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).padding(18.0)
+}
+
+// 设计稿副标题的媒体摘要：image/epub 混合。按首次出现排序并去重；API 的 html
+// 页面在阅读器语义里对应 epub/html 文档页，显示为设计稿用词 epub。
+private func readerMediaSummary(model: AppModel): String {
+    let seen = HashSet<String>()
+    let kinds = ArrayList<String>()
+    for (i in 0..model.reader.pageCount) {
+        match (model.reader.pageAt(i)) {
+            case Some(page) =>
+                var kind = page.pageType.trimAscii()
+                if (kind == "") {
+                    kind = "image"
+                }
+                if (kind == "html") {
+                    kind = "epub"
+                }
+                if (!seen.contains(kind)) {
+                    seen.add(kind)
+                    kinds.add(kind)
+                }
+            case None => ()
+        }
+    }
+    if (kinds.size == 0) {
+        return ""
+    }
+    let joined = String.join(kinds.toArray(), delimiter: "/")
+    if (kinds.size > 1) {
+        "${joined} 混合"
+    } else {
+        joined
+    }
 }
 
 // ── 页面导航抽屉（原型 #sidebar）：缩略图 / 列表 / 文件树三态。──
@@ -829,17 +862,20 @@ private class ReaderPageRow <: Widget {
     }
 }
 
-// 设置抽屉副标题（原型 #settings .sub：12px dim 单行）：「档案名 · N 页」。
+// 设置抽屉副标题（原型 #settings .sub：12px dim 单行）：
+// 「档案名 · N 页 · image/epub 混合」。
 // 页数后缀恒定保留，档案名按剩余宽度二分截断（Label.maxLines 整体截断会把
 // 「· N 页」一起挤没）。截断复用本文件 sidebarEllipsize。
 private class ReaderSettingsSubtitle <: Widget {
     private let title: String
     private let pageCount: Int64
+    private let mediaSummary: String
     private var frame = Rect.zero()
 
-    public init(title: String, pageCount: Int64) {
+    public init(title: String, pageCount: Int64, mediaSummary: String) {
         this.title = title
         this.pageCount = pageCount
+        this.mediaSummary = mediaSummary
         emit(this)
     }
 
@@ -853,11 +889,16 @@ private class ReaderSettingsSubtitle <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let ps: Float32 = 12.0
+        let typeSuffix = if (mediaSummary.size > 0) {
+            " · ${mediaSummary}"
+        } else {
+            ""
+        }
         if (title.size == 0) {
-            ctx.renderer.text("${pageCount} 页", frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)
+            ctx.renderer.text("${pageCount} 页${typeSuffix}", frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)
             return
         }
-        let suffix = " · ${pageCount} 页"
+        let suffix = " · ${pageCount} 页${typeSuffix}"
         let suffixW = ctx.renderer.textWidth(suffix, pointSize: ps)
         let fitted = sidebarEllipsize(ctx, title, frame.w - suffixW, ps)
         ctx.renderer.text(fitted, frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)
