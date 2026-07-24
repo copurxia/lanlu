@@ -21,11 +21,12 @@ func rootView(model: AppModel): Unit {
 // 标题栏拖动区：titleBarDragRects/readerBarDragRects 给出顶栏死区矩形（DRAGGABLE 内
 // 鼠标事件不投递给应用，交互控件必须全部落在矩形之外；几何预算与取舍见 ui/titlebar.cj、
 // ui/reader_bar.cj 注释）。坐标为逻辑 vp，内部已处理 scale；阅读器换用专用顶栏且
-// chrome 隐藏时清空拖动区（顶部恢复点击翻页），故按（宽度, 页型, chrome 可见性, 返回钮）复查，
-// 窗口 resize 或四者之一变化时经 onTick 重注册（全同则早退，空转零成本）。
+// chrome 隐藏或阅读器抽屉打开时清空拖动区（顶部恢复点击翻页/抽屉标签点击），故按
+//（宽度, 页型, chrome 可见性, 抽屉可见性, 返回钮）复查；任一变化时经 onTick 重注册。
 private var dragRegionWidth: Int32 = -1
 private var dragRegionReader = false
 private var dragRegionChrome = true
+private var dragRegionReaderPanel = false
 private var dragRegionHasBack = false
 
 private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
@@ -39,19 +40,21 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
         case _ => false
     }
     let chrome = !isReader || model.reader.chromeVisible
-    if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && hasBack ==
-        dragRegionHasBack) {
+    let readerPanelOpen = isReader && (model.readerSidebarOpen.value || model.readerSettingsOpen.value)
+    if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && readerPanelOpen ==
+        dragRegionReaderPanel && hasBack == dragRegionHasBack) {
         return
     }
     dragRegionWidth = w
     dragRegionReader = isReader
     dragRegionChrome = chrome
+    dragRegionReaderPanel = readerPanelOpen
     dragRegionHasBack = hasBack
     // 不支持 hit-test 的视频驱动（如快照装置的 dummy）会拒绝注册：忽略即可，窗口照常
     // 可用，只是没有 OS 托管拖动（与 desktop_app 忽略光标/IME 锚点拒绝同一惯例）。
     try {
         if (isReader) {
-            if (chrome) {
+            if (chrome && !readerPanelOpen) {
                 window.setDragRegions(readerBarDragRects(w))
             } else {
                 window.setDragRegions(Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0)))
