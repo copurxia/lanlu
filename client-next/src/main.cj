@@ -10,9 +10,9 @@ import std.fs.{canonicalize, exists, Path}
 func rootView(model: AppModel): Unit {
     match (model.page.value) {
         case Page.Login => loginView(model)
-        case Page.Library => libraryView(model)     // Task 8 提供
-        case Page.Detail(_) => detailView(model)    // Task 11：档案详情（共用骨架）
-        case Page.Tank(_) => tankView(model)        // Task 11：合集详情（共用骨架）
+        case Page.Library => libraryView(model) // Task 8 提供
+        case Page.Detail(_) => detailView(model) // Task 11：档案详情（共用骨架）
+        case Page.Tank(_) => tankView(model) // Task 11：合集详情（共用骨架）
         case Page.Reader(_, _) => readerView(model)
         case Page.Settings => settingsView(model)
     }
@@ -39,8 +39,10 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
         case _ => false
     }
     let chrome = !isReader || model.reader.chromeVisible
-    if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome &&
-        hasBack == dragRegionHasBack) { return }
+    if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && hasBack ==
+        dragRegionHasBack) {
+        return
+    }
     dragRegionWidth = w
     dragRegionReader = isReader
     dragRegionChrome = chrome
@@ -63,6 +65,7 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
 }
 
 main(): Int64 {
+    initializeSettingsStore()
     // 启动后端策略（2026-07-19 Task E2 实测，详见 .superpowers/sdd/task-e2-report.md）：
     // 原生 Wayland 启动崩溃根因 = libdecor 的 GTK 插件在窗口创建时初始化 GTK3，
     // 触发 glycin（本体经 libvips→librsvg→gdk_pixbuf 常驻进程，无法移除）的
@@ -105,21 +108,22 @@ main(): Int64 {
         let s = AppSettings()
         s.serverUrl = "https://demo.lanlu.local"
         // 亮主题快照：种子模式跳过磁盘配置，唯独 theme 取自磁盘——隔离 HOME 预置
-        // config.json theme=light 即可拍亮主题快照，其余字段保持离线默认（缺文件回退 dark）。
-        s.theme = loadSettingsFrom(defaultSettingsPath()).theme
+        // MMKV 中 theme=light 即可拍亮主题快照，其余字段保持离线默认。
+        s.theme = loadSettings().theme
         s
     } else {
-        loadSettingsFrom(defaultSettingsPath())
+        loadSettings()
     }
-    let model = AppModel(settings)
+    let model = AppModel(settings, persistSettings: {s => saveSettings(s)})
     if (seedMode.size > 0) {
         seedLibrarySnapshot(model, seedMode)
     } else {
         model.tryResumeSession()
     }
-    let app = DesktopApp(WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight()), theme: lanluThemeFor(settings.theme))
+    let app = DesktopApp(WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight()),
+        theme: lanluThemeFor(settings.theme))
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
-    model.themeChangeHandler = { mode => app.setTheme(lanluThemeFor(mode)) }
+    model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
     app.setMinimumSize(960, 640)
     // 无边框窗口：移除 OS 装饰，标题栏由 ui/titlebar.cj 自绘（Task 8）；
     // 阅读器页换用专用顶栏 ui/reader_bar.cj（T13）。
@@ -128,11 +132,14 @@ main(): Int64 {
     // 空转零渲染：主循环每次迭代泵回工作线程结果（drain 为空时不写任何 State，
     // dirty-frame skipping 使该迭代不重建/不绘制）；不能用 FrameHandler 做这件事——
     // 它必须每帧 requestFrame 才能持续触发，会强制 60fps 全量重建+绘制。
-    app.onTick = { =>
-        model.pump()
-        let ww = Int64(app.sdlWindow.width)
-        if (ww != model.windowWidth.value) { model.windowWidth.value = ww }
-        syncTitleBarDragRegion(app.sdlWindow, model)
+    app.onTick = {
+        =>
+            model.pump()
+            let ww = Int64(app.sdlWindow.width)
+            if (ww != model.windowWidth.value) {
+                model.windowWidth.value = ww
+            }
+            syncTitleBarDragRegion(app.sdlWindow, model)
     }
     app.run {
         ZStack {
@@ -141,20 +148,19 @@ main(): Int64 {
             // chrome 显隐动画在 readerTopBarChrome 内（上滑/下滑 Spring，见 ui/reader_bar.cj）。
             // readerVersion 订阅由 readerView/reader_bar 内部读取完成，这里无需再读。
             match (model.page.value) {
-                case Page.Reader(_, _) =>
-                    ZStack {
-                        readerView(model)
-                        readerTopBarChrome(app.sdlWindow, model)
-                    }.alignment(Alignment.TopLeading)
-                case _ =>
-                    VStack {
-                        titleBar(app.sdlWindow, model)
-                        rootView(model)
-                    }.spacing(0.0)
+                case Page.Reader(_, _) => ZStack {
+                    readerView(model)
+                    readerTopBarChrome(app.sdlWindow, model)
+                }.alignment(Alignment.TopLeading)
+                case _ => VStack {
+                    titleBar(app.sdlWindow, model)
+                    rootView(model)
+                }.spacing(0.0)
             }
             ToastLayer(model.toaster)
         }
     }
     model.close()
+    closeSettingsStore()
     return 0
 }

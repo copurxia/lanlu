@@ -5,12 +5,13 @@ version = "0.1.0"
 description = "lanlu desktop client built on CangjieGUI"
 output-type = "executable"
 # vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
-link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc"
+link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++"
 
 [dependencies]
 cui = { path = "../packages/cangjie-gui" }
 vips_ffi = { path = "../packages/vips_ffi" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
+kv4cj = { path = "../ref/kv4cj" }
 ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx" }
 
 [target.x86_64-unknown-linux-gnu]
@@ -19,3 +20,7 @@ ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx"
   [target.x86_64-unknown-linux-gnu.bin-dependencies]
     # stdx（encoding.json.stream 等）以二进制依赖方式引入，与服务端 cjpm.toml 同款。
     path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+[ffi.c]
+core = { path = "../ref/kv4cj/lib" }
+mymmkv = { path = "../ref/kv4cj/lib" }

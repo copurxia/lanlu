@@ -136,9 +136,11 @@ public class AppModel {
     // 图片：key → 状态（""=未开始/"loading"=在途/"error"=失败/"ready"=像素已就绪）
     public let imageStates = HashMap<String, State<String>>()
     private let imageMutex = Mutex()
+    private let persistSettings: (AppSettings) -> Unit
 
-    public init(s: AppSettings) {
+    public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()}) {
         settings = s
+        this.persistSettings = persistSettings
         reader = ReaderModel(s)
         readerShowInfo = State<Bool>(s.readerShowInfo)
         autoPlayIntervalSlider.value = Float32(clampAutoPlayInterval(s.readerAutoPlayInterval))
@@ -158,15 +160,15 @@ public class AppModel {
         }
         // ReaderModel 出口接线：设置落盘、进度上报（走 worker，失败静默同旧 reportProgress）、
         // 预取（复用图片管线，并发上限由 requestImage 保证）。
-        reader.onPersist = {=> saveSettingsTo(defaultSettingsPath(), settings)}
+        reader.onPersist = {=> this.persistSettings(settings)}
         reader.onProgress = {
             arc, page1 => match (api) {
                 case Some(a) => let _ = worker.submit(
                     "progress",
                     {
                         =>
-                        a.setProgress(arc, page1);
-                        return page1
+                            a.setProgress(arc, page1);
+                            return page1
                     }
                 )
                 case None => ()
@@ -220,9 +222,17 @@ public class AppModel {
                                 let lyrics = if (lyricAsset > 0) {
                                     try {
                                         let lyricBytes = a.assetBytes(lyricAsset)
-                                        if (lyricBytes.size <= 1048576) { String.fromUtf8(lyricBytes) } else { "" }
-                                    } catch (_: Exception) { "" }
-                                } else { "" }
+                                        if (lyricBytes.size <= 1048576) {
+                                            String.fromUtf8(lyricBytes)
+                                        } else {
+                                            ""
+                                        }
+                                    } catch (_: Exception) {
+                                        ""
+                                    }
+                                } else {
+                                    ""
+                                }
                                 (key, path, probeMediaDuration(path), lyrics)
                         }
                     )
@@ -232,13 +242,19 @@ public class AppModel {
         // 流式音频只需单独获取体积很小的歌词资产；媒体本体不再整文件进内存。
         playback.onLyricsDownload = {
             key, assetId => match (api) {
-                case Some(a) =>
-                    let _ = worker.submit("lyrics:${key}", {
+                case Some(a) => let _ = worker.submit(
+                    "lyrics:${key}",
+                    {
                         =>
                             let bytes = a.assetBytes(assetId)
-                            let lyrics = if (bytes.size <= 1048576) { String.fromUtf8(bytes) } else { "" }
+                            let lyrics = if (bytes.size <= 1048576) {
+                                String.fromUtf8(bytes)
+                            } else {
+                                ""
+                            }
                             (key, lyrics)
-                    })
+                    }
+                )
                 case None => ()
             }
         }
@@ -412,7 +428,7 @@ public class AppModel {
             return
         }
         let p = settings.upsertServer(editingServerId, name, norm)
-        saveSettingsTo(defaultSettingsPath(), settings)
+        persistSettings(settings)
         serversVersion.value = serversVersion.value + 1
         serverModalOpen.value = false
         selectedServerId.value = p.id
@@ -426,7 +442,7 @@ public class AppModel {
             return
         }
         settings.deleteServer(id)
-        saveSettingsTo(defaultSettingsPath(), settings)
+        persistSettings(settings)
         deleteConfirmId.value = ""
         serversVersion.value = serversVersion.value + 1
         if (selectedServerId.value == id) {
@@ -448,13 +464,13 @@ public class AppModel {
         let _ = worker.submit("testconn", {=> LanluApi(norm).info()})
     }
 
-    // 登出只清 active profile 的 token（服务器条目保留）；旧三字段由 saveSettingsTo 同步。
+    // 登出只清 active profile 的 token（服务器条目保留）；运行期镜像由 saveSettings 同步。
     public func logout(): Unit {
         match (settings.activeProfile()) {
             case Some(p) => p.token = ""
             case None => ()
         }
-        saveSettingsTo(defaultSettingsPath(), settings)
+        persistSettings(settings)
         isAdmin.value = false
         page.value = Page.Login
     }
@@ -768,8 +784,8 @@ public class AppModel {
                     "sweep",
                     {
                         =>
-                        c.sweep(2 * 1024 * 1024 * 1024);
-                        return true
+                            c.sweep(2 * 1024 * 1024 * 1024);
+                            return true
                     }
                 )
                 return c
@@ -983,7 +999,9 @@ public class AppModel {
     public func requestAudioBackdrop(assetId: Int64): String {
         let imgKey = "backdrop:audio:${assetId}"
         let state = imageState(imgKey)
-        if (state.value == "loading" || state.value == "ready") { return imgKey }
+        if (state.value == "loading" || state.value == "ready") {
+            return imgKey
+        }
         state.value = "loading"
         let a = api ?? return imgKey
         let c = cache()
@@ -1156,11 +1174,11 @@ public class AppModel {
         readerSidebarOpen.value = false
     }
 
-    // 信息浮层开关：写 settings 并落盘（与 reader.onPersist 同款 saveSettingsTo）。
+    // 信息浮层开关：写 settings 并落盘（与 reader.onPersist 同款 saveSettings）。
     public func toggleReaderShowInfo(): Unit {
         readerShowInfo.value = !readerShowInfo.value
         settings.readerShowInfo = readerShowInfo.value
-        saveSettingsTo(defaultSettingsPath(), settings)
+        persistSettings(settings)
     }
 
     // ---- 阅读选项的 UI 入口：委托 ReaderModel 持久化，bump readerVersion 通知视图 ----
@@ -1450,7 +1468,7 @@ public class AppModel {
             return
         }
         settings.theme = mode
-        saveSettingsTo(defaultSettingsPath(), settings)
+        persistSettings(settings)
         if (let Some(h) <- themeChangeHandler) {
             h(mode)
         }
@@ -1602,7 +1620,9 @@ public class AppModel {
         }
         // backdrop 解码失败静默（不 toast，不阻塞页面），backdrop 区域回退为纯色渐变。
         if (r.name.startsWith("backdrop:")) {
-            if (r.name.startsWith("backdrop:audio:")) { imageState(r.name).value = "error" }
+            if (r.name.startsWith("backdrop:audio:")) {
+                imageState(r.name).value = "error"
+            }
             return
         }
         // 续读解析/拼接失败：结束页落「没有下一档案」态（不 toast，阅读器内联展示）。
@@ -1619,7 +1639,9 @@ public class AppModel {
             readerVersion.value += 1
             return
         }
-        if (r.name.startsWith("lyrics:")) { return }
+        if (r.name.startsWith("lyrics:")) {
+            return
+        }
         // 浏览模式行任务失败：不 toast（9 行并发失败会刷屏），行内呈现可点击重试；
         // 401/会话失效仍走全局 logout + 提示。
         if (r.name.startsWith("row:")) {
@@ -1668,7 +1690,7 @@ public class AppModel {
                 case Some(p) => p.token = ""
                 case None => ()
             }
-            saveSettingsTo(defaultSettingsPath(), settings)
+            persistSettings(settings)
             return
         }
         // TOTP 验证失败（401=验证码错误）：不 logout（本就未登录），内联错误条展示。
@@ -1717,7 +1739,7 @@ public class AppModel {
                                 settings.activeServerId = sid
                             case None => ()
                         }
-                        saveSettingsTo(defaultSettingsPath(), settings)
+                        persistSettings(settings)
                         // 换服登录必须复位图片缓存：缓存目录按 serverUrl 派生，而 imageStates
                         // 的 key（asset:42 等）与服务器无关，不复位会把旧服务器的图误判为
                         // “已加载”，新下载也会落进旧目录。
@@ -1747,7 +1769,7 @@ public class AppModel {
                 case Some(prof) =>
                     prof.lastUsedAt = nowLabel()
                     settings.activeServerId = prof.id
-                    saveSettingsTo(defaultSettingsPath(), settings)
+                    persistSettings(settings)
                 case None => ()
             }
             // me() 返回同 LoginData 结构：同步管理员标记（控制设置页「服务器」分组显隐）。
@@ -1874,7 +1896,7 @@ public class AppModel {
                         case Some(p) => p.username = pendingCredUsername
                         case None => ()
                     }
-                    saveSettingsTo(defaultSettingsPath(), settings)
+                    persistSettings(settings)
                     pendingCredUsername = ""
                 }
                 loadAuthSecurity()
@@ -2068,7 +2090,9 @@ public class AppModel {
                 case Some(p) =>
                     let (k, d) = (p as (String, DecodedImage)).getOrThrow()
                     stagePixelImage(k, d.width, d.height, d.pixels)
-                    if (k.startsWith("backdrop:audio:")) { imageState(k).value = "ready" }
+                    if (k.startsWith("backdrop:audio:")) {
+                        imageState(k).value = "ready"
+                    }
                 case None => ()
             }
         } else if (name.startsWith("playback:")) {
@@ -2255,8 +2279,8 @@ public class AppModel {
             "用户已删除",
             {
                 =>
-                a.adminDeleteUser(id);
-                ""
+                    a.adminDeleteUser(id);
+                    ""
             }
         )
     }
@@ -2267,8 +2291,8 @@ public class AppModel {
             "角色已更新",
             {
                 =>
-                a.adminSetUserRole(id, admin);
-                ""
+                    a.adminSetUserRole(id, admin);
+                    ""
             }
         )
     }
@@ -2279,8 +2303,8 @@ public class AppModel {
             "密码已重置",
             {
                 =>
-                a.adminResetUserPassword(id, pw);
-                ""
+                    a.adminResetUserPassword(id, pw);
+                    ""
             }
         )
     }
@@ -2293,8 +2317,8 @@ public class AppModel {
             "设置已保存",
             {
                 =>
-                a.saveSystemSettings(entries);
-                ""
+                    a.saveSystemSettings(entries);
+                    ""
             }
         )
     }
@@ -2319,8 +2343,8 @@ public class AppModel {
             "分类已删除",
             {
                 =>
-                a.deleteCategory(catid);
-                ""
+                    a.deleteCategory(catid);
+                    ""
             }
         )
     }
@@ -2331,8 +2355,8 @@ public class AppModel {
             "已提交分类扫描任务",
             {
                 =>
-                a.scanCategory(catid);
-                ""
+                    a.scanCategory(catid);
+                    ""
             }
         )
     }
@@ -2343,8 +2367,8 @@ public class AppModel {
             "已提交全库扫描任务",
             {
                 =>
-                a.scanAllCategories();
-                ""
+                    a.scanAllCategories();
+                    ""
             }
         )
     }
@@ -2356,8 +2380,8 @@ public class AppModel {
                 "分类已创建",
                 {
                     =>
-                    a.createCategory(jsonBody);
-                    ""
+                        a.createCategory(jsonBody);
+                        ""
                 }
             )
         } else {
@@ -2367,8 +2391,8 @@ public class AppModel {
                 "分类已保存",
                 {
                     =>
-                    a.updateCategory(catid, jsonBody);
-                    ""
+                        a.updateCategory(catid, jsonBody);
+                        ""
                 }
             )
         }
@@ -2383,8 +2407,8 @@ public class AppModel {
                 "标签已创建",
                 {
                     =>
-                    a.createTag(jsonBody);
-                    ""
+                        a.createTag(jsonBody);
+                        ""
                 }
             )
         } else {
@@ -2394,8 +2418,8 @@ public class AppModel {
                 "标签已保存",
                 {
                     =>
-                    a.updateTag(id, jsonBody);
-                    ""
+                        a.updateTag(id, jsonBody);
+                        ""
                 }
             )
         }
@@ -2407,8 +2431,8 @@ public class AppModel {
             "标签已删除",
             {
                 =>
-                a.deleteTag(id);
-                ""
+                    a.deleteTag(id);
+                    ""
             }
         )
     }
@@ -2421,8 +2445,8 @@ public class AppModel {
             "已更新",
             {
                 =>
-                a.toggleSmartFilter(id);
-                ""
+                    a.toggleSmartFilter(id);
+                    ""
             }
         )
     }
@@ -2433,8 +2457,8 @@ public class AppModel {
             "删除成功",
             {
                 =>
-                a.deleteSmartFilter(id);
-                ""
+                    a.deleteSmartFilter(id);
+                    ""
             }
         )
     }
@@ -2446,8 +2470,8 @@ public class AppModel {
                 "智能分类已创建",
                 {
                     =>
-                    a.createSmartFilter(jsonBody);
-                    ""
+                        a.createSmartFilter(jsonBody);
+                        ""
                 }
             )
         } else {
@@ -2457,8 +2481,8 @@ public class AppModel {
                 "智能分类已保存",
                 {
                     =>
-                    a.updateSmartFilter(id, jsonBody);
-                    ""
+                        a.updateSmartFilter(id, jsonBody);
+                        ""
                 }
             )
         }
@@ -2495,8 +2519,8 @@ public class AppModel {
             "顺序已保存",
             {
                 =>
-                a.reorderSmartFilters(ids);
-                ""
+                    a.reorderSmartFilters(ids);
+                    ""
             }
         )
     }
@@ -2509,8 +2533,8 @@ public class AppModel {
             "任务已取消",
             {
                 =>
-                a.cancelTask(id);
-                ""
+                    a.cancelTask(id);
+                    ""
             }
         )
     }
@@ -2521,8 +2545,8 @@ public class AppModel {
             "已重新加入任务队列",
             {
                 =>
-                a.retryTask(id);
-                ""
+                    a.retryTask(id);
+                    ""
             }
         )
     }
@@ -2540,8 +2564,8 @@ public class AppModel {
                 "定时任务服务已停止",
                 {
                     =>
-                    a.cronStop();
-                    ""
+                        a.cronStop();
+                        ""
                 }
             )
         } else {
@@ -2550,8 +2574,8 @@ public class AppModel {
                 "定时任务服务已启动",
                 {
                     =>
-                    a.cronStart();
-                    ""
+                        a.cronStart();
+                        ""
                 }
             )
         }
@@ -2563,8 +2587,8 @@ public class AppModel {
             "已更新",
             {
                 =>
-                a.cronSetEnabled(id, enabled);
-                ""
+                    a.cronSetEnabled(id, enabled);
+                    ""
             }
         )
     }
@@ -2575,8 +2599,8 @@ public class AppModel {
             "已手动触发任务",
             {
                 =>
-                a.cronTrigger(id);
-                ""
+                    a.cronTrigger(id);
+                    ""
             }
         )
     }
@@ -2587,8 +2611,8 @@ public class AppModel {
             "定时任务已删除",
             {
                 =>
-                a.cronDeleteTask(id);
-                ""
+                    a.cronDeleteTask(id);
+                    ""
             }
         )
     }
@@ -2600,8 +2624,8 @@ public class AppModel {
                 "定时任务已创建",
                 {
                     =>
-                    a.cronCreateTask(jsonBody);
-                    ""
+                        a.cronCreateTask(jsonBody);
+                        ""
                 }
             )
         } else {
@@ -2611,8 +2635,8 @@ public class AppModel {
                 "定时任务已保存",
                 {
                     =>
-                    a.cronUpdateTask(id, jsonBody);
-                    ""
+                        a.cronUpdateTask(id, jsonBody);
+                        ""
                 }
             )
         }
@@ -2627,8 +2651,8 @@ public class AppModel {
             "启动任务设置已保存",
             {
                 =>
-                a.saveSystemSettings(entries);
-                ""
+                    a.saveSystemSettings(entries);
+                    ""
             }
         )
     }
@@ -2641,8 +2665,8 @@ public class AppModel {
             "已更新",
             {
                 =>
-                a.setPluginEnabled(ns, enabled);
-                ""
+                    a.setPluginEnabled(ns, enabled);
+                    ""
             }
         )
     }
@@ -2653,8 +2677,8 @@ public class AppModel {
             "插件已删除",
             {
                 =>
-                a.deletePlugin(ns);
-                ""
+                    a.deletePlugin(ns);
+                    ""
             }
         )
     }
@@ -2665,8 +2689,8 @@ public class AppModel {
             "插件配置已保存",
             {
                 =>
-                a.savePluginConfig(ns, jsonBody);
-                ""
+                    a.savePluginConfig(ns, jsonBody);
+                    ""
             }
         )
     }
@@ -2698,8 +2722,8 @@ public class AppModel {
             "双重验证已关闭",
             {
                 =>
-                a.totpDisable();
-                ""
+                    a.totpDisable();
+                    ""
             }
         )
     }
@@ -2710,8 +2734,8 @@ public class AppModel {
             "新的恢复码已生成",
             {
                 =>
-                a.totpRegenerate();
-                ""
+                    a.totpRegenerate();
+                    ""
             }
         )
     }
@@ -2722,8 +2746,8 @@ public class AppModel {
             "登录会话已撤销",
             {
                 =>
-                a.revokeSession(id);
-                ""
+                    a.revokeSession(id);
+                    ""
             }
         )
     }
@@ -2734,8 +2758,8 @@ public class AppModel {
             "其他设备已全部退出",
             {
                 =>
-                a.revokeOtherSessions();
-                ""
+                    a.revokeOtherSessions();
+                    ""
             }
         )
     }
@@ -2757,8 +2781,8 @@ public class AppModel {
             "Token 已撤销",
             {
                 =>
-                a.revokeToken(id);
-                ""
+                    a.revokeToken(id);
+                    ""
             }
         )
     }
@@ -2769,8 +2793,8 @@ public class AppModel {
             "Passkey 已删除",
             {
                 =>
-                a.revokePasskey(id);
-                ""
+                    a.revokePasskey(id);
+                    ""
             }
         )
     }
