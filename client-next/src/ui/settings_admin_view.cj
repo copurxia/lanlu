@@ -23,16 +23,16 @@ func usersPage(model: AppModel): Unit {
     detailCard(model, "创建用户") {
         HStack {
             // formField 限宽约 320vp，右侧「设为管理员」开关保留在行内可见。
-            VStack { formField("用户名", newName, "请输入用户名") }.width(320.vp)
+            VStack {formField("用户名", newName, "请输入用户名")}.width(320.vp)
             VStack {
                 Label("设为管理员").fontSize(11.fp).muted()
-                Switch("", newAdmin.project(get: {v => v}, set: {_, v => v }))
+                Switch("", newAdmin.project(get: {v => v}, set: {_, v => v}))
             }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Start)
             Spacer()
         }.spacing(16.vp).crossAxisAlignment(CrossAxisAlignment.End).hug()
         HStack {
-            Button("创建用户", {=>
-                if (newName.value.trimAscii().size > 0) {
+            Button("创建用户", {
+                => if (newName.value.trimAscii().size > 0) {
                     model.actCreateUser(newName.value.trimAscii(), newAdmin.value)
                     newName.value = ""
                 }
@@ -51,53 +51,76 @@ func usersPage(model: AppModel): Unit {
         if (users.size == 0) {
             pageLoading(model, "暂无用户或加载中…")
         }
-        ForEach(users.toArray(), key: { u: AdminUserItem => "${u.id}" }) { u =>
-            let self = u.username == model.settings.username
-            HStack {
-                VStack {
-                    HStack {
-                        Label(u.username).fontSize(13.fp)
-                        if (u.isAdmin) { pill(model, "管理员", PillTone.Accent) }
-                        else { pill(model, "普通用户", PillTone.Gray) }
-                        if (self) { pill(model, "当前用户", PillTone.Blue) }
-                    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
-                    Label("创建时间: ${u.createdAt}").fontSize(10.fp).muted()
-                }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-                Button("重置密码", {=>
-                    resetId.value = u.id
-                    resetPw.value = ""
-                    resetOpen.value = true
-                }).enabled(!self)
-                // 角色开关：cui Bindable 仅 State.project 一种产出途径，按 brief 备选方案——
-                // 本地 rememberState 初值取 u.isAdmin，set 里直接提交服务端（同外观页主题分段写法），
-                // 失败由 handleError 提示，列表随 act.* 内部 reload 刷新。
-                Switch("管理员",
-                    rememberState<Bool>("users.role.${u.id}", {=> u.isAdmin })
-                        .project(get: {v => v}, set: {_, v =>
-                            model.actSetUserRole(u.id, v)
-                            return v
-                        }))
-                    .enabled(!self)
-                Button("删除", {=>
-                    delId.value = u.id
-                    delOpen.value = true
-                }).role(ButtonRole.Danger).enabled(!self)
-            }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).flexible(false).fillWidth().padding(0.vp, 6.vp)
+        ForEach(users.toArray(), key: {u: AdminUserItem => "${u.id}"}) {
+            u =>
+                let self = u.username == model.settings.username
+                HStack {
+                    VStack {
+                        HStack {
+                            Label(u.username).fontSize(13.fp)
+                            if (u.isAdmin) {
+                                pill(model, "管理员", PillTone.Accent)
+                            } else {
+                                pill(model, "普通用户", PillTone.Gray)
+                            }
+                            if (self) {
+                                pill(model, "当前用户", PillTone.Blue)
+                            }
+                        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+                        Label("创建时间: ${u.createdAt}").fontSize(10.fp).muted()
+                    }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
+                    Button(
+                        "重置密码",
+                        {
+                            =>
+                                resetId.value = u.id
+                                resetPw.value = ""
+                                resetOpen.value = true
+                        }
+                    ).enabled(!self)
+                    // 角色开关：cui Bindable 仅 State.project 一种产出途径，按 brief 备选方案——
+                    // 本地 rememberState 初值取 u.isAdmin，set 里直接提交服务端（同外观页主题分段写法），
+                    // 失败由 handleError 提示，列表随 act.* 内部 reload 刷新。
+                    Switch(
+                        "管理员",
+                        rememberState<Bool>("users.role.${u.id}", {=> u.isAdmin}).project(
+                            get: {v => v},
+                            set: {
+                                _, v =>
+                                    model.actSetUserRole(u.id, v)
+                                    return v
+                            }
+                        )
+                    ).enabled(!self)
+                    Button(
+                        "删除",
+                        {
+                            =>
+                                delId.value = u.id
+                                delOpen.value = true
+                        }
+                    ).role(ButtonRole.Danger).enabled(!self)
+                }
+                    .spacing(10.vp)
+                    .crossAxisAlignment(CrossAxisAlignment.Center)
+                    .flexible(false)
+                    .fillWidth()
+                    .padding(0.vp, 6.vp)
         }
     }
-    confirmModal(delOpen, "确认删除用户", "您确定要删除此用户吗？此操作无法撤销。", "删除", {=>
-        model.actDeleteUser(delId.value)
+    confirmModal(delOpen, "确认删除用户", "您确定要删除此用户吗？此操作无法撤销。", "删除", {
+        => model.actDeleteUser(delId.value)
     })
     // 重置密码弹窗（原型 dialog：新密码 + 确认动作）。
-    Modal(resetOpen, body: {=>
-        VStack {
+    Modal(resetOpen, body: {
+        => VStack {
             Label("重置密码").fontSize(15.fp)
             formField("新密码", resetPw, "请输入新密码（至少6位）", masked: true)
             HStack {
                 Spacer()
-                Button("取消", {=> resetOpen.value = false })
-                Button("重置密码", {=>
-                    if (resetPw.value.size >= 6) {
+                Button("取消", {=> resetOpen.value = false})
+                Button("重置密码", {
+                    => if (resetPw.value.size >= 6) {
                         resetOpen.value = false
                         model.actResetUserPassword(resetId.value, resetPw.value)
                     }
@@ -118,8 +141,7 @@ func systemPage(model: AppModel): Unit {
 
     // 四个 Tab 对应设置项的 category 分组。
     let tab = rememberState<Int64>("sys.tab", {=> 0})
-    SegmentedControl(["存储设置", "性能设置", "服务器设置", "SSL 设置"],
-        tab.project(get: {v => v}, set: {_, v => v }))
+    SegmentedControl(["存储设置", "性能设置", "服务器设置", "SSL 设置"], tab.project(get: {v => v}, set: {_, v => v}))
     let category = match (tab.value) {
         case 0 => "storage"
         case 1 => "performance"
@@ -144,52 +166,77 @@ func systemPage(model: AppModel): Unit {
         // 构建期收集各行草稿 State，保存回调只读已收集的 State（避免回调内调用 rememberState）。
         let drafts = ArrayList<(String, State<String>)>()
         for (s in all) {
-            if (s.category != category) { continue }
+            if (s.category != category) {
+                continue
+            }
             drafts.add((s.key, sysSettingRow(model, s)))
         }
         HStack {
             Spacer()
-            Button("保存", {=>
-                let entries = ArrayList<(String, String)>()
-                for ((k, st) in drafts) { entries.add((k, st.value)) }
-                model.actSaveSysSettings(entries)
-            }).role(ButtonRole.Primary).enabled(drafts.size > 0)
+            Button(
+                "保存",
+                {
+                    =>
+                        let entries = ArrayList<(String, String)>()
+                        for ((k, st) in drafts) {
+                            entries.add((k, st.value))
+                        }
+                        model.actSaveSysSettings(entries)
+                }
+            ).role(ButtonRole.Primary).enabled(drafts.size > 0)
         }.flexible(false).fillWidth().padding(0.vp, 12.vp, 0.vp, 0.vp)
     }
 }
 
 // 提示条（原型 .notice）：警告色左边框说明文字。
 func noticeRow(model: AppModel, text: String): Unit {
-    let soft = if (model.isLight()) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
-    let accent = if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-    Label(text).fontSize(11.fp).foregroundColor(accent)
-        .padding(12.vp, 10.vp).background(soft, 10.vp)
+    let soft = if (model.isLight()) {
+        LANLU_L_ACCENT_SOFT
+    } else {
+        LANLU_ACCENT_SOFT
+    }
+    let accent = if (model.isLight()) {
+        LANLU_L_ACCENT
+    } else {
+        LANLU_ACCENT
+    }
+    Label(text).fontSize(11.fp).foregroundColor(accent).padding(12.vp, 10.vp).background(soft, 10.vp)
 }
 
 // 单个设置项：按 valueType 渲染控件；草稿存 rememberState("sys.{key}")，并返回草稿 State 供保存回调读取。
 private func sysSettingRow(model: AppModel, s: SysSetting): State<String> {
     let draft = rememberState<String>("sys.${s.key}", {=> s.value})
-    let title = if (s.descriptionZh.size > 0) { "${s.descriptionZh}  ${s.key}" } else { s.key }
+    let title = if (s.descriptionZh.size > 0) {
+        "${s.descriptionZh}  ${s.key}"
+    } else {
+        s.key
+    }
     if (s.valueType == "boolean") {
         settingRow(model, title, "") {
             // cui Switch 两参数均位置参数；"true"/"false" 字符串与布尔互转。
-            Switch("", draft.project(
-                get: {v => v == "true" },
-                set: {_, v => if (v) { "true" } else { "false" } }))
+            Switch("", draft.project(get: {v => v == "true"}, set: {
+                _, v => if (v) {
+                    "true"
+                } else {
+                    "false"
+                }
+            }))
         }
     } else if (s.key == "ROCKSDB_COMPRESSION") {
         let opts = ["none", "snappy", "zlib", "bz2", "lz4", "lz4hc", "xpress", "zstd"]
         settingRow(model, title, "") {
-            Dropdown(opts, draft.project(
-                get: {v => compressionIndex(opts, v) },
-                set: {_, i => opts[i] }))
+            Dropdown(opts, draft.project(get: {v => compressionIndex(opts, v)}, set: {_, i => opts[i]}))
         }
     } else {
-        settingRow(model, title, if (s.valueType == "long") { "单位：毫秒" } else { "" }) {
+        settingRow(model, title, if (s.valueType == "long") {
+            "单位：毫秒"
+        } else {
+            ""
+        }) {
             HStack {
                 // cui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
                 ZStack {
-                    TextField(draft.project(get: {v => v }, set: {_, v => v }))
+                    TextField(draft.project(get: {v => v}, set: {_, v => v}))
                     if (draft.value.size == 0 && s.value.size > 0) {
                         Label(s.value).fontSize(13.fp).muted().padding(8.vp, 10.vp, 0.vp, 0.vp)
                     }
@@ -201,7 +248,11 @@ private func sysSettingRow(model: AppModel, s: SysSetting): State<String> {
 }
 
 private func compressionIndex(opts: Array<String>, v: String): Int64 {
-    for (i in 0..opts.size) { if (opts[i] == v) { return i } }
+    for (i in 0..opts.size) {
+        if (opts[i] == v) {
+            return i
+        }
+    }
     return 0
 }
 
@@ -218,10 +269,11 @@ func tasksPage(model: AppModel): Unit {
     // 状态筛选（原型 .ftabs：全部/待执行/执行中/等待中/已完成/失败）。
     HStack {
         SegmentedControl(["全部", "待执行", "执行中", "等待中", "已完成", "失败"],
-            tab.project(get: {v => v }, set: {_, v => v }))
+            tab.project(get: {v => v}, set: {_, v => v}))
         Spacer()
-        Button("⟳ 刷新", {=> model.loadTasks(status) })
-    }.crossAxisAlignment(CrossAxisAlignment.Center).hug()
+        IconButton(IconName.Refresh, label: Some("刷新"), style: Some(ghostStyleOf(model)),
+            onClick: {=> model.loadTasks(status)})
+    }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
 
     let cancelId = rememberState<Int64>("tasks.cancelId", {=> -1})
     let cancelOpen = rememberState<Bool>("tasks.cancelOpen", {=> false})
@@ -230,14 +282,14 @@ func tasksPage(model: AppModel): Unit {
             if (p.tasks.size == 0) {
                 Label("该状态下没有任务").fontSize(12.fp).muted()
             }
-            ForEach(p.tasks.toArray(), key: { t: TaskRecord => "${t.id}" }) { t =>
-                taskCard(model, t, cancelId, cancelOpen)
+            ForEach(p.tasks.toArray(), key: {t: TaskRecord => "${t.id}"}) {
+                t => taskCard(model, t, cancelId, cancelOpen)
             }
             Label("共 ${p.total} 个任务").fontSize(11.fp).muted()
         case None => pageLoading(model, "任务快照读取中…")
     }
-    confirmModal(cancelOpen, "取消任务", "确定要取消这个任务吗？", "取消任务", {=>
-        model.actCancelTask(cancelId.value)
+    confirmModal(cancelOpen, "取消任务", "确定要取消这个任务吗？", "取消任务", {
+        => model.actCancelTask(cancelId.value)
     })
 }
 
@@ -254,7 +306,16 @@ private func taskStatusOf(tab: Int64): String {
 
 // 任务卡（原型 .task-card：名称 + 状态/编号/优先级/类型徽章 + 取消/重试 + 进度 + 日志 + 时间）。
 private func taskCard(model: AppModel, t: TaskRecord, cancelId: State<Int64>, cancelOpen: State<Bool>): Unit {
-    let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    let panel = if (model.isLight()) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_PANEL
+    }
+    let logBg = if (model.isLight()) {
+        LANLU_L_PANEL_RAISED
+    } else {
+        LANLU_PANEL_RAISED
+    }
     VStack {
         HStack {
             Label(t.name).fontSize(13.fp).maxLines(1)
@@ -262,38 +323,63 @@ private func taskCard(model: AppModel, t: TaskRecord, cancelId: State<Int64>, ca
             Spacer()
             pill(model, "Job #${t.id}", PillTone.Outline)
             pill(model, "P${t.priority}", priorityTone(t.priority))
-            if (t.taskType.size > 0) { pill(model, taskTypeLabel(t.taskType), PillTone.Blue) }
-            if (t.triggerSource.size > 0) { pill(model, t.triggerSource, PillTone.Outline) }
-            if (t.status == "pending" || t.status == "running" || t.status == "waiting") {
-                Button("⏹ 取消", {=>
-                    cancelId.value = t.id
-                    cancelOpen.value = true
-                }).role(ButtonRole.Danger)
-            } else if (t.status == "failed" || t.status == "stopped") {
-                Button("▶ 重试", {=> model.actRetryTask(t.id) })
+            if (t.taskType.size > 0) {
+                pill(model, taskTypeLabel(t.taskType), PillTone.Blue)
             }
-        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+            if (t.triggerSource.size > 0) {
+                pill(model, t.triggerSource, PillTone.Outline)
+            }
+            if (t.status == "pending" || t.status == "running" || t.status == "waiting") {
+                Button(
+                    "⏹ 取消",
+                    {
+                        =>
+                            cancelId.value = t.id
+                            cancelOpen.value = true
+                    }
+                ).role(ButtonRole.Danger)
+            } else if (t.status == "failed" || t.status == "stopped") {
+                Button("▶ 重试", {=> model.actRetryTask(t.id)})
+            }
+        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
         HStack {
             Label("进度").fontSize(10.fp).muted()
-            ProgressTrack(t.progress, 6.0)
+            ProgressTrack(t.progress, 6.0).flex()
             Label("${t.progress}%").fontSize(10.fp).muted()
-        }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+        }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
         if (t.message.size > 0) {
-            Label(t.message).fontSize(10.fp).muted().maxLines(3)
+            Label(t.message)
+                .fontSize(10.5.fp)
+                .muted()
+                .maxLines(3)
+                .tight()
+                .fillWidth()
+                .padding(9.vp, 12.vp)
+                .background(logBg, 9.vp)
+                .fillWidth()
         }
         HStack {
             taskTimeCell("创建时间", t.createdAt)
             taskTimeCell("开始时间", t.startedAt)
             taskTimeCell("完成时间", t.completedAt)
-        }.spacing(12.vp)
-    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-        .padding(12.vp, 14.vp).background(panel, 14.vp).fillWidth()
+        }.spacing(12.vp).hug().fillWidth()
+    }
+        .spacing(8.vp)
+        .crossAxisAlignment(CrossAxisAlignment.Start)
+        .hug()
+        .padding(12.vp, 14.vp)
+        .background(panel, 14.vp)
+        .fillWidth()
 }
 
 private func taskTimeCell(k: String, v: String): Unit {
     VStack {
         Label(k).fontSize(9.fp).muted()
-        Label(if (v.size > 0) { v } else { "-" }).fontSize(11.fp)
+        Label(if (v.size > 0) {
+            v
+        } else {
+            "-"
+        }).fontSize(11.fp)
     }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
 }
 
@@ -320,9 +406,15 @@ private func taskStatusTone(s: String): PillTone {
 }
 
 private func priorityTone(p: Int64): PillTone {
-    if (p <= 10) { return PillTone.Red }
-    if (p <= 20) { return PillTone.Orange }
-    if (p <= 40) { return PillTone.Blue }
+    if (p <= 10) {
+        return PillTone.Red
+    }
+    if (p <= 20) {
+        return PillTone.Orange
+    }
+    if (p <= 40) {
+        return PillTone.Blue
+    }
     return PillTone.Gray
 }
 
@@ -358,29 +450,34 @@ func cronPage(model: AppModel): Unit {
     pageHeader("定时任务管理", "配置定时执行的任务和启动时触发的任务")
     HStack {
         Spacer()
-        Button("⟳ 刷新", {=> model.loadCron() })
+        Button("⟳ 刷新", {=> model.loadCron()})
         // 创建/编辑弹窗首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("＋ 创建定时任务", {=> model.todoToast("定时任务编辑弹窗") }).role(ButtonRole.Primary)
+        Button("＋ 创建定时任务", {=> model.todoToast("定时任务编辑弹窗")}).role(ButtonRole.Primary)
     }.hug()
 
     // 服务状态卡（原型：运行中/已停止 + 启停 + 统计）。
     detailCard(model, "服务状态") {
         match (model.cronStatus.value) {
-            case Some(st) =>
-                HStack {
-                    if (st.running) { pill(model, "运行中", PillTone.Green) }
-                    else { pill(model, "已停止", PillTone.Gray) }
-                    Spacer()
-                    Label("总任务数: ${st.totalTasks} · 已启用: ${st.enabledTasks}").fontSize(11.fp).muted()
-                    Button(if (st.running) { "⏹ 停止服务" } else { "▶ 启动服务" },
-                        {=> model.actCronServiceToggle() })
-                }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+            case Some(st) => HStack {
+                if (st.running) {
+                    pill(model, "运行中", PillTone.Green)
+                } else {
+                    pill(model, "已停止", PillTone.Gray)
+                }
+                Spacer()
+                Label("总任务数: ${st.totalTasks} · 已启用: ${st.enabledTasks}").fontSize(11.fp).muted()
+                Button(if (st.running) {
+                    "⏹ 停止服务"
+                } else {
+                    "▶ 启动服务"
+                }, {=> model.actCronServiceToggle()})
+            }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
             case None => pageLoading(model, "加载中…")
         }
     }
 
     let tab = rememberState<Int64>("cron.tab", {=> 0})
-    SegmentedControl(["定时任务列表", "启动任务设置"], tab.project(get: {v => v }, set: {_, v => v }))
+    SegmentedControl(["定时任务列表", "启动任务设置"], tab.project(get: {v => v}, set: {_, v => v}))
     if (tab.value == 0) {
         cronTaskList(model)
     } else {
@@ -396,41 +493,63 @@ private func cronTaskList(model: AppModel): Unit {
     if (tasks.size == 0) {
         Label("暂无定时任务").fontSize(12.fp).muted()
     }
-    ForEach(tasks.toArray(), key: { t: CronTask => "${t.id}" }) { t =>
-        let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
-        VStack {
-            HStack {
-                Label(t.name).fontSize(13.fp)
-                if (t.enabled) { pill(model, "启用", PillTone.Green) }
-                else { pill(model, "禁用", PillTone.Gray) }
-                pill(model, taskTypeLabel(t.taskType), PillTone.Outline)
-                Spacer()
-                Button("▶", {=> model.actCronTrigger(t.id) })
-                // cui Switch 两参数均位置参数；绑定件按任务 id 唯一化 key（见 switchBindKeyed）。
-                Switch("", switchBindKeyed("cron.${t.id}", t.enabled, {v => model.actCronToggle(t.id, v) }))
-                Button("编辑", {=> model.todoToast("定时任务编辑弹窗") })
-                Button("删除", {=>
-                    delId.value = t.id
-                    delOpen.value = true
-                }).role(ButtonRole.Danger)
-            }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
-            HStack {
-                taskTimeCell("Cron 表达式", t.cronExpression)
-                taskTimeCell("优先级", "${t.priority}")
-                taskTimeCell("执行次数", "${t.runCount}")
-                taskTimeCell("上次执行", if (t.hasLastRun) {
-                    "${t.lastRunAt} ${if (t.lastRunSuccess) { "✓" } else { "✗" }}"
-                } else { "从未执行" })
-            }.spacing(12.vp)
-            if (t.enabled && t.nextRunAt.size > 0) {
-                Label("下次执行: ${t.nextRunAt}").fontSize(11.fp)
-                    .foregroundColor(if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT })
+    ForEach(tasks.toArray(), key: {t: CronTask => "${t.id}"}) {
+        t =>
+            let panel = if (model.isLight()) {
+                LANLU_L_PANEL
+            } else {
+                LANLU_PANEL
             }
-        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-            .padding(12.vp, 14.vp).background(panel, 14.vp).fillWidth()
+            VStack {
+                HStack {
+                    Label(t.name).fontSize(13.fp)
+                    if (t.enabled) {
+                        pill(model, "启用", PillTone.Green)
+                    } else {
+                        pill(model, "禁用", PillTone.Gray)
+                    }
+                    pill(model, taskTypeLabel(t.taskType), PillTone.Outline)
+                    Spacer()
+                    Button("▶", {=> model.actCronTrigger(t.id)})
+                    // cui Switch 两参数均位置参数；绑定件按任务 id 唯一化 key（见 switchBindKeyed）。
+                    Switch("", switchBindKeyed("cron.${t.id}", t.enabled, {v => model.actCronToggle(t.id, v)}))
+                    Button("编辑", {=> model.todoToast("定时任务编辑弹窗")})
+                    Button(
+                        "删除",
+                        {
+                            =>
+                                delId.value = t.id
+                                delOpen.value = true
+                        }
+                    ).role(ButtonRole.Danger)
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+                HStack {
+                    taskTimeCell("Cron 表达式", t.cronExpression)
+                    taskTimeCell("优先级", "${t.priority}")
+                    taskTimeCell("执行次数", "${t.runCount}")
+                    taskTimeCell("上次执行", if (t.hasLastRun) {
+                        "${t.lastRunAt} ${if (t.lastRunSuccess) { "✓" } else { "✗" }}"
+                    } else {
+                        "从未执行"
+                    })
+                }.spacing(12.vp)
+                if (t.enabled && t.nextRunAt.size > 0) {
+                    Label("下次执行: ${t.nextRunAt}").fontSize(11.fp).foregroundColor(if (model.isLight()) {
+                        LANLU_L_ACCENT
+                    } else {
+                        LANLU_ACCENT
+                    })
+                }
+            }
+                .spacing(8.vp)
+                .crossAxisAlignment(CrossAxisAlignment.Start)
+                .hug()
+                .padding(12.vp, 14.vp)
+                .background(panel, 14.vp)
+                .fillWidth()
     }
-    confirmModal(delOpen, "删除定时任务", "确定要删除此定时任务吗？此操作无法撤销。", "删除", {=>
-        model.actCronDelete(delId.value)
+    confirmModal(delOpen, "删除定时任务", "确定要删除此定时任务吗？此操作无法撤销。", "删除", {
+        => model.actCronDelete(delId.value)
     })
 }
 
@@ -444,16 +563,30 @@ private func startupSettings(model: AppModel): Unit {
 }
 
 private func startupRow(model: AppModel, label: String, desc: String, key: String, dft: Bool): Unit {
-    var cur = if (dft) { "true" } else { "false" }
-    for (s in model.sysSettings.value) { if (s.key == key) { cur = s.value } }
+    var cur = if (dft) {
+        "true"
+    } else {
+        "false"
+    }
+    for (s in model.sysSettings.value) {
+        if (s.key == key) {
+            cur = s.value
+        }
+    }
     // lambda 不能捕获可变局部变量，取不可变副本。
     let cur0 = cur
     settingRow(model, label, desc) {
-        Switch("", rememberState<Bool>("cron.startup.${key}", {=> cur0 == "true" })
-            .project(get: {v => v }, set: {_, v =>
-                model.actSaveStartup(key, v)
-                return v
-            }))
+        Switch(
+            "",
+            rememberState<Bool>("cron.startup.${key}", {=> cur0 == "true"}).project(
+                get: {v => v},
+                set: {
+                    _, v =>
+                        model.actSaveStartup(key, v)
+                        return v
+                }
+            )
+        )
     }
 }
 
@@ -470,10 +603,10 @@ func pluginsPage(model: AppModel): Unit {
     let tab = rememberState<Int64>("plugins.tab", {=> 0})
     HStack {
         SegmentedControl(["全部", "元数据", "下载", "登录", "脚本", "在线源"],
-            tab.project(get: {v => v }, set: {_, v => v }))
+            tab.project(get: {v => v}, set: {_, v => v}))
         Spacer()
         // 安装插件（wasm 上传/URL）首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("安装插件", {=> model.todoToast("安装插件（wasm 上传/URL）") }).role(ButtonRole.Primary)
+        Button("安装插件", {=> model.todoToast("安装插件（wasm 上传/URL）")}).role(ButtonRole.Primary)
     }.crossAxisAlignment(CrossAxisAlignment.Center).hug()
 
     let delNs = rememberState<String>("plugins.delNs", {=> ""})
@@ -485,30 +618,32 @@ func pluginsPage(model: AppModel): Unit {
     // 先按类型过滤出目标列表，再切块渲染（过滤逻辑与原 shown 计数一致）。
     let filtered = ArrayList<PluginItem>()
     for (p in list) {
-        if (want.size > 0 && p.pluginType != want) { continue }
+        if (want.size > 0 && p.pluginType != want) {
+            continue
+        }
         filtered.add(p)
     }
     // 卡片网格（原型 .grid-3：三列）。同分类页做法：LazyGrid 与页层 ScrollView 嵌套
     // 会拿到无限高，故退化为 HStack 三列等宽分行布局（见 chunkCats 注释）。
     // 异步网格同样走 ForEach(key)，防止数据到达后的重建错位。
-    ForEachIndexed(chunkPlugins(filtered, 3).toArray()) { _, row =>
-        HStack {
-            ForEach(row.toArray(), key: { p: PluginItem => p.namespace }) { p =>
-                VStack {
+    ForEachIndexed(chunkPlugins(filtered, 3).toArray()) {
+        _, row => HStack {
+            ForEach(row.toArray(), key: {p: PluginItem => p.namespace}) {
+                p => VStack {
                     pluginCard(model, p, delNs, delOpen, cfgNs, cfgOpen)
                 }.flex()
             }
             // 末行补空槽，保持三列等宽。
             for (_ in 0..(3 - row.size)) {
-                VStack { }.flex()
+                VStack {}.flex()
             }
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
     }
     if (filtered.size == 0) {
         let _ = Label("暂无插件").fontSize(12.fp).muted()
     }
-    confirmModal(delOpen, "删除插件", "确定要删除该插件吗？此操作将同时删除插件文件，不可恢复。", "删除", {=>
-        model.actPluginDelete(delNs.value)
+    confirmModal(delOpen, "删除插件", "确定要删除该插件吗？此操作将同时删除插件文件，不可恢复。", "删除", {
+        => model.actPluginDelete(delNs.value)
     })
     pluginConfigModal(model, cfgNs, cfgOpen)
 }
@@ -554,8 +689,12 @@ private func pluginTypeLabel(v: String): (String, PillTone) {
 
 // 插件卡（原型 .m-card：名称/命名空间/类型徽章/开关 + 作者/版本/描述 + 操作行）。
 private func pluginCard(model: AppModel, p: PluginItem, delNs: State<String>, delOpen: State<Bool>,
-        cfgNs: State<String>, cfgOpen: State<Bool>): Unit {
-    let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    cfgNs: State<String>, cfgOpen: State<Bool>): Unit {
+    let panel = if (model.isLight()) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_PANEL
+    }
     let (typeText, typeTone) = pluginTypeLabel(p.pluginType)
     VStack {
         HStack {
@@ -565,40 +704,53 @@ private func pluginCard(model: AppModel, p: PluginItem, delNs: State<String>, de
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
             pill(model, typeText, typeTone)
             // cui Switch 两参数均位置参数；绑定件按插件命名空间唯一化 key（见 switchBindKeyed）。
-            Switch("", switchBindKeyed("plugin.${p.namespace}", p.enabled,
-                {v => model.actPluginEnabled(p.namespace, v) }))
+            Switch("", switchBindKeyed("plugin.${p.namespace}", p.enabled, {v => model.actPluginEnabled(p.namespace, v)}))
                 .enabled(p.installed)
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
         Label("作者: ${p.author} · 版本: ${p.version}").fontSize(11.fp).muted()
         Label(p.description).fontSize(11.fp).muted().maxLines(2)
         HStack {
-            Button("删除", {=>
-                delNs.value = p.namespace
-                delOpen.value = true
-            }).role(ButtonRole.Danger)
+            Button(
+                "删除",
+                {
+                    =>
+                        delNs.value = p.namespace
+                        delOpen.value = true
+                }
+            ).role(ButtonRole.Danger)
             Spacer()
             // 应用字体无 emoji 字形，按钮用文字「配置」。
-            Button("配置", {=>
-                cfgNs.value = p.namespace
-                cfgOpen.value = true
-            }).enabled(p.installed && p.hasSchema)
+            Button(
+                "配置",
+                {
+                    =>
+                        cfgNs.value = p.namespace
+                        cfgOpen.value = true
+                }
+            ).enabled(p.installed && p.hasSchema)
         }.crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
-    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-        .padding(12.vp, 14.vp).background(panel, 14.vp).fillWidth()
+    }
+        .spacing(8.vp)
+        .crossAxisAlignment(CrossAxisAlignment.Start)
+        .hug()
+        .padding(12.vp, 14.vp)
+        .background(panel, 14.vp)
+        .fillWidth()
 }
 
 // 配置弹窗：首版收敛为说明性弹窗——参数 Schema 运行时按插件动态生成，
 // 完整表单（string/int/bool/array 同系统设置页 sysSettingRow 模式）留待后续迭代。
 private func pluginConfigModal(model: AppModel, cfgNs: State<String>, cfgOpen: State<Bool>): Unit {
-    Modal(cfgOpen, body: {=>
-        VStack {
+    Modal(cfgOpen, body: {
+        => VStack {
             Label("配置插件 · ${cfgNs.value}").fontSize(15.fp)
             Label("参数加载与编辑走系统设置同款表单（string/int 输入、bool 开关、array 逗号分隔）")
-                .fontSize(11.fp).muted()
+                .fontSize(11.fp)
+                .muted()
             HStack {
                 Spacer()
-                Button("取消", {=> cfgOpen.value = false })
-                Button("关闭", {=> cfgOpen.value = false }).role(ButtonRole.Primary)
+                Button("取消", {=> cfgOpen.value = false})
+                Button("关闭", {=> cfgOpen.value = false}).role(ButtonRole.Primary)
             }.spacing(8.vp)
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(440.vp)
     })
@@ -617,13 +769,15 @@ func statsPage(model: AppModel): Unit {
     // 系统信息（原型 kv-grid 两列定义列表 + motd）。
     detailCard(model, "系统信息") {
         match (model.serverInfo.value) {
-            case Some(info) =>
-                infoList(model, [
+            case Some(info) => infoList(
+                model,
+                [
                     ("服务器名称", info.name),
                     ("版本", "${info.versionName} ${info.version}"),
                     ("档案总数", "${info.totalArchives}"),
                     ("地址", model.settings.serverUrl)
-                ])
+                ]
+            )
             case None => pageLoading(model, "加载中…")
         }
     }
@@ -635,17 +789,25 @@ func statsPage(model: AppModel): Unit {
             let _ = Label("暂无标签数据").fontSize(12.fp).muted()
         } else {
             var maxC = 1
-            for (t in tags) { if (t.count > maxC) { maxC = t.count } }
+            for (t in tags) {
+                if (t.count > maxC) {
+                    maxC = t.count
+                }
+            }
             // lambda 不能捕获可变局部变量，取不可变副本进 FlowRow 构建器。
             let maxCount = maxC
             let _ = FlowRow {
-                ForEach(tags.toArray(), key: { t: CloudTag => t.tag }) { t =>
-                    // 字号 11..22fp 随权重线性放大（原型 11+count*0.45px，上限收敛）。
-                    let fs = 11.0 + 11.0 * Float64(t.count) / Float64(maxCount)
-                    ClickArea(onClick: {=> model.searchFromSettings(t.tag) }) {
-                        Label(t.display).fontSize(fs.fp)
-                            .foregroundColor(if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED })
-                    }
+                ForEach(tags.toArray(), key: {t: CloudTag => t.tag}) {
+                    t =>
+                        // 字号 11..22fp 随权重线性放大（原型 11+count*0.45px，上限收敛）。
+                        let fs = 11.0 + 11.0 * Float64(t.count) / Float64(maxCount)
+                        ClickArea(onClick: {=> model.searchFromSettings(t.tag)}) {
+                            Label(t.display).fontSize(fs.fp).foregroundColor(if (model.isLight()) {
+                                LANLU_L_MUTED
+                            } else {
+                                LANLU_MUTED
+                            })
+                        }
                 }
             }.spacing(14.vp)
         }

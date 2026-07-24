@@ -222,8 +222,11 @@ class HoverSensor <: Widget {
 // （IconName 枚举无对应项；原型符号 ⚙/◐/⌕/⇄ 在 NotoSansCJK/msyh 无字形，不依赖字体符号）。
 // Back/Menu/Swap/Heart 为阅读器顶栏（reader-redesign #topbar）增补；
 // Download/AddTank/Ellipsis 为详情操作卡增补（替代 ⬇/⊕/⋯ 文本兜底）。
+// Book/Pages/Disk/Box 为设置页统计卡增补（替代 ♥/▤/▣/● 文本符号，原型 .stat-card 图标）；
+// Tag/Globe/Sparkle/Monitor/Chart/Info 为设置导航图标增补（原型 #set-nav .side-item .ico）。
 public enum GhostGlyph {
     | Named(IconName) | Gear | Theme | Search | Back | Menu | Swap | Heart | Download | AddTank | Ellipsis
+    | Book | Pages | Disk | Box | Tag | Globe | Sparkle | Monitor | Chart | Info | Home
 }
 
 // 绘制 GhostGlyph 图形（16×16 视觉格，中心 cx/cy）：GhostIconButton 与阅读器模式钮共用。
@@ -299,6 +302,134 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
             renderer.fillCircle(cx - 5.5, cy, 1.3, color)
             renderer.fillCircle(cx, cy, 1.3, color)
             renderer.fillCircle(cx + 5.5, cy, 1.3, color)
+        case GhostGlyph.Book =>
+            // 📖：摊开的书——中缝 + 左右两页外框（统计卡「已读档案」）。
+            let pen = Pen(width: 1.5, color: color)
+            renderer.strokeLine(cx, cy - 6.0, cx, cy + 6.0, pen)
+            renderer.strokeLine(cx, cy - 6.0, cx - 6.5, cy - 4.5, pen)
+            renderer.strokeLine(cx - 6.5, cy - 4.5, cx - 6.5, cy + 4.5, pen)
+            renderer.strokeLine(cx - 6.5, cy + 4.5, cx, cy + 6.0, pen)
+            renderer.strokeLine(cx, cy - 6.0, cx + 6.5, cy - 4.5, pen)
+            renderer.strokeLine(cx + 6.5, cy - 4.5, cx + 6.5, cy + 4.5, pen)
+            renderer.strokeLine(cx + 6.5, cy + 4.5, cx, cy + 6.0, pen)
+        case GhostGlyph.Pages =>
+            // ▤→页堆：后页上缘露边 + 前页框内两条横线（统计卡「总阅读页数」）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeLine(cx - 4.5, cy - 7.0, cx + 6.5, cy - 7.0, pen)
+            renderer.strokeLine(cx + 6.5, cy - 7.0, cx + 6.5, cy - 4.5, pen)
+            renderer.strokeRoundedRect(Rect(cx - 6.5, cy - 4.5, 11.0, 12.0), 1.5, pen)
+            renderer.strokeLine(cx - 3.5, cy - 0.5, cx + 1.5, cy - 0.5, pen)
+            renderer.strokeLine(cx - 3.5, cy + 2.5, cx + 1.5, cy + 2.5, pen)
+        case GhostGlyph.Disk =>
+            // 🗄：三层数据库盘（设置导航「缓存」/统计卡「档案总数」语义存储）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeRoundedRect(Rect(cx - 6.5, cy - 7.0, 13.0, 4.6), 2.3, pen)
+            renderer.strokeRoundedRect(Rect(cx - 6.5, cy - 2.3, 13.0, 4.6), 2.3, pen)
+            renderer.strokeRoundedRect(Rect(cx - 6.5, cy + 2.4, 13.0, 4.6), 2.3, pen)
+        case GhostGlyph.Box =>
+            // 📦：箱体 + 顶盖中线（设置导航「插件管理」）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeRoundedRect(Rect(cx - 6.5, cy - 4.5, 13.0, 11.0), 1.5, pen)
+            renderer.strokeLine(cx - 6.5, cy - 1.5, cx + 6.5, cy - 1.5, pen)
+            renderer.strokeLine(cx, cy - 4.5, cx, cy - 1.5, pen)
+        case GhostGlyph.Tag =>
+            // 🏷：标签牌——尖角五边形 + 穿绳孔（设置导航「标签管理」）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeLine(cx - 6.5, cy - 6.5, cx + 1.5, cy - 6.5, pen)
+            renderer.strokeLine(cx + 1.5, cy - 6.5, cx + 6.5, cy - 1.5, pen)
+            renderer.strokeLine(cx + 6.5, cy - 1.5, cx - 1.5, cy + 6.5, pen)
+            renderer.strokeLine(cx - 1.5, cy + 6.5, cx - 6.5, cy - 1.5, pen)
+            renderer.strokeLine(cx - 6.5, cy - 1.5, cx - 6.5, cy - 6.5, pen)
+            renderer.fillCircle(cx - 2.5, cy - 2.5, 1.3, color)
+        case GhostGlyph.Globe =>
+            // 🌐：外圈 + 赤道线 + 两条纵经线弧（设置导航「语言」）。
+            let pen = Pen(width: 1.3, color: color)
+            renderer.strokeCircle(cx, cy, 7.0, pen)
+            renderer.strokeLine(cx - 7.0, cy, cx + 7.0, cy, pen)
+            // 纵经线用密集小线段逼近椭圆弧。
+            for (off in [-3.2, 3.2]) {
+                var px = cx + Float32(off)
+                var py = cy - 6.0
+                for (i in 1..13) {
+                    let t = -1.0 + 2.0 * Float64(i) / 12.0
+                    let ny = cy + Float32(t * 6.0)
+                    let nx = cx + Float32(off * (1.0 - t * t))
+                    renderer.strokeLine(px, py, nx, ny, pen)
+                    px = nx
+                    py = ny
+                }
+            }
+        case GhostGlyph.Sparkle =>
+            // ✦：四角星——中心向四正点细线 + 四斜点短线（设置导航「智能分类」）。
+            let pen = Pen(width: 1.5, color: color)
+            renderer.strokeLine(cx, cy - 7.0, cx, cy + 7.0, pen)
+            renderer.strokeLine(cx - 7.0, cy, cx + 7.0, cy, pen)
+            let pen2 = Pen(width: 1.2, color: color)
+            renderer.strokeLine(cx - 3.4, cy - 3.4, cx + 3.4, cy + 3.4, pen2)
+            renderer.strokeLine(cx + 3.4, cy - 3.4, cx - 3.4, cy + 3.4, pen2)
+        case GhostGlyph.Monitor =>
+            // 🖥：屏框 + 底座（设置导航「系统设置」）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeRoundedRect(Rect(cx - 7.0, cy - 6.0, 14.0, 10.0), 1.5, pen)
+            renderer.strokeLine(cx, cy + 4.0, cx, cy + 6.5, pen)
+            renderer.strokeLine(cx - 4.0, cy + 6.5, cx + 4.0, cy + 6.5, pen)
+        case GhostGlyph.Chart =>
+            // 📊：三根递增柱 + 底线（设置导航「统计信息」）。
+            let pen = Pen(width: 1.6, color: color)
+            renderer.strokeLine(cx - 7.0, cy + 6.5, cx + 7.0, cy + 6.5, pen)
+            renderer.strokeLine(cx - 4.5, cy + 1.5, cx - 4.5, cy + 5.0, Pen(width: 2.6, color: color))
+            renderer.strokeLine(cx, cy - 2.5, cx, cy + 5.0, Pen(width: 2.6, color: color))
+            renderer.strokeLine(cx + 4.5, cy - 6.5, cx + 4.5, cy + 5.0, Pen(width: 2.6, color: color))
+        case GhostGlyph.Info =>
+            // ℹ：外圈 + i 点与竖（设置导航「关于」）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeCircle(cx, cy, 7.0, pen)
+            renderer.fillCircle(cx, cy - 3.4, 1.2, color)
+            renderer.strokeLine(cx, cy - 0.5, cx, cy + 4.0, Pen(width: 1.8, color: color))
+        case GhostGlyph.Home =>
+            // ⌂：屋顶 + 屋身（关于页「项目主页」，原型 ⌂）。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeLine(cx - 7.0, cy - 0.5, cx, cy - 6.5, pen)
+            renderer.strokeLine(cx, cy - 6.5, cx + 7.0, cy - 0.5, pen)
+            renderer.strokeLine(cx - 5.0, cy - 1.5, cx - 5.0, cy + 6.0, pen)
+            renderer.strokeLine(cx + 5.0, cy - 1.5, cx + 5.0, cy + 6.0, pen)
+            renderer.strokeLine(cx - 5.0, cy + 6.0, cx + 5.0, cy + 6.0, pen)
+    }
+}
+
+// 非按钮图形图标：在 measure 尺寸内居中绘制 GhostGlyph（统计卡/设置行/导航前置图标用，
+// GhostIconButton 是整块热区，这里只要纯展示）。
+public class GlyphIcon <: Widget {
+    private let glyph: GhostGlyph
+    private let extent: Float32
+    private let color: ?Color
+    private var frame = Rect.zero()
+
+    public init(glyph: GhostGlyph, size!: Float32 = 16.0, color!: ?Color = None) {
+        this.glyph = glyph
+        this.extent = size
+        this.color = color
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(extent, extent)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let c = match (color) {
+            case Some(v) => v
+            case None => ctx.theme.text
+        }
+        drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(), c)
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
     }
 }
 
@@ -480,6 +611,7 @@ class CoverBorder <: Widget {
 
 // 侧栏导航项（原型 .side-item）：全宽行（高 34），圆角 9；激活铺 accentSoft 圆角底 +
 // accent 文字（.side-item.on），hover 铺 overlayHover 底且文字保持主文字色，
+// 可选左侧 18vp 前置图标（原型 .side-item .ico，书库侧栏不带、设置导航带），
 // 可选右侧 muted 计数（11fp）；左键抬起触发 onClick。自定义 Widget（同 ClickSensor 协议）。
 class NavItem <: Widget {
     private let label: String
@@ -487,13 +619,16 @@ class NavItem <: Widget {
     private let active: Bool
     private let onClick: () -> Unit
     private let hoverId: String
+    private let glyph: ?GhostGlyph
     private var frame = Rect.zero()
 
-    public init(label: String, active!: Bool = false, count!: String = "", onClick!: () -> Unit) {
+    public init(label: String, active!: Bool = false, count!: String = "", glyph!: ?GhostGlyph = None,
+        onClick!: () -> Unit) {
         this.label = label
         this.count = count
         this.active = active
         this.onClick = onClick
+        this.glyph = glyph
         // 侧栏条目按文案唯一（全部/仅收藏/…/分类名），整树每帧重建不留残留。
         this.hoverId = "NavItem:${label}"
         emit(this)
@@ -513,11 +648,19 @@ class NavItem <: Widget {
         } else if (ctx.isHovered(hoverId)) {
             ctx.renderer.fillRoundedRect(frame, 9.0, ctx.theme.overlayHover)
         }
-        let th = ctx.renderer.textHeight(pointSize: FontSizes.CONTROL)
-        let ty = frame.centerY() - th / 2.0
         // 激活金文字（.side-item.on color: var(--accent)）；hover/常态均主文字色。
         let labelColor = if (active) { ctx.theme.accent } else { ctx.theme.text }
-        ctx.renderer.text(label, frame.x + 12.0, ty, labelColor, pointSize: FontSizes.CONTROL)
+        var textX = frame.x + 12.0
+        match (glyph) {
+            case Some(g) =>
+                // 原型 .side-item .ico：18px 图标位 + 9px 间距；激活态图标随文字转金色。
+                drawGhostGlyph(ctx.renderer, g, textX + 9.0, frame.centerY(), labelColor)
+                textX += 27.0
+            case None => ()
+        }
+        let th = ctx.renderer.textHeight(pointSize: FontSizes.CONTROL)
+        let ty = frame.centerY() - th / 2.0
+        ctx.renderer.text(label, textX, ty, labelColor, pointSize: FontSizes.CONTROL)
         if (count.size > 0) {
             // 原型 .side-item .cnt：11px、低透明（muted 即低对比语义）。
             let cw = ctx.renderer.textWidth(count, pointSize: 11.0)
