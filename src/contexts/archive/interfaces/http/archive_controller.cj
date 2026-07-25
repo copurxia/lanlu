@@ -301,29 +301,16 @@ public class ArchiveController {
      * 保留 unreserved 字符（字母、数字、-_.~），其余字符进行百分号编码。
      */
     private static func urlEncodeComponent(input: String): String {
-        let unreserved = HashSet<UInt8>()
-        let hexChars = [
-            UInt8(UInt32(r'0')), UInt8(UInt32(r'1')), UInt8(UInt32(r'2')), UInt8(UInt32(r'3')),
-            UInt8(UInt32(r'4')), UInt8(UInt32(r'5')), UInt8(UInt32(r'6')), UInt8(UInt32(r'7')),
-            UInt8(UInt32(r'8')), UInt8(UInt32(r'9')), UInt8(UInt32(r'A')), UInt8(UInt32(r'B')),
-            UInt8(UInt32(r'C')), UInt8(UInt32(r'D')), UInt8(UInt32(r'E')), UInt8(UInt32(r'F'))
-        ]
-        unsafe {
-            for (c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~".rawData()) {
-                unreserved.add(c)
-            }
-        }
+        let hex = ["0","1","2","3","4","5","6","7","8","9","A","B","C","D","E","F"]
         let bytes = unsafe { input.rawData() }
         var out = ""
         for (b in bytes) {
-            if (unreserved.contains(b)) {
+            // A-Z(65-90) a-z(97-122) 0-9(48-57) -(45) _(95) .(46) ~(126)
+            if ((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) ||
+                b == 45 || b == 95 || b == 46 || b == 126) {
                 out += String.fromUtf8(Array<UInt8>(1, {_ => b}))
             } else {
-                let high = Int64((UInt32(b) >> 4) & 0x0Fu32)
-                let low = Int64(UInt32(b) & 0x0Fu32)
-                out += "%"
-                out += String.fromUtf8(Array<UInt8>(1, {_ => hexChars[high]}))
-                out += String.fromUtf8(Array<UInt8>(1, {_ => hexChars[low]}))
+                out += "%" + hex[Int64((UInt32(b) >> 4) & 0x0Fu32)] + hex[Int64(UInt32(b) & 0x0Fu32)]
             }
         }
         return out

@@ -679,47 +679,79 @@ public static func setMetadataAssetId(entityType: String, entityId: String, slot
         })
     }
 
-public static func getPageThumbAssetId(parentArchiveId: String, pageNumber: Int32): Int64 {
-        let pages = listPageMetadata(parentArchiveId)
-        for (page in pages) {
-            if (page.page_number == pageNumber) {
-                return page.thumb_asset_id
-            }
+    public static func getPageThumbAssetId(parentArchiveId: String, pageNumber: Int32): Int64 {
+        let normalizedParent = parentArchiveId.trimAscii()
+        if (normalizedParent.size == 0 || pageNumber <= 0) { return 0 }
+
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let sql = "SELECT COALESCE(ma.asset_id, 0) FROM metadata_objects mo " +
+                              "LEFT JOIN metadata_assets ma ON ma.metadata_id = mo.id AND ma.slot = 'thumb' " +
+                              "WHERE mo.entity_type = 'page' AND mo.parent_entity_type = 'archive' " +
+                              "AND mo.parent_entity_id = $1 AND mo.page_number = $2"
+                    return db.rawOne<Int64>(sql, [vtext(normalizedParent), vint(Int64(pageNumber))],
+                        { row => row.getInt64(0) }) ?? 0
+                } catch (e: Exception) {
+                    getLogger("metadata_dao").error("查询页缩略图ID失败", ("error", e.message))
+                    return 0
+                }
+            case None =>
+                getLogger("metadata_dao").error("无法连接到数据库")
+                return 0
         }
-        return 0
     }
 
     public static func getPageThumbAssetIds(parentArchiveId: String): Array<Int64> {
-        let pages = listPageMetadata(parentArchiveId)
-        let out = ArrayList<Int64>()
-        let seen = HashSet<Int64>()
-        for (page in pages) {
-            if (page.thumb_asset_id > 0 && !seen.contains(page.thumb_asset_id)) {
-                seen.add(page.thumb_asset_id)
-                out.add(page.thumb_asset_id)
-            }
+        let normalizedParent = parentArchiveId.trimAscii()
+        if (normalizedParent.size == 0) { return Array<Int64>() }
+
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    let sql = "SELECT DISTINCT COALESCE(ma.asset_id, 0) FROM metadata_objects mo " +
+                              "LEFT JOIN metadata_assets ma ON ma.metadata_id = mo.id AND ma.slot = 'thumb' " +
+                              "WHERE mo.entity_type = 'page' AND mo.parent_entity_type = 'archive' " +
+                              "AND mo.parent_entity_id = $1 AND ma.asset_id > 0"
+                    return db.raw<Int64>(sql, [vtext(normalizedParent)], { row => row.getInt64(0) })
+                } catch (e: Exception) {
+                    getLogger("metadata_dao").error("查询页缩略图ID列表失败", ("error", e.message))
+                    return Array<Int64>()
+                }
+            case None =>
+                getLogger("metadata_dao").error("无法连接到数据库")
+                return Array<Int64>()
         }
-        return out.toArray()
     }
 
     public static func getPageAttachmentAssetIds(parentArchiveId: String, slot!: String = ""): Array<Int64> {
-        let pages = listPageMetadata(parentArchiveId)
-        let out = ArrayList<Int64>()
-        let seen = HashSet<Int64>()
-        for (page in pages) {
-            for (attachment in page.attachments) {
-                let normalizedSlot = slot.trimAscii().toAsciiLower()
-                if (normalizedSlot.size > 0 && attachment.slot.trimAscii().toAsciiLower() != normalizedSlot) {
-                    continue
+        let normalizedParent = parentArchiveId.trimAscii()
+        if (normalizedParent.size == 0) { return Array<Int64>() }
+
+        let normalizedSlot = slot.trimAscii().toAsciiLower()
+
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    var sql = "SELECT DISTINCT mpa.asset_id FROM metadata_objects mo " +
+                              "JOIN metadata_page_assets mpa ON mpa.metadata_id = mo.id " +
+                              "WHERE mo.entity_type = 'page' AND mo.parent_entity_type = 'archive' " +
+                              "AND mo.parent_entity_id = $1 AND mpa.asset_id > 0"
+                    var params = ArrayList<Value>()
+                    params.add(vtext(normalizedParent))
+                    if (normalizedSlot.size > 0) {
+                        sql += " AND mpa.slot = $2"
+                        params.add(vtext(normalizedSlot))
+                    }
+                    return db.raw<Int64>(sql, params.toArray(), { row => row.getInt64(0) })
+                } catch (e: Exception) {
+                    getLogger("metadata_dao").error("查询页附件资产ID列表失败", ("error", e.message))
+                    return Array<Int64>()
                 }
-                let assetId = attachment.asset_id
-                if (assetId > 0 && !seen.contains(assetId)) {
-                    seen.add(assetId)
-                    out.add(assetId)
-                }
-            }
+            case None =>
+                getLogger("metadata_dao").error("无法连接到数据库")
+                return Array<Int64>()
         }
-        return out.toArray()
     }
 
     public static func deletePageMetadata(parentArchiveId: String): Bool {

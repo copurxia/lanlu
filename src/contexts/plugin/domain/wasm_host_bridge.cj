@@ -3216,6 +3216,8 @@ public class WasmHostBridge {
         stateMutex.unlock()
     }
 
+    private static let MAX_CACHED_ADJACENT_ITEMS: Int64 = 100
+
     private static func getCachedAdjacentListing(executionId: Int64, cacheKey: String): Option<String> {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
@@ -3233,6 +3235,19 @@ public class WasmHostBridge {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
+                if (state.adjacentListings.size >= MAX_CACHED_ADJACENT_ITEMS) {
+                    // FIFO eviction: remove oldest entry to prevent unbounded growth
+                    let keys = state.adjacentListings.keys()
+                    var firstKey: ?String = None
+                    for (k in keys) {
+                        firstKey = Some(k)
+                        break
+                    }
+                    match (firstKey) {
+                        case Some(k) => state.adjacentListings.remove(k)
+                        case None => ()
+                    }
+                }
                 state.adjacentListings[cacheKey] = responseJson
                 executionStates[executionId] = state
             case None => ()
@@ -3257,6 +3272,19 @@ public class WasmHostBridge {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
+                if (state.adjacentTexts.size >= MAX_CACHED_ADJACENT_ITEMS) {
+                    // FIFO eviction: remove oldest entry to prevent unbounded growth
+                    let keys = state.adjacentTexts.keys()
+                    var firstKey: ?String = None
+                    for (k in keys) {
+                        firstKey = Some(k)
+                        break
+                    }
+                    match (firstKey) {
+                        case Some(k) => state.adjacentTexts.remove(k)
+                        case None => ()
+                    }
+                }
                 state.adjacentTexts[cacheKey] = text
                 executionStates[executionId] = state
             case None => ()
