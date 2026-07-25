@@ -447,9 +447,6 @@ public class ReaderModel {
     // webtoon 由滚动驱动，不响应按键翻页。虚拟页上「上一页」回本 segment 最后真实页
     //（moveTo 内按双页/拆分封面规则吸附，对齐 frontend computeCollectionEndReturnRealPage）。
     public func turnPage(forward: Bool): Unit {
-        if (isWebtoon()) {
-            return
-        }
         let total = streamLength()
         if (total == 0) {
             return

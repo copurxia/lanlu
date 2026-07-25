@@ -1034,6 +1034,10 @@ public class AppModel {
         reader.open(arcid, startPage - 1)
         readerIndex.value = reader.displayPage
         readerPageSlider.value = Float32(reader.displayPage)
+        // 自动播放计时重置：每次进入阅读器都从此刻开始计时，避免继承旧的
+        // lastAutoPlayTurnMs（来自上一本书或 AppModel 初始值 0）导致立即触发翻页并误判末页。
+        // 必须在 api ?? return 之前，否则离线模式会跳过重置。
+        lastAutoPlayTurnMs = reader.clock()
         page.value = Page.Reader(arcid, startPage)
         let a = api ?? return
         let _ = worker.submit("files:${arcid}", {=> a.files(arcid)})
