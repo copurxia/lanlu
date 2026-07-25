@@ -74,8 +74,14 @@ private func readerBody(model: AppModel): Unit {
         Panel { Label("加载页列表…").muted() }
         return
     }
-    // flex 让页面区在父容器中吃满分配高度（顶栏已是叠层浮层，页面区恒为全高；
-    // ZStack 默认非 flexible，不加 flex 时舞台量不出页面区高度）。
+    // chrome 可见时，内容区预留顶栏高度（52vp），避免舞台内容被顶栏遮挡。
+    // 顶栏是 ZStack 浮层，不占布局空间；这里用固定 padding 把内容区下推。
+    // padding 在 chrome 切换时瞬间生效（不参与顶栏 Spring 动画），避免逐帧重排。
+    let topPad = if (model.reader.chromeVisible) {
+        Float32(READER_BAR_HEIGHT)
+    } else {
+        0.0f32
+    }
     ZStack {
         // 点击区叠在舞台之下：舞台自绘不消费翻页语义的点击（失败重试/双击缩放/
         // 音频控制除外，见 ReaderStage.handle），落到底层照样触发。
@@ -114,5 +120,5 @@ private func readerBody(model: AppModel): Unit {
         ReaderStage(model)
         // 底部 lane 胶囊：随 chrome 显隐（Spring 滑出/淡出在 dock 内部）。
         readerDock(model)
-    }.flex()
+    }.flex().padding(0.0, topPad, 0.0, 0.0)
 }
