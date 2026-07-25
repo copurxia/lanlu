@@ -91,7 +91,14 @@ private func readerBody(model: AppModel): Unit {
                 }
             }
             Flexible(weight: if (model.reader.tapTurnPage) { 4.0 } else { 10.0 }) {
-                ClickArea(onClick: {=> model.toggleReaderChrome() }) {
+                // 中央点击：autoHide 开启时切换 chrome 显隐（标准阅读器交互）；autoHide
+                // 关闭时不应隐藏 chrome——用户没开自动隐藏就是期望 chrome 始终可见，
+                // 否则任何点击（占 100% 宽度）都会误藏 chrome 且移动鼠标无法恢复。
+                ClickArea(onClick: {=>
+                    if (model.reader.autoHide) {
+                        model.toggleReaderChrome()
+                    }
+                }) {
                     Spacer().fillHeight()
                 }
             }

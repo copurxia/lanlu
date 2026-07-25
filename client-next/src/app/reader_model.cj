@@ -670,6 +670,12 @@ public class ReaderModel {
     public func setAutoHide(v: Bool): Unit {
         _autoHide = v
         settings.readerAutoHide = v
+        // 关闭自动隐藏时立即亮出 chrome：避免此前 autoHide 为 true 时 chrome 已被隐藏，
+        // 关闭开关后用户看不到顶栏/工具栏且移动鼠标也无法恢复（noteActivity 仅 autoHide
+        // 为 true 时恢复 chromeVisible）。
+        if (!v) {
+            _chromeVisible = true
+        }
         persist()
     }
 
