@@ -45,6 +45,8 @@ public class AppSettings {
     public var username: String = ""
     // 界面主题："dark"（默认）| "light"。
     public var theme: String = "dark"
+    // 界面字体：TTF/TTC/OTF 文件路径。空串 = 使用系统默认字体。需重启生效。
+    public var fontPath: String = ""
     // 阅读器设置默认值对齐 frontend use-reader-settings；ReaderModel 读初值并写回。
     public var readerMode: String = "single-ltr" // single-ltr | single-rtl | single-ttb | webtoon
     public var readerDoublePage: Bool = false
@@ -164,6 +166,7 @@ public func loadSettings(): AppSettings {
     if (s.theme != "light") {
         s.theme = "dark"
     }
+    s.fontPath = kv.getString("appearance.font_path")
     s.readerMode = kv.getString("reader.mode", defaultValue: "single-ltr")
     if (s.readerMode != "single-ltr" && s.readerMode != "single-rtl" && s.readerMode != "single-ttb" && s.readerMode !=
         "webtoon") {
@@ -209,6 +212,7 @@ public func saveSettings(s: AppSettings): Unit {
     let oldCount = kv.getInt64("servers.count")
     let _ = kv.set("schema.version", Int64(1))
     let _ = kv.set("appearance.theme", s.theme)
+    let _ = kv.set("appearance.font_path", s.fontPath)
     let _ = kv.set("reader.mode", s.readerMode)
     let _ = kv.set("reader.double_page", s.readerDoublePage)
     let _ = kv.set("reader.split_cover", s.readerSplitCover)

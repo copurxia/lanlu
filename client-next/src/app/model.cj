@@ -1464,16 +1464,42 @@ public class AppModel {
     // app 包直接引用会成环，故以 (String) -> Unit 回调桥接（参数 "dark"|"light"）。
     public var themeChangeHandler: ?(String) -> Unit = None
 
-    // 切换主题：更新设置、落盘，再经注入回调应用到运行中的 DesktopApp（即切即生效）。
+    // ── 主题涟漪动画状态 ──
+    // 点击切换主题时不立即应用，而是经 ThemeRipple 组件播放扩展圆动画，
+    // 动画覆盖全窗口后再执行实际切换（网页 Material 涟漪式明暗切换）。
+    public var themeRipplePending: Bool = false
+    public var themeRippleTarget: String = ""
+
+    // 切换主题：不再即切即生效，改为设置待处理标记，由 ThemeRipple 组件
+    // 播放涟漪动画并在完成时回调 applyPendingTheme 落盘并应用新主题。
     public func setTheme(mode: String): Unit {
         if (mode != "dark" && mode != "light") {
             return
         }
-        settings.theme = mode
+        if (mode == settings.theme) {
+            return
+        }
+        themeRippleTarget = mode
+        themeRipplePending = true
+    }
+
+    // 涟漪动画完成后调用：更新内存设置、落盘、经注入回调应用到 DesktopApp。
+    public func applyPendingTheme(): Unit {
+        if (themeRippleTarget.size == 0) {
+            return
+        }
+        settings.theme = themeRippleTarget
         persistSettings(settings)
         if (let Some(h) <- themeChangeHandler) {
-            h(mode)
+            h(themeRippleTarget)
         }
+    }
+
+    // 设置界面字体（需重启生效）。
+    public func setFontPath(path: String): Unit {
+        settings.fontPath = path
+        persistSettings(settings)
+        toaster.show("字体将在下次启动时生效", kind: ToastKind.Info)
     }
 
     // ---- 设置页 ----

@@ -4,6 +4,7 @@ import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SearchItem, TrendPoint, PasskeyItem, SessionItem, TokenItem}
 import std.collection.ArrayList
+import std.fs.{Directory, Path, exists}
 
 // 设置页（原型 settings-redesign.html）：左 224vp 分类导航 + 右侧内容页。
 // 板块索引：0 概览 / 1 账户安全 / 2 外观 / 3 语言 / 4 缓存 / 5 诊断 / 6 分类 /
@@ -13,8 +14,6 @@ import std.collection.ArrayList
 
 // 侧栏宽（原型 #set-nav 224px，与书库侧栏同规格）。
 private let SET_NAV_W: Float32 = 224.0
-// 内容列定宽（原型 .set-page{max-width:640px}）：卡片跨轴拉伸通栏，不随内容收缩。
-private let SET_CONTENT_W: Float32 = 640.0
 
 public func settingsView(model: AppModel): Unit {
     // 进场加载一次：rememberState 随页面卸载清除（StateStore 未访问条目即删），
@@ -59,8 +58,7 @@ public func settingsView(model: AppModel): Unit {
                     case _ => placeholderPage(model, sectionName(section.value))
                 }
             }.spacing(16.vp).crossAxisAlignment(CrossAxisAlignment.Start)
-            let contentMaxW: Float32 = if (isWideSection(section.value)) { 100000.0 } else { SET_CONTENT_W }
-            content.fillWidth().maxWidth(contentMaxW).padding(22.vp, 26.vp, 22.vp, 48.vp)
+            content.fillWidth().padding(22.vp, 26.vp, 22.vp, 48.vp)
         }
     }.spacing(0.0)
     // Modal 不占布局空间（measure 返回零），作为兄弟节点挂在页面根部（同 login_view）。
@@ -443,6 +441,47 @@ private func avatarHead(username: String): String {
     firstChar(username)
 }
 
+// ── 字体扫描：运行时读取系统已安装字体 ──
+
+// 字体项：路径 + 展示名。空路径 = 系统默认。
+public class FontItem {
+    public let path: String
+    public let label: String
+
+    public init(path: String, label: String) {
+        this.path = path
+        this.label = label
+    }
+}
+
+// 系统字体目录列表。
+private let FONT_DIRS = [
+    "/usr/share/fonts",
+    "/usr/local/share/fonts"
+]
+
+// 扫描系统字体目录，返回已安装的 .ttf/.ttc/.otf 字体列表。
+private func scanSystemFonts(): ArrayList<FontItem> {
+    let list = ArrayList<FontItem>()
+    // 首位：系统默认（空路径 = 让 NativeTextRenderer 走候选列表）
+    list.add(FontItem("", "系统默认"))
+    for (root in FONT_DIRS) {
+        let rootPath = Path(root)
+        if (!exists(rootPath)) {
+            continue
+        }
+        // Directory.walk 递归遍历；回调收集字体文件路径
+        Directory.walk(rootPath, {info =>
+            let name = info.name
+            if (name.endsWith(".ttf") || name.endsWith(".ttc") || name.endsWith(".otf")) {
+                list.add(FontItem(info.path.toString(), name))
+            }
+            true // 继续遍历
+        })
+    }
+    list
+}
+
 private func appearancePage(model: AppModel): Unit {
     pageHeader("外观", "界面主题，切换后立即生效并持久化")
     detailCard(model, "主题") {
@@ -460,6 +499,40 @@ private func appearancePage(model: AppModel): Unit {
                 )
             )
         }
+    }
+    fontCard(model)
+}
+
+// ── 字体设置卡片 ──
+
+private func fontCard(model: AppModel): Unit {
+    let fonts = rememberState<ArrayList<FontItem>>("settings.fonts", {=> scanSystemFonts()}).value
+    // 初始化选中索引：按当前 fontPath 匹配字体列表
+    let selected = rememberState<Int64>("settings.fontIdx", {=>
+        var idx: Int64 = 0
+        for (i in 0..fonts.size) {
+            if (fonts[i].path == model.settings.fontPath) {
+                idx = i
+                break
+            }
+        }
+        idx
+    })
+    // 构建下拉选项（仅展示名；限制 50 条避免过长）
+    let maxItems = min(fonts.size, 50)
+    let labels = ArrayList<String>()
+    for (i in 0..maxItems) {
+        labels.add(fonts[i].label)
+    }
+    detailCard(model, "界面字体") {
+        settingRowIcon(model, "字体", "选择系统字体；需重启客户端生效", GhostGlyph.Pages) {
+            Dropdown(labels.toArray(), selected, key: "fontSelect")
+        }
+    }
+    // 检测用户选择变更，写入设置并落盘
+    let idx = selected.value
+    if (idx >= 0 && idx < fonts.size && fonts[idx].path != model.settings.fontPath) {
+        model.setFontPath(fonts[idx].path)
     }
 }
 
@@ -522,14 +595,6 @@ private func logoutConfirmModal(model: AppModel, logoutOpen: State<Bool>): Unit 
 }
 
 // ==================== 设置区共享件（原型徽章/表单/确认框） ====================
-
-// 宽板块判定（原型 .set-page.wide）。
-func isWideSection(s: Int64): Bool {
-    match (s) {
-        case 0 | 1 | 6 | 7 | 9 | 11 | 12 | 13 | 14 => true
-        case _ => false
-    }
-}
 
 public enum PillTone {
     Accent | Blue | Green | Red | Orange | Gray | Outline

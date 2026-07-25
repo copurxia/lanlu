@@ -123,7 +123,9 @@ main(): Int64 {
     } else {
         model.tryResumeSession()
     }
-    let app = DesktopApp(WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight()),
+    let app = DesktopApp(
+        WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(),
+            fontPath: if (settings.fontPath.size > 0) { Some(settings.fontPath) } else { None }),
         theme: lanluThemeFor(settings.theme))
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
@@ -160,6 +162,7 @@ main(): Int64 {
                     rootView(model)
                 }.spacing(0.0)
             }
+            ThemeRipple(model)
             ToastLayer(model.toaster)
         }
     }
