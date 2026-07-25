@@ -888,16 +888,18 @@ class ReaderStage <: Widget {
 
     // ── 事件：滚轮（长图滚动/翻页）+ 双击缩放 + 失败页点击重试 + 音频舞台控制 ──
 
-    // 长图滚动生效判定：longPage 开 + 单页图片 + 非 webtoon + 未放大 + 宽适配后高度
-    // 溢出舞台。返回最大滚动偏移；不启用返回 None（双页 spread/音频页/未就绪天然不满足）。
+    // 长图滚动生效判定：longPage 开 + 单页图片 + TTB 模式 + 未放大 + 宽适配后高度
+    // 溢出舞台。LTR/RTL 左右翻页模式下不应启用——长图按宽度拉伸会导致纵向溢出视口，
+    // 左右翻页应始终 contain 适配。返回最大滚动偏移；不启用返回 None。
     private func longPageMax(ctx: UiContext): ?Float32 {
         let r = model.reader
         if (!r.longPage || keys.size != 1 || st.zoomed) {
             return None
         }
+        // 只在纵向阅读模式下启用长图滚动：LTR/RTL 左右翻页使用 contain 适配即可。
         match (r.mode) {
-            case ReadingMode.Webtoon => return None
-            case _ => ()
+            case ReadingMode.SingleTtb => ()
+            case _ => return None
         }
         let key = keys[0]
         if (key.size == 0 || model.imageState(key).value != "ready") {
