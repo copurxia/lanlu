@@ -803,6 +803,7 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
     public var coverAssetId: Int64 = 0
     public var createdAt: String = ""
     public var updatedAt: String = ""
+    public var isfavorite: Bool = false
 
     public static func fromJson(r: JsonReader): TankoubonInfo {
         let res = TankoubonInfo()
@@ -824,6 +825,7 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
                             case "assets" => res.coverAssetId = parseTankCoverAssets(r.readValueBytes())
                             case "created_at" => res.createdAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "updated_at" => res.updatedAt = decodeRaw<String>(r.readValueBytes(), "")
+                            case "isfavorite" => res.isfavorite = decodeRaw<Bool>(r.readValueBytes(), false)
                             case _ => r.skip()
                         }
                     }

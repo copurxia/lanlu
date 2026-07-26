@@ -189,6 +189,7 @@ func tankoubonListParsesBareResultArray(): Unit {
     // 封面档案 id = 首个成员（children[0]），对齐 frontend TankoubonCard firstArchiveId。
     @Expect(list[0].coverArcid, "a1")
     @Expect(list[0].updatedAt, "2024-05-01")
+    @Expect(list[0].isfavorite, false)
     @Expect(list[1].id, "TANK_2")
     @Expect(list[1].coverArcid, "")
 }
@@ -216,6 +217,7 @@ func tankoubonParsesMetadataObjectShape(): Unit {
     @Expect(t.progress, Float32(6.0))
     @Expect(t.coverArcid, "a88")
     @Expect(t.updatedAt, "2024-06-02")
+    @Expect(t.isfavorite, true)
 }
 
 // ===== T11: TankoubonInfo 详情扩展（description/tags/coverAssetId/createdAt 容忍两形态）=====

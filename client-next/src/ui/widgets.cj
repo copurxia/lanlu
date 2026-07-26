@@ -285,10 +285,18 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
             renderer.strokeLine(cx - 6.5, cy + 3.5, cx - 3.0, cy + 0.5, pen)
             renderer.strokeLine(cx - 6.5, cy + 3.5, cx - 3.0, cy + 6.5, pen)
         case GhostGlyph.Heart =>
-            // ♥ 文本字形（FavChip 同款，字体可达；♡ 轮廓字形覆盖无保障，恒用实心心，靠颜色分态）。
-            let tw = renderer.textWidth("♥", pointSize: 15.0)
-            let th = renderer.textHeight(pointSize: 15.0)
-            renderer.text("♥", cx - tw / 2.0, cy - th / 2.0, color, pointSize: 15.0)
+            // 心形使用矢量折线近似 lucide heart，避免 Linux 字体缺少 ♥ 时只剩按钮底板。
+            let pen = Pen(width: 1.7, color: color)
+            let points: Array<(Float32, Float32)> = [
+                (-6.5, -2.7), (-6.0, -4.5), (-4.6, -5.7), (-2.8, -6.0),
+                (-1.2, -5.3), (0.0, -3.9), (1.2, -5.3), (2.8, -6.0),
+                (4.6, -5.7), (6.0, -4.5), (6.5, -2.7), (6.1, -0.5),
+                (4.6, 1.8), (0.0, 6.4), (-4.6, 1.8), (-6.1, -0.5), (-6.5, -2.7)
+            ]
+            for (i in 0..points.size - 1) {
+                renderer.strokeLine(cx + points[i][0], cy + points[i][1],
+                    cx + points[i + 1][0], cy + points[i + 1][1], pen)
+            }
         case GhostGlyph.Download =>
             // ⤓：下箭头入盘（干线 + 箭头头 + 三边底盘，原型 .action-icons 下载钮）。
             let pen = Pen(width: 1.6, color: color)
@@ -917,46 +925,75 @@ class CoverProgress <: Widget {
     }
 }
 
-// 收藏 chip（原型 .cover .fav）：右下 28vp 圆，rgba(0,0,0,.6) 底 + ♥，压在封面媒体之上
-// （底/未收藏白色两主题不翻转，原型注释「封面上的 chip 不随主题翻转」）；已收藏常显 accent 色，
-// 否则 hover 时浮现。点击切换收藏并消费事件（不穿透成卡片点击）。
-class FavChip <: Widget {
-    private let hoverId: String
+// 封面浮层操作层：对应 frontend BaseMediaCard 左下角两个 32×32 secondary icon button。
+// 绘制与命中共用 detailsRect/favoriteRect，避免布局包装层造成视觉位置与点击 frame 偏离。
+class CardHoverActions <: Widget {
+    private let key: String
+    private let hoverVisible: State<Bool>
     private let favorited: Bool
-    private let onToggle: () -> Unit
+    private let onDetails: () -> Unit
+    private let onFavorite: () -> Unit
     private var frame = Rect.zero()
 
-    public init(hoverId: String, favorited: Bool, onToggle: () -> Unit) {
-        this.hoverId = hoverId
+    public init(key: String, visible: State<Bool>, favorited: Bool, onDetails: () -> Unit,
+        onFavorite: () -> Unit) {
+        this.key = key
+        this.hoverVisible = visible
         this.favorited = favorited
-        this.onToggle = onToggle
+        this.onDetails = onDetails
+        this.onFavorite = onFavorite
         emit(this)
     }
 
     public func measure(_: UiContext, _: Size): Size {
-        Size(28.0, 28.0)
+        Size.zero()
     }
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
     }
 
+    private func detailsRect(): Rect {
+        Rect(frame.x + 10.0, frame.y + frame.h - 42.0, 32.0, 32.0)
+    }
+
+    private func favoriteRect(): Rect {
+        Rect(frame.x + 49.0, frame.y + frame.h - 42.0, 32.0, 32.0)
+    }
+
+    private func drawButton(ctx: UiContext, rect: Rect, glyph: GhostGlyph, hoverId: String,
+        active: Bool): Unit {
+        let bg = if (ctx.isHovered(hoverId)) {
+            Color.rgba(255, 255, 255, 64)
+        } else {
+            Color.rgba(255, 255, 255, 38)
+        }
+        ctx.renderer.fillRoundedRect(rect, 8.0, bg)
+        drawGhostGlyph(ctx.renderer, glyph, rect.centerX(), rect.centerY(),
+            if (active) { ctx.theme.accent } else { LANLU_ON_MEDIA })
+    }
+
     public func draw(ctx: UiContext): Unit {
-        if (!favorited && !ctx.isHovered(hoverId)) { return }
-        ctx.renderer.fillCircle(frame.centerX(), frame.centerY(), 14.0, Color.rgba(0, 0, 0, 153))
-        let color = if (favorited) { ctx.theme.accent } else { LANLU_ON_MEDIA }
-        let tw = ctx.renderer.textWidth("♥", pointSize: 13.0)
-        let th = ctx.renderer.textHeight(pointSize: 13.0)
-        ctx.renderer.text("♥", frame.centerX() - tw / 2.0, frame.centerY() - th / 2.0, color,
-            pointSize: 13.0)
+        if (!hoverVisible.value) { return }
+        drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), "cover-details:${key}", false)
+        drawButton(ctx, favoriteRect(), GhostGlyph.Heart, "cover-favorite:${key}", favorited)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
         match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (detailsRect().contains(x, y)) {
+                    ctx.claimHover("cover-details:${key}", CursorShape.Interactive)
+                } else if (favoriteRect().contains(x, y)) {
+                    ctx.claimHover("cover-favorite:${key}", CursorShape.Interactive)
+                }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
-                // 与 draw 同条件：chip 不可见（未收藏且未 hover）时不消费，点击穿透成卡片点击。
-                if ((favorited || ctx.isHovered(hoverId)) && frame.contains(x, y)) {
-                    onToggle()
+                if (favoriteRect().contains(x, y)) {
+                    onFavorite()
+                    return true
+                }
+                if (detailsRect().contains(x, y)) {
+                    onDetails()
                     return true
                 }
             case _ => ()
@@ -1017,6 +1054,7 @@ public class TankCardItem {
     public var coverAssetId: Int64 = 0
     public var archiveCount: Int64 = 0
     public var readPct: Int64 = 0 // 0..100
+    public var isfavorite: Bool = false
 }
 
 // 聚合合辑条目判定（groupby_tanks 响应的 type=="tankoubon"；普通档案 arcid 非空、itemType 为空）。
@@ -1045,6 +1083,7 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
         t.coverAssetId = item.coverAssetId
         t.archiveCount = item.archiveCount
         t.readPct = progressPct(item.pagecount, item.progress)
+        t.isfavorite = item.isfavorite
         tankCard(model, t, coverW)
     } else {
         archiveCard(model, item, coverW)
@@ -1057,8 +1096,8 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
 // 封面下标题 1 行截断 + meta 行 muted。
 public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
-        {=> model.openDetail(item.arcid) },
-        isNew: item.isnew, tank: false, showFav: true, favorited: item.isfavorite,
+        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
+        isNew: item.isnew, tank: false, favorited: item.isfavorite,
         pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
@@ -1066,14 +1105,14 @@ public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
 // meta 为「N 个档案 · X%」。点击进合集详情（T11 接通路由）。
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
     homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%",
-        coverW, item.coverAssetId, {=> model.openTank(item.id) },
-        isNew: false, tank: true, showFav: false, favorited: false, pct: item.readPct,
+        coverW, item.coverAssetId, {=> model.openTank(item.id) }, {=> model.toggleTankFavoriteOnCard(item.id) },
+        isNew: false, tank: true, favorited: item.isfavorite, pct: item.readPct,
         summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 卡片公共骨架：封面 ZStack（可选叠层/封面/描边/角标/进度/悬浮信息层）+ 标题 + meta。
 private func homeCoverCard(model: AppModel, id: String, title: String, meta: String, coverW: Float32,
-    coverAssetId: Int64, onClick: () -> Unit, isNew!: Bool, tank!: Bool, showFav!: Bool,
+    coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, isNew!: Bool, tank!: Bool,
     favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = ""): Unit {
     let coverH = coverW * 4.0 / 3.0
     let cardKey = if (tank) { "tank:${id}" } else { "arc:${id}" }
@@ -1102,10 +1141,11 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                 CoverBorder(hoverId)
                 if (overlayHovered.value) {
                     CoverClipStart()
-                    cardHoverOverlay(cardKey, hoverId, summary, tagsCsv, coverH, showFav, favorited,
-                        onClick, {=> model.toggleFavoriteOnCard(id) })
+                    cardHoverOverlay(summary, tagsCsv, coverH)
                     CoverClipEnd()
                 }
+                // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
+                CardHoverActions(cardKey, overlayHovered, favorited, onClick, onFavorite)
                 // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）。
                 HStack {
                     if (tank) { tankBadge(model) }
@@ -1129,9 +1169,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
 
 // BaseMediaCard 同款封面悬浮层：底部渐变上依次放标签、三行简介和详情/收藏操作。
 // 多选不属于此层；卡片主体点击仍保持原有打开详情行为，内部操作会先消费点击事件。
-private func cardHoverOverlay(cardKey: String, hoverId: String, summary: String, tagsCsv: String,
-    coverH: Float32, showFav: Bool, favorited: Bool, onDetails: () -> Unit,
-    onFavorite: () -> Unit): Unit {
+private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32): Unit {
     let tags = cardHoverTags(tagsCsv)
     let maxTags: Int64 = if (summary.size > 0) { 5 } else { 8 }
     ZStack {
@@ -1160,30 +1198,7 @@ private func cardHoverOverlay(cardKey: String, hoverId: String, summary: String,
             }
         }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Start)
             .padding(10.vp, 10.vp, 10.vp, 48.vp).maxHeight(coverH)
-        // 操作区独立贴封面底部，不参与上方标签/简介的高度计算。
-        HStack {
-            cardDetailsAction(cardKey, onDetails)
-            if (showFav) {
-                FavChip(hoverId, favorited, onFavorite)
-            }
-            Spacer()
-        }.spacing(7.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-            .padding(10.vp).maxHeight(48.vp)
     }.alignment(Alignment.BottomLeading)
-}
-
-// 悬浮层「详情」文本按钮：眼睛图标补充视觉语义，文字避免纯图标操作不易辨认。
-private func cardDetailsAction(cardKey: String, onDetails: () -> Unit): Unit {
-    ClickArea(onClick: onDetails) {
-        ZStack {
-            HoverSensor("cover-details:${cardKey}")
-            HStack {
-                Icon(IconName.Eye, size: 13.vp).foregroundColor(LANLU_ON_MEDIA)
-                Label("详情").fontSize(10.5.fp).foregroundColor(LANLU_ON_MEDIA).tight()
-            }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Center)
-                .padding(8.vp, 5.vp).background(Color.rgba(255, 255, 255, 38), 7.vp)
-        }.alignment(Alignment.TopLeading)
-    }
 }
 
 // 搜索 DTO 的 tags 是 CSV。悬浮卡只展示值部分，过滤 source 命名空间，与 frontend
@@ -1870,6 +1885,7 @@ public func tankCardRow(model: AppModel, tanks: Array<TankoubonInfo>, rowId: Str
         c.coverAssetId = t.coverAssetId
         c.archiveCount = t.archiveCount
         c.readPct = tankReadPct(t)
+        c.isfavorite = t.isfavorite
         items.add(c)
     }
     LazyRow.of(items.toArray(), REL_COVER_W, spacing: 14.0, key: {t: TankCardItem => t.id},
@@ -2062,7 +2078,7 @@ private func pageFileName(p: PageInfo): String {
 
 // ── 合集成员（原型 .member-grid / .member-list；成员行含 mini 进度条）──
 
-// 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格（无收藏 chip），点击进档案详情。
+// 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格，悬停提供详情与收藏图标按钮。
 public func memberGridContent(model: AppModel, members: Array<SearchItem>): Unit {
     let w = model.detailWidth.value - 36.0
     var cols = if (w <= 0.0) { 4 } else { Int64((w + 12.0) / 152.0) }
@@ -2077,11 +2093,11 @@ public func memberGridContent(model: AppModel, members: Array<SearchItem>): Unit
     }.height(gridH)
 }
 
-// 成员卡：复用首页卡骨架，不渲染收藏 chip（原型成员卡无收藏；fav 乐观翻转也只覆盖首页数据源）。
+// 成员卡：复用首页卡骨架，悬停提供详情与收藏图标按钮。
 private func memberCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
-        {=> model.openDetail(item.arcid) },
-        isNew: item.isnew, tank: false, showFav: false, favorited: false,
+        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
+        isNew: item.isnew, tank: false, favorited: item.isfavorite,
         pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 

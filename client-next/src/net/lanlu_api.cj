@@ -269,6 +269,14 @@ public class LanluApi {
         }
     }
 
+    public func setTankFavorite(tankid: String, fav: Bool): Unit {
+        if (fav) {
+            let _ = checked(client.put("/api/tankoubons/${tankid}/favorite", ""))
+        } else {
+            let _ = checked(client.delete("/api/tankoubons/${tankid}/favorite"))
+        }
+    }
+
     public func setIsNew(arcid: String, isNew: Bool): Unit {
         if (isNew) {
             let _ = checked(client.put("/api/archives/${arcid}/isnew", ""))

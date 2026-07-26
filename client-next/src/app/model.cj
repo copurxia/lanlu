@@ -1411,7 +1411,7 @@ public class AppModel {
         )
     }
 
-    // 首页卡片收藏 chip（Task 9）：乐观翻转 items/browseRows 里所有同 arcid 条目并立即重绘；
+    // 档案卡收藏：乐观翻转首页/搜索/合集成员中的同一档案并立即重绘；
     // 失败由 handleError 统一 toast（不回滚，下次行/网格数据到货自愈）。
     public func toggleFavoriteOnCard(arcid: String): Unit {
         var target = false
@@ -1432,12 +1432,83 @@ public class AppModel {
                 }
             }
         }
+        for (it in tankMembers.value) {
+            if (it.arcid == arcid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
         if (!found) {
             return
         }
         items.value = items.value
         browseRows.value = browseRows.value
+        tankMembers.value = tankMembers.value
         toggleFavorite(arcid, target)
+    }
+
+    // 合集卡收藏：endpoint 与 frontend FavoriteService 的 tankoubon 分支一致。
+    public func toggleTankFavoriteOnCard(tankid: String): Unit {
+        var target = false
+        var found = false
+        for (it in items.value) {
+            if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
+        for (row in browseRows.value) {
+            for (it in row.items) {
+                if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
+                    found = true
+                    target = !it.isfavorite
+                    it.isfavorite = target
+                }
+            }
+        }
+        for (it in parentTanks.value) {
+            if (it.id == tankid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
+        for (it in tankRelated.value) {
+            if (it.id == tankid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
+        match (tank.value) {
+            case Some(it) =>
+                if (it.id == tankid) {
+                    found = true
+                    target = !it.isfavorite
+                    it.isfavorite = target
+                    tank.value = Some(it)
+                }
+            case None => ()
+        }
+        if (!found) {
+            return
+        }
+        items.value = items.value
+        browseRows.value = browseRows.value
+        parentTanks.value = parentTanks.value
+        tankRelated.value = tankRelated.value
+        let a = api ?? return
+        let nextFavorite = target
+        let _ = worker.submit(
+            "tank-favorite:${tankid}",
+            {
+                =>
+                    a.setTankFavorite(tankid, nextFavorite)
+                    return nextFavorite
+            }
+        )
     }
 
     public func toggleIsNew(arcid: String, isNew: Bool): Unit {
