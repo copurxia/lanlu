@@ -141,6 +141,19 @@ func pagesParseBothShapes(): Unit {
 }
 
 @Test
+func pagesParseDisplayMetadataWithDefaultSourcePriority(): Unit {
+    let body = "{\"pages\":[{\"id\":\"p5\",\"type\":\"image\",\"title\":\"page_005.avif\",\"metadata\":{\"title\":\"通用标题\",\"description\":\"通用简介\",\"thumb_asset_id\":80},\"default_source\":{\"path\":\"第14章/page_005.avif\",\"metadata\":{\"title\":\"名场面：抉择\",\"description\":\"雪夜简介\",\"thumb_asset_id\":81,\"release_at\":\"2024-08-17\",\"order_index\":7,\"hidden_in_files\":true}}}]}"
+    let page = parsePages(body)[0]
+    @Expect(page.sourcePath, "第14章/page_005.avif")
+    @Expect(page.title, "名场面：抉择")
+    @Expect(page.description, "雪夜简介")
+    @Expect(page.thumbAssetId, 81)
+    @Expect(page.releaseAt, "2024-08-17")
+    @Expect(page.orderIndex, 7)
+    @Expect(page.hiddenInFiles, true)
+}
+
+@Test
 func nullScalarFieldsFallBackToDefaults(): Unit {
     let body = "{\"data\":[{\"type\":\"archive\",\"arcid\":\"a2\",\"archivetype\":\"image\",\"filename\":\"f\",\"isnew\":false,\"isfavorite\":false,\"favoritetime\":null,\"lastreadtime\":null,\"pagecount\":1,\"progress\":0,\"size\":1,\"assets\":{},\"description\":null,\"tags\":\"\",\"title\":\"t\",\"release_at\":0,\"created_at\":0,\"updated_at\":0}],\"draw\":1,\"page\":1,\"pageSize\":1,\"recordsFiltered\":1,\"recordsTotal\":1}"
     let p = parseSearchPage(body)

@@ -324,6 +324,17 @@ private func seedArchiveDetail(model: AppModel): Unit {
     pages.add(makePage("media/theme.flac", "audio"))
     pages.add(makePage("media/cover.avif", "image"))
     pages.add(makePage("text/ch14.xhtml", "html"))
+    pages[4].title = "名场面：抉择"
+    pages[4].description = "跨页彩图，主角在雪夜做出抉择的名场面。"
+    pages[4].thumbAssetId = 9031
+    pages[4].releaseAt = "2024-08-17"
+    pages[4].orderIndex = 5
+    stageCover(model, "asset:9031", 13)
+    // 元数据弹窗首屏只展示前 6 页；为离线 GUI 验收预置其自动缩略图。
+    for (i in 0..6) {
+        let page = pages[i]
+        stageCover(model, "page:ARC_D1:${page.sourcePath}", i + 1)
+    }
     model.detailPages.value = pages
 
     // 所属合集 ×2（一个带 64% 进度）
@@ -395,6 +406,7 @@ private func seedTankDetail(model: AppModel): Unit {
 private func makePage(id: String, pageType: String): PageInfo {
     let p = PageInfo()
     p.id = id
+    p.sourcePath = id
     p.pageType = pageType
     p
 }

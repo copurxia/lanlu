@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{PageInfo, SearchItem}
+import lanlu_client_next.net.{PageInfo, SearchItem, percentEncode}
 import std.collection.ArrayList
 
 // metadata-edit-redesign.html：合集 → 档案 → 页的单一可下钻编辑器。弹窗保持
@@ -439,28 +439,27 @@ private func pagePreview(model: AppModel): Unit {
         return
     }
     let page = pages[model.metadataEditorPageIndex]
-    let key = if (page.thumbAssetId > 0) {
-        "asset:${page.thumbAssetId}"
-    } else {
-        "page:${model.metadataEditorArchiveId}:${page.sourcePath}"
-    }
-    let url = if (page.thumbAssetId > 0) {
-        "/api/assets/${page.thumbAssetId}"
-    } else {
-        "/api/archives/${model.metadataEditorArchiveId}/page?path=${page.sourcePath}"
-    }
+    let title = pageDisplayTitle(page, model.metadataEditorPageIndex)
     HStack {
         ZStack {
-            remoteImage(model, key, url, 220.vp, 138.vp, radius: 10.0)
+            remoteImage(model, pageThumbnailKey(model, page), pageThumbnailUrl(model, page), 220.vp, 138.vp,
+                radius: 10.0)
             Badge("P.${model.metadataEditorPageIndex + 1}", kind: BadgeKind.Info).padding(8.vp)
         }.alignment(Alignment.TopLeading).width(220.vp).height(138.vp)
         VStack {
-            Label(page.sourcePath).fontSize(13.fp).maxLines(1)
-            Label("条目路径：${page.sourcePath}").fontSize(11.fp).muted().maxLines(1)
-            Label(if (page.thumbAssetId > 0) {
-                "缩略图：已自定义"
+            Label(title).fontSize(14.fp).maxLines(1)
+            if (page.releaseAt.trimAscii().size > 0) {
+                Label("发布日期：${page.releaseAt.trimAscii()}").fontSize(10.fp).muted().maxLines(1)
+            }
+            if (page.description.trimAscii().size > 0) {
+                Label(page.description).fontSize(11.fp).muted().wrap().maxLines(2)
             } else {
-                "缩略图：自动截取"
+                Label("暂无页面简介").fontSize(11.fp).muted()
+            }
+            Label(if (page.thumbAssetId > 0) {
+                "已使用自定义缩略图"
+            } else {
+                "使用页面自动缩略图"
             }).fontSize(11.fp).foregroundColor(if (page.thumbAssetId > 0) {
                 Color.rgb(34, 158, 92)
             } else {
@@ -470,6 +469,7 @@ private func pagePreview(model: AppModel): Unit {
                     LANLU_MUTED
                 }
             })
+            Label("条目路径：${page.sourcePath}").fontSize(10.fp).muted().maxLines(1)
             Button("替换缩略图", {=> model.todoToast("缩略图上传")}).style(ghostStyleOf(model))
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
     }.spacing(14.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
@@ -664,20 +664,12 @@ private func tankMemberRow(model: AppModel, item: SearchItem, index: Int64): Uni
 private func metadataPageRow(model: AppModel, page: PageInfo, index: Int64): Unit {
     ClickArea(onClick: {=> model.editMetadataPage(index)}) {
         HStack {
-            Badge("${index + 1}", kind: if (page.title.size > 0 || page.thumbAssetId > 0) {
-                BadgeKind.Success
-            } else {
-                BadgeKind.Neutral
-            })
+            remoteImage(model, pageThumbnailKey(model, page), pageThumbnailUrl(model, page), 52.vp, 34.vp, radius: 6.0)
             VStack {
-                Label(if (page.title.size > 0) {
-                    page.title
-                } else {
-                    "P.${index + 1}"
-                }).fontSize(12.fp).maxLines(1)
-                Label(page.sourcePath).fontSize(10.fp).muted().maxLines(1)
+                Label(pageDisplayTitle(page, index)).fontSize(12.fp).maxLines(1)
+                Label(pageDisplaySummary(page)).fontSize(10.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            if (page.title.size > 0 || page.thumbAssetId > 0) {
+            if (pageHasCustomDisplayMetadata(page)) {
                 Badge("已自定义", kind: BadgeKind.Success)
             }
             Icon(IconName.Pencil, size: 13.vp, color: Some(if (model.isLight()) {
@@ -686,6 +678,66 @@ private func metadataPageRow(model: AppModel, page: PageInfo, index: Int64): Uni
                 LANLU_MUTED
             }))
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(8.vp, 7.vp).fillWidth()
+    }
+}
+
+private func pageDisplayTitle(page: PageInfo, index: Int64): String {
+    if (!pageHasCustomTitle(page)) {
+        return "P.${index + 1}"
+    }
+    page.title.trimAscii()
+}
+
+private func pageHasCustomTitle(page: PageInfo): Bool {
+    let title = page.title.trimAscii()
+    let path = page.sourcePath.trimAscii()
+    if (title.size == 0 || title == path) {
+        return false
+    }
+    let parts = path.split("/")
+    if (parts.size > 0 && title == parts[parts.size - 1]) {
+        return false
+    }
+    true
+}
+
+private func pageHasCustomDisplayMetadata(page: PageInfo): Bool {
+    pageHasCustomTitle(page) || page.description.trimAscii().size > 0 || page.releaseAt.trimAscii().size > 0 ||
+        page.thumbAssetId > 0
+}
+
+private func pageDisplaySummary(page: PageInfo): String {
+    let releaseAt = page.releaseAt.trimAscii()
+    let description = page.description.trimAscii()
+    if (releaseAt.size > 0 && description.size > 0) {
+        return "${releaseAt} · ${description}"
+    }
+    if (releaseAt.size > 0) {
+        return releaseAt
+    }
+    if (description.size > 0) {
+        return description
+    }
+    if (page.thumbAssetId > 0) {
+        "自定义缩略图"
+    } else {
+        "自动缩略图"
+    }
+}
+
+private func pageThumbnailKey(model: AppModel, page: PageInfo): String {
+    if (page.thumbAssetId > 0) {
+        "asset:${page.thumbAssetId}"
+    } else {
+        "page:${model.metadataEditorArchiveId}:${page.sourcePath}"
+    }
+}
+
+private func pageThumbnailUrl(model: AppModel, page: PageInfo): String {
+    if (page.thumbAssetId > 0) {
+        "/api/assets/${page.thumbAssetId}"
+    } else {
+        "/api/archives/${model.metadataEditorArchiveId}/page?path=${percentEncode(page.sourcePath)}"
     }
 }
 

@@ -586,6 +586,10 @@ public class PageInfo {
     public var sourcePath: String = ""
     public var pageType: String = ""
     public var title: String = ""
+    public var description: String = ""
+    public var releaseAt: String = ""
+    public var orderIndex: Int64 = 0
+    public var hiddenInFiles: Bool = false
     public var lyricsAssetId: Int64 = 0
     public var thumbAssetId: Int64 = 0
 }
@@ -647,6 +651,8 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
         while (r.peek() != EndArray) {
             r.startObject()
             let p = PageInfo()
+            var sourceMetadataRaw = ""
+            var pageMetadataRaw = ""
             while (r.peek() != EndObject) {
                 match (r.readName()) {
                     case "id" => p.id = decodeRaw<String>(r.readValueBytes(), "")
@@ -655,24 +661,26 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
                         p.sourcePath = pageSourcePath(sourceRaw)
                         p.lyricsAssetId = pageLyricsAssetId(sourceRaw)
                         p.thumbAssetId = pageThumbAssetId(sourceRaw)
+                        sourceMetadataRaw = pageSourceMetadataRaw(sourceRaw)
                     case "defaultSource" =>
                         let sourceRaw = rawText(r.readValueBytes())
                         p.sourcePath = pageSourcePath(sourceRaw)
                         p.lyricsAssetId = pageLyricsAssetId(sourceRaw)
                         p.thumbAssetId = pageThumbAssetId(sourceRaw)
-                    case "metadata" =>
-                        let metadataRaw = rawText(r.readValueBytes())
-                        let assetId = metadataLyricsAssetId(metadataRaw)
-                        if (assetId > 0) { p.lyricsAssetId = assetId }
-                        let thumbId = metadataThumbAssetId(metadataRaw)
-                        if (thumbId > 0) { p.thumbAssetId = thumbId }
+                        sourceMetadataRaw = pageSourceMetadataRaw(sourceRaw)
+                    case "metadata" => pageMetadataRaw = rawText(r.readValueBytes())
                     case "type" => p.pageType = decodeRaw<String>(r.readValueBytes(), "")
                     case "title" => p.title = decodeRaw<String>(r.readValueBytes(), "")
                     case _ => r.skip()
                 }
             }
             r.endObject()
-            if (p.sourcePath.size == 0) { p.sourcePath = p.id }
+            // 页面级元数据是通用兜底；默认源元数据更贴近当前展示文件，优先覆盖。
+            applyPageMetadata(p, pageMetadataRaw)
+            applyPageMetadata(p, sourceMetadataRaw)
+            if (p.sourcePath.size == 0) {
+                p.sourcePath = p.id
+            }
             list.add(p)
         }
         r.endArray()
@@ -680,8 +688,67 @@ private func parsePageArray(raw: String): ArrayList<PageInfo> {
     return list
 }
 
+private func pageSourceMetadataRaw(raw: String): String {
+    if (raw.size == 0) {
+        return ""
+    }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        var metadataRaw = ""
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "metadata" => metadataRaw = rawText(r.readValueBytes())
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+        metadataRaw
+    } catch (_: Exception) {
+        ""
+    }
+}
+
+private func applyPageMetadata(page: PageInfo, raw: String): Unit {
+    if (raw.size == 0) {
+        return
+    }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "title" =>
+                    let title = decodeRaw<String>(r.readValueBytes(), "").trimAscii()
+                    if (title.size > 0) {
+                        page.title = title
+                    }
+                case "description" => page.description = decodeRaw<String>(r.readValueBytes(), "")
+                case "release_at" => page.releaseAt = decodeRaw<String>(r.readValueBytes(), "")
+                case "order_index" => page.orderIndex = decodeRaw<Int64>(r.readValueBytes(), 0)
+                case "hidden_in_files" => page.hiddenInFiles = decodeRaw<Bool>(r.readValueBytes(), false)
+                case "thumb_asset_id" =>
+                    let thumbId = decodeRaw<Int64>(r.readValueBytes(), 0)
+                    if (thumbId > 0) {
+                        page.thumbAssetId = thumbId
+                    }
+                case "attachments" =>
+                    let attachmentsRaw = "{\"attachments\":${rawText(r.readValueBytes())}}"
+                    let assetId = metadataLyricsAssetId(attachmentsRaw)
+                    if (assetId > 0) {
+                        page.lyricsAssetId = assetId
+                    }
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+    } catch (_: Exception) {}
+}
+
 private func pageThumbAssetId(raw: String): Int64 {
-    if (raw.size == 0) { return 0 }
+    if (raw.size == 0) {
+        return 0
+    }
     let r = readerOf(raw)
     try {
         r.startObject()

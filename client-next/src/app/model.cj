@@ -403,17 +403,27 @@ public class AppModel {
         metadataEditorPageIndex = index
         metadataEditorLevel.value = 2
         let p = list[index]
-        metadataTitle.value = if (p.title.size > 0) {
+        metadataTitle.value = if (p.title.size > 0 && !isPageFileFallbackTitle(p.title, p.sourcePath)) {
             p.title
         } else {
             "P.${index + 1}"
         }
-        metadataDescription.value = ""
-        metadataReleaseAt.value = ""
-        metadataOrderIndex.value = "${index + 1}"
-        metadataHiddenInFiles.value = false
+        metadataDescription.value = p.description
+        metadataReleaseAt.value = p.releaseAt
+        metadataOrderIndex.value = "${if (p.orderIndex > 0) { p.orderIndex } else { index + 1 }}"
+        metadataHiddenInFiles.value = p.hiddenInFiles
         metadataEditorDirty.value = false
         metadataPluginPreview.value = false
+    }
+
+    private func isPageFileFallbackTitle(title: String, sourcePath: String): Bool {
+        let normalizedTitle = title.trimAscii()
+        let normalizedPath = sourcePath.trimAscii()
+        if (normalizedTitle.size == 0 || normalizedTitle == normalizedPath) {
+            return true
+        }
+        let parts = normalizedPath.split("/")
+        parts.size > 0 && normalizedTitle == parts[parts.size - 1]
     }
 
     public func metadataEditorBackTo(level: Int64): Unit {
@@ -473,7 +483,8 @@ public class AppModel {
             let order = parsePositiveInt(metadataOrderIndex.value, metadataEditorPageIndex + 1)
             body = "{\"pages\":[{\"page_number\":${metadataEditorPageIndex + 1}," +
                 "\"entry_path\":${jsonQuote(p.sourcePath)},\"title\":${jsonQuote(title)}," +
-                "\"description\":${jsonQuote(metadataDescription.value)},\"order_index\":${order}," +
+                "\"description\":${jsonQuote(metadataDescription.value)}," +
+                "\"release_at\":${jsonQuote(metadataReleaseAt.value.trimAscii())},\"order_index\":${order}," +
                 "\"hidden_in_files\":${metadataHiddenInFiles.value}}]}"
         }
         if (target.size == 0) {
