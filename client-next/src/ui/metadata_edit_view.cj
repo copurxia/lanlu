@@ -448,13 +448,13 @@ private func pagePreview(model: AppModel): Unit {
         }.alignment(Alignment.TopLeading).width(220.vp).height(138.vp)
         VStack {
             Label(title).fontSize(14.fp).maxLines(1)
-            if (page.releaseAt.trimAscii().size > 0) {
-                Label("发布日期：${page.releaseAt.trimAscii()}").fontSize(10.fp).muted().maxLines(1)
-            }
             if (page.description.trimAscii().size > 0) {
                 Label(page.description).fontSize(11.fp).muted().wrap().maxLines(2)
             } else {
                 Label("暂无页面简介").fontSize(11.fp).muted()
+            }
+            if (page.releaseAt.trimAscii().size > 0) {
+                Label("发布日期：${page.releaseAt.trimAscii()}").fontSize(10.fp).muted().maxLines(1)
             }
             Label(if (page.thumbAssetId > 0) {
                 "已使用自定义缩略图"
@@ -669,9 +669,6 @@ private func metadataPageRow(model: AppModel, page: PageInfo, index: Int64): Uni
                 Label(pageDisplayTitle(page, index)).fontSize(12.fp).maxLines(1)
                 Label(pageDisplaySummary(page)).fontSize(10.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            if (pageHasCustomDisplayMetadata(page)) {
-                Badge("已自定义", kind: BadgeKind.Success)
-            }
             Icon(IconName.Pencil, size: 13.vp, color: Some(if (model.isLight()) {
                 LANLU_L_MUTED
             } else {
@@ -701,22 +698,17 @@ private func pageHasCustomTitle(page: PageInfo): Bool {
     true
 }
 
-private func pageHasCustomDisplayMetadata(page: PageInfo): Bool {
-    pageHasCustomTitle(page) || page.description.trimAscii().size > 0 || page.releaseAt.trimAscii().size > 0 ||
-        page.thumbAssetId > 0
-}
-
 private func pageDisplaySummary(page: PageInfo): String {
     let releaseAt = page.releaseAt.trimAscii()
     let description = page.description.trimAscii()
     if (releaseAt.size > 0 && description.size > 0) {
-        return "${releaseAt} · ${description}"
-    }
-    if (releaseAt.size > 0) {
-        return releaseAt
+        return "${description} · ${releaseAt}"
     }
     if (description.size > 0) {
         return description
+    }
+    if (releaseAt.size > 0) {
+        return releaseAt
     }
     if (page.thumbAssetId > 0) {
         "自定义缩略图"
