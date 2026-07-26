@@ -1,11 +1,12 @@
 package lanlu_client_next.app
 
-import cui.{State, Toaster, ToastKind, clearImageCache, clearPixelImages, onPixelImageEvicted, stagePixelImage}
+import cui.{FileDialogRequest, FileDialogResult, State, Toaster, ToastKind, clearImageCache, clearPixelImages, 
+    onPixelImageEvicted, stagePixelImage}
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap}
 import std.convert.Parsable
-import std.fs.{Directory, File, Path, exists}
+import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.math.sqrt
 import std.sync.Mutex
 
@@ -43,6 +44,30 @@ public class BrowseRow {
     public var requested = false // 已提交过加载任务（分类到达后补建行不复用旧任务）
     public var loading = true
     public var failed = false
+}
+
+// 上传抽屉的单文件状态。对象字段只在 UI 线程修改；工作线程通过 ApiWorker.post
+// 投递不可变进度元组，pump 收件后再推进 uploadFiles 的 State 代次。
+public class UploadFileItem {
+    public var id: String = ""
+    public var path: String = ""
+    public var name: String = ""
+    public var size: Int64 = 0
+    public var categoryId: Int64 = 0
+    public var progress: Int64 = 0
+    public var status: String = "queued"
+    public var message: String = ""
+}
+
+// 在线下载任务状态。与 UploadFileItem 同一线程约束：对象字段只在 UI 线程修改，
+// 工作线程通过 ApiWorker.post 投递不可变进度元组，pump 收件后再推进 downloadTasks。
+public class DownloadTaskItem {
+    public var id: String = ""
+    public var url: String = ""
+    public var categoryId: Int64 = 0
+    public var progress: Int64 = 0
+    public var status: String = "queued"
+    public var message: String = ""
 }
 
 private func joinMetadataTags(tags: ArrayList<String>): String {
@@ -126,6 +151,22 @@ public class AppModel {
     public let favOnly = State<Bool>(false)
     public let newOnly = State<Bool>(false)
     public let untaggedOnly = State<Bool>(false)
+
+    // 右侧上传抽屉：分类使用 categories 的数组下标；系统文件对话框是异步请求，
+    // 每次 onTick 由 pump 轮询，传输任务则走现有固定工作线程池。
+    public let uploadDrawerOpen = State<Bool>(false)
+    public let uploadCategoryIndex = State<Int64>(0)
+    public let uploadFiles = State<ArrayList<UploadFileItem>>(ArrayList<UploadFileItem>())
+    public let uploadFileDialog = State<?FileDialogRequest>(None<FileDialogRequest>)
+    private var uploadSequence: Int64 = 0
+    private var hasCompletedUploads = false
+
+    // 在线下载：与上传共用分类选择（uploadCategoryIndex），任务同样走固定工作线程池。
+    public let uploadTabIndex = State<Int64>(0)
+    public let downloadUrlsText = State<String>("")
+    public let downloadTasks = State<ArrayList<DownloadTaskItem>>(ArrayList<DownloadTaskItem>())
+    private var downloadSequence: Int64 = 0
+    private var hasCompletedDownloads = false
 
     // 浏览模式行数据（随机推荐 + 分类行）与内容区宽度（SizeProbe 写入，驱动自适应列数）
     public let browseRows = State<ArrayList<BrowseRow>>(ArrayList<BrowseRow>())
@@ -921,6 +962,345 @@ public class AppModel {
     public func loadCategories(): Unit {
         let a = api ?? return
         let _ = worker.submit("categories", {=> a.categories()})
+    }
+
+    // ---- 上传抽屉 ----
+
+    public func openUploadDrawer(): Unit {
+        uploadDrawerOpen.value = true
+        if (categories.value.size == 0) {
+            loadCategories()
+        }
+    }
+
+    // Drawer 自身先把 presented 置 false 再调用 onDismiss；有活动传输时立即写回 true，
+    // 因而遮罩点击/Esc/关闭钮都遵守 frontend 的“传输中不可关闭”约束。
+    public func closeUploadDrawer(): Unit {
+        if (hasActiveUploads() || hasActiveDownloads()) {
+            uploadDrawerOpen.value = true
+            toaster.show("传输进行中，无法关闭", kind: ToastKind.Warning)
+            return
+        }
+        uploadDrawerOpen.value = false
+        uploadFileDialog.value = None<FileDialogRequest>
+        uploadFiles.value = ArrayList<UploadFileItem>()
+        uploadCategoryIndex.value = 0
+        uploadTabIndex.value = 0
+        downloadUrlsText.value = ""
+        downloadTasks.value = ArrayList<DownloadTaskItem>()
+        if (hasCompletedUploads || hasCompletedDownloads) {
+            hasCompletedUploads = false
+            hasCompletedDownloads = false
+            loadCategories()
+            refreshLibrary()
+        }
+    }
+
+    public func beginUploadFileSelection(request: FileDialogRequest): Unit {
+        match (uploadFileDialog.value) {
+            case Some(current) =>
+                if (!current.isDone()) {
+                    toaster.show("文件选择器已打开", kind: ToastKind.Info)
+                    return
+                }
+            case None => ()
+        }
+        uploadFileDialog.value = Some(request)
+    }
+
+    private func pollUploadFileDialog(): Unit {
+        match (uploadFileDialog.value) {
+            case Some(request) => match (request.result()) {
+                case FileDialogResult.FileDialogPending => ()
+                case FileDialogResult.FileDialogCanceled => uploadFileDialog.value = None<FileDialogRequest>
+                case FileDialogResult.FileDialogFailed(message) =>
+                    uploadFileDialog.value = None<FileDialogRequest>
+                    showError(if (message.size > 0) {
+                        "打开文件选择器失败：${message}"
+                    } else {
+                        "打开文件选择器失败"
+                    })
+                case FileDialogResult.FileDialogSelected(paths, _) =>
+                    uploadFileDialog.value = None<FileDialogRequest>
+                    addUploadPaths(paths)
+            }
+            case None => ()
+        }
+    }
+
+    public func addUploadPath(path: String): Unit {
+        addUploadPaths([path])
+    }
+
+    public func addUploadPaths(paths: Array<String>): Unit {
+        let category = match (selectedUploadCategory()) {
+            case Some(value) => value
+            case None =>
+                toaster.show("请先选择要上传到的分类", kind: ToastKind.Warning)
+                return
+        }
+        for (rawPath in paths) {
+            let path = rawPath.trimAscii()
+            if (path.size == 0) {
+                continue
+            }
+            if (!isSupportedArchiveUpload(path)) {
+                toaster.show("不支持的档案格式：${Path(path).fileName}", kind: ToastKind.Warning)
+                continue
+            }
+            var duplicate = false
+            for (existing in uploadFiles.value) {
+                if (existing.path == path && isUploadActive(existing.status)) {
+                    duplicate = true
+                    break
+                }
+            }
+            if (duplicate) {
+                toaster.show("该文件已在上传队列中", kind: ToastKind.Info)
+                continue
+            }
+            try {
+                let info = FileInfo(Path(path))
+                let size = Int64(info.size)
+                if (size <= 0) {
+                    toaster.show("文件不能为空：${Path(path).fileName}", kind: ToastKind.Warning)
+                    continue
+                }
+                uploadSequence += 1
+                let item = UploadFileItem()
+                item.id = "${uploadSequence}"
+                item.path = path
+                item.name = Path(path).fileName
+                item.size = size
+                item.categoryId = category.id
+                uploadFiles.value.add(item)
+                uploadFiles.value = uploadFiles.value
+                startArchiveUpload(item, false)
+            } catch (e: Exception) {
+                showError("无法读取文件：${e.message}")
+            }
+        }
+    }
+
+    private func selectedUploadCategory(): ?CategoryItem {
+        let index = uploadCategoryIndex.value
+        if (index < 0 || index >= categories.value.size) {
+            return None<CategoryItem>
+        }
+        let category = categories.value[index]
+        if (category.id <= 0) {
+            return None<CategoryItem>
+        }
+        Some(category)
+    }
+
+    private func startArchiveUpload(item: UploadFileItem, overwrite: Bool): Unit {
+        let a = api ?? return item.status = "queued"
+        item.progress = 0
+        item.message = "排队中"
+        uploadFiles.value = uploadFiles.value
+        let id = item.id
+        let path = item.path
+        let categoryId = item.categoryId
+        let mailbox = worker
+        let submitted = worker.submit(
+            "upload:${id}",
+            {
+                =>
+                    let result = a.uploadArchive(path, categoryId, overwrite, {
+                        stage, progress, message => mailbox.post("upload.progress", Some((id, stage, progress, message)))
+                    })
+                    return (id, result)
+            }
+        )
+        if (!submitted) {
+            item.status = "error"
+            item.message = "上传任务已在运行"
+            uploadFiles.value = uploadFiles.value
+        }
+    }
+
+    public func retryUpload(id: String, overwrite!: Bool = false): Unit {
+        match (findUpload(id)) {
+            case Some(item) =>
+                if (!isUploadActive(item.status)) {
+                    startArchiveUpload(item, overwrite)
+                }
+            case None => ()
+        }
+    }
+
+    public func removeUpload(id: String): Unit {
+        let next = ArrayList<UploadFileItem>()
+        for (item in uploadFiles.value) {
+            if (item.id != id || isUploadActive(item.status)) {
+                next.add(item)
+            }
+        }
+        uploadFiles.value = next
+    }
+
+    public func clearCompletedUploads(): Unit {
+        let next = ArrayList<UploadFileItem>()
+        for (item in uploadFiles.value) {
+            if (item.status != "success") {
+                next.add(item)
+            }
+        }
+        uploadFiles.value = next
+    }
+
+    public func clearUploads(): Unit {
+        if (hasActiveUploads()) {
+            toaster.show("传输进行中，无法清空", kind: ToastKind.Warning)
+            return
+        }
+        uploadFiles.value = ArrayList<UploadFileItem>()
+    }
+
+    public func hasActiveUploads(): Bool {
+        for (item in uploadFiles.value) {
+            if (isUploadActive(item.status)) {
+                return true
+            }
+        }
+        false
+    }
+
+    private func isUploadActive(status: String): Bool {
+        status == "queued" || status == "uploading" || status == "processing"
+    }
+
+    private func findUpload(id: String): ?UploadFileItem {
+        for (item in uploadFiles.value) {
+            if (item.id == id) {
+                return Some(item)
+            }
+        }
+        None<UploadFileItem>
+    }
+
+    // ---- 在线下载 ----
+
+    // 每行一个 URL：空行跳过，非法链接提示后跳过，与活动任务重复的链接跳过。
+    public func addDownloadTasks(): Unit {
+        let category = match (selectedUploadCategory()) {
+            case Some(value) => value
+            case None =>
+                showError("请先选择要下载到的分类")
+                return
+        }
+        var added: Int64 = 0
+        for (rawLine in downloadUrlsText.value.split("\n")) {
+            let url = rawLine.trimAscii()
+            if (url.size == 0) {
+                continue
+            }
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                toaster.show("下载链接无效：${url}", kind: ToastKind.Warning)
+                continue
+            }
+            var duplicate = false
+            for (existing in downloadTasks.value) {
+                if (existing.url == url && isDownloadActive(existing.status)) {
+                    duplicate = true
+                    break
+                }
+            }
+            if (duplicate) {
+                toaster.show("该链接已在下载队列中", kind: ToastKind.Info)
+                continue
+            }
+            downloadSequence += 1
+            let item = DownloadTaskItem()
+            item.id = "${downloadSequence}"
+            item.url = url
+            item.categoryId = category.id
+            downloadTasks.value.add(item)
+            downloadTasks.value = downloadTasks.value
+            added += 1
+            startUrlDownload(item)
+        }
+        if (added > 0) {
+            downloadUrlsText.value = ""
+        }
+    }
+
+    private func startUrlDownload(item: DownloadTaskItem): Unit {
+        let a = api ?? return item.status = "queued"
+        item.progress = 0
+        item.message = "排队中"
+        downloadTasks.value = downloadTasks.value
+        let id = item.id
+        let url = item.url
+        let categoryId = item.categoryId
+        let mailbox = worker
+        let submitted = worker.submit(
+            "download:${id}",
+            {
+                =>
+                    let result = a.downloadFromUrl(url, categoryId, {
+                        stage, progress, message => mailbox.post("download.progress",
+                            Some((id, stage, progress, message)))
+                    })
+                    return (id, result)
+            }
+        )
+        if (!submitted) {
+            item.status = "error"
+            item.message = "下载任务已在运行"
+            downloadTasks.value = downloadTasks.value
+        }
+    }
+
+    public func removeDownloadTask(id: String): Unit {
+        let next = ArrayList<DownloadTaskItem>()
+        for (item in downloadTasks.value) {
+            if (item.id != id || isDownloadActive(item.status)) {
+                next.add(item)
+            }
+        }
+        downloadTasks.value = next
+    }
+
+    public func clearCompletedDownloads(): Unit {
+        let next = ArrayList<DownloadTaskItem>()
+        for (item in downloadTasks.value) {
+            if (item.status != "success") {
+                next.add(item)
+            }
+        }
+        downloadTasks.value = next
+    }
+
+    public func clearDownloads(): Unit {
+        if (hasActiveDownloads()) {
+            toaster.show("传输进行中，无法清空", kind: ToastKind.Warning)
+            return
+        }
+        downloadTasks.value = ArrayList<DownloadTaskItem>()
+    }
+
+    public func hasActiveDownloads(): Bool {
+        for (item in downloadTasks.value) {
+            if (isDownloadActive(item.status)) {
+                return true
+            }
+        }
+        false
+    }
+
+    private func isDownloadActive(status: String): Bool {
+        status == "queued" || status == "downloading" || status == "processing"
+    }
+
+    private func findDownload(id: String): ?DownloadTaskItem {
+        for (item in downloadTasks.value) {
+            if (item.id == id) {
+                return Some(item)
+            }
+        }
+        None<DownloadTaskItem>
     }
 
     // 总页数（至少 1 页）；pageSize 异常时按 40 防御。
@@ -1993,6 +2373,7 @@ public class AppModel {
 
     public func pump(): Unit {
         reader.tick() // 进度防抖周期驱动：窗口到点补发 pending 尾巴
+        pollUploadFileDialog()
 
         // chrome 自动隐藏计时（T13）：autoHide 开且 READER_CHROME_AUTOHIDE_MS 无活动则隐藏
         // 顶栏，仅在阅读页生效（离开阅读器后 reader 状态闲置，不应静默翻转）。
@@ -2052,6 +2433,44 @@ public class AppModel {
     }
 
     private func handleError(r: ApiResult): Unit {
+        if (r.name.startsWith("upload:")) {
+            let id = r.name.removePrefix("upload:")
+            match (findUpload(id)) {
+                case Some(item) =>
+                    item.status = "error"
+                    item.message = if (r.error.size > 0) {
+                        r.error
+                    } else {
+                        "上传失败"
+                    }
+                    uploadFiles.value = uploadFiles.value
+                case None => ()
+            }
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            showError(r.error)
+            return
+        }
+        if (r.name.startsWith("download:")) {
+            let id = r.name.removePrefix("download:")
+            match (findDownload(id)) {
+                case Some(item) =>
+                    item.status = "error"
+                    item.message = if (r.error.size > 0) {
+                        r.error
+                    } else {
+                        "下载失败"
+                    }
+                    downloadTasks.value = downloadTasks.value
+                case None => ()
+            }
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            showError(r.error)
+            return
+        }
         // 自动补全是辅助能力：普通网络失败静默收起，会话失效仍走全局登出。
         if (r.name.startsWith("autocomplete:")) {
             if (r.name == autocompleteTaskName) {
@@ -2190,7 +2609,102 @@ public class AppModel {
 
     private func dispatch(r: ApiResult): Unit {
         let name = r.name
-        if (name == "login" || name == "login-totp") {
+        if (name == "upload.progress") {
+            match (r.payload) {
+                case Some(payload) =>
+                    let (id, stage, progress, message) = (payload as (String, String, Int64, String)).getOrThrow()
+                    match (findUpload(id)) {
+                        case Some(item) =>
+                            item.status = stage
+                            item.progress = if (stage == "queued") {
+                                0
+                            } else {
+                                max(item.progress, progress)
+                            }
+                            if (message.size > 0) {
+                                item.message = message
+                            }
+                            uploadFiles.value = uploadFiles.value
+                        case None => ()
+                    }
+                case None => ()
+            }
+        } else if (name.startsWith("upload:")) {
+            match (r.payload) {
+                case Some(payload) =>
+                    let (id, result) = (payload as (String, ArchiveUploadResult)).getOrThrow()
+                    match (findUpload(id)) {
+                        case Some(item) =>
+                            if (result.success) {
+                                item.status = "success"
+                                item.progress = 100
+                                item.message = "上传完成"
+                                hasCompletedUploads = true
+                            } else if (result.fileExists) {
+                                item.status = "fileExists"
+                                item.message = if (result.error.size > 0) {
+                                    result.error
+                                } else {
+                                    "文件已存在"
+                                }
+                            } else {
+                                item.status = "error"
+                                item.message = if (result.error.size > 0) {
+                                    result.error
+                                } else {
+                                    "上传失败"
+                                }
+                            }
+                            uploadFiles.value = uploadFiles.value
+                        case None => ()
+                    }
+                case None => ()
+            }
+        } else if (name == "download.progress") {
+            match (r.payload) {
+                case Some(payload) =>
+                    let (id, stage, progress, message) = (payload as (String, String, Int64, String)).getOrThrow()
+                    match (findDownload(id)) {
+                        case Some(item) =>
+                            item.status = stage
+                            item.progress = if (stage == "queued") {
+                                0
+                            } else {
+                                max(item.progress, progress)
+                            }
+                            if (message.size > 0) {
+                                item.message = message
+                            }
+                            downloadTasks.value = downloadTasks.value
+                        case None => ()
+                    }
+                case None => ()
+            }
+        } else if (name.startsWith("download:")) {
+            match (r.payload) {
+                case Some(payload) =>
+                    let (id, result) = (payload as (String, ArchiveUploadResult)).getOrThrow()
+                    match (findDownload(id)) {
+                        case Some(item) =>
+                            if (result.success) {
+                                item.status = "success"
+                                item.progress = 100
+                                item.message = "下载完成，已入库"
+                                hasCompletedDownloads = true
+                            } else {
+                                item.status = "error"
+                                item.message = if (result.error.size > 0) {
+                                    result.error
+                                } else {
+                                    "下载失败"
+                                }
+                            }
+                            downloadTasks.value = downloadTasks.value
+                        case None => ()
+                    }
+                case None => ()
+            }
+        } else if (name == "login" || name == "login-totp") {
             loading.value = false
             match (r.payload) {
                 case Some(p) =>
@@ -2253,8 +2767,8 @@ public class AppModel {
         } else if (name.startsWith("autocomplete:")) {
             match (r.payload) {
                 case Some(p) =>
-                    let (requestId, queryText, suggestions) =
-                        (p as (Int64, String, ArrayList<TagSuggestion>)).getOrThrow()
+                    let (requestId, queryText, suggestions) = (p as (Int64, String, ArrayList<TagSuggestion>))
+                        .getOrThrow()
                     if (requestId == autocompleteRequestId) {
                         autocompleteQuery.value = queryText
                         autocompleteSuggestions.value = suggestions
@@ -2276,7 +2790,7 @@ public class AppModel {
         } else if (name == "set.overview") {
             match (r.payload) {
                 case Some(p) =>
-                    let (stats, trend, read, fav) = (p as (UserStats, ArrayList<TrendPoint>, ArrayList<SearchItem>,
+                    let (stats, trend, read, fav) = (p as (UserStats, ArrayList<TrendPoint>, ArrayList<SearchItem>, 
                         ArrayList<SearchItem>)).getOrThrow()
                     userStats.value = stats
                     userTrend.value = trend
@@ -2346,7 +2860,7 @@ public class AppModel {
         } else if (name == "set.security") {
             match (r.payload) {
                 case Some(p) =>
-                    let (se, tk, pk, tp) = (p as (ArrayList<SessionItem>, ArrayList<TokenItem>, ArrayList<PasskeyItem>,
+                    let (se, tk, pk, tp) = (p as (ArrayList<SessionItem>, ArrayList<TokenItem>, ArrayList<PasskeyItem>, 
                         TotpStatus)).getOrThrow()
                     sessions.value = se
                     apiTokens.value = tk
@@ -2810,7 +3324,7 @@ public class AppModel {
     private func taskStreamLoop(a: LanluApi, status: String, gen: Int64): Unit {
         while (!isTaskStreamCancelled(gen)) {
             try {
-                a.streamTaskList(status, 10, { page => postTaskStreamPage(status, gen, page) })
+                a.streamTaskList(status, 10, {page => postTaskStreamPage(status, gen, page)})
                 // 流正常结束（服务端关闭）：取消则退出，否则走统一退避重连。
                 if (isTaskStreamCancelled(gen)) {
                     return

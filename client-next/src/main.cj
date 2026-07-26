@@ -27,6 +27,7 @@ private var dragRegionWidth: Int32 = -1
 private var dragRegionReader = false
 private var dragRegionChrome = true
 private var dragRegionReaderPanel = false
+private var dragRegionUploadDrawer = false
 private var dragRegionHasBack = false
 
 private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
@@ -41,19 +42,23 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     }
     let chrome = !isReader || model.reader.chromeVisible
     let readerPanelOpen = isReader && (model.readerSidebarOpen.value || model.readerSettingsOpen.value)
+    let uploadPanelOpen = model.uploadDrawerOpen.value
     if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && readerPanelOpen ==
-        dragRegionReaderPanel && hasBack == dragRegionHasBack) {
+        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && hasBack == dragRegionHasBack) {
         return
     }
     dragRegionWidth = w
     dragRegionReader = isReader
     dragRegionChrome = chrome
     dragRegionReaderPanel = readerPanelOpen
+    dragRegionUploadDrawer = uploadPanelOpen
     dragRegionHasBack = hasBack
     // 不支持 hit-test 的视频驱动（如快照装置的 dummy）会拒绝注册：忽略即可，窗口照常
     // 可用，只是没有 OS 托管拖动（与 desktop_app 忽略光标/IME 锚点拒绝同一惯例）。
     try {
-        if (isReader) {
+        if (uploadPanelOpen) {
+            window.setDragRegions(Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0)))
+        } else if (isReader) {
             if (chrome && !readerPanelOpen) {
                 window.setDragRegions(readerBarDragRects(w))
             } else {
@@ -125,8 +130,11 @@ main(): Int64 {
     }
     let app = DesktopApp(
         WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(),
-            fontPath: if (settings.fontPath.size > 0) { Some(settings.fontPath) } else { None }),
-        theme: lanluThemeFor(settings.theme))
+            fontPath: if (settings.fontPath.size > 0) {
+                Some(settings.fontPath)
+            } else {
+                None
+            }), theme: lanluThemeFor(settings.theme))
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
     app.setMinimumSize(960, 640)
@@ -162,6 +170,7 @@ main(): Int64 {
                     rootView(model)
                 }.spacing(0.0)
             }
+            uploadDrawer(app.sdlWindow, model)
             metadataEditOverlay(model)
             ThemeRipple(model)
             ToastLayer(model.toaster)

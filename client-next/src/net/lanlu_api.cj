@@ -2,6 +2,7 @@ package lanlu_client_next.net
 
 import ignite.client.*
 import std.collection.ArrayList
+import std.fs.{File, FileInfo, OpenMode, Path}
 import std.sync.Mutex
 
 public class ApiException <: Exception {
@@ -38,6 +39,7 @@ class TokenStore {
 
 public class LanluApi {
     private let client: RestClient
+    private let uploadClient: RestClient
     private let store = TokenStore()
     private let base: String
 
@@ -59,6 +61,17 @@ public class LanluApi {
                         }
                 }
             )
+        uploadClient = RestClient(readTimeout: Duration.second * 600, writeTimeout: Duration.second * 600, poolSize: 4)
+            .baseUrl(base)
+            .onRequest(
+                {
+                    req =>
+                        let t = s.get()
+                        if (t.size > 0) {
+                            req.header("Authorization", "Bearer ${t}")
+                        }
+                }
+            )
     }
 
     public func setToken(token: String): Unit {
@@ -66,6 +79,7 @@ public class LanluApi {
     }
     public func close(): Unit {
         client.close()
+        uploadClient.close()
     }
 
     private func checked(resp: ClientResponse): Envelope {
@@ -86,8 +100,11 @@ public class LanluApi {
             // 页面/媒体接口的服务端错误体包含归档路径、条目读取等具体原因。保留它，
             // 否则播放层只能显示无诊断价值的 “HTTP 500”。
             let detail = resp.body().trimAscii()
-            throw ApiException(resp.status,
-                if (detail.size > 0) { "HTTP ${resp.status}: ${detail}" } else { "HTTP ${resp.status}" })
+            throw ApiException(resp.status, if (detail.size > 0) {
+                "HTTP ${resp.status}: ${detail}"
+            } else {
+                "HTTP ${resp.status}"
+            })
         }
         resp.bodyBytes()
     }
@@ -290,6 +307,220 @@ public class LanluApi {
             let _ = checked(client.put("/api/archives/${arcid}/isnew", ""))
         } else {
             let _ = checked(client.delete("/api/archives/${arcid}/isnew"))
+        }
+    }
+
+    // 档案上传协议与 frontend ChunkedUploadService 保持一致：创建 asset_upload 任务，
+    // 等待调度为 running，按 10 MiB 顺序 PUT 分片，再等待 process/consume 任务链完成。
+    public func uploadArchive(
+        path: String,
+        categoryId: Int64,
+        overwrite: Bool,
+        onUpdate: (String, Int64, String) -> Unit
+    ): ArchiveUploadResult {
+        let filePath = Path(path)
+        let info = FileInfo(filePath)
+        let fileSize = Int64(info.size)
+        let filename = filePath.fileName
+        if (fileSize <= 0) {
+            throw IllegalArgumentException("文件不能为空")
+        }
+        if (categoryId <= 0) {
+            throw IllegalArgumentException("请选择要上传到的分类")
+        }
+
+        let totalChunks = (fileSize + ARCHIVE_UPLOAD_CHUNK_SIZE - 1) / ARCHIVE_UPLOAD_CHUNK_SIZE
+        let body = "{\"filename\":${jsonQuote(filename)},\"file_checksum\":\"\"," +
+            "\"filesize\":${fileSize},\"chunk_size\":${ARCHIVE_UPLOAD_CHUNK_SIZE}," +
+            "\"total_chunks\":${totalChunks},\"title\":${jsonQuote(filePath.fileNameWithoutExtension)}," +
+            "\"tags\":\"\",\"summary\":\"\",\"category_id\":${categoryId}," +
+            "\"overwrite\":${if (overwrite) { "true" } else { "false" }}," +
+            "\"target_type\":\"archive\",\"target_id\":\"\",\"content_type\":\"\"}"
+        let initResponse = uploadClient.postJson("/api/assets/upload/init", body)
+        if (initResponse.status == 409) {
+            let result = ArchiveUploadResult()
+            result.fileExists = true
+            let envelope = parseEnvelope(initResponse.body())
+            result.error = if (envelope.message.size > 0) {
+                envelope.message
+            } else {
+                "文件已存在"
+            }
+            return result
+        }
+        let initEnvelope = checked(initResponse)
+        let taskId = uploadResultTaskId(initEnvelope.dataRaw, "taskId")
+        if (taskId <= 0) {
+            throw ApiException(0, "服务器未返回上传任务 ID")
+        }
+
+        onUpdate("queued", 0, "等待上传任务调度")
+        waitForUploadReady(taskId, onUpdate)
+        onUpdate("uploading", 0, "正在上传")
+        try (file = File(filePath, OpenMode.Read)) {
+            var chunkIndex: Int64 = 0
+            while (chunkIndex < totalChunks) {
+                let offset = chunkIndex * ARCHIVE_UPLOAD_CHUNK_SIZE
+                let expectedSize = min(ARCHIVE_UPLOAD_CHUNK_SIZE, fileSize - offset)
+                let chunk = Array<UInt8>(expectedSize, repeat: 0)
+                let bytesRead = file.read(chunk)
+                if (bytesRead != expectedSize) {
+                    throw Exception("读取分片失败：期望 ${expectedSize} 字节，实际 ${bytesRead} 字节")
+                }
+                uploadArchiveChunk(taskId, chunkIndex, totalChunks, chunk)
+                chunkIndex += 1
+                onUpdate("uploading", min(100, chunkIndex * 100 / totalChunks),
+                    "已上传 ${chunkIndex}/${totalChunks} 个分片")
+            }
+        }
+
+        onUpdate("processing", 100, "服务器正在处理档案")
+        let uploadTask = waitForTerminalTask(taskId, onUpdate)
+        ensureUploadTaskCompleted(uploadTask)
+
+        let processTaskId = uploadResultTaskId(uploadTask.result, "process_task_id")
+        var processTask = uploadTask
+        if (processTaskId > 0) {
+            processTask = waitForTerminalTask(processTaskId, onUpdate)
+            ensureUploadTaskCompleted(processTask)
+        }
+        let consumeTaskId = uploadResultTaskId(processTask.result, "consume_task_id")
+        if (consumeTaskId > 0) {
+            ensureUploadTaskCompleted(waitForTerminalTask(consumeTaskId, onUpdate))
+        }
+
+        let result = ArchiveUploadResult()
+        result.success = true
+        result.taskId = taskId
+        result
+    }
+
+    // 在线下载协议与 frontend downloadFromUrl 一致：POST /api/download_url 入队即返回，
+    // 下载与入库全在服务端 TaskPool 内完成，客户端只轮询任务至终态。
+    // 注意该接口响应是裸 JSON（{"job":id,"success":1,...}）而非统一 envelope，故用
+    // checkedBody + uploadResultTaskId 解析，不能走 checked/parseEnvelope。
+    public func downloadFromUrl(
+        url: String,
+        categoryId: Int64,
+        onUpdate: (String, Int64, String) -> Unit
+    ): ArchiveUploadResult {
+        let trimmed = url.trimAscii()
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            throw IllegalArgumentException("下载链接无效")
+        }
+        if (categoryId <= 0) {
+            throw IllegalArgumentException("请选择要下载到的分类")
+        }
+
+        let body = "{\"url\":${jsonQuote(trimmed)},\"category_id\":${categoryId}}"
+        let raw = checkedBody(client.postJson("/api/download_url", body))
+        let taskId = uploadResultTaskId(raw, "job")
+        if (taskId <= 0) {
+            let detail = uploadResultText(raw, "error")
+            throw ApiException(0, if (detail.size > 0) {
+                detail
+            } else {
+                "服务器未返回下载任务 ID"
+            })
+        }
+
+        onUpdate("downloading", 0, "等待下载任务调度")
+        // 服务端在同一个任务里先下载后入库：进度未满视为下载中，满 100 后视为处理中。
+        let task = waitForTerminalTask(taskId, {
+            stage, progress, message => onUpdate(if (stage == "processing" && progress < 100) {
+                "downloading"
+            } else {
+                stage
+            }, progress, message)
+        }, what: "下载任务")
+        ensureUploadTaskCompleted(task)
+
+        let result = ArchiveUploadResult()
+        result.success = true
+        result.taskId = taskId
+        result
+    }
+
+    private func uploadTask(taskId: Int64): UploadTaskSnapshot {
+        parseUploadTaskSnapshot(checkedBody(client.get("/api/admin/taskpool/${taskId}")))
+    }
+
+    private func waitForUploadReady(taskId: Int64, onUpdate: (String, Int64, String) -> Unit): Unit {
+        var attempts: Int64 = 0
+        while (attempts < 1800) {
+            let task = uploadTask(taskId)
+            match (task.status) {
+                case "running" => return
+                case "pending" | "waiting" => onUpdate("queued", 0, if (task.message.size > 0) {
+                    task.message
+                } else {
+                    "等待上传任务调度"
+                })
+                case "failed" | "stopped" | "cancelled" | "canceled" => throw ApiException(0, uploadTaskError(task))
+                case "completed" => throw ApiException(0, "上传任务未进入运行态便已结束")
+                case _ => ()
+            }
+            attempts += 1
+            sleep(Duration.second)
+        }
+        throw ApiException(0, "等待上传任务调度超时")
+    }
+
+    private func uploadArchiveChunk(taskId: Int64, chunkIndex: Int64, totalChunks: Int64, chunk: Array<UInt8>): Unit {
+        var attempt: Int64 = 0
+        while (true) {
+            let response = uploadClient
+                .request()
+                .method("PUT")
+                .url("/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}")
+                .header("Content-Type", "application/octet-stream")
+                .bodyBytes(chunk)
+                .send()
+            if (response.isSuccess()) {
+                let _ = checked(response)
+                return
+            }
+            let status = response.status
+            let detail = response.body()
+            if (status == 400 || status == 404 || attempt >= 3) {
+                throw ApiException(status, if (detail.size > 0) {
+                    detail
+                } else {
+                    "分片 ${chunkIndex} 上传失败"
+                })
+            }
+            attempt += 1
+            sleep(Duration.second * attempt)
+        }
+    }
+
+    private func waitForTerminalTask(taskId: Int64, onUpdate: (String, Int64, String) -> Unit,
+        what!: String = "上传档案"): UploadTaskSnapshot {
+        var attempts: Int64 = 0
+        while (attempts < 3600) {
+            let task = uploadTask(taskId)
+            onUpdate("processing", min(100, max(0, task.progress)), task.message)
+            match (task.status) {
+                case "completed" | "failed" | "stopped" | "cancelled" | "canceled" => return task
+                case _ => ()
+            }
+            attempts += 1
+            sleep(Duration.second)
+        }
+        throw ApiException(0, "等待服务器处理${what}超时")
+    }
+
+    private func ensureUploadTaskCompleted(task: UploadTaskSnapshot): Unit {
+        if (task.status != "completed") {
+            throw ApiException(0, uploadTaskError(task))
+        }
+    }
+
+    private func uploadTaskError(task: UploadTaskSnapshot): String {
+        if (task.message.size > 0) {
+            task.message
+        } else {
+            "任务 ${task.id} 状态为 ${task.status}"
         }
     }
 
@@ -604,8 +835,8 @@ public class LanluApi {
         }
         let stream = resp.bodyStream()
         try {
-            readSseStream(stream, { event, data =>
-                if (event == "ping") {
+            readSseStream(stream, {
+                event, data => if (event == "ping") {
                     true
                 } else {
                     onPage(parseTaskListPage(data))

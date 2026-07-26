@@ -9,7 +9,7 @@ import std.collection.ArrayList
 // 左→右 = 品牌（金色圆角方块 + Lanlu）→ 弹性空隙 → 全局搜索框（icon + 占位 + kbd「/」，
 // 默认封顶 460vp，点击/聚焦后展开至 680vp，在品牌与右侧固定带之间水平居中）→
 // 弹性空隙 → 导航胶囊（首页/书架/在线源，
-// 后两项无页面置灰）→ ⚙ 设置 → ◐ 主题 → 用户芯片 → 1×20 分隔线 → 最小化/最大化/关闭。
+// 后两项无页面置灰）→ 上传 → ⚙ 设置 → ◐ 主题 → 用户芯片 → 1×20 分隔线 → 最小化/最大化/关闭。
 // 窗口拖动走 SdlWindow.setDragRegions 多矩形（main.cj 注册：品牌区 + 搜索框两侧的弹性空隙，
 // 见 titleBarDragRects）——DRAGGABLE 内鼠标事件不投递给应用，
 // 故所有交互控件都必须落在注册矩形之外。双击最大化手势因同一限制放弃（YAGNI）。
@@ -39,7 +39,11 @@ private let DRAG_BACK_OFFSET: Int32 = 44
 // 坐标为逻辑 vp。
 public func titleBarDragRects(windowWidth: Int32, hasBack: Bool): Array<(Int32, Int32, Int32, Int32)> {
     let rects = ArrayList<(Int32, Int32, Int32, Int32)>()
-    let brandX: Int32 = if (hasBack) { 16 + DRAG_BACK_OFFSET } else { 0 }
+    let brandX: Int32 = if (hasBack) {
+        16 + DRAG_BACK_OFFSET
+    } else {
+        0
+    }
     rects.add((brandX, 0, DRAG_BRAND_W, TITLEBAR_HEIGHT))
     let leftReserve = brandX + DRAG_BRAND_W
     let freeW = windowWidth - leftReserve - DRAG_RIGHT_RESERVE
@@ -61,7 +65,7 @@ private let WIN_BTN_GAP: Float32 = 2.0
 private let WIN_SEP_W: Float32 = 13.0
 // 搜索框左右内缩规格（图标 12..24 位 / kbd 宽 18 + 边距位）。
 private let SEARCH_ICON_INSET: Float32 = 26.0 // TextField 左内缩
-private let SEARCH_KBD_INSET: Float32 = 30.0  // TextField 右内缩
+private let SEARCH_KBD_INSET: Float32 = 30.0 // TextField 右内缩
 // 搜索框控件 id（TextField key 即焦点 id；Enter 提交、「/」聚焦、Esc 失焦都按它判定）。
 private let SEARCH_FIELD_ID = "titlebar-search"
 // SDL_SCANCODE_SLASH（keyFromScancode 未映射的符号键以 RawScancode 透传）。
@@ -114,11 +118,10 @@ public class WinControlButton <: Widget {
         let cx = frame.centerX()
         let cy = frame.centerY()
         match (glyph) {
-            case WinGlyph.Min =>
-                ctx.renderer.fill(Rect(cx - 5.0, cy - 0.6, 10.0, 1.2), glyphColor)
-            case WinGlyph.Max =>
-                ctx.renderer.strokeRect(Rect(cx - 4.5, cy - 4.5, 9.0, 9.0),
-                    Pen(width: 1.2, color: glyphColor))
+            case WinGlyph.Min => ctx.renderer.fill(Rect(cx - 5.0, cy - 0.6, 10.0, 1.2), glyphColor)
+            case WinGlyph.Max => ctx
+                .renderer
+                .strokeRect(Rect(cx - 4.5, cy - 4.5, 9.0, 9.0), Pen(width: 1.2, color: glyphColor))
             case WinGlyph.Close =>
                 let pen = Pen(width: 1.2, color: glyphColor)
                 ctx.renderer.strokeLine(cx - 4.0, cy - 4.0, cx + 4.0, cy + 4.0, pen)
@@ -234,19 +237,19 @@ private class SearchChrome <: Widget {
         let iconColor = ctx.theme.mutedText
         let pen = Pen(width: 1.3, color: iconColor)
         ctx.renderer.strokeCircle(frame.x + 14.0, frame.centerY() - 1.0, 4.2, pen)
-        ctx.renderer.strokeLine(frame.x + 17.2, frame.centerY() + 2.2, frame.x + 20.4,
-            frame.centerY() + 5.4, pen)
+        ctx.renderer.strokeLine(frame.x + 17.2, frame.centerY() + 2.2, frame.x + 20.4, frame.centerY() + 5.4, pen)
         // 右侧 kbd「/」（原型 .kbd：1px 边、圆角 5、10.5fp muted）。
         let kw: Float32 = 18.0
         let kh: Float32 = 18.0
         let kx = frame.right() - 8.0 - kw
         let ky = frame.centerY() - kh / 2.0
-        ctx.renderer.strokeRoundedRect(Rect(kx + 0.5, ky + 0.5, kw - 1.0, kh - 1.0), 4.5,
-            Pen(width: 1.0, color: ctx.theme.panelEdge))
+        ctx
+            .renderer
+            .strokeRoundedRect(Rect(kx + 0.5, ky + 0.5, kw - 1.0, kh - 1.0), 4.5,
+                Pen(width: 1.0, color: ctx.theme.panelEdge))
         let sw = ctx.renderer.textWidth("/", pointSize: 10.5)
         let sh = ctx.renderer.textHeight(pointSize: 10.5)
-        ctx.renderer.text("/", kx + (kw - sw) / 2.0, ky + (kh - sh) / 2.0, ctx.theme.mutedText,
-            pointSize: 10.5)
+        ctx.renderer.text("/", kx + (kw - sw) / 2.0, ky + (kh - sh) / 2.0, ctx.theme.mutedText, pointSize: 10.5)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -282,11 +285,15 @@ private class SearchPlaceholder <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         // 占位文案仅在有输入时隐藏（与浏览器 placeholder 一致：聚焦但为空时仍显示）。
-        if (model.searchText.value.size > 0) { return }
+        if (model.searchText.value.size > 0) {
+            return
+        }
         let ph = "搜索标题 / 标签 / 艺术家…"
         let th = ctx.renderer.textHeight(pointSize: 13.0)
-        ctx.renderer.text(ph, frame.x + SEARCH_ICON_INSET + 12.0, frame.centerY() - th / 2.0,
-            ctx.theme.mutedText, pointSize: 13.0)
+        ctx
+            .renderer
+            .text(ph, frame.x + SEARCH_ICON_INSET + 12.0, frame.centerY() - th / 2.0, ctx.theme.mutedText,
+                pointSize: 13.0)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -335,7 +342,11 @@ private func searchWidth(progress: Float32): Float32 {
 // 以与拖动区相同的几何预算限制宽度：常规窗口拿到完整动画宽度，
 // 窄窗口则优先保留右侧导航/窗口按钮，搜索框自适应收窄。
 private func searchLayoutWidth(windowWidth: Int32, hasBack: Bool, progress: Float32): Float32 {
-    let brandX: Int32 = if (hasBack) { 16 + DRAG_BACK_OFFSET } else { 0 }
+    let brandX: Int32 = if (hasBack) {
+        16 + DRAG_BACK_OFFSET
+    } else {
+        0
+    }
     let available = max(0.0, Float32(windowWidth - brandX - DRAG_BRAND_W - DRAG_RIGHT_RESERVE))
     min(searchWidth(progress), available)
 }
@@ -350,7 +361,7 @@ private class SearchKeys <: Widget {
 
     public init(model: AppModel) {
         this.model = model
-        this.slashPending = rememberState<Bool>("titlebar:slash-pending", {=> false })
+        this.slashPending = rememberState<Bool>("titlebar:slash-pending", {=> false})
         emit(this)
     }
 
@@ -386,8 +397,7 @@ private class SearchKeys <: Widget {
                     slashPending.value = false
                     return true
                 }
-            case UiEvent.Frame(_) =>
-                slashPending.value = false
+            case UiEvent.Frame(_) => slashPending.value = false
             case _ => ()
         }
         false
@@ -430,8 +440,9 @@ private class NavPill <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, ctx.theme.panel)
-        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5,
-            Pen(width: 1.0, color: ctx.theme.panelEdge))
+        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: ctx
+            .theme
+            .panelEdge))
         var x = frame.x + 3.0
         for (i in 0..labels.size) {
             let w = itemWidth(ctx, labels[i])
@@ -452,8 +463,7 @@ private class NavPill <: Widget {
 
     private func drawPillText(ctx: UiContext, label: String, item: Rect, th: Float32, color: Color): Unit {
         let tw = ctx.renderer.textWidth(label, pointSize: 12.5)
-        ctx.renderer.text(label, item.centerX() - tw / 2.0, item.centerY() - th / 2.0, color,
-            pointSize: 12.5)
+        ctx.renderer.text(label, item.centerX() - tw / 2.0, item.centerY() - th / 2.0, color, pointSize: 12.5)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -498,7 +508,11 @@ private class UserChip <: Widget {
     // 用户名截断（>8 rune 截断 + …）：防止超长名把右侧固定带撑出拖动区预算。
     private func displayName(): String {
         let runes = model.settings.username.toRuneArray()
-        runesToString(runes, 0, min(runes.size, 8)) + if (runes.size > 8) { "…" } else { "" }
+        runesToString(runes, 0, min(runes.size, 8)) + if (runes.size > 8) {
+            "…"
+        } else {
+            ""
+        }
     }
 
     public func measure(ctx: UiContext, _: Size): Size {
@@ -512,26 +526,28 @@ private class UserChip <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, ctx.theme.panel)
-        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5,
-            Pen(width: 1.0, color: ctx.theme.panelEdge))
+        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: ctx
+            .theme
+            .panelEdge))
         let ax = frame.x + 4.0 + 12.0
         ctx.renderer.fillCircle(ax, frame.centerY(), 12.0, AVATAR_BLUE)
         let initial = initialLetter()
         let tw = ctx.renderer.textWidth(initial, pointSize: 11.0)
         let th = ctx.renderer.textHeight(pointSize: 11.0)
-        ctx.renderer.text(initial, ax - tw / 2.0, frame.centerY() - th / 2.0,
-            Color.rgb(255, 255, 255), pointSize: 11.0)
+        ctx.renderer.text(initial, ax - tw / 2.0, frame.centerY() - th / 2.0, Color.rgb(255, 255, 255), pointSize: 11.0)
         let name = displayName()
         let nw = ctx.renderer.textWidth(name, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
-        ctx.renderer.text(name, frame.right() - 10.0 - nw, frame.centerY() - nh / 2.0,
-            ctx.theme.mutedText, pointSize: 12.0)
+        ctx.renderer.text(name, frame.right() - 10.0 - nw, frame.centerY() - nh / 2.0, ctx.theme.mutedText,
+            pointSize: 12.0)
     }
 
     // 首 rune 作头像字母（空名兜底 U；不做大小写变换，中日韩文字原样亦成立）。
     private func initialLetter(): String {
         let runes = model.settings.username.toRuneArray()
-        if (runes.size == 0) { return "U" }
+        if (runes.size == 0) {
+            return "U"
+        }
         runesToString(runes, 0, 1)
     }
 
@@ -561,7 +577,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         TitleBarBackground()
         HStack {
             if (showBack) {
-                GhostIconButton(GhostGlyph.Back, "titlebar:back") {=> model.page.value = Page.Library }
+                GhostIconButton(GhostGlyph.Back, "titlebar:back") {=> model.page.value = Page.Library}
             }
             HStack {
                 brandLogo(28.vp)
@@ -573,17 +589,19 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 ZStack {
                     SearchChrome(model)
                     // chrome 关闭：外壳由 SearchChrome 自绘，避免 TextField 默认底/边再套一层。
-                    TextField(model.searchText, key: SEARCH_FIELD_ID, chrome: false)
-                        .padding(SEARCH_ICON_INSET + 4.0, 0.0, SEARCH_KBD_INSET + 4.0, 0.0)
+                    TextField(model.searchText, key: SEARCH_FIELD_ID, chrome: false).padding(SEARCH_ICON_INSET + 4.0,
+                        0.0, SEARCH_KBD_INSET + 4.0, 0.0)
                     SearchPlaceholder(model)
                     SearchAutocomplete(model, SEARCH_FIELD_ID)
                     SearchExpandTicker(searchTween, searchProgress)
-                }.alignment(Alignment.TopLeading)
-                    .width(searchLayoutWidth(window.width, showBack, searchProgress))
+                }.alignment(Alignment.TopLeading).width(searchLayoutWidth(window.width, showBack, searchProgress))
                 Spacer()
                 NavPill(model)
-                GhostIconButton(GhostGlyph.Gear, "titlebar:settings") {=>
-                    model.page.value = Page.Settings
+                GhostIconButton(GhostGlyph.Named(IconName.Upload), "titlebar:upload") {
+                    => model.openUploadDrawer()
+                }
+                GhostIconButton(GhostGlyph.Gear, "titlebar:settings") {
+                    => model.page.value = Page.Settings
                 }
             } else {
                 Spacer()
@@ -593,9 +611,9 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 UserChip(model)
             }
             WinSep()
-            WinControlButton(WinGlyph.Min, "titlebar:min") { _ => window.minimize() }
-            WinControlButton(WinGlyph.Max, "titlebar:max") { _ => window.maximize() }
-            WinControlButton(WinGlyph.Close, "titlebar:close") { ctx => ctx.requestClose() }
+            WinControlButton(WinGlyph.Min, "titlebar:min") {_ => window.minimize()}
+            WinControlButton(WinGlyph.Max, "titlebar:max") {_ => window.maximize()}
+            WinControlButton(WinGlyph.Close, "titlebar:close") {ctx => ctx.requestClose()}
         }.spacing(10.0).crossAxisAlignment(CrossAxisAlignment.Center).padding(16.0, 0.0, 16.0, 0.0)
         // 顶层键盘接线件：最后声明 = 事件分发最优先（只吃不相关鼠标事件之外的键）。
         SearchKeys(model)
