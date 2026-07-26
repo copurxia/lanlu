@@ -494,6 +494,62 @@ public class GhostIconButton <: Widget {
     }
 }
 
+// 明暗切换专用按钮：根据当前主题绘制太阳/月亮，并把点击坐标交给涟漪层。
+// 其余尺寸、hover 与 GhostIconButton 保持一致。
+public class ThemeToggleButton <: Widget {
+    private let model: AppModel
+    private let hoverId: String
+    private var frame = Rect.zero()
+
+    public init(model: AppModel, hoverId: String) {
+        this.model = model
+        this.hoverId = hoverId
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size { Size(34.0, 34.0) }
+
+    public func layout(_: UiContext, rect: Rect): Unit { frame = rect }
+
+    public func draw(ctx: UiContext): Unit {
+        let hovered = ctx.isHovered(hoverId)
+        if (hovered) {
+            ctx.renderer.fillRoundedRect(frame, 9.0, ctx.theme.overlayHover)
+        }
+        let color = if (hovered) { ctx.theme.text } else { ctx.theme.mutedText }
+        let cx = frame.centerX()
+        let cy = frame.centerY()
+        if (model.isLight()) {
+            ctx.renderer.fillCircle(cx, cy, 3.8, color)
+            let pen = Pen(width: 1.4, color: color)
+            for (i in 0..8) {
+                let a = Float64(i) * 0.7853982
+                ctx.renderer.strokeLine(cx + Float32(cos(a)) * 6.0, cy + Float32(sin(a)) * 6.0,
+                    cx + Float32(cos(a)) * 8.0, cy + Float32(sin(a)) * 8.0, pen)
+            }
+        } else {
+            // 月牙：主色圆上用当前面板色挖去右上区域。
+            ctx.renderer.fillCircle(cx, cy, 6.5, color)
+            ctx.renderer.fillCircle(cx + 3.2, cy - 2.8, 6.0,
+                if (hovered) { ctx.theme.overlayHover } else { ctx.theme.panel })
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) { ctx.claimHover(hoverId, CursorShape.Interactive) }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    model.setThemeAt(if (model.settings.theme == "dark") { "light" } else { "dark" }, x, y)
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
+}
+
 // 迷你分段（原型 .mini-seg）：elev 底 + 1px 描边 + 圆角 8 容器（内边距 2、间距 2）；
 // 项 11fp、padding 4×9、圆角 6；选中 accentSoft 浅金底 + accent 字（设计稿为浅金，
 // 框架 SegmentedControl 实金底过重，故详情页专用此件）；hover 未选项转主文字色。

@@ -269,9 +269,7 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
             // 标题 flex 吃掉中间剩余宽（原型 .tb-title flex:1；超长整体省略号截断）。
             ReaderTitle(archiveTitle, chapter).flex()
             pagePill(model)
-            GhostIconButton(GhostGlyph.Theme, "readerbar:theme") {=>
-                model.setTheme(if (model.settings.theme == "dark") { "light" } else { "dark" })
-            }
+            ThemeToggleButton(model, "readerbar:theme")
             ReaderModeButton(model)
             GhostIconButton(GhostGlyph.Heart, "readerbar:fav", active: favorited) {=>
                 model.toggleReaderFavorite()

@@ -533,9 +533,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
             } else {
                 Spacer()
             }
-            GhostIconButton(GhostGlyph.Theme, "titlebar:theme") {=>
-                model.setTheme(if (model.settings.theme == "dark") { "light" } else { "dark" })
-            }
+            ThemeToggleButton(model, "titlebar:theme")
             if (!onLogin && model.settings.username.size > 0) {
                 UserChip(model)
             }

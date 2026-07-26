@@ -1469,17 +1469,29 @@ public class AppModel {
     // 动画覆盖全窗口后再执行实际切换（网页 Material 涟漪式明暗切换）。
     public var themeRipplePending: Bool = false
     public var themeRippleTarget: String = ""
+    // 触发点使用窗口逻辑坐标；负值表示没有指针来源（例如设置页分段切换），
+    // ThemeRipple 会回落到窗口中心。
+    public var themeRippleX: Float32 = -1.0
+    public var themeRippleY: Float32 = -1.0
 
     // 切换主题：不再即切即生效，改为设置待处理标记，由 ThemeRipple 组件
     // 播放涟漪动画并在完成时回调 applyPendingTheme 落盘并应用新主题。
     public func setTheme(mode: String): Unit {
+        setThemeAt(mode, -1.0, -1.0)
+    }
+
+    // 标题栏主题按钮把实际点击点传进来，使扩散圆与参考页一样从按钮处揭开。
+    public func setThemeAt(mode: String, x: Float32, y: Float32): Unit {
         if (mode != "dark" && mode != "light") {
             return
         }
-        if (mode == settings.theme) {
+        // 动画期间拒绝第二次切换，避免待处理目标和正在绘制的目标互相覆盖。
+        if (mode == settings.theme || themeRipplePending || themeRippleTarget.size > 0) {
             return
         }
         themeRippleTarget = mode
+        themeRippleX = x
+        themeRippleY = y
         themeRipplePending = true
     }
 
@@ -1493,6 +1505,9 @@ public class AppModel {
         if (let Some(h) <- themeChangeHandler) {
             h(themeRippleTarget)
         }
+        themeRippleTarget = ""
+        themeRippleX = -1.0
+        themeRippleY = -1.0
     }
 
     // 设置界面字体（需重启生效）。
