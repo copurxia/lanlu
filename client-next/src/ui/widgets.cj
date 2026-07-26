@@ -808,20 +808,22 @@ func ghostStyleOf(model: AppModel): SurfaceStyle {
 // hover 封面缩放幅度（frontend base-media-card 的 group-hover:scale-105 同款：
 // 卡片不动，封面图在框内放大，替代早期的整卡 translateY 上浮）。
 private let CARD_ZOOM: Float32 = 0.05
+private let CARD_OVERLAY_MS: Int64 = 180
 
-// 悬停上浮传感器：HoverSensor 的变体——认领 hoverId 之外，在 draw 里把传入的 Spring
-// 向 hover?1:0 目标动画。卡片构建期读 spring.value 换算 .offset 位移（应用层拿不到
-// buildChild，自定义 Widget 无法包裹 builder 子树，只能「传感器 + 构建期读值」组合；
-// 读到的值落后 draw 一帧，对 4vp 动画无感知影响）。
+// 悬停动画传感器：HoverSensor 的变体——认领 hoverId，并在 draw 里同步推进封面缩放
+// Spring 与浮层显隐 Tween。卡片构建期读取动画值（应用层拿不到 buildChild，自定义
+// Widget 无法包裹 builder 子树，只能采用「传感器 + 构建期读值」组合）。
 class HoverLift <: Widget {
     private let hoverId: String
     private let spring: Spring
+    private let overlayTween: Tween
     private let hovered: State<Bool>
     private var frame = Rect.zero()
 
-    public init(hoverId: String, spring: Spring, hovered: State<Bool>) {
+    public init(hoverId: String, spring: Spring, overlayTween: Tween, hovered: State<Bool>) {
         this.hoverId = hoverId
         this.spring = spring
+        this.overlayTween = overlayTween
         this.hovered = hovered
         emit(this)
     }
@@ -841,6 +843,7 @@ class HoverLift <: Widget {
         }
         let goal: Float32 = if (isHovered) { 1.0 } else { 0.0 }
         let _ = spring.animate(ctx, target: goal)
+        let _ = overlayTween.animate(ctx, target: goal)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -930,15 +933,17 @@ class CoverProgress <: Widget {
 class CardHoverActions <: Widget {
     private let key: String
     private let hoverVisible: State<Bool>
+    private let progress: Float32
     private let favorited: Bool
     private let onDetails: () -> Unit
     private let onFavorite: () -> Unit
     private var frame = Rect.zero()
 
-    public init(key: String, visible: State<Bool>, favorited: Bool, onDetails: () -> Unit,
-        onFavorite: () -> Unit) {
+    public init(key: String, visible: State<Bool>, progress: Float32, favorited: Bool,
+        onDetails: () -> Unit, onFavorite: () -> Unit) {
         this.key = key
         this.hoverVisible = visible
+        this.progress = progress
         this.favorited = favorited
         this.onDetails = onDetails
         this.onFavorite = onFavorite
@@ -961,25 +966,33 @@ class CardHoverActions <: Widget {
         Rect(frame.x + 49.0, frame.y + frame.h - 42.0, 32.0, 32.0)
     }
 
-    private func drawButton(ctx: UiContext, rect: Rect, glyph: GhostGlyph, hoverId: String,
-        active: Bool): Unit {
+    private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph, hoverId: String,
+        active: Bool, reveal: Float32): Unit {
+        let t = max(0.0, min(1.0, reveal))
+        if (t <= 0.0) { return }
+        let rect = baseRect.shift(0.0, (1.0 - t) * 6.0)
         let bg = if (ctx.isHovered(hoverId)) {
-            Color.rgba(255, 255, 255, 64)
+            Color.rgba(255, 255, 255, Int64(64.0 * t))
         } else {
-            Color.rgba(255, 255, 255, 38)
+            Color.rgba(255, 255, 255, Int64(38.0 * t))
         }
         ctx.renderer.fillRoundedRect(rect, 8.0, bg)
+        let iconColor = if (active) { ctx.theme.accent } else { LANLU_ON_MEDIA }
         drawGhostGlyph(ctx.renderer, glyph, rect.centerX(), rect.centerY(),
-            if (active) { ctx.theme.accent } else { LANLU_ON_MEDIA })
+            iconColor.withAlpha(Int64(Float32(Int64(iconColor.a)) * t)))
     }
 
     public func draw(ctx: UiContext): Unit {
-        if (!hoverVisible.value) { return }
-        drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), "cover-details:${key}", false)
-        drawButton(ctx, favoriteRect(), GhostGlyph.Heart, "cover-favorite:${key}", favorited)
+        let detailsT = max(0.0, min(1.0, (progress - 0.06) / 0.94))
+        let favoriteT = max(0.0, min(1.0, (progress - 0.16) / 0.84))
+        drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), "cover-details:${key}", false, detailsT)
+        drawButton(ctx, favoriteRect(), GhostGlyph.Heart, "cover-favorite:${key}", favorited, favoriteT)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
+        if (!hoverVisible.value && progress <= 0.01) {
+            return false
+        }
         match (event) {
             case UiEvent.MouseMove(x, y) =>
                 if (detailsRect().contains(x, y)) {
@@ -1101,7 +1114,7 @@ public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
         pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
-// 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上「▣ 合集」角标，
+// 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上开书图标「合集」角标，
 // meta 为「N 个档案 · X%」。点击进合集详情（T11 接通路由）。
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
     homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%",
@@ -1119,6 +1132,10 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
     let hoverId = "cover:${cardKey}"
     // Spring 0→1 驱动封面缩放（HoverLift 传感器在 draw 里推进弹簧）。
     let zoomSpring = rememberState<Spring>("zoom:${cardKey}", {=> Spring(0.0)}).value
+    let overlayTween = rememberState<Tween>("overlay-motion:${cardKey}", {
+        => Tween(CARD_OVERLAY_MS, Easing.easeOutCubic)
+    }).value
+    let overlayT = overlayTween.value
     // HoverLift 在绘制期同步悬停态，下一帧构建与 BaseMediaCard 一致的信息/操作浮层。
     let overlayHovered = rememberState<Bool>("cover-overlay:${cardKey}", {=> false})
     ClickArea(onClick: onClick) {
@@ -1130,7 +1147,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     let edge = if (model.isLight()) { LANLU_L_PANEL_EDGE } else { LANLU_PANEL_EDGE }
                     TankBackdrop(hi, lo, edge)
                 }
-                HoverLift(hoverId, zoomSpring, overlayHovered)
+                HoverLift(hoverId, zoomSpring, overlayTween, overlayHovered)
                 if (coverAssetId > 0) {
                     remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
                         Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
@@ -1139,13 +1156,13 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     noCoverBox(model, coverW, coverH)
                 }
                 CoverBorder(hoverId)
-                if (overlayHovered.value) {
+                if (overlayT > 0.001) {
                     CoverClipStart()
-                    cardHoverOverlay(summary, tagsCsv, coverH)
+                    cardHoverOverlay(summary, tagsCsv, coverH, overlayT)
                     CoverClipEnd()
                 }
                 // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
-                CardHoverActions(cardKey, overlayHovered, favorited, onClick, onFavorite)
+                CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite)
                 // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）。
                 HStack {
                     if (tank) { tankBadge(model) }
@@ -1169,13 +1186,14 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
 
 // BaseMediaCard 同款封面悬浮层：底部渐变上依次放标签、三行简介和详情/收藏操作。
 // 多选不属于此层；卡片主体点击仍保持原有打开详情行为，内部操作会先消费点击事件。
-private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32): Unit {
+private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32, progress: Float32): Unit {
     let tags = cardHoverTags(tagsCsv)
     let maxTags: Int64 = if (summary.size > 0) { 5 } else { 8 }
+    let t = max(0.0, min(1.0, progress))
     ZStack {
         GradientScrim(direction: GradientDirection.Bottom,
-            stops: [(0.0, Color.rgba(0, 0, 0, 0)), (0.38, Color.rgba(0, 0, 0, 56)),
-                (1.0, Color.rgba(0, 0, 0, 196))])
+            stops: [(0.0, Color.rgba(0, 0, 0, 0)), (0.38, Color.rgba(0, 0, 0, Int64(56.0 * t))),
+                (1.0, Color.rgba(0, 0, 0, Int64(196.0 * t)))])
         // 与 frontend BaseMediaCard 的 absolute bottom 内容层对应：预留 48vp 给操作区，
         // 标签/简介仅在封面内自底向上排布，过长内容由外层封面裁剪。
         VStack {
@@ -1183,22 +1201,27 @@ private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32)
                 FlowRow {
                     let shown = min(tags.size, maxTags)
                     for (i in 0..shown) {
-                        Label(tags[i]).fontSize(10.fp).foregroundColor(LANLU_ON_MEDIA).tight()
-                            .padding(6.vp, 2.vp).background(Color.rgba(255, 255, 255, 38), 5.vp)
+                        Label(tags[i]).fontSize(10.fp)
+                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t))).tight()
+                            .padding(6.vp, 2.vp)
+                            .background(Color.rgba(255, 255, 255, Int64(38.0 * t)), 5.vp)
                     }
                     if (tags.size > shown) {
-                        Label("+${tags.size - shown}").fontSize(10.fp).foregroundColor(LANLU_ON_MEDIA).tight()
-                            .padding(6.vp, 2.vp).background(Color.rgba(255, 255, 255, 38), 5.vp)
+                        Label("+${tags.size - shown}").fontSize(10.fp)
+                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t))).tight()
+                            .padding(6.vp, 2.vp)
+                            .background(Color.rgba(255, 255, 255, Int64(38.0 * t)), 5.vp)
                     }
                 }.spacing(4.vp)
             }
             if (summary.size > 0) {
-                Label(summary).fontSize(10.5.fp).foregroundColor(Color.rgba(255, 255, 255, 230))
+                Label(summary).fontSize(10.5.fp)
+                    .foregroundColor(Color.rgba(255, 255, 255, Int64(230.0 * t)))
                     .maxLines(3).tight().fillWidth()
             }
         }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Start)
             .padding(10.vp, 10.vp, 10.vp, 48.vp).maxHeight(coverH)
-    }.alignment(Alignment.BottomLeading)
+    }.alignment(Alignment.BottomLeading).offset(x: 0.0, y: (1.0 - t) * 8.0)
 }
 
 // 搜索 DTO 的 tags 是 CSV。悬浮卡只展示值部分，过滤 source 命名空间，与 frontend
@@ -1252,10 +1275,12 @@ private func newBadge(): Unit {
 
 // 合集类型角标（原型 .badge-type.tank）：accent 色字 + rgba(0,0,0,.65) 底
 // （叠在封面上不随主题翻转，仅文字色随主题 accent）。
-// 注：原型符号 ⧉ 在 NotoSansCJK/msyh 无字形，以 ▣（叠层近义、字体可及）代替。
 private func tankBadge(model: AppModel): Unit {
     let accent = if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-    Label("▣ 合集").fontSize(10.5.fp).foregroundColor(accent)
+    HStack {
+        GlyphIcon(GhostGlyph.Book, size: 13.0, color: accent)
+        Label("合集").fontSize(10.5.fp).foregroundColor(accent)
+    }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
         .padding(8.vp, 3.vp).background(Color.rgba(0, 0, 0, 165), 6.vp)
 }
 
