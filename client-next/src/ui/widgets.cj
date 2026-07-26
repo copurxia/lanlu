@@ -765,7 +765,7 @@ private func imagePlaceholder(model: AppModel, w: Length, h: Length, text: Strin
 // 首次构建（状态 ""）时经 model.requestImage 发起加载（并发上限由 model 保证）。
 // zoom >1 时成品图绕中心放大并裁回框内（卡片 hover 缩放动画用；占位/错误态不缩放）。
 public func remoteImage(model: AppModel, key: String, url: String, w: Length, h: Length,
-    zoom!: Float32 = 1.0): Unit {
+    zoom!: Float32 = 1.0, radius!: Float32 = 0.0): Unit {
     let st = model.imageState(key)
     if (st.value == "") {
         model.requestImage(key, url)
@@ -779,7 +779,7 @@ public func remoteImage(model: AppModel, key: String, url: String, w: Length, h:
     } else {
         // 状态为 "ready"：像素已 stage 进 cui 像素纹理缓存，PixelImageView 首帧惰性建纹理。
         // 封面用 Cover 裁满卡片；width/height 为首选尺寸；zoom 仅作用在成品图上。
-        PixelImageView(key, w, h, fit: ImageFit.Cover).zoom(zoom)
+        PixelImageView(key, w, h, fit: ImageFit.Cover).zoom(zoom).rounded(radius)
     }
 }
 
@@ -1048,7 +1048,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                 if (coverAssetId > 0) {
                     remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
                         Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
-                        zoom: 1.0 + CARD_ZOOM * zoomSpring.value)
+                        zoom: 1.0 + CARD_ZOOM * zoomSpring.value, radius: coverW * 0.072)
                 } else {
                     noCoverBox(model, coverW, coverH)
                 }
