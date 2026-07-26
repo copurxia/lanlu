@@ -7,7 +7,8 @@ import std.collection.ArrayList
 // ── 自定义标题栏（无边框窗口顶栏）──
 // 布局对齐仓库根 home-detail-redesign.html #topbar：高 56vp、底边 1px panelEdge；
 // 左→右 = 品牌（金色圆角方块 + Lanlu）→ 弹性空隙 → 全局搜索框（icon + 占位 + kbd「/」，
-// flex 封顶 460vp，在品牌与右侧固定带之间水平居中）→ 弹性空隙 → 导航胶囊（首页/书架/在线源，
+// 默认封顶 460vp，点击/聚焦后展开至 680vp，在品牌与右侧固定带之间水平居中）→
+// 弹性空隙 → 导航胶囊（首页/书架/在线源，
 // 后两项无页面置灰）→ ⚙ 设置 → ◐ 主题 → 用户芯片 → 1×20 分隔线 → 最小化/最大化/关闭。
 // 窗口拖动走 SdlWindow.setDragRegions 多矩形（main.cj 注册：品牌区 + 搜索框两侧的弹性空隙，
 // 见 titleBarDragRects）——DRAGGABLE 内鼠标事件不投递给应用，
@@ -20,8 +21,10 @@ public let TITLEBAR_HEIGHT: Int32 = 56
 // 品牌区：左内边距 16 + 方块 28 + 间距 9 + 「Lanlu」15fp ≈ 45 ≈ 98，注册 100 留边。
 private let DRAG_BRAND_W: Int32 = 100
 // 搜索框视觉规格（原型 .search-shell）：圆角 10、左侧图标位、右侧 kbd 位。
-// MAX_W 提前到此：titleBarDragRects 要用它算搜索框落点。
-private let SEARCH_MAX_W: Float32 = 460.0
+// 拖动区始终按展开宽度避让：动画中搜索框不会被 OS 拖动命中区覆盖。
+private let SEARCH_REST_W: Float32 = 460.0
+private let SEARCH_EXPANDED_W: Float32 = 680.0
+private let SEARCH_EXPAND_MS: Int64 = 220
 // 右侧固定带保留宽（右内边距 16 + 胶囊 ≈182 + 设置/主题 34×2 + 用户芯片 ≤150 + 分隔线 13
 // + 窗口控制 118 + 间距 6×10 ≈ 607，取 640 留安全边；用户名超长的芯片已截断兜底）。
 private let DRAG_RIGHT_RESERVE: Int32 = 640
@@ -41,7 +44,7 @@ public func titleBarDragRects(windowWidth: Int32, hasBack: Bool): Array<(Int32, 
     let leftReserve = brandX + DRAG_BRAND_W
     let freeW = windowWidth - leftReserve - DRAG_RIGHT_RESERVE
     if (freeW > 0) {
-        let searchW = min(Int32(SEARCH_MAX_W), freeW)
+        let searchW = min(Int32(SEARCH_EXPANDED_W), freeW)
         let side = (freeW - searchW) / 2
         if (side > 0) {
             rects.add((leftReserve, 0, side, TITLEBAR_HEIGHT))
@@ -291,6 +294,51 @@ private class SearchPlaceholder <: Widget {
     }
 }
 
+// 搜索框聚焦动画的逐帧推进器。构建期使用 Tween 上一帧的值计算宽度，
+// draw 期再读取 TextField 的真实焦点并推进动画；补请求一帧使最后的 0/1 精确落到布局上。
+private class SearchExpandTicker <: Widget {
+    private let tween: Tween
+    private let builtProgress: Float32
+
+    public init(tween: Tween, builtProgress: Float32) {
+        this.tween = tween
+        this.builtProgress = builtProgress
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(0.0, 0.0)
+    }
+
+    public func layout(_: UiContext, _: Rect): Unit {}
+
+    public func draw(ctx: UiContext): Unit {
+        let progress = tween.animate(ctx, target: if (ctx.hasFocus(SEARCH_FIELD_ID)) {
+            1.0
+        } else {
+            0.0
+        })
+        if (progress != builtProgress) {
+            ctx.requestFrame()
+        }
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
+
+private func searchWidth(progress: Float32): Float32 {
+    SEARCH_REST_W + (SEARCH_EXPANDED_W - SEARCH_REST_W) * progress
+}
+
+// 以与拖动区相同的几何预算限制宽度：常规窗口拿到完整动画宽度，
+// 窄窗口则优先保留右侧导航/窗口按钮，搜索框自适应收窄。
+private func searchLayoutWidth(windowWidth: Int32, hasBack: Bool, progress: Float32): Float32 {
+    let brandX: Int32 = if (hasBack) { 16 + DRAG_BACK_OFFSET } else { 0 }
+    let available = max(0.0, Float32(windowWidth - brandX - DRAG_BRAND_W - DRAG_RIGHT_RESERVE))
+    min(searchWidth(progress), available)
+}
 
 // 搜索框按键接线（ZStack 顶层、不消费鼠标事件的纯键盘件）：
 // Enter（聚焦时）→ 提交搜索；Esc（聚焦时）→ 失焦；「/」（无任何控件聚焦时）→ 聚焦搜索框。
@@ -505,6 +553,10 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         case Page.Detail(_) | Page.Tank(_) | Page.Settings => true
         case _ => false
     }
+    let searchTween = rememberState<Tween>("titlebar:search-expand", {
+        => Tween(SEARCH_EXPAND_MS, Easing.easeOutCubic)
+    }).value
+    let searchProgress = searchTween.value
     ZStack {
         TitleBarBackground()
         HStack {
@@ -524,7 +576,9 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                     TextField(model.searchText, key: SEARCH_FIELD_ID, chrome: false)
                         .padding(SEARCH_ICON_INSET + 4.0, 0.0, SEARCH_KBD_INSET + 4.0, 0.0)
                     SearchPlaceholder(model)
-                }.alignment(Alignment.TopLeading).flex().maxWidth(SEARCH_MAX_W)
+                    SearchExpandTicker(searchTween, searchProgress)
+                }.alignment(Alignment.TopLeading)
+                    .width(searchLayoutWidth(window.width, showBack, searchProgress))
                 Spacer()
                 NavPill(model)
                 GhostIconButton(GhostGlyph.Gear, "titlebar:settings") {=>
