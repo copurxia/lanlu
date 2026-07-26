@@ -1105,6 +1105,14 @@ public class CloudTag {
     public var count: Int64 = 0
 }
 
+// 顶部搜索框的标签自动补全项：value 是可提交的 namespace:name，
+// label/display 是服务端按语言翻译后的展示文案。
+public class TagSuggestion {
+    public var value: String = ""
+    public var label: String = ""
+    public var display: String = ""
+}
+
 // 对象数组解析的内部通用件：数组可能直接是 data，也可能包在对象 key 内。
 // 保持包内可见（不加 private），Task 2 的第二批 DTO 会复用。
 func dataArrayRaw(body: String, objectKey: String): String {
@@ -1207,6 +1215,47 @@ public func parseCloudTags(body: String): ArrayList<CloudTag> {
                         t.display = t.tag
                     }
                     list.add(t)
+                }
+                r.endArray()
+                break
+            case _ => break
+        }
+    }
+    return list
+}
+
+public func parseTagSuggestions(body: String): ArrayList<TagSuggestion> {
+    let list = ArrayList<TagSuggestion>()
+    let raw = dataArrayRaw(body, "suggestions")
+    if (raw.size == 0) {
+        return list
+    }
+    let r = readerOf(raw)
+    while (let Some(tok) <- r.peek()) {
+        match (tok) {
+            case BeginArray =>
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    r.startObject()
+                    let suggestion = TagSuggestion()
+                    while (r.peek() != EndObject) {
+                        match (r.readName()) {
+                            case "value" => suggestion.value = decodeRaw<String>(r.readValueBytes(), "")
+                            case "label" => suggestion.label = decodeRaw<String>(r.readValueBytes(), "")
+                            case "display" => suggestion.display = decodeRaw<String>(r.readValueBytes(), "")
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    if (suggestion.value.size > 0) {
+                        if (suggestion.label.size == 0) {
+                            suggestion.label = suggestion.value
+                        }
+                        if (suggestion.display.size == 0) {
+                            suggestion.display = suggestion.label
+                        }
+                        list.add(suggestion)
+                    }
                 }
                 r.endArray()
                 break

@@ -220,7 +220,7 @@ private func accentTextOf(model: AppModel): Color {
 // 卡片头部：品牌 logo（brandLogo，widgets.cj）+ 服务器名 / 金色地址。
 func cardHeader(model: AppModel, p: ?ServerProfile): Unit {
     HStack {
-        brandLogo(model, 44.vp)
+        brandLogo(44.vp)
         match (p) {
             case Some(prof) =>
                 VStack {

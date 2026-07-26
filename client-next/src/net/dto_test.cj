@@ -343,6 +343,17 @@ func sourceNamespaceParsesCompositeId(): Unit {
     @Expect(sourceNamespace(""), "")
 }
 
+@Test
+func tagAutocompleteParsesSuggestionsAndFallbacks(): Unit {
+    let suggestions = parseTagSuggestions(
+        "{\"code\":200,\"message\":\"ok\",\"data\":{\"suggestions\":[{\"value\":\"female:swimsuit\",\"label\":\"泳装\",\"display\":\"female:泳装\"},{\"value\":\"artist:foo\"},{\"label\":\"忽略空值\"}]}}")
+    @Expect(suggestions.size, 2)
+    @Expect(suggestions[0].value, "female:swimsuit")
+    @Expect(suggestions[0].label, "泳装")
+    @Expect(suggestions[1].label, "artist:foo")
+    @Expect(suggestions[1].display, "artist:foo")
+}
+
 // 设置区扩展 DTO：统计/账户安全/用户管理/系统设置/词云（Task 1）
 // 注：仓颉多行字符串必须换行起始，行内 JSON 一律用转义双引号，与文件内既有测试一致。
 @Test

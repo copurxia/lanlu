@@ -33,6 +33,10 @@ public func settingsView(model: AppModel): Unit {
     if (!model.isAdmin.value && section.value >= 6 && section.value <= 14) {
         section.value = 0
     }
+    // 任务记录 SSE：切走任务板块即停（进入/切筛选由 tasksPage 负责，见 model.ensureTaskStream）。
+    if (section.value != 11) {
+        model.stopTaskStream()
+    }
     // 根 HStack 默认 8vp 间距会在导航/边线/内容区之间留死区，必须清零（同书库）。
     HStack {
         settingsNav(model, section)
@@ -251,9 +255,9 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
                 Label(model.settings.username).fontSize(15.fp)
                 Label(model.settings.serverUrl).fontSize(11.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            Button("切换服务器", {=> model.page.value = Page.Login})
+            Button("切换服务器", {=> model.page.value = Page.Login}).role(ButtonRole.Primary)
             Button("退出登录", {=> logoutOpen.value = true}).role(ButtonRole.Danger)
-        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
     }
 
     // ---- 统计卡片（原型 .stat-grid：4 等宽） ----

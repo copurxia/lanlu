@@ -69,6 +69,14 @@ public class ApiWorker {
         return true
     }
 
+    // 信箱外投（长连流式任务专用）：不占用 inflight 名额、可同名重复投递，
+    // 结果仍由主循环 onTick drain 回 UI 线程。
+    public func post(name: String, payload: ?Any, error!: String = ""): Unit {
+        synchronized(mutex) {
+            results.add(ApiResult(name, payload, error))
+        }
+    }
+
     public func drain(): ArrayList<ApiResult> {
         synchronized(mutex) {
             let out = ArrayList<ApiResult>()

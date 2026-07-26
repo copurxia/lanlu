@@ -4,32 +4,26 @@ import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SearchItem, TankoubonInfo, PageInfo}
 import std.collection.{ArrayList, HashMap}
-import std.fs.{canonicalize, exists, Path}
+import std.fs.{exists, Path}
 import std.math.{cos, sin}
 
 // 品牌 logo（顶栏 28vp / 登录卡 44vp 共用）：金色镂空书架方块
-//（client-next/assets/lanlu_logo_gold.png，圆角与镂空已烘焙在像素里），
-// 按 /proc/self/exe 推导路径（同 main.cj 的 libdecor 插件定位法），
-// 依次回退深色原版、金底 Server 图标。
-func lanluLogoPath(): ?String {
-    try {
-        let exeDir = canonicalize(Path("/proc/self/exe")).parent.toString()
-        for (name in ["lanlu_logo_gold.png", "lanlu_logo.png"]) {
-            let p = "${exeDir}/../../../assets/${name}"
-            if (exists(Path(p))) { return p }
-        }
-    } catch (_: Exception) { () }
-    None
+//（build.cj 将 client-next/assets/lanlu_logo_gold.png 复制到可执行文件旁）。
+// Logo 缺失说明发布产物不完整：立即报错，不能用无关图标掩盖打包问题。
+func lanluLogoPath(): String {
+    let executableDir = match (ApplicationPaths.basePath()) {
+        case Some(path) => path
+        case None => throw IllegalStateException("无法定位 Lanlu 可执行文件目录")
+    }
+    let path = "${executableDir}/lanlu_logo_gold.png"
+    if (!exists(Path(path))) {
+        throw IllegalStateException("Lanlu Logo 资源缺失：${path}")
+    }
+    path
 }
 
-func brandLogo(model: AppModel, size: Length): Unit {
-    match (lanluLogoPath()) {
-        case Some(p) => ImageView(p, preferredWidth: Some(size), preferredHeight: size)
-        case None =>
-            let accent = if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-            Icon(IconName.Server, size: 20.vp).foregroundColor(Color.rgb(0x1A, 0x12, 0x06))
-                .padding(10.vp).background(accent, 12.vp)
-    }
+func brandLogo(size: Length): Unit {
+    ImageView(lanluLogoPath(), preferredWidth: Some(size), preferredHeight: size)
 }
 
 // 旋转加载圈（indeterminate spinner）：270° 弧的起点随帧钟旋转，绘制时 requestFrame

@@ -307,6 +307,12 @@ public class LanluApi {
         parseCloudTags(checkedBody(client.get("/api/tags/cloud?limit=${limit}")))
     }
 
+    public func tagAutocomplete(query: String, limit: Int64): ArrayList<TagSuggestion> {
+        let url = "/api/tags/autocomplete?q=${percentEncode(query.trimAscii())}&lang=zh&limit=${limit}" +
+            "&require_bound=1"
+        parseTagSuggestions(checkedBody(client.get(url)))
+    }
+
     public func totpStatus(): TotpStatus {
         parseTotpStatus(checkedBody(client.get("/api/auth/totp/status")))
     }
@@ -578,13 +584,14 @@ public class LanluApi {
         let _ = checked(client.postJson("/api/admin/taskpool/${id}/retry", "{}"))
     }
 
-    // ==================== 设置区扩展：任务记录（SSE 首帧快照） ====================
+    // ==================== 设置区扩展：任务记录（SSE 实时订阅） ====================
 
-    // /api/admin/taskpool/tasks 只有 SSE 形态（首帧 snapshot 即全量分页），
-    // 用 bodyStream 增量读到首个完整 data 帧即停；SSE 响应永不结束，
-    // 必须显式关闭流释放底层连接（try/finally 覆盖解析异常路径）。
-    public func taskListSnapshot(status: String, page: Int64, pageSize: Int64): TaskListPage {
-        var url = "/api/admin/taskpool/tasks?page=${page}&pageSize=${pageSize}"
+    // 持续订阅 /api/admin/taskpool/tasks（SSE）：服务端首帧 snapshot 即全量分页，此后
+    // 每次列表变化推一整页 tasks 帧；ping 心跳帧跳过。onPage 返回 false 表示调用方取消，
+    // 函数随即关闭流并正常返回；连接中断/读取异常抛异常，由调用方决定重连
+    // （对齐 web 前端 EventSource 断线自动重连）。
+    public func streamTaskList(status: String, pageSize: Int64, onPage: (TaskListPage) -> Bool): Unit {
+        var url = "/api/admin/taskpool/tasks?page=1&pageSize=${pageSize}"
         if (status != "all" && status.size > 0) {
             url += "&status=${status}"
         }
@@ -597,11 +604,13 @@ public class LanluApi {
         }
         let stream = resp.bodyStream()
         try {
-            let text = readSseSnapshot(stream)
-            match (sseFirstData(text)) {
-                case Some(data) => parseTaskListPage(data)
-                case None => throw ApiException(0, "任务列表快照读取失败（未收到完整 SSE 帧）")
-            }
+            readSseStream(stream, { event, data =>
+                if (event == "ping") {
+                    true
+                } else {
+                    onPage(parseTaskListPage(data))
+                }
+            })
         } finally {
             // InputStream 接口未静态暴露 close，底层实现均为 Resource，转型后关闭。
             match (stream as Resource) {

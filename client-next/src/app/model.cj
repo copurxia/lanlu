@@ -108,6 +108,12 @@ public class AppModel {
 
     // 书库
     public let searchText = State<String>("")
+    public let autocompleteSuggestions = State<ArrayList<TagSuggestion>>(ArrayList<TagSuggestion>())
+    public let autocompleteQuery = State<String>("")
+    public let autocompleteLoading = State<Bool>(false)
+    public let autocompleteVisible = State<Bool>(false)
+    private var autocompleteRequestId: Int64 = 0
+    private var autocompleteTaskName: String = ""
     public let items = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
     public let loading = State<Bool>(false)
     public let recordsTotal = State<Int64>(0)
@@ -828,9 +834,43 @@ public class AppModel {
 
     // 工具条「搜索」：写入关键词并收束查询；清空词后搜索即回浏览模式（复位出站标记）。
     public func submitFilter(): Unit {
+        clearAutocomplete()
         browseExited = false
         query.filter = searchText.value
         applyFilters()
+    }
+
+    // 顶栏只在 220ms UI 防抖到期后调本函数。任务带递增 id，先发后至的旧响应
+    // 不会覆盖新输入的建议。
+    public func requestAutocomplete(rawQuery: String): Unit {
+        let queryText = rawQuery.trimAscii()
+        let a = api ?? return clearAutocomplete()
+        if (queryText.size == 0) {
+            clearAutocomplete()
+            return
+        }
+        autocompleteRequestId += 1
+        let requestId = autocompleteRequestId
+        let taskName = "autocomplete:${requestId}"
+        autocompleteTaskName = taskName
+        autocompleteQuery.value = queryText
+        autocompleteSuggestions.value = ArrayList<TagSuggestion>()
+        autocompleteLoading.value = true
+        autocompleteVisible.value = true
+        let _ = worker.submit(taskName, {=> (requestId, queryText, a.tagAutocomplete(queryText, 10))})
+    }
+
+    public func dismissAutocomplete(): Unit {
+        autocompleteVisible.value = false
+    }
+
+    public func clearAutocomplete(): Unit {
+        autocompleteRequestId += 1
+        autocompleteTaskName = ""
+        autocompleteQuery.value = ""
+        autocompleteSuggestions.value = ArrayList<TagSuggestion>()
+        autocompleteLoading.value = false
+        autocompleteVisible.value = false
     }
 
     // 横排行「查看更多」（继续阅读）：把行的排序规格搬进主查询并切到
@@ -1639,6 +1679,7 @@ public class AppModel {
     }
 
     public func close(): Unit {
+        stopTaskStream()
         playback.stop()
         match (mediaProxy) {
             case Some(proxy) => proxy.close()
@@ -1963,6 +2004,11 @@ public class AppModel {
                 }
             case _ => ()
         }
+        // 任务记录 SSE 生命周期：离开设置页即停（板块内进入/切筛选由视图侧负责）。
+        match (page.value) {
+            case Page.Settings => ()
+            case _ => stopTaskStream()
+        }
         // 自动播放驱动（对齐 frontend useReaderAutoPlay）：每 intervalSec 秒前进一个
         // spread；翻到末 spread 无法前进时自动停（到底自动停）并提示。计时基准
         // reader.clock（与进度防抖 tick 同惯例）；webtoon 本实现是分页的，同样步进。
@@ -2006,6 +2052,19 @@ public class AppModel {
     }
 
     private func handleError(r: ApiResult): Unit {
+        // 自动补全是辅助能力：普通网络失败静默收起，会话失效仍走全局登出。
+        if (r.name.startsWith("autocomplete:")) {
+            if (r.name == autocompleteTaskName) {
+                autocompleteLoading.value = false
+                autocompleteSuggestions.value = ArrayList<TagSuggestion>()
+                autocompleteVisible.value = false
+            }
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+                showError(r.error)
+            }
+            return
+        }
         // 图片任务失败不 toast，只置 error 态并补发队列。
         if (r.name.startsWith("img:")) {
             finishImageTask()
@@ -2191,6 +2250,19 @@ public class AppModel {
             page.value = Page.Library
             loadCategories()
             loadBrowseRows()
+        } else if (name.startsWith("autocomplete:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let (requestId, queryText, suggestions) =
+                        (p as (Int64, String, ArrayList<TagSuggestion>)).getOrThrow()
+                    if (requestId == autocompleteRequestId) {
+                        autocompleteQuery.value = queryText
+                        autocompleteSuggestions.value = suggestions
+                        autocompleteLoading.value = false
+                        autocompleteVisible.value = suggestions.size > 0
+                    }
+                case None => ()
+            }
         } else if (name == "search") {
             loading.value = false
             match (r.payload) {
@@ -2247,9 +2319,15 @@ public class AppModel {
                 case Some(p) => smartFilters.value = (p as ArrayList<SmartFilterItem>).getOrThrow()
                 case None => ()
             }
-        } else if (name.startsWith("set.tasks")) {
+        } else if (name.startsWith("set.tasks.stream:")) {
+            // 流式整页推送：仅当结果筛选与当前订阅一致才应用
+            //（旧流尾帧/切板块后的残留一律丢弃）。
+            let st = name.removePrefix("set.tasks.stream:")
             match (r.payload) {
-                case Some(p) => taskPage.value = (p as TaskListPage).getOrThrow()
+                case Some(p) =>
+                    if (st == taskStreamStatus) {
+                        taskPage.value = (p as TaskListPage).getOrThrow()
+                    }
                 case None => ()
             }
         } else if (name == "set.cron") {
@@ -2292,8 +2370,6 @@ public class AppModel {
                 // act.tag 只 toast，不在此 reload（避免清空筛选条件），由视图侧确认回调触发按当前筛选重拉。
                 else if (name.startsWith("act.filter")) {
                 loadSmartFilters()
-            } else if (name.startsWith("act.task")) {
-                loadTasks("all")
             } else if (name.startsWith("act.cron")) {
                 loadCron()
             } else if (name.startsWith("act.plugin")) {
@@ -2672,9 +2748,97 @@ public class AppModel {
         let _ = worker.submit("set.filters", {=> a.smartFilters()})
     }
 
-    public func loadTasks(status: String): Unit {
-        let a = api ?? return
-        let _ = worker.submit("set.tasks:${status}", {=> a.taskListSnapshot(status, 1, 10)})
+    // ---- 任务记录 SSE 实时订阅（对齐 web 前端 EventSource：进入页即长连，帧到即刷新）----
+    // 生命周期：tasksPage 组合时 ensureTaskStream(status)；切筛选→按新 status 重连；
+    // 切走板块（settings_view）/离开设置页（pump）→ stopTaskStream。
+    // 取消仅置标志位不跨线程关流：服务端 15s ping 会唤醒 read，旧线程最迟一个 ping 周期
+    // 内自行退出，其间尾帧由 dispatch 的 status 一致性校验丢弃（代次 gen 兜底）。
+    private let taskStreamMutex = Mutex()
+    private var taskStreamGen: Int64 = 0
+    private var taskStreamRunning = false
+    private var taskStreamCancel = false
+    private var taskStreamStatus = ""
+
+    public func ensureTaskStream(status: String): Unit {
+        let a = match (api) {
+            case Some(x) => x
+            case None => return
+        }
+        var resetPage = false
+        let gen = synchronized(taskStreamMutex) {
+            if (taskStreamRunning && taskStreamStatus == status) {
+                return
+            }
+            taskStreamCancel = true // 停旧流（靠 gen 代次判停，见块头注释）
+            resetPage = taskStreamStatus != status
+            taskStreamStatus = status
+            taskStreamCancel = false
+            taskStreamRunning = true
+            taskStreamGen += 1
+            taskStreamGen
+        }
+        // 筛选变化：清掉旧筛选的页面数据，避免新快照到货前展示错筛选列表。
+        if (resetPage) {
+            taskPage.value = None
+        }
+        let _ = spawn {
+            taskStreamLoop(a, status, gen)
+        }
+    }
+
+    public func restartTaskStream(status: String): Unit {
+        stopTaskStream()
+        ensureTaskStream(status)
+    }
+
+    public func stopTaskStream(): Unit {
+        synchronized(taskStreamMutex) {
+            taskStreamCancel = true
+            taskStreamRunning = false
+            taskStreamStatus = ""
+            taskStreamGen += 1
+        }
+    }
+
+    private func isTaskStreamCancelled(gen: Int64): Bool {
+        synchronized(taskStreamMutex) {
+            taskStreamCancel || taskStreamGen != gen
+        }
+    }
+
+    // 断线/服务端关流 2s 后重连（对齐 EventSource retry）；401 投错误结果走全局登出后退出。
+    private func taskStreamLoop(a: LanluApi, status: String, gen: Int64): Unit {
+        while (!isTaskStreamCancelled(gen)) {
+            try {
+                a.streamTaskList(status, 10, { page => postTaskStreamPage(status, gen, page) })
+                // 流正常结束（服务端关闭）：取消则退出，否则走统一退避重连。
+                if (isTaskStreamCancelled(gen)) {
+                    return
+                }
+                sleep(Duration.second * 2)
+            } catch (e: Exception) {
+                if (isTaskStreamCancelled(gen)) {
+                    return
+                }
+                match (e as ApiException) {
+                    case Some(ae) =>
+                        if (ae.status == 401) {
+                            worker.post("set.tasks.stream:${status}", None, error: ae.message)
+                            return
+                        }
+                    case None => ()
+                }
+                sleep(Duration.second * 2)
+            }
+        }
+    }
+
+    private func postTaskStreamPage(status: String, gen: Int64, page: TaskListPage): Bool {
+        if (isTaskStreamCancelled(gen)) {
+            return false
+        }
+        worker.post("set.tasks.stream:${status}", Some(page))
+        return true
     }
 
     public func loadCron(): Unit {

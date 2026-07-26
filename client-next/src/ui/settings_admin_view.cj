@@ -258,13 +258,10 @@ private func compressionIndex(opts: Array<String>, v: String): Int64 {
 
 func tasksPage(model: AppModel): Unit {
     let tab = rememberState<Int64>("tasks.tab", {=> 0})
-    let loadedKey = rememberState<String>("tasks.loadedKey", {=> ""})
     let status = taskStatusOf(tab.value)
-    if (loadedKey.value != status) {
-        loadedKey.value = status
-        model.loadTasks(status)
-    }
-    pageHeader("任务记录", "查看并管理后台任务（列表为进入/切换时的快照）")
+    // SSE 长连订阅：进入/切筛选时按当前 status 建立或重连（幂等，重复组合零开销）。
+    model.ensureTaskStream(status)
+    pageHeader("任务记录", "查看并管理后台任务（SSE 长连实时刷新）")
 
     // 状态筛选（原型 .ftabs：全部/待执行/执行中/等待中/已完成/失败）。
     HStack {
@@ -272,7 +269,7 @@ func tasksPage(model: AppModel): Unit {
             tab.project(get: {v => v}, set: {_, v => v}))
         Spacer()
         IconButton(IconName.Refresh, label: Some("刷新"), style: Some(ghostStyleOf(model)),
-            onClick: {=> model.loadTasks(status)})
+            onClick: {=> model.restartTaskStream(status)})
     }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
 
     let cancelId = rememberState<Int64>("tasks.cancelId", {=> -1})
@@ -286,7 +283,7 @@ func tasksPage(model: AppModel): Unit {
                 t => taskCard(model, t, cancelId, cancelOpen)
             }
             Label("共 ${p.total} 个任务").fontSize(11.fp).muted()
-        case None => pageLoading(model, "任务快照读取中…")
+        case None => pageLoading(model, "任务列表加载中…")
     }
     confirmModal(cancelOpen, "取消任务", "确定要取消这个任务吗？", "取消任务", {
         => model.actCancelTask(cancelId.value)

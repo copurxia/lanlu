@@ -564,7 +564,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 GhostIconButton(GhostGlyph.Back, "titlebar:back") {=> model.page.value = Page.Library }
             }
             HStack {
-                brandLogo(model, 28.vp)
+                brandLogo(28.vp)
                 Label("Lanlu").fontSize(15.fp)
             }.spacing(9.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             if (!onLogin) {
@@ -576,6 +576,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                     TextField(model.searchText, key: SEARCH_FIELD_ID, chrome: false)
                         .padding(SEARCH_ICON_INSET + 4.0, 0.0, SEARCH_KBD_INSET + 4.0, 0.0)
                     SearchPlaceholder(model)
+                    SearchAutocomplete(model, SEARCH_FIELD_ID)
                     SearchExpandTicker(searchTween, searchProgress)
                 }.alignment(Alignment.TopLeading)
                     .width(searchLayoutWidth(window.width, showBack, searchProgress))
