@@ -71,9 +71,9 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
             }
             GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {=> model.todoToast("下载")}
             GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> model.todoToast("加入合集")}
-        GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
-            => model.todoToast("编辑")
-        }
+            GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
+                => model.openArchiveMetadataEditor(m.arcid)
+            }
             GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
 
@@ -163,7 +163,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
             // 收藏/编辑/更多动作留 TODO。矢量图标钮（28vp）。
             GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0) {=> model.todoToast("合集收藏")}
             GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {
-                => model.todoToast("编辑")
+                => model.openTankMetadataEditor(t.id)
             }
             GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作")}
     }

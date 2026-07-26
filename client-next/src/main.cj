@@ -162,6 +162,7 @@ main(): Int64 {
                     rootView(model)
                 }.spacing(0.0)
             }
+            metadataEditOverlay(model)
             ThemeRipple(model)
             ToastLayer(model.toaster)
         }

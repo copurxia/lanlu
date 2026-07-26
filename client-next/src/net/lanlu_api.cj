@@ -191,6 +191,10 @@ public class LanluApi {
         parseArchiveMeta(checkedBody(client.get("/api/archives/${arcid}/metadata")))
     }
 
+    public func updateArchiveMetadata(arcid: String, body: String): Unit {
+        let _ = checked(client.put("/api/archives/${percentEncode(arcid)}/metadata", body))
+    }
+
     public func files(arcid: String): ArrayList<PageInfo> {
         parsePages(checkedBody(client.get("/api/archives/${arcid}/files")))
     }
@@ -207,6 +211,10 @@ public class LanluApi {
     // 单个合集：GET /api/tankoubons/:id/metadata 返回裸对象（children 为 member 对象数组）。
     public func getTankoubon(id: String): TankoubonInfo {
         parseTankoubon(checkedBody(client.get("/api/tankoubons/${id}/metadata")))
+    }
+
+    public func updateTankoubonMetadata(id: String, body: String): Unit {
+        let _ = checked(client.put("/api/tankoubons/${percentEncode(id)}/metadata", body))
     }
 
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。

@@ -17,6 +17,7 @@ import std.env.getCommandLine
 // 用于 960/1440/1920 三宽度验证。
 // T11 增补：--seed-detail（档案详情）/ --seed-tank（合集详情），种子覆盖 hero、
 // 页面预览（含目录层级与媒体页）、所属合集、成员列表、侧栏卡片与 backdrop 像素。
+// metadata redesign 增补：--seed-metadata 在档案详情种子上直接打开多级编辑器。
 // Task 5 增补：--seed-settings（设置页），种子账号/服务器信息（serverInfo）。
 // T13 增补：--seed-reader（阅读器），种子元数据（标题/收藏态）、24 页页表（第 5 页视频、
 // 第 6 页音频，验证 lane/舞台分派）与全部图片页像素。阅读器视图态开关：--reader-nochrome
@@ -28,6 +29,7 @@ public func harnessSeedMode(): String {
         if (a == "--seed-browse") { return "browse" }
         if (a == "--seed-search") { return "search" }
         if (a == "--seed-detail") { return "detail" }
+        if (a == "--seed-metadata") { return "metadata" }
         if (a == "--seed-tank") { return "tank" }
         if (a == "--seed-settings") { return "settings" }
         if (a == "--seed-reader") { return "reader" }
@@ -69,6 +71,19 @@ public func harnessHasArg(flag: String): Bool {
 }
 
 public func seedLibrarySnapshot(model: AppModel, mode: String): Unit {
+    if (mode == "metadata") {
+        if (harnessHasArg("--metadata-tank")) {
+            seedTankDetail(model)
+            model.openTankMetadataEditor("TANK_1")
+        } else {
+            seedArchiveDetail(model)
+            model.openArchiveMetadataEditor("ARC_D1")
+            if (harnessHasArg("--metadata-page")) {
+                model.editMetadataPage(4)
+            }
+        }
+        return
+    }
     if (mode == "detail") {
         seedArchiveDetail(model)
         return

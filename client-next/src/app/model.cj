@@ -45,6 +45,59 @@ public class BrowseRow {
     public var failed = false
 }
 
+private func joinMetadataTags(tags: ArrayList<String>): String {
+    let out = StringBuilder()
+    for (i in 0..tags.size) {
+        if (i > 0) {
+            out.append(", ")
+        }
+        out.append(tags[i])
+    }
+    out.toString()
+}
+
+private func metadataTagsJson(raw: String): String {
+    let out = StringBuilder()
+    out.append("[")
+    var first = true
+    for (part in raw.split(",")) {
+        let tag = part.trimAscii()
+        if (tag.size == 0) {
+            continue
+        }
+        if (!first) {
+            out.append(",")
+        }
+        out.append(jsonQuote(tag))
+        first = false
+    }
+    out.append("]")
+    out.toString()
+}
+
+private func metadataRootBody(title: String, description: String, tags: String, releaseAt: String): String {
+    let dateField = if (releaseAt.trimAscii().size > 0) {
+        ",\"release_at\":${jsonQuote(releaseAt.trimAscii())}"
+    } else {
+        ""
+    }
+    "{\"title\":${jsonQuote(title)},\"type\":0,\"description\":${jsonQuote(description)}," +
+        "\"tags\":${metadataTagsJson(tags)}${dateField}}"
+}
+
+private func parsePositiveInt(raw: String, fallback: Int64): Int64 {
+    try {
+        let value = Int64.parse(raw.trimAscii())
+        if (value > 0) {
+            value
+        } else {
+            fallback
+        }
+    } catch (_: Exception) {
+        fallback
+    }
+}
+
 // 详情页多级编辑草稿。根层编辑档案，子层逐页编辑；草稿只在 UI 线程修改。
 public class AppModel {
     public let page = State<Page>(Page.Login)
@@ -105,6 +158,28 @@ public class AppModel {
     public let tankMemberViewIndex = State<Int64>(0)
     public let tankFilter = State<String>("")
     public let tankRelated = State<ArrayList<TankoubonInfo>>(ArrayList<TankoubonInfo>())
+
+    // 多级元数据编辑器（0=合集、1=档案、2=页）。根编辑实体及下钻数据都留在
+    // AppModel，避免声明式视图逐帧重建时丢失草稿；网络结果仍只在 UI 线程落 State。
+    public let metadataEditorOpen = State<Bool>(false)
+    public let metadataEditorLevel = State<Int64>(0)
+    public let metadataEditorSaving = State<Bool>(false)
+    public let metadataEditorDirty = State<Bool>(false)
+    public let metadataPluginPreview = State<Bool>(false)
+    public let metadataTitle = State<String>("")
+    public let metadataDescription = State<String>("")
+    public let metadataTags = State<String>("")
+    public let metadataReleaseAt = State<String>("")
+    public let metadataOrderIndex = State<String>("")
+    public let metadataVolumeNo = State<String>("")
+    public let metadataHiddenInFiles = State<Bool>(false)
+    public let metadataEditorArchiveMeta = State<?ArchiveMeta>(None)
+    public let metadataEditorPages = State<ArrayList<PageInfo>>(ArrayList<PageInfo>())
+    public var metadataEditorTankId: String = ""
+    public var metadataEditorTankTitle: String = ""
+    public var metadataEditorArchiveId: String = ""
+    public var metadataEditorArchiveTitle: String = ""
+    public var metadataEditorPageIndex: Int64 = 0
 
     // 设置页
     public let serverInfo = State<?ServerInfo>(None)
@@ -275,6 +350,188 @@ public class AppModel {
     // 操作占位提示（T11：下载/加入合集/编辑/更多等按钮仅渲染，真实功能后续任务接入）。
     public func todoToast(feature: String): Unit {
         toaster.show("${feature}功能暂未实现", kind: ToastKind.Info)
+    }
+
+    // ---- 多级元数据编辑 ----
+
+    public func openArchiveMetadataEditor(arcid: String): Unit {
+        metadataEditorTankId = ""
+        metadataEditorTankTitle = ""
+        metadataEditorArchiveId = arcid
+        metadataEditorPages.value = detailPages.value
+        metadataEditorArchiveMeta.value = meta.value
+        metadataEditorLevel.value = 1
+        loadArchiveEditorDraft()
+        metadataEditorOpen.value = true
+    }
+
+    public func openTankMetadataEditor(tankid: String): Unit {
+        metadataEditorTankId = tankid
+        metadataEditorArchiveId = ""
+        metadataEditorArchiveMeta.value = None
+        metadataEditorPages.value = ArrayList<PageInfo>()
+        metadataEditorLevel.value = 0
+        loadTankEditorDraft()
+        metadataEditorOpen.value = true
+    }
+
+    public func editTankMember(item: SearchItem, volumeNo: Int64): Unit {
+        metadataEditorArchiveId = item.arcid
+        metadataEditorArchiveTitle = item.title
+        metadataEditorArchiveMeta.value = None
+        metadataEditorPages.value = ArrayList<PageInfo>()
+        metadataEditorLevel.value = 1
+        metadataTitle.value = item.title
+        metadataDescription.value = item.description
+        metadataTags.value = item.tagsCsv
+        metadataReleaseAt.value = ""
+        metadataVolumeNo.value = "${volumeNo}"
+        metadataOrderIndex.value = ""
+        metadataEditorDirty.value = false
+        metadataPluginPreview.value = false
+        let a = api ?? return
+        let id = item.arcid
+        let _ = worker.submit("editmeta:${id}", {=> a.metadata(id)})
+        let _ = worker.submit("editfiles:${id}", {=> a.files(id)})
+    }
+
+    public func editMetadataPage(index: Int64): Unit {
+        let list = metadataEditorPages.value
+        if (index < 0 || index >= list.size) {
+            return
+        }
+        metadataEditorPageIndex = index
+        metadataEditorLevel.value = 2
+        let p = list[index]
+        metadataTitle.value = if (p.title.size > 0) {
+            p.title
+        } else {
+            "P.${index + 1}"
+        }
+        metadataDescription.value = ""
+        metadataReleaseAt.value = ""
+        metadataOrderIndex.value = "${index + 1}"
+        metadataHiddenInFiles.value = false
+        metadataEditorDirty.value = false
+        metadataPluginPreview.value = false
+    }
+
+    public func metadataEditorBackTo(level: Int64): Unit {
+        if (level <= 0 && metadataEditorTankId.size > 0) {
+            metadataEditorLevel.value = 0
+            loadTankEditorDraft()
+        } else {
+            metadataEditorLevel.value = 1
+            loadArchiveEditorDraft()
+        }
+    }
+
+    public func closeMetadataEditor(): Unit {
+        if (metadataEditorSaving.value) {
+            return
+        }
+        metadataEditorOpen.value = false
+        metadataPluginPreview.value = false
+    }
+
+    public func previewMetadataPlugin(): Unit {
+        metadataPluginPreview.value = true
+        metadataEditorDirty.value = true
+        toaster.show("插件预览已填充到当前草稿", kind: ToastKind.Info)
+    }
+
+    public func saveMetadataEditor(): Unit {
+        if (metadataEditorSaving.value) {
+            return
+        }
+        let a = api ?? return
+        let title = metadataTitle.value.trimAscii()
+        if (title.size == 0) {
+            toaster.show("标题不能为空", kind: ToastKind.Warning)
+            return
+        }
+        let level = metadataEditorLevel.value
+        let body: String
+        let target: String
+        let kind: String
+        if (level == 0) {
+            target = metadataEditorTankId
+            kind = "tank"
+            body = metadataRootBody(title, metadataDescription.value, metadataTags.value, metadataReleaseAt.value)
+        } else if (level == 1) {
+            target = metadataEditorArchiveId
+            kind = "archive"
+            body = metadataRootBody(title, metadataDescription.value, metadataTags.value, metadataReleaseAt.value)
+        } else {
+            target = metadataEditorArchiveId
+            kind = "page"
+            let list = metadataEditorPages.value
+            if (metadataEditorPageIndex < 0 || metadataEditorPageIndex >= list.size) {
+                return
+            }
+            let p = list[metadataEditorPageIndex]
+            let order = parsePositiveInt(metadataOrderIndex.value, metadataEditorPageIndex + 1)
+            body = "{\"pages\":[{\"page_number\":${metadataEditorPageIndex + 1}," +
+                "\"entry_path\":${jsonQuote(p.sourcePath)},\"title\":${jsonQuote(title)}," +
+                "\"description\":${jsonQuote(metadataDescription.value)},\"order_index\":${order}," +
+                "\"hidden_in_files\":${metadataHiddenInFiles.value}}]}"
+        }
+        if (target.size == 0) {
+            return
+        }
+        metadataEditorSaving.value = true
+        let taskName = "editsave:${kind}:${target}"
+        let _ = worker.submit(
+            taskName,
+            {
+                =>
+                    if (kind == "tank") {
+                        a.updateTankoubonMetadata(target, body)
+                    } else {
+                        a.updateArchiveMetadata(target, body)
+                    }
+                    return target
+            }
+        )
+    }
+
+    private func loadTankEditorDraft(): Unit {
+        match (tank.value) {
+            case Some(t) =>
+                metadataEditorTankTitle = t.name
+                metadataTitle.value = t.name
+                metadataDescription.value = t.description
+                metadataTags.value = joinMetadataTags(t.tags)
+                metadataReleaseAt.value = ""
+            case None => ()
+        }
+        metadataVolumeNo.value = ""
+        metadataOrderIndex.value = ""
+        metadataEditorDirty.value = false
+        metadataPluginPreview.value = false
+    }
+
+    private func loadArchiveEditorDraft(): Unit {
+        match (metadataEditorArchiveMeta.value) {
+            case Some(m) =>
+                metadataEditorArchiveTitle = m.title
+                metadataTitle.value = m.title
+                metadataDescription.value = m.description
+                metadataTags.value = joinMetadataTags(m.tags)
+                metadataReleaseAt.value = if (m.release_at > 0) {
+                    formatTimestamp(m.release_at)
+                } else {
+                    ""
+                }
+            case None =>
+                metadataTitle.value = metadataEditorArchiveTitle
+                metadataDescription.value = ""
+                metadataTags.value = ""
+                metadataReleaseAt.value = ""
+        }
+        metadataOrderIndex.value = ""
+        metadataEditorDirty.value = false
+        metadataPluginPreview.value = false
     }
 
     // ---- 多服务器登录 ----
@@ -1771,6 +2028,20 @@ public class AppModel {
         if (r.name.startsWith("lyrics:")) {
             return
         }
+        if (r.name.startsWith("editsave:")) {
+            metadataEditorSaving.value = false
+            showError(r.error)
+            return
+        }
+        // 嵌套档案的辅助元数据加载失败不关闭编辑器：保留搜索条目提供的基础草稿，
+        // 页侧栏显示为空即可，避免一次非关键请求失败中断整个编辑流程。
+        if (r.name.startsWith("editmeta:") || r.name.startsWith("editfiles:")) {
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+                showError(r.error)
+            }
+            return
+        }
         // 浏览模式行任务失败：不 toast（9 行并发失败会刷屏），行内呈现可点击重试；
         // 401/会话失效仍走全局 logout + 提示。
         if (r.name.startsWith("row:")) {
@@ -2080,6 +2351,39 @@ public class AppModel {
                         case _ => ()
                     }
                 case None => ()
+            }
+        } else if (name.startsWith("editmeta:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let arcid = name.removePrefix("editmeta:")
+                    if (metadataEditorOpen.value && arcid == metadataEditorArchiveId) {
+                        let m = (p as ArchiveMeta).getOrThrow()
+                        metadataEditorArchiveMeta.value = Some(m)
+                        loadArchiveEditorDraft()
+                    }
+                case None => ()
+            }
+        } else if (name.startsWith("editfiles:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let arcid = name.removePrefix("editfiles:")
+                    if (metadataEditorOpen.value && arcid == metadataEditorArchiveId) {
+                        metadataEditorPages.value = (p as ArrayList<PageInfo>).getOrThrow()
+                    }
+                case None => ()
+            }
+        } else if (name.startsWith("editsave:")) {
+            metadataEditorSaving.value = false
+            metadataEditorDirty.value = false
+            metadataEditorOpen.value = false
+            toaster.show("元数据已保存", kind: ToastKind.Success)
+            match (page.value) {
+                case Page.Detail(arcid) =>
+                    refreshMeta(arcid)
+                    let a = api ?? return
+                    let _ = worker.submit("dfiles:${arcid}", {=> a.files(arcid)})
+                case Page.Tank(tankid) => openTank(tankid)
+                case _ => ()
             }
         } else if (name.startsWith("dfiles:")) {
             match (r.payload) {
