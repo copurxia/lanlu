@@ -1473,6 +1473,8 @@ public class AppModel {
     // ThemeRipple 会回落到窗口中心。
     public var themeRippleX: Float32 = -1.0
     public var themeRippleY: Float32 = -1.0
+    public var themeToggleX: Float32 = -1.0
+    public var themeToggleY: Float32 = -1.0
 
     // 切换主题：不再即切即生效，改为设置待处理标记，由 ThemeRipple 组件
     // 播放涟漪动画并在完成时回调 applyPendingTheme 落盘并应用新主题。
@@ -1482,6 +1484,15 @@ public class AppModel {
 
     // 标题栏主题按钮把实际点击点传进来，使扩散圆与参考页一样从按钮处揭开。
     public func setThemeAt(mode: String, x: Float32, y: Float32): Unit {
+        requestTheme(mode, x, y, -1.0, -1.0)
+    }
+
+    // 主题按钮同时提供实际点击点（涟漪圆心）与按钮中心（图标形变中心）。
+    public func setThemeFromToggle(mode: String, x: Float32, y: Float32, toggleX: Float32, toggleY: Float32): Unit {
+        requestTheme(mode, x, y, toggleX, toggleY)
+    }
+
+    private func requestTheme(mode: String, x: Float32, y: Float32, toggleX: Float32, toggleY: Float32): Unit {
         if (mode != "dark" && mode != "light") {
             return
         }
@@ -1492,6 +1503,8 @@ public class AppModel {
         themeRippleTarget = mode
         themeRippleX = x
         themeRippleY = y
+        themeToggleX = toggleX
+        themeToggleY = toggleY
         themeRipplePending = true
     }
 
@@ -1508,6 +1521,8 @@ public class AppModel {
         themeRippleTarget = ""
         themeRippleX = -1.0
         themeRippleY = -1.0
+        themeToggleX = -1.0
+        themeToggleY = -1.0
     }
 
     // 设置界面字体（需重启生效）。

@@ -236,16 +236,22 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
         case GhostGlyph.Named(icon) =>
             drawIcon(renderer, icon, Rect(cx - 8.0, cy - 8.0, 16.0, 16.0), color)
         case GhostGlyph.Gear =>
-            // 齿轮：外圈 + 贴圈的 8 根粗齿（45° 步进）+ 中心孔。
-            // 齿必须从圈边起画且加粗，否则圈齿分离在小尺寸下会读成「太阳」。
-            renderer.strokeCircle(cx, cy, 5.4, Pen(width: 1.5, color: color))
+            // 齿轮：紧凑的环形轮廓 + 8 个切向圆角齿块 + 中心孔。
+            // 齿块沿圆周展开，不再用放射长线；16px 下更像齿轮而不是太阳。
+            let toothPen = Pen(width: 2.0, color: color)
             for (i in 0..8) {
                 let a = Float64(i) * 0.7853982 // π/4
-                renderer.strokeLine(cx + Float32(cos(a)) * 5.2, cy + Float32(sin(a)) * 5.2,
-                    cx + Float32(cos(a)) * 8.2, cy + Float32(sin(a)) * 8.2,
-                    Pen(width: 2.4, color: color))
+                let radialX = Float32(cos(a))
+                let radialY = Float32(sin(a))
+                let toothX = cx + radialX * 6.55
+                let toothY = cy + radialY * 6.55
+                let tangentX = -radialY * 0.9
+                let tangentY = radialX * 0.9
+                renderer.strokeLine(toothX - tangentX, toothY - tangentY,
+                    toothX + tangentX, toothY + tangentY, toothPen)
             }
-            renderer.strokeCircle(cx, cy, 1.9, Pen(width: 1.3, color: color))
+            renderer.strokeCircle(cx, cy, 5.35, Pen(width: 1.55, color: color))
+            renderer.strokeCircle(cx, cy, 2.0, Pen(width: 1.45, color: color))
         case GhostGlyph.Theme =>
             // ◐ 的矢量等价：外圈描边 + 左半填充（clip 裁掉右半）。
             renderer.strokeCircle(cx, cy, 6.5, Pen(width: 1.2, color: color))
@@ -541,7 +547,8 @@ public class ThemeToggleButton <: Widget {
                 if (frame.contains(x, y)) { ctx.claimHover(hoverId, CursorShape.Interactive) }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (frame.contains(x, y)) {
-                    model.setThemeAt(if (model.settings.theme == "dark") { "light" } else { "dark" }, x, y)
+                    model.setThemeFromToggle(if (model.settings.theme == "dark") { "light" } else { "dark" },
+                        x, y, frame.centerX(), frame.centerY())
                     return true
                 }
             case _ => ()
