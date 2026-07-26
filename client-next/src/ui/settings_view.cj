@@ -1,10 +1,10 @@
 package lanlu_client_next.ui
 
 import cui.*
+import fontkit_ffi.systemFonts
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SearchItem, TrendPoint, PasskeyItem, SessionItem, TokenItem}
 import std.collection.ArrayList
-import std.fs.{Directory, Path, exists}
 
 // 设置页（原型 settings-redesign.html）：左 224vp 分类导航 + 右侧内容页。
 // 板块索引：0 概览 / 1 账户安全 / 2 外观 / 3 语言 / 4 缓存 / 5 诊断 / 6 分类 /
@@ -204,8 +204,9 @@ private func settingRowBody(model: AppModel, label: String, desc: String, icon: 
                 Label(desc).fontSize(11.fp).muted().maxLines(1)
             }
         }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
+        Spacer()
         trailing()
-    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(0.vp, 4.vp)
+    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth().padding(0.vp, 4.vp)
 }
 
 // 占位页（语言/诊断：客户端无对应能力，导航保留入口）。
@@ -454,30 +455,13 @@ public class FontItem {
     }
 }
 
-// 系统字体目录列表。
-private let FONT_DIRS = [
-    "/usr/share/fonts",
-    "/usr/local/share/fonts"
-]
-
-// 扫描系统字体目录，返回已安装的 .ttf/.ttc/.otf 字体列表。
+// 通过 font-kit 的平台字体源枚举系统字体，不推测字体安装目录。
 private func scanSystemFonts(): ArrayList<FontItem> {
     let list = ArrayList<FontItem>()
     // 首位：系统默认（空路径 = 让 NativeTextRenderer 走候选列表）
     list.add(FontItem("", "系统默认"))
-    for (root in FONT_DIRS) {
-        let rootPath = Path(root)
-        if (!exists(rootPath)) {
-            continue
-        }
-        // Directory.walk 递归遍历；回调收集字体文件路径
-        Directory.walk(rootPath, {info =>
-            let name = info.name
-            if (name.endsWith(".ttf") || name.endsWith(".ttc") || name.endsWith(".otf")) {
-                list.add(FontItem(info.path.toString(), name))
-            }
-            true // 继续遍历
-        })
+    for (font in systemFonts()) {
+        list.add(FontItem(font.path, font.family))
     }
     list
 }
@@ -518,10 +502,9 @@ private func fontCard(model: AppModel): Unit {
         }
         idx
     })
-    // 构建下拉选项（仅展示名；限制 50 条避免过长）
-    let maxItems = min(fonts.size, 50)
+    // 下拉控件会对长列表滚动并只绘制可见项，因此传入全部字体。
     let labels = ArrayList<String>()
-    for (i in 0..maxItems) {
+    for (i in 0..fonts.size) {
         labels.add(fonts[i].label)
     }
     detailCard(model, "界面字体") {

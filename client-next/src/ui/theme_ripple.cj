@@ -17,7 +17,7 @@ class ThemeRippleState {
 }
 
 // 全屏遮罩 widget：ZStack 中覆盖整个窗口，不消费任何事件。
-class ThemeRipple <: Widget {
+public class ThemeRipple <: Widget {
     private let model: AppModel
     private let st: ThemeRippleState
 
