@@ -174,6 +174,8 @@ private func seedItems(model: AppModel, n: Int64, seqBase: Int64): ArrayList<Sea
         let it = SearchItem()
         it.arcid = "ARC${seq}"
         it.title = fakeTitle(seq)
+        it.description = "命运的岔路口与那场改变一切的雪夜之战；这段简介用于验证卡片悬浮层的三行截断。"
+        it.tagsCsv = "artist:画师${seq % 7}, language:中文, category:漫画, magic, source:demo"
         it.pagecount = 20 + seq % 180
         it.archivetype = "doujinshi"
         // 进度：约 1/3 未读，其余部分进度，个别读完（100%）

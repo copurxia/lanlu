@@ -808,11 +808,13 @@ private let CARD_ZOOM: Float32 = 0.05
 class HoverLift <: Widget {
     private let hoverId: String
     private let spring: Spring
+    private let hovered: State<Bool>
     private var frame = Rect.zero()
 
-    public init(hoverId: String, spring: Spring) {
+    public init(hoverId: String, spring: Spring, hovered: State<Bool>) {
         this.hoverId = hoverId
         this.spring = spring
+        this.hovered = hovered
         emit(this)
     }
 
@@ -825,7 +827,11 @@ class HoverLift <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let goal: Float32 = if (ctx.isHovered(hoverId)) { 1.0 } else { 0.0 }
+        let isHovered = ctx.isHovered(hoverId)
+        if (hovered.value != isHovered) {
+            hovered.value = isHovered
+        }
+        let goal: Float32 = if (isHovered) { 1.0 } else { 0.0 }
         let _ = spring.animate(ctx, target: goal)
     }
 
@@ -839,6 +845,39 @@ class HoverLift <: Widget {
         }
         false
     }
+}
+
+// ZStack 本身只负责叠放，不会裁剪子树。悬浮信息层可能因标签换行超过封面高度，
+// 因此在它绘制前后显式压入/弹出封面裁剪区，避免覆盖标题、meta 或拉长卡片的视觉边界。
+// 两个哨兵都以零尺寸参与测量、在 ZStack 布局时伸展到完整封面 frame。
+class CoverClipStart <: Widget {
+    private var frame = Rect.zero()
+
+    public init() {
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size { Size.zero() }
+
+    public func layout(_: UiContext, rect: Rect): Unit { frame = rect }
+
+    public func draw(ctx: UiContext): Unit { ctx.renderer.pushClip(frame) }
+
+    public func handle(_: UiContext, _: UiEvent): Bool { false }
+}
+
+class CoverClipEnd <: Widget {
+    public init() {
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size { Size.zero() }
+
+    public func layout(_: UiContext, _: Rect): Unit {}
+
+    public func draw(ctx: UiContext): Unit { ctx.renderer.popClip() }
+
+    public func handle(_: UiContext, _: UiEvent): Bool { false }
 }
 
 // 封面底部进度条（原型 .cover .prog）：3vp 高，轨道走 ctx.theme.overlayTrack（明暗自适），
@@ -973,6 +1012,8 @@ class TankBackdrop <: Widget {
 public class TankCardItem {
     public var id: String = ""
     public var title: String = ""
+    public var description: String = ""
+    public var tagsCsv: String = ""
     public var coverAssetId: Int64 = 0
     public var archiveCount: Int64 = 0
     public var readPct: Int64 = 0 // 0..100
@@ -999,6 +1040,8 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
         let t = TankCardItem()
         t.id = item.tankoubonId
         t.title = item.title
+        t.description = item.description
+        t.tagsCsv = item.tagsCsv
         t.coverAssetId = item.coverAssetId
         t.archiveCount = item.archiveCount
         t.readPct = progressPct(item.pagecount, item.progress)
@@ -1010,13 +1053,13 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
 
 // 档案卡片（原型 .card）：扁平无卡片底；封面 3:4 Cover，hover 封面放大 5% + 金描边
 // （HoverLift 推进 Spring、PixelImageView.zoom 绕中心放大裁回框内，CoverBorder 切 accent）；
-// 右上 NEW 红 pill；右下收藏 chip（hover/已收藏浮现，点击切换）；底部 3vp 进度条；
+// 右上 NEW 红 pill；悬浮层提供标签/简介/详情/收藏操作；底部 3vp 进度条；
 // 封面下标题 1 行截断 + meta 行 muted。
 public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
         {=> model.openDetail(item.arcid) },
         isNew: item.isnew, tank: false, showFav: true, favorited: item.isfavorite,
-        pct: progressPct(item.pagecount, item.progress))
+        pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上「▣ 合集」角标，
@@ -1024,17 +1067,21 @@ public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
     homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%",
         coverW, item.coverAssetId, {=> model.openTank(item.id) },
-        isNew: false, tank: true, showFav: false, favorited: false, pct: item.readPct)
+        isNew: false, tank: true, showFav: false, favorited: false, pct: item.readPct,
+        summary: item.description, tagsCsv: item.tagsCsv)
 }
 
-// 卡片公共骨架：封面 ZStack（可选叠层/封面/描边/角标/进度/收藏）+ 标题 + meta。
+// 卡片公共骨架：封面 ZStack（可选叠层/封面/描边/角标/进度/悬浮信息层）+ 标题 + meta。
 private func homeCoverCard(model: AppModel, id: String, title: String, meta: String, coverW: Float32,
     coverAssetId: Int64, onClick: () -> Unit, isNew!: Bool, tank!: Bool, showFav!: Bool,
-    favorited!: Bool, pct!: Int64): Unit {
+    favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = ""): Unit {
     let coverH = coverW * 4.0 / 3.0
-    let hoverId = "cover:${id}"
+    let cardKey = if (tank) { "tank:${id}" } else { "arc:${id}" }
+    let hoverId = "cover:${cardKey}"
     // Spring 0→1 驱动封面缩放（HoverLift 传感器在 draw 里推进弹簧）。
-    let zoomSpring = rememberState<Spring>("zoom:${id}", {=> Spring(0.0)}).value
+    let zoomSpring = rememberState<Spring>("zoom:${cardKey}", {=> Spring(0.0)}).value
+    // HoverLift 在绘制期同步悬停态，下一帧构建与 BaseMediaCard 一致的信息/操作浮层。
+    let overlayHovered = rememberState<Bool>("cover-overlay:${cardKey}", {=> false})
     ClickArea(onClick: onClick) {
         VStack {
             ZStack {
@@ -1044,7 +1091,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     let edge = if (model.isLight()) { LANLU_L_PANEL_EDGE } else { LANLU_PANEL_EDGE }
                     TankBackdrop(hi, lo, edge)
                 }
-                HoverLift(hoverId, zoomSpring)
+                HoverLift(hoverId, zoomSpring, overlayHovered)
                 if (coverAssetId > 0) {
                     remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
                         Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
@@ -1053,6 +1100,12 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     noCoverBox(model, coverW, coverH)
                 }
                 CoverBorder(hoverId)
+                if (overlayHovered.value) {
+                    CoverClipStart()
+                    cardHoverOverlay(cardKey, hoverId, summary, tagsCsv, coverH, showFav, favorited,
+                        onClick, {=> model.toggleFavoriteOnCard(id) })
+                    CoverClipEnd()
+                }
                 // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）。
                 HStack {
                     if (tank) { tankBadge(model) }
@@ -1066,21 +1119,91 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                         CoverProgress(pct)
                     }
                 }
-                // 右下收藏 chip：距边 8vp（原型 .cover .fav 定位）。
-                if (showFav) {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            FavChip(hoverId, favorited) {=> model.toggleFavoriteOnCard(id) }
-                        }.fillWidth()
-                    }.padding(8.vp)
-                }
-            }.alignment(Alignment.TopLeading)
+            // 浮层内容不能反向参与封面测量；封面槽位始终保持调用方给定的固定尺寸。
+            }.alignment(Alignment.TopLeading).width(coverW).height(coverH)
             Label(title).maxLines(1).fontSize(12.5.fp)
             Label(meta).fontSize(11.fp).muted()
         }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start)
     }
+}
+
+// BaseMediaCard 同款封面悬浮层：底部渐变上依次放标签、三行简介和详情/收藏操作。
+// 多选不属于此层；卡片主体点击仍保持原有打开详情行为，内部操作会先消费点击事件。
+private func cardHoverOverlay(cardKey: String, hoverId: String, summary: String, tagsCsv: String,
+    coverH: Float32, showFav: Bool, favorited: Bool, onDetails: () -> Unit,
+    onFavorite: () -> Unit): Unit {
+    let tags = cardHoverTags(tagsCsv)
+    let maxTags: Int64 = if (summary.size > 0) { 5 } else { 8 }
+    ZStack {
+        GradientScrim(direction: GradientDirection.Bottom,
+            stops: [(0.0, Color.rgba(0, 0, 0, 0)), (0.38, Color.rgba(0, 0, 0, 56)),
+                (1.0, Color.rgba(0, 0, 0, 196))])
+        // 与 frontend BaseMediaCard 的 absolute bottom 内容层对应：预留 48vp 给操作区，
+        // 标签/简介仅在封面内自底向上排布，过长内容由外层封面裁剪。
+        VStack {
+            if (tags.size > 0) {
+                FlowRow {
+                    let shown = min(tags.size, maxTags)
+                    for (i in 0..shown) {
+                        Label(tags[i]).fontSize(10.fp).foregroundColor(LANLU_ON_MEDIA).tight()
+                            .padding(6.vp, 2.vp).background(Color.rgba(255, 255, 255, 38), 5.vp)
+                    }
+                    if (tags.size > shown) {
+                        Label("+${tags.size - shown}").fontSize(10.fp).foregroundColor(LANLU_ON_MEDIA).tight()
+                            .padding(6.vp, 2.vp).background(Color.rgba(255, 255, 255, 38), 5.vp)
+                    }
+                }.spacing(4.vp)
+            }
+            if (summary.size > 0) {
+                Label(summary).fontSize(10.5.fp).foregroundColor(Color.rgba(255, 255, 255, 230))
+                    .maxLines(3).tight().fillWidth()
+            }
+        }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+            .padding(10.vp, 10.vp, 10.vp, 48.vp).maxHeight(coverH)
+        // 操作区独立贴封面底部，不参与上方标签/简介的高度计算。
+        HStack {
+            cardDetailsAction(cardKey, onDetails)
+            if (showFav) {
+                FavChip(hoverId, favorited, onFavorite)
+            }
+            Spacer()
+        }.spacing(7.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+            .padding(10.vp).maxHeight(48.vp)
+    }.alignment(Alignment.BottomLeading)
+}
+
+// 悬浮层「详情」文本按钮：眼睛图标补充视觉语义，文字避免纯图标操作不易辨认。
+private func cardDetailsAction(cardKey: String, onDetails: () -> Unit): Unit {
+    ClickArea(onClick: onDetails) {
+        ZStack {
+            HoverSensor("cover-details:${cardKey}")
+            HStack {
+                Icon(IconName.Eye, size: 13.vp).foregroundColor(LANLU_ON_MEDIA)
+                Label("详情").fontSize(10.5.fp).foregroundColor(LANLU_ON_MEDIA).tight()
+            }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Center)
+                .padding(8.vp, 5.vp).background(Color.rgba(255, 255, 255, 38), 7.vp)
+        }.alignment(Alignment.TopLeading)
+    }
+}
+
+// 搜索 DTO 的 tags 是 CSV。悬浮卡只展示值部分，过滤 source 命名空间，与 frontend
+// BaseMediaCard 的 hoverTags 规则保持一致；原始数据不修改，详情页仍可显示完整标签。
+private func cardHoverTags(tagsCsv: String): ArrayList<String> {
+    let tags = ArrayList<String>()
+    for (raw in tagsCsv.split(",")) {
+        let tag = raw.trimAscii()
+        if (tag.size == 0 || tag.toAsciiLower().contains("source")) {
+            continue
+        }
+        let shown = match (tag.indexOf(":")) {
+            case Some(i) => tag[(i + 1)..tag.size].trimAscii()
+            case None => tag
+        }
+        if (shown.size > 0) {
+            tags.add(shown)
+        }
+    }
+    tags
 }
 
 // 阅读进度百分比（0..100；无进度返回 0）。
@@ -1742,6 +1865,8 @@ public func tankCardRow(model: AppModel, tanks: Array<TankoubonInfo>, rowId: Str
         let c = TankCardItem()
         c.id = t.id
         c.title = t.name
+        c.description = t.description
+        c.tagsCsv = String.join(t.tags.toArray(), delimiter: ",")
         c.coverAssetId = t.coverAssetId
         c.archiveCount = t.archiveCount
         c.readPct = tankReadPct(t)
@@ -1957,7 +2082,7 @@ private func memberCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
         {=> model.openDetail(item.arcid) },
         isNew: item.isnew, tank: false, showFav: false, favorited: false,
-        pct: memberReadPct(item.pagecount, item.progress))
+        pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 列表态（原型 .member-row）：序号 + 40×56 mini 封面 + 标题/meta + 90vp mini 进度条。
