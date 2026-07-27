@@ -39,6 +39,8 @@ public func sseFrameEvent(frame: String): String {
 // 拿到以 \n\n 结尾的完整帧后整段解码（帧边界为 ASCII，完整帧必为合法 UTF-8）；
 // 已消费前缀超 64KB 才压缩搬运，常规帧率下零拷贝累积。单帧超过 maxFrameBytes 视为
 // 对端/代理异常，抛异常让调用方走重连。
+// 拷贝策略（#43）：块追加用 add(all:) 整段 memcpy 而非逐字节 add；帧提取对同一轮
+// 缓冲只 toArray 一次（快照复用做压缩搬运），切片本身是 fromUtf8 必需的单次拷贝。
 public func readSseStream(stream: InputStream, onData: (String, String) -> Bool,
     maxFrameBytes!: Int64 = 262144): Unit {
     let buf = ArrayList<UInt8>()
@@ -47,14 +49,23 @@ public func readSseStream(stream: InputStream, onData: (String, String) -> Bool,
     while (true) {
         let n = stream.read(chunk)
         if (n <= 0) { return }
-        for (i in 0..n) { buf.add(chunk[i]) }
+        if (n == chunk.size) {
+            buf.add(all: chunk)
+        } else {
+            buf.add(all: chunk[0..n])
+        }
+        // 本轮缓冲的快照：仅在确有完整帧时取一次，多帧共享；压缩搬运也复用它。
+        var snapshot: ?Array<UInt8> = None
         while (true) {
             let idx = indexOfDoubleLf(buf, start)
             if (idx < 0) { break }
             if (idx + 2 - start > maxFrameBytes) {
                 throw Exception("SSE frame exceeds ${maxFrameBytes} bytes")
             }
-            let frameText = String.fromUtf8(buf.toArray()[start..(idx + 2)])
+            if (snapshot.isNone()) {
+                snapshot = Some(buf.toArray())
+            }
+            let frameText = String.fromUtf8(snapshot.getOrThrow()[start..(idx + 2)])
             start = idx + 2
             match (sseFirstData(frameText)) {
                 case Some(data) => if (!onData(sseFrameEvent(frameText), data)) { return }
@@ -68,9 +79,12 @@ public func readSseStream(stream: InputStream, onData: (String, String) -> Bool,
             buf.clear()
             start = 0
         } else if (start > 65536) {
-            let rest = buf.toArray()[start..]
+            let rest = match (snapshot) {
+                case Some(arr) => arr[start..]
+                case None => buf.toArray()[start..]
+            }
             buf.clear()
-            for (b in rest) { buf.add(b) }
+            buf.add(all: rest)
             start = 0
         }
     }

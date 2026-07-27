@@ -1,5 +1,7 @@
 package lanlu_client_next.net
 
+import std.collection.ArrayList
+
 @Test
 func submitDeliversPayloadViaDrain(): Unit {
     let w = ApiWorker()
@@ -37,4 +39,36 @@ func duplicateNameRejectedWhileInflight(): Unit {
     let w = ApiWorker()
     @Expect(w.submit("slow", {=> sleep(Duration.millisecond * 300); 1 }), true)
     @Expect(w.submit("slow", {=> 2 }), false)  // 在途重名被拒
+}
+
+@Test
+func imagePoolDoesNotBlockApiPool(): Unit {
+    // 图片池 4 线程全部被慢任务占满时，API 池任务仍应先行完成（两池互不阻塞）。
+    let w = ApiWorker()
+    for (i in 0..4) {
+        @Expect(w.submitImage("img${i}", {=> sleep(Duration.millisecond * 500); i }), true)
+    }
+    @Expect(w.submit("fast", {=> 42 }), true)
+    let order = ArrayList<String>()
+    var tries = 0
+    while (order.size < 5 && tries < 200) {
+        for (r in w.drain()) {
+            order.add(r.name)
+        }
+        if (order.size < 5) {
+            sleep(Duration.millisecond * 20)
+        }
+        tries++
+    }
+    @Expect(order.size, 5)
+    @Expect(order[0], "fast") // 慢图片任务在途期间 API 任务先到货
+}
+
+@Test
+func submitImageDeduplicatesInflightName(): Unit {
+    let w = ApiWorker()
+    @Expect(w.submitImage("img:same", {=> sleep(Duration.millisecond * 300); 1 }), true)
+    @Expect(w.submitImage("img:same", {=> 2 }), false) // 在途重名被拒
+    // submit 与 submitImage 共享 inflight 命名空间：同名跨池也被拒
+    @Expect(w.submit("img:same", {=> 3 }), false)
 }

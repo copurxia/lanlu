@@ -1290,11 +1290,12 @@ public func sectionHeader(title: String, trailing: () -> Unit): Unit {
 // 横排卡片行（原型 .card-row）：横向滚动（滚轮/滑块齐备），只物化视口附近列；
 // 间距 14vp，行高由调用方按卡片规格给定。子项 key/卡片按条目类型分派（聚合合辑
 // 条目的 arcid 为空，直接用会撞 key 闪退，见 searchItemKey）。
-public func cardRow(model: AppModel, rowKey: String, items: Array<SearchItem>, coverW: Float32,
+// items 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
+public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem>, coverW: Float32,
     stripH: Float32): Unit {
-    LazyRow.of(items, coverW, spacing: 14.0, key: {it: SearchItem => searchItemKey(it)},
-        id: "browse:${rowKey}") { it =>
-        searchItemCard(model, it, coverW)
+    LazyRow(items.size, coverW, spacing: 14.0, key: {i => searchItemKey(items[i])},
+        id: "browse:${rowKey}") { i =>
+        searchItemCard(model, items[i], coverW)
     }.height(stripH)
 }
 
@@ -1327,7 +1328,7 @@ public class DetailHeroData {
     public var progressPct: Int64 = 0       // 0..100；<=0 隐藏内联进度条
     public var progressText: String = ""    // 如 "已读 64%"
     public var summary: String = ""         // 3 行截断
-    public var tags: Array<String> = []     // 超 10 个折叠为 "+N"
+    public var tags = ArrayList<String>()   // 超 10 个折叠为 "+N"
     public var primaryLabel: String = ""
     public var primaryEnabled: Bool = true
     public var onPrimary: () -> Unit = {=> () }
@@ -1789,16 +1790,22 @@ class TagChip <: Widget {
 }
 
 // 标签 chips 流（原型 .tag-row .tag）：1px 描边 pill、hover 变金、点击携 tag 跳搜索，自动换行。
-public func tagFlow(model: AppModel, tags: Array<String>): Unit {
+public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
     let chipBg = if (model.isLight()) { Color.rgba(0, 0, 0, 13) } else { Color.rgba(255, 255, 255, 15) }
     FlowRow {
-        let shown = if (tags.size > 10) { tags[0..10] } else { tags }
-        ForEach(shown, key: { t: String => t }) { t =>
-            TagChip(t, model.isLight(), "tf:${t}") {=>
-                model.searchText.value = t
-                model.submitFilter()
-                model.page.value = Page.Library
+        // 最多展示前 10 个，每个以 tag 串为 Keyed 身份（同 ForEach(key: {t => t}) 语义）。
+        let shown = min(tags.size, 10)
+        var i = 0
+        while (i < shown) {
+            let t = tags[i]
+            Keyed(t) {
+                TagChip(t, model.isLight(), "tf:${t}") {=>
+                    model.searchText.value = t
+                    model.submitFilter()
+                    model.page.value = Page.Library
+                }
             }
+            i += 1
         }
         if (tags.size > 10) {
             Label("+${tags.size - 10}").fontSize(11.fp).muted().padding(11.vp, 4.vp)
@@ -1808,7 +1815,7 @@ public func tagFlow(model: AppModel, tags: Array<String>): Unit {
 }
 
 // 侧栏标签分组（原型 .tag-group）：按命名空间前缀分组；组内 chips 同 tagFlow 规格，点击携原始串跳搜索。
-public func tagGroups(model: AppModel, tags: Array<String>): Unit {
+public func tagGroups(model: AppModel, tags: ArrayList<String>): Unit {
     let groups = groupTagsByNamespace(tags)
     VStack {
         ForEachIndexed(groups) { _, g =>
@@ -1829,7 +1836,7 @@ public func tagGroups(model: AppModel, tags: Array<String>): Unit {
 
 // 标签分组：按首次出现序归组；返回 (组名, (显示值, 原始 tag) 数组) 列表——
 // 显示值去命名空间前缀，点击检索仍用原始串。
-private func groupTagsByNamespace(tags: Array<String>): ArrayList<(String, Array<(String, String)>)> {
+private func groupTagsByNamespace(tags: ArrayList<String>): ArrayList<(String, Array<(String, String)>)> {
     let order = ArrayList<String>()
     let buckets = HashMap<String, ArrayList<(String, String)>>()
     for (t in tags) {
@@ -1893,23 +1900,32 @@ public func progressCard(model: AppModel, big: String, ofText: String, pct: Int6
 }
 
 // 合集 mini 卡横排行（原型 .rel-row 的合集版）：132vp tankCard + 横向滚动。
-public func tankCardRow(model: AppModel, tanks: Array<TankoubonInfo>, rowId: String): Unit {
+// tanks 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
+public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId: String): Unit {
     let items = ArrayList<TankCardItem>()
     for (t in tanks) {
         let c = TankCardItem()
         c.id = t.id
         c.title = t.name
         c.description = t.description
-        c.tagsCsv = String.join(t.tags.toArray(), delimiter: ",")
+        // StringBuilder 拼 CSV：String.join 要求 Array，会为每个合集每帧 toArray 一次标签表。
+        let csv = StringBuilder()
+        for (i in 0..t.tags.size) {
+            if (i > 0) {
+                csv.append(",")
+            }
+            csv.append(t.tags[i])
+        }
+        c.tagsCsv = csv.toString()
         c.coverAssetId = t.coverAssetId
         c.archiveCount = t.archiveCount
         c.readPct = tankReadPct(t)
         c.isfavorite = t.isfavorite
         items.add(c)
     }
-    LazyRow.of(items.toArray(), REL_COVER_W, spacing: 14.0, key: {t: TankCardItem => t.id},
-        id: rowId) { t =>
-        tankCard(model, t, REL_COVER_W)
+    LazyRow(items.size, REL_COVER_W, spacing: 14.0, key: {i => items[i].id},
+        id: rowId) { i =>
+        tankCard(model, items[i], REL_COVER_W)
     }.height(REL_STRIP_H)
 }
 
@@ -1928,7 +1944,8 @@ public func pageTypeIcon(pageType: String): String {
 
 // 页面预览卡体：按 model.pageViewIndex（0=缩略图 1=列表 2=树）切换；
 // readUpTo 为已读页码（≤ 该页码的页半透明）；点击页进阅读器对应页。
-public func pagePreview(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
+// pages 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
+public func pagePreview(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     if (pages.size == 0) { return }
     if (model.pageViewIndex.value == 1) {
@@ -1942,7 +1959,7 @@ public func pagePreview(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64
 
 // 缩略图态（原型 .pv-grid）：auto-fill minmax(96px,1fr) → 列数按主列宽现算；
 // 单元格 16:10，左上页码 pill，右上媒体类型图标，已读半透明。
-private func pvGrid(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
+private func pvGrid(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0 // 减去 d-card 两侧 18vp 内边距
     var cols = if (w <= 0.0) { 6 } else { Int64((w + 10.0) / 106.0) }
@@ -1951,10 +1968,9 @@ private func pvGrid(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
     let cellH = cellW * 10.0 / 16.0
     let rows = (pages.size + cols - 1) / cols
     let gridH = Float32(rows) * cellH + Float32(rows - 1) * 10.0
-    let indexed = ArrayList<(Int64, PageInfo)>()
-    for (i in 0..pages.size) { indexed.add((i + 1, pages[i])) }
-    LazyGrid(indexed.toArray(), cols, cellH, spacing: 10.0, columnSpacing: 10.0,
-        id: "pv-grid") { item =>
+    // (count, itemAt) 形式按需取页：不再为配对页码每帧新建 indexed 中间表。
+    LazyGrid(pages.size, cols, cellH, spacing: 10.0, columnSpacing: 10.0,
+        id: "pv-grid", itemAt: {i => (i + 1, pages[i])}) { item =>
         let (no, p) = item
         pvThumb(model, no, p.pageType, no <= readUpTo, cellH) {=> onOpenPage(no) }
     }.height(gridH)
@@ -1994,7 +2010,7 @@ private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
 }
 
 // 列表态（原型 .pv-list .pv-row）：页码右对齐定宽 + 文件名截断 + 类型图标，已读半透明。
-private func pvList(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
+private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     VStack {
         for (i in 0..pages.size) {
@@ -2008,7 +2024,7 @@ private func pvList(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
 }
 
 // 树态（原型 #pv-tree）：按目录分组（首次出现序），目录行「▾ dir（N）」+ 成员行缩进。
-private func pvTree(model: AppModel, pages: Array<PageInfo>, readUpTo: Int64,
+private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     // 预分组：目录 → 页码列表（保持原顺序）。
     let dirs = ArrayList<String>()
@@ -2120,30 +2136,38 @@ private func memberCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
         pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
+// 列表态行高：40×56 mini 封面 + 上下 8vp 内边距 = 72vp（LazyList 定高行）。
+private let MEMBER_ROW_H: Float32 = 72.0
+// 列表态高度上限（vp）：合集成员可达万级（model pageSize=10000），与页层 ScrollView
+// 嵌套时 LazyList 若拿全内容高则视口=内容、虚拟化失效；封顶后列表内部自滚动，
+// 行构建/绘制/封面请求只付一屏（评审 #9）。成员数少（内容高低于上限）时外观与原
+// 全量 VStack 完全一致，仅大合集出现行内滚动条。
+private let MEMBER_LIST_MAX_H: Float32 = 736.0
+
 // 列表态（原型 .member-row）：序号 + 40×56 mini 封面 + 标题/meta + 90vp mini 进度条。
 public func memberListContent(model: AppModel, members: Array<SearchItem>): Unit {
-    VStack {
-        for (i in 0..members.size) {
-            let it = members[i]
-            let pct = memberReadPct(it.pagecount, it.progress)
-            ClickArea(onClick: {=> model.openDetail(it.arcid) }) {
-                HStack {
-                    Label("${i + 1}").fontSize(11.fp).muted().width(30.vp)
-                    if (it.coverAssetId > 0) {
-                        remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}",
-                            Length(40.0, LengthUnit.Vp), Length(56.0, LengthUnit.Vp))
-                    } else {
-                        noCoverBox(model, 40.0, 56.0)
-                    }
-                    VStack {
-                        Label(it.title).fontSize(13.fp).maxLines(1)
-                        Label(memberMeta(it, pct)).fontSize(11.fp).muted().maxLines(1)
-                    }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-                    ProgressTrack(pct, 4.0).width(90.vp)
-                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(8.vp)
-            }
+    let contentH = Float32(members.size) * MEMBER_ROW_H + Float32(max(0, members.size - 1)) * 2.0
+    LazyList(members.size, {_ => MEMBER_ROW_H}, spacing: 2.0,
+        key: {i => members[i].arcid}, id: "member-list") { i =>
+        let it = members[i]
+        let pct = memberReadPct(it.pagecount, it.progress)
+        ClickArea(onClick: {=> model.openDetail(it.arcid) }) {
+            HStack {
+                Label("${i + 1}").fontSize(11.fp).muted().width(30.vp)
+                if (it.coverAssetId > 0) {
+                    remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}",
+                        Length(40.0, LengthUnit.Vp), Length(56.0, LengthUnit.Vp))
+                } else {
+                    noCoverBox(model, 40.0, 56.0)
+                }
+                VStack {
+                    Label(it.title).fontSize(13.fp).maxLines(1)
+                    Label(memberMeta(it, pct)).fontSize(11.fp).muted().maxLines(1)
+                }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
+                ProgressTrack(pct, 4.0).width(90.vp)
+            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(8.vp)
         }
-    }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+    }.height(min(contentH, MEMBER_LIST_MAX_H))
 }
 
 // 成员行 meta：「N 页 · 已读 X%」或仅「N 页」（与首页卡 meta 同规）。

@@ -550,6 +550,41 @@ func autoPlayPumpOffDoesNothing(): Unit {
     m.toggleReaderAutoPlay() // 复位，避免影响其他用例（本用例独立实例，防御性）
 }
 
+// 主循环定时唤醒接线：pump 的周期定时器经 nextPumpTimerMs 暴露最近到期剩余毫秒，
+// 供 onTick 注册 requestFrameAfter；无定时器时 None，循环可无限期等待。
+@Test
+func nextPumpTimerMsTracksReaderTimers(): Unit {
+    let m = AppModel(AppSettings())
+    let fake = FakeClock()
+    m.reader.clock = { => fake.now }
+    // 非阅读页：无定时器。
+    @Expect(m.nextPumpTimerMs().isNone())
+    m.reader.open("arc1", 0)
+    m.reader.setPages(mkImagePages(3))
+    m.page.value = Page.Reader("arc1", 1)
+    // 默认 autoHide/autoPlay 关、无 pending 进度 → 仍 None。
+    @Expect(m.nextPumpTimerMs().isNone())
+
+    // 自动翻页：间隔 2s，计时从 now=0 起 → 剩余 2000ms。
+    m.setReaderAutoPlayInterval(2)
+    m.toggleReaderAutoPlay()
+    @Expect(m.nextPumpTimerMs().getOrThrow(), 2000)
+    fake.now = 500
+    @Expect(m.nextPumpTimerMs().getOrThrow(), 1500)
+    // chrome 自动隐藏（3000ms，lastActivity=0）比翻页更远 → 仍取翻页。
+    m.toggleReaderAutoHide()
+    @Expect(m.nextPumpTimerMs().getOrThrow(), 1500)
+    // 关掉翻页后轮到自动隐藏：3000 - 500 = 2500。
+    m.toggleReaderAutoPlay()
+    @Expect(m.nextPumpTimerMs().getOrThrow(), 2500)
+    // 超时后钳制为 0（立即触发）。
+    fake.now = 4000
+    @Expect(m.nextPumpTimerMs().getOrThrow(), 0)
+    // 离开阅读页 → None。
+    m.page.value = Page.Library
+    @Expect(m.nextPumpTimerMs().isNone())
+}
+
 // ---- 无缝续读：流映射 / 虚拟页 / 拼接 ----
 
 @Test
@@ -712,6 +747,27 @@ func prefetchCrossesSegmentBoundary(): Unit {
     r.gotoPage(9)
     @Expect(r.onVirtualEnd, true)
     @Expect(spreadLabel(r.prefetchTargets()), "[5,6]")
+}
+
+@Test
+func prefetchCoversNextSpreadInDoublePage(): Unit {
+    // 回归（#23）：双页模式预取窗口以整个 spread（首页..末页）为基准，下一 spread 的
+    // 第二页（spread 末页 +2）必须入窗——旧实现以 spread 首页 ±2，永远漏掉它。
+    let s = AppSettings()
+    s.readerDoublePage = true
+    let r = ReaderModel(s)
+    r.open("arc1", 0)
+    r.setPages(mkImagePages(8)) // spreads: [0,1] [2,3] [4,5] [6,7]
+    r.gotoPage(2)
+    @Expect(spreadLabel(r.spreadPages()), "[2,3]")
+    @Expect(spreadLabel(r.prefetchTargets()), "[0,1,4,5]")
+    // 首个 spread：前方裁剪，spread 自身页不重复预取
+    r.gotoPage(0)
+    @Expect(spreadLabel(r.prefetchTargets()), "[2,3]")
+    // 末尾 spread：后方裁剪
+    r.gotoPage(6)
+    @Expect(spreadLabel(r.spreadPages()), "[6,7]")
+    @Expect(spreadLabel(r.prefetchTargets()), "[4,5]")
 }
 
 @Test

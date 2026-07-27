@@ -554,6 +554,12 @@ private func readerPageList(model: AppModel, rows: ArrayList<SidebarRow>, tree: 
     }.spacing(2.0).flex().padding(12.0, 0.0, 12.0, 12.0)
 }
 
+// 侧栏缩略图 key：走 300px thumb 解码档（与 app 层 decodeMaxDimension 的前缀约定一致），
+// 不再让 ~100vp 缩略图挤占 page: 2000px 档的下载带宽与解码内存（#8）。
+private func readerThumbKey(arcid: String, pid: String): String {
+    "thumb:${arcid}:${pid}"
+}
+
 private class ReaderPageThumb <: Widget {
     private let model: AppModel
     private let index: Int64
@@ -570,7 +576,7 @@ private class ReaderPageThumb <: Widget {
             case Some(p) =>
                 if (p.pageType == "image" || p.pageType == "") {
                     let arcid = model.reader.arcidOfReal(index)
-                    imageKey = readerPageKey(arcid, p.id)
+                    imageKey = readerThumbKey(arcid, p.id)
                     if (model.imageState(imageKey).value == "") {
                         model.requestImage(imageKey, readerPageUrl(arcid, p.id))
                     }

@@ -529,3 +529,45 @@ func parseRealServerShapes(): Unit {
     @Expect(tp.tasks[0].triggerSource, "手动")
     @Expect(tp.tasks[0].createdAt, "10:21:58")
 }
+
+// ---- #32 标量快路径等价性：fastInt64/fastBool 对任意输入必须与 decodeRaw 旧路径一致 ----
+
+@Test
+func fastInt64MatchesDecodeRawOnCanonicalForms(): Unit {
+    let cases = ["0", "1", "-1", "42", "-42", "999999999999999999", "-999999999999999999", "-0", "200"]
+    for (c in cases) {
+        let b = c.toArray()
+        @Expect(fastInt64(b, -7), decodeRaw<Int64>(b, -7))
+    }
+}
+
+@Test
+func fastInt64MatchesDecodeRawOnEdgeForms(): Unit {
+    // 非规范/边界形态：null、空白、浮点、指数、前导零、超长按位、空串、字母——
+    // 全部回退旧路径，结果必须一致（含 fallback 语义）。
+    let cases = ["null", " 42", "42 ", "4.5", "1e3", "007", "-007", "9999999999999999999",
+        "-9223372036854775809", "", "abc", "--1", "+1", "4_2"]
+    for (c in cases) {
+        let b = c.toArray()
+        @Expect(fastInt64(b, -7), decodeRaw<Int64>(b, -7))
+        @Expect(fastInt64(b, 0), decodeRaw<Int64>(b, 0))
+    }
+}
+
+@Test
+func fastInt64BoundaryValuesParseExactly(): Unit {
+    @Expect(fastInt64("0".toArray(), -1), 0)
+    @Expect(fastInt64("-1".toArray(), 0), -1)
+    @Expect(fastInt64("999999999999999999".toArray(), 0), 999999999999999999)
+    @Expect(fastInt64("-999999999999999999".toArray(), 0), -999999999999999999)
+}
+
+@Test
+func fastBoolMatchesDecodeRawOnAllForms(): Unit {
+    let cases = ["true", "false", "null", " true", "true ", "True", "TRUE", "1", "0", "", "yes"]
+    for (c in cases) {
+        let b = c.toArray()
+        @Expect(fastBool(b, true), decodeRaw<Bool>(b, true))
+        @Expect(fastBool(b, false), decodeRaw<Bool>(b, false))
+    }
+}

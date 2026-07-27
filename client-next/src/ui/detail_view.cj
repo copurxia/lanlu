@@ -2,8 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, TankoubonInfo, SearchItem, PageInfo,
-    statPages}
+import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, TankoubonInfo, SearchItem, PageInfo}
 import std.collection.ArrayList
 
 // 详情页（档案 / 合集共用骨架；原型 home-detail-redesign.html「档案详情/合集详情」视图）：
@@ -48,7 +47,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     hero.progressPct = pct
     hero.progressText = "已读 ${pct}%"
     hero.summary = oneLineSummary(m.description)
-    hero.tags = m.tags.toArray()
+    hero.tags = m.tags
     hero.primaryLabel = readButtonLabel(m)
     hero.primaryEnabled = m.pagecount > 0
     hero.onPrimary = {
@@ -84,7 +83,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
             => detailCard(model, "页面预览", count: "${model.detailPages.value.size} 页", tools: {
                 => MiniSeg(["缩略图", "列表", "树"], model.pageViewIndex, key: "pv-seg")
             }) {
-                => pagePreview(model, model.detailPages.value.toArray(), m.progress) {
+                => pagePreview(model, model.detailPages.value, m.progress) {
                     no => model.openReader(m.arcid, no)
                 }
             }
@@ -93,14 +92,14 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     if (model.parentTanks.value.size > 0) {
         mainCards.add({
             => detailCard(model, "所属合集", count: "${model.parentTanks.value.size}") {
-                => tankCardRow(model, model.parentTanks.value.toArray(), "parent-tanks")
+                => tankCardRow(model, model.parentTanks.value, "parent-tanks")
             }
         })
     }
     if (model.relatedItems.value.size > 0) {
         mainCards.add({
             => detailCard(model, "相关推荐") {
-                => cardRow(model, "related", model.relatedItems.value.toArray(), 132.0, 238.0)
+                => cardRow(model, "related", model.relatedItems.value, 132.0, 238.0)
             }
         })
     }
@@ -115,12 +114,12 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     sideCards.add({=> progressCard(model, "${pct}%", ofText, pct)})
     sideCards.add({
         => detailCard(model, "基础信息") {
-            => infoList(model, archiveInfoRows(m, model.detailPages.value.toArray()))
+            => infoList(model, archiveInfoRows(m, model.detailPages.value))
         }
     })
     if (m.tags.size > 0) {
         sideCards.add({
-            => detailCard(model, "标签") {=> tagGroups(model, m.tags.toArray())}
+            => detailCard(model, "标签") {=> tagGroups(model, m.tags)}
         })
     }
 
@@ -152,7 +151,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     hero.progressPct = pct
     hero.progressText = "已读 ${pct}%"
     hero.summary = oneLineSummary(t.description)
-    hero.tags = t.tags.toArray()
+    hero.tags = t.tags
     hero.primaryLabel = "▶ 从头开始阅读"
     hero.primaryEnabled = members.size > 0
     hero.onPrimary = {=> model.startTankReading()}
@@ -168,6 +167,10 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
             GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
 
+    // 成员筛选 memo（#9）：仅在 (筛选词, tankMembers 代次) 变化时重算全量小写化匹配，
+    // 封面到货等无关状态写引发的重建直接命中缓存，万级成员合集不再每帧 O(n) 过滤。
+    let filterMemo = rememberState<MemberFilterMemo>("detail:tank:member-filter", {=> MemberFilterMemo()}).value
+
     // 主列：收录档案（网格/列表切换 + 即时筛选 + 计数）→ 相关推荐（无数据隐藏）
     let mainCards = ArrayList<() -> Unit>()
     if (members.size > 0) {
@@ -179,7 +182,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
                 }.spacing(8.vp).hug()
             }) {
                 =>
-                    let shown = filteredMembers(model)
+                    let shown = filteredMembers(model, filterMemo)
                     if (shown.size == 0) {
                         Label("无匹配档案").fontSize(12.fp).muted()
                     } else if (model.tankMemberViewIndex.value == 1) {
@@ -193,7 +196,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     if (model.tankRelated.value.size > 0) {
         mainCards.add({
             => detailCard(model, "相关推荐") {
-                => tankCardRow(model, model.tankRelated.value.toArray(), "tank-related")
+                => tankCardRow(model, model.tankRelated.value, "tank-related")
             }
         })
     }
@@ -207,7 +210,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     })
     if (t.tags.size > 0) {
         sideCards.add({
-            => detailCard(model, "标签") {=> tagGroups(model, t.tags.toArray())}
+            => detailCard(model, "标签") {=> tagGroups(model, t.tags)}
         })
     }
 
@@ -220,21 +223,41 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
         tank: true)
 }
 
+// 成员筛选 memo 缓存（rememberState 跨帧保留）：结果仅在筛选词或成员代次变化时重算。
+class MemberFilterMemo {
+    var filter: String = ""
+    var revision: UInt64 = 0
+    var inited: Bool = false
+    var result: Array<SearchItem> = []
+}
+
 // 成员即时筛选：标题包含（ASCII 大小写不敏感；空串返回全部）。
-private func filteredMembers(model: AppModel): Array<SearchItem> {
+// 按 (tankFilter.value, tankMembers.revision) memo：成员列表只在 dispatch 整体重赋值时
+// 推进代次（model 契约），筛选词与成员都未变时直接返回上次结果（评审 #9）。
+private func filteredMembers(model: AppModel, memo: MemberFilterMemo): Array<SearchItem> {
     let filter = model.tankFilter.value.trimAscii()
+    let revision = model.tankMembers.revision
+    if (memo.inited && memo.filter == filter && memo.revision == revision) {
+        return memo.result
+    }
     let members = model.tankMembers.value
-    if (filter.size == 0) {
-        return members.toArray()
-    }
-    let lf = filter.toAsciiLower()
-    let list = ArrayList<SearchItem>()
-    for (it in members) {
-        if (it.title.toAsciiLower().contains(lf)) {
-            list.add(it)
+    let result = if (filter.size == 0) {
+        members.toArray()
+    } else {
+        let lf = filter.toAsciiLower()
+        let list = ArrayList<SearchItem>()
+        for (it in members) {
+            if (it.title.toAsciiLower().contains(lf)) {
+                list.add(it)
+            }
         }
+        list.toArray()
     }
-    list.toArray()
+    memo.filter = filter
+    memo.revision = revision
+    memo.inited = true
+    memo.result = result
+    result
 }
 
 // 已读完成员数（progress >= pagecount），侧栏「已读完 N 个」。
@@ -317,7 +340,7 @@ private func joinMeta(a: String, b: String): String {
 
 // 档案基础信息行（原型 info-list：文件名/大小/页数/路径/来源/发布日期/添加时间/最近阅读；
 // 「更新时间」「状态」「文件类型」为保留的额外行，置尾）。路径/来源无数据即隐藏。
-private func archiveInfoRows(m: ArchiveMeta, pages: Array<PageInfo>): Array<(String, String)> {
+private func archiveInfoRows(m: ArchiveMeta, pages: ArrayList<PageInfo>): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
     if (m.filename.size > 0) {
         rows.add(("文件名", m.filename))
@@ -357,23 +380,37 @@ private func archiveInfoRows(m: ArchiveMeta, pages: Array<PageInfo>): Array<(Str
 }
 
 // 页数行：「48（图像 44 · 视频 2 · 音频 1 · 文本 1）」；无页表或无统计时仅总页数。
-private func pageStatText(pagecount: Int64, pages: Array<PageInfo>): String {
+private func pageStatText(pagecount: Int64, pages: ArrayList<PageInfo>): String {
     if (pages.size == 0) {
         return "${pagecount}"
     }
-    let s = statPages(pages)
+    // 与 net.statPages 同口径按 pageType 计数；此处直接遍历 ArrayList——页表可达千级，
+    // 若为调 statPages（签名要 Array）每帧 toArray 一次，恰是评审 #29 要消掉的拷贝。
+    var image: Int64 = 0
+    var video: Int64 = 0
+    var audio: Int64 = 0
+    var html: Int64 = 0
+    for (p in pages) {
+        match (p.pageType) {
+            case "image" => image += 1
+            case "video" => video += 1
+            case "audio" => audio += 1
+            case "html" => html += 1
+            case _ => ()
+        }
+    }
     let parts = ArrayList<String>()
-    if (s.image > 0) {
-        parts.add("图像 ${s.image}")
+    if (image > 0) {
+        parts.add("图像 ${image}")
     }
-    if (s.video > 0) {
-        parts.add("视频 ${s.video}")
+    if (video > 0) {
+        parts.add("视频 ${video}")
     }
-    if (s.audio > 0) {
-        parts.add("音频 ${s.audio}")
+    if (audio > 0) {
+        parts.add("音频 ${audio}")
     }
-    if (s.html > 0) {
-        parts.add("文本 ${s.html}")
+    if (html > 0) {
+        parts.add("文本 ${html}")
     }
     if (parts.size == 0) {
         return "${pagecount}"

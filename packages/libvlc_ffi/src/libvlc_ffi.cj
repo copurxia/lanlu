@@ -83,19 +83,84 @@ private type DisplayCallback = CFunc<(CPointer<Unit>, CPointer<Unit>) -> Unit>
 foreign func libvlc_video_set_callbacks(player: PlayerPtr, lock: LockCallback, unlock: UnlockCallback,
     display: DisplayCallback, opaque: CPointer<Unit>): Unit
 
-foreign func libvlc_video_set_format(player: PlayerPtr, chroma: CString, width: UInt32, height: UInt32, pitch: UInt32): Unit
+// 格式协商回调（libvlc_video_format_cb / libvlc_video_cleanup_cb）：VLC 在解码器
+// 产出实际格式后回调 setup，chroma/width/height 为 IN/OUT，pitches/lines 为 OUT，
+// 返回分配的缓冲平面数（0 = 失败）。cleanup 在 vout 结束时回调。
+private type FormatCallback = CFunc<(CPointer<CPointer<Unit>>, CPointer<UInt8>, CPointer<UInt32>,
+    CPointer<UInt32>, CPointer<UInt32>, CPointer<UInt32>) -> UInt32>
+
+private type FormatCleanupCallback = CFunc<(CPointer<Unit>) -> Unit>
+
+foreign func libvlc_video_set_format_callbacks(player: PlayerPtr, setup: FormatCallback,
+    cleanup: FormatCleanupCallback): Unit
 
 foreign func memcpy(destination: CPointer<Unit>, source: CPointer<Unit>, count: UIntNative): CPointer<Unit>
 
 // client-next has one reader media lane. Keeping the callback target process-global avoids passing
 // managed references through libVLC and is safe because VlcPlayer serializes ownership below.
-private let FRAME_WIDTH: Int32 = 1280
-private let FRAME_HEIGHT: Int32 = 720
-private let FRAME_BYTES: Int64 = Int64(FRAME_WIDTH) * Int64(FRAME_HEIGHT) * 4
+// 帧尺寸由 videoFormatSetup 按解码器原生分辨率回填；取不到（setup 传入 0）时回退 1280x720。
+private let FALLBACK_FRAME_WIDTH: Int32 = 1280
+private let FALLBACK_FRAME_HEIGHT: Int32 = 720
+private var frameWidth: Int32 = FALLBACK_FRAME_WIDTH
+private var frameHeight: Int32 = FALLBACK_FRAME_HEIGHT
+private var frameBytes: Int64 = Int64(FALLBACK_FRAME_WIDTH) * Int64(FALLBACK_FRAME_HEIGHT) * 4
 private let FRAME_MUTEX = Mutex()
 private var frameBuffer = CPointer<UInt8>()
+private var frameBufferCapacity: Int64 = 0
 private var frameGeneration: UInt64 = 0
 private var playerClaimed = false
+
+// 帧格式协商：chroma 固定改写为 RGBA；width/height 保留解码器原生值（0 时回退），
+// 按需增长全局帧缓冲（缩容不释放，后续同尺寸/更小分辨率直接复用），pitch 紧密排列。
+// 在 VLC 解码线程上调用；与 takeFrame 经 FRAME_MUTEX 串行化，缓冲重分配不会撞上拷贝。
+@C
+private func videoFormatSetup(_: CPointer<CPointer<Unit>>, chroma: CPointer<UInt8>, width: CPointer<UInt32>,
+    height: CPointer<UInt32>, pitches: CPointer<UInt32>, lines: CPointer<UInt32>): UInt32 {
+    unsafe {
+        (chroma + 0).write(0x52u8) // 'R'
+        (chroma + 1).write(0x47u8) // 'G'
+        (chroma + 2).write(0x42u8) // 'B'
+        (chroma + 3).write(0x41u8) // 'A'
+        var w = width.read()
+        var h = height.read()
+        if (w == 0 || h == 0) {
+            w = UInt32(FALLBACK_FRAME_WIDTH)
+            h = UInt32(FALLBACK_FRAME_HEIGHT)
+            width.write(w)
+            height.write(h)
+        }
+        pitches.write(w * 4)
+        lines.write(h)
+        let need = Int64(w) * Int64(h) * 4
+        synchronized(FRAME_MUTEX) {
+            if (need > frameBufferCapacity) {
+                if (!frameBuffer.isNull()) {
+                    LibC.free(frameBuffer)
+                }
+                frameBuffer = LibC.malloc<UInt8>(count: need)
+                frameBufferCapacity = if (frameBuffer.isNull()) {
+                    0
+                } else {
+                    need
+                }
+            }
+            if (frameBufferCapacity > 0) {
+                frameWidth = Int32(w)
+                frameHeight = Int32(h)
+                frameBytes = need
+            }
+        }
+    }
+    if (frameBufferCapacity == 0) {
+        return 0
+    }
+    1
+}
+
+@C
+private func videoFormatCleanup(_: CPointer<Unit>): Unit {
+    // 全局帧缓冲跨 open 复用（尺寸变化时由 setup 按需增长），这里不做释放。
+}
 
 @C
 private func videoLock(_: CPointer<Unit>, planes: CPointer<CPointer<Unit>>): CPointer<Unit> {
@@ -117,6 +182,9 @@ public class VideoFrame {
     public let width: Int32
     public let height: Int32
     public let generation: UInt64
+    // 借用语义：该数组由 VlcPlayer 持有并在下次 takeFrame 返回新帧时原地覆写
+    // （尺寸变化才重新分配）。需要跨帧持久持有的调用方必须自行拷贝；
+    // client-next 的用法（当帧同步上传纹理）不受此限制。
     public let rgba: Array<UInt8>
 
     init(width: Int32, height: Int32, generation: UInt64, rgba: Array<UInt8>) {
@@ -141,6 +209,8 @@ public class VlcPlayer <: Resource {
     private var instance = InstancePtr()
     private var player = PlayerPtr()
     private var lastFrameGeneration: UInt64 = 0
+    // takeFrame 复用的出帧数组：尺寸（frameBytes）不变时原地覆写，避免每帧分配。
+    private var framePixels = Array<UInt8>(0, repeat: 0u8)
 
     public init() {
         synchronized(FRAME_MUTEX) {
@@ -148,9 +218,6 @@ public class VlcPlayer <: Resource {
                 throw Exception("only one VlcPlayer may be active")
             }
             playerClaimed = true
-            if (frameBuffer.isNull()) {
-                frameBuffer = unsafe { LibC.malloc<UInt8>(count: FRAME_BYTES) }
-            }
         }
         instance = unsafe { libvlc_new(0, CPointer<CString>()) }
         if (instance.isNull()) {
@@ -187,26 +254,22 @@ public class VlcPlayer <: Resource {
             if (player.isNull()) {
                 throw Exception("libVLC could not create media player")
             }
-            let chroma = unsafe { LibC.mallocCString("RGBA") }
-            try {
-                unsafe {
-                    libvlc_video_set_callbacks(player, videoLock, videoUnlock, videoDisplay, CPointer<Unit>())
-                    libvlc_video_set_format(player, chroma, UInt32(FRAME_WIDTH), UInt32(FRAME_HEIGHT),
-                        UInt32(FRAME_WIDTH * 4))
-                    let _ = libvlc_audio_set_mute(player, if (muted) {
-                        1
-                    } else {
-                        0
-                    })
-                    if (libvlc_media_player_play(player) != 0) {
-                        throw Exception("libVLC playback failed")
-                    }
-                    if (offsetSec > 0.0) {
-                        let _ = libvlc_media_player_set_time(player, Int64(offsetSec * 1000.0))
-                    }
+            unsafe {
+                libvlc_video_set_callbacks(player, videoLock, videoUnlock, videoDisplay, CPointer<Unit>())
+                // 帧尺寸不由本侧指定：格式协商回调（videoFormatSetup）按解码器
+                // 原生分辨率设置 chroma/pitch 并增长全局帧缓冲，取不到时回退 1280x720。
+                libvlc_video_set_format_callbacks(player, videoFormatSetup, videoFormatCleanup)
+                let _ = libvlc_audio_set_mute(player, if (muted) {
+                    1
+                } else {
+                    0
+                })
+                if (libvlc_media_player_play(player) != 0) {
+                    throw Exception("libVLC playback failed")
                 }
-            } finally {
-                unsafe { LibC.free(chroma) }
+                if (offsetSec > 0.0) {
+                    let _ = libvlc_media_player_set_time(player, Int64(offsetSec * 1000.0))
+                }
             }
         } finally {
             unsafe { LibC.free(cpath) }
@@ -285,14 +348,18 @@ public class VlcPlayer <: Resource {
             if (frameGeneration == lastFrameGeneration || frameBuffer.isNull()) {
                 return None
             }
-            let pixels = Array<UInt8>(FRAME_BYTES, repeat: 0u8)
+            // 复用上帧数组：frameBytes 不变（同分辨率连续帧）时原地覆写，
+            // 分辨率切换（videoFormatSetup 更新 frameBytes）才重新分配。
+            if (framePixels.size != frameBytes) {
+                framePixels = Array<UInt8>(frameBytes, repeat: 0u8)
+            }
             unsafe {
-                let handle = acquireArrayRawData(pixels)
-                let _ = memcpy(CPointer<Unit>(handle.pointer), CPointer<Unit>(frameBuffer), UIntNative(FRAME_BYTES))
+                let handle = acquireArrayRawData(framePixels)
+                let _ = memcpy(CPointer<Unit>(handle.pointer), CPointer<Unit>(frameBuffer), UIntNative(frameBytes))
                 releaseArrayRawData(handle)
             }
             lastFrameGeneration = frameGeneration
-            Some(VideoFrame(FRAME_WIDTH, FRAME_HEIGHT, frameGeneration, pixels))
+            Some(VideoFrame(frameWidth, frameHeight, frameGeneration, framePixels))
         }
     }
 

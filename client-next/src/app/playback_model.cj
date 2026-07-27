@@ -4,6 +4,7 @@ import std.time.MonoTime
 import std.process.executeWithOutput
 import std.convert.Parsable
 import std.collection.ArrayList
+import std.sort.sort
 import libvlc_ffi.{SubtitleTrack, VideoFrame, VlcPlayer}
 
 // 阅读器媒体 lane 的播放引擎（纯逻辑可单测：进程/时钟/下载全部注入，同 ReaderModel 风格）。
@@ -37,6 +38,9 @@ public class PlaybackModel {
     public var subtitleTracks = ArrayList<SubtitleTrack>()
     public var subtitleTrackId: Int32 = -1
     public var lyricsLines = ArrayList<LyricLine>()
+    // 已交付 UI 的视频帧代际（takeVideoFrame 每取到新帧 +1）：阅读器舞台据此
+    // 只在新帧到达时续帧，而非固定 60fps。
+    public var videoGeneration: UInt64 = 0
 
     // ---- 注入点 ----
     // 单调时钟（毫秒）；测试注入假时钟驱动位置断言。
@@ -113,6 +117,7 @@ public class PlaybackModel {
 
     public func loadLyrics(assetId: Int64): Unit {
         lyricsLines.clear()
+        invalidateLyricCursor()
         if (assetId <= 0) { return }
         match (onLyricsDownload) {
             case Some(cb) => cb(mediaKey, assetId)
@@ -121,7 +126,10 @@ public class PlaybackModel {
     }
 
     public func onLyricsDownloaded(key: String, lyrics: String): Unit {
-        if (key == mediaKey) { lyricsLines = parseTimedLyrics(lyrics) }
+        if (key == mediaKey) {
+            lyricsLines = parseTimedLyrics(lyrics)
+            invalidateLyricCursor()
+        }
     }
 
     public func refreshVlcState(): Unit {
@@ -143,6 +151,7 @@ public class PlaybackModel {
         error = ""
         localPath = path
         lyricsLines = parseTimedLyrics(lyrics)
+        invalidateLyricCursor()
     }
 
     // 下载失败回填（同 onDownloaded 的对号入座语义）。
@@ -269,11 +278,29 @@ public class PlaybackModel {
             case Some(r) =>
                 let duration = r.durationSec()
                 if (duration > 0.0) { durationSec = duration }
-                subtitleTracks = r.subtitleTracks()
-                subtitleTrackId = r.currentSubtitleTrack()
-                r.takeFrame()
+                refreshSubtitleTracksThrottled(r)
+                let frame = r.takeFrame()
+                if (frame.isSome()) {
+                    videoGeneration += 1
+                }
+                frame
             case None => None
         }
+    }
+
+    // 字幕轨 FFI（subtitleTracks/currentSubtitleTrack 每次调用都遍历释放原生链表）在
+    // 播放中随 takeVideoFrame 高频触发；轨道列表秒级变化，1s 节流足够，cycleSubtitleTrack
+    // 等主动操作仍即时刷新。用注入时钟计时，测试可驱动。
+    private var lastSubtitleRefreshMs: Int64 = -10000
+
+    private func refreshSubtitleTracksThrottled(r: LibVlcRunner): Unit {
+        let now = clock()
+        if (now - lastSubtitleRefreshMs < 1000) {
+            return
+        }
+        lastSubtitleRefreshMs = now
+        subtitleTracks = r.subtitleTracks()
+        subtitleTrackId = r.currentSubtitleTrack()
     }
 
     private func stopInternal(): Unit {
@@ -288,17 +315,58 @@ public class PlaybackModel {
         subtitleTracks.clear()
         subtitleTrackId = -1
         lyricsLines.clear()
+        videoGeneration = 0
+        lastSubtitleRefreshMs = -10000
+        invalidateLyricCursor()
         startOffsetSec = 0.0
         pausedOffsetSec = 0.0
     }
 
+    // 当前歌词行：二分查找最后一条 timeSec <= now（O(log n)）；播放中位置单调前进时
+    // 从上次命中索引向前扫（均摊 O(1)），回退/seek 走二分。结果缓存于 lastLyric*，
+    // 歌词列表替换时由 invalidateLyricCursor 复位。
+    private var lastLyricCursor: Int64 = -1
+    private var lastLyricPositionSec: Float64 = -1.0
+
+    private func invalidateLyricCursor(): Unit {
+        lastLyricCursor = -1
+        lastLyricPositionSec = -1.0
+    }
+
     public func activeLyricIndex(): Int64 {
         let now = positionSec
-        var active: Int64 = -1
-        for (i in 0..lyricsLines.size) {
-            if (lyricsLines[Int64(i)].timeSec <= now) { active = Int64(i) } else { break }
+        let n = lyricsLines.size
+        if (n == 0) {
+            invalidateLyricCursor()
+            return -1
         }
-        active
+        // 单调前进快路径：上次命中仍有效（行存在且不晚于 now），向前扫到本行。
+        if (now >= lastLyricPositionSec && lastLyricCursor < n &&
+            (lastLyricCursor < 0 || lyricsLines[lastLyricCursor].timeSec <= now)) {
+            var i = lastLyricCursor
+            while (i + 1 < n && lyricsLines[i + 1].timeSec <= now) {
+                i += 1
+            }
+            lastLyricCursor = i
+            lastLyricPositionSec = now
+            return i
+        }
+        // 回退/seek/歌词热替换：二分最后一条 timeSec <= now。
+        var lo: Int64 = 0
+        var hi = n - 1
+        var ans: Int64 = -1
+        while (lo <= hi) {
+            let mid = (lo + hi) / 2
+            if (lyricsLines[mid].timeSec <= now) {
+                ans = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        lastLyricCursor = ans
+        lastLyricPositionSec = now
+        ans
     }
 
     public func cycleSubtitleTrack(): Unit {
@@ -367,6 +435,9 @@ public func parseTimedLyrics(raw: String): ArrayList<LyricLine> {
             case None => ()
         }
     }
+    // 出口按 timeSec 升序稳定排序：activeLyricIndex 的二分/单调前进缓存都假设时间戳有序，
+    // 乱序 LRC 不再改变命中语义；时间戳相同保持文件内原始先后（稳定排序）。
+    sort(result, lessThan: {a, b => a.timeSec < b.timeSec}, stable: true)
     result
 }
 

@@ -620,9 +620,9 @@ private func metadataSide(model: AppModel): Unit {
         ScrollView(key: "metadata-side-list") {
             VStack {
                 if (level == 0) {
-                    ForEachIndexed(model.tankMembers.value.toArray()) {i, item => tankMemberRow(model, item, i)}
+                    ForEachIndexed(model.tankMembers.value) {i, item => tankMemberRow(model, item, i)}
                 } else {
-                    ForEachIndexed(model.metadataEditorPages.value.toArray()) {i, page => metadataPageRow(model, page, i)}
+                    ForEachIndexed(model.metadataEditorPages.value) {i, page => metadataPageRow(model, page, i)}
                 }
                 if (count == 0) {
                     Label("暂无可编辑条目").fontSize(11.fp).muted().padding(12.vp)
@@ -721,7 +721,9 @@ private func pageThumbnailKey(model: AppModel, page: PageInfo): String {
     if (page.thumbAssetId > 0) {
         "asset:${page.thumbAssetId}"
     } else {
-        "page:${model.metadataEditorArchiveId}:${page.sourcePath}"
+        // 自动缩略图走 thumb: 档（解码上限 300px，评审 #41）：编辑器侧栏只展示 52×34vp，
+        // 用 page:（2000px 档）会为每张缩略图全页解码。url 不变，由 model 按 key 前缀分档。
+        "thumb:${model.metadataEditorArchiveId}:${page.sourcePath}"
     }
 }
 

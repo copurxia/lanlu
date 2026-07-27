@@ -51,10 +51,13 @@ public class MediaProxy <: Resource {
         }
         // VLC 常用 bytes=N- 的开放区间。兰鹿会据此声明从 N 到文件末尾的巨大
         // Content-Length；stdx server 转交超大响应时会造成不必要的内存压力。
-        // 把开放区间切成 8 MiB 窗口，VLC 会依据 Content-Range 继续请求下一段。
+        // 把开放区间切成 32 MiB 窗口，VLC 会依据 Content-Range 继续请求下一段。
+        // 上游连接复用：stdx HTTP/1.1 Client 自带按 host 的连接池（poolSize 默认 10），
+        // 同一 MediaProxy.client 的连续窗口请求走 keep-alive 复用同一 TCP 连接，
+        // 窗口边界的额外开销是一次 loopback+上游的请求往返，不含握手/慢启动。
         let range = match (ctx.request.headers.getFirst("Range")) {
             case Some(value) => boundedRange(value)
-            case None => "bytes=0-8388607"
+            case None => "bytes=0-33554431"
         }
         builder = builder.header("Range", range)
         match (ctx.request.headers.getFirst("User-Agent")) {
@@ -86,10 +89,10 @@ public class MediaProxy <: Resource {
         let rawStart = value[6..value.size - 1]
         try {
             let start = Int64.parse(rawStart)
-            if (start < 0) { return "bytes=0-8388607" }
-            return "bytes=${start}-${start + 8388607}"
+            if (start < 0) { return "bytes=0-33554431" }
+            return "bytes=${start}-${start + 33554431}"
         } catch (_: Exception) {
-            "bytes=0-8388607"
+            "bytes=0-33554431"
         }
     }
 

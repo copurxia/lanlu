@@ -9,6 +9,7 @@ import std.convert.Parsable
 import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.math.sqrt
 import std.sync.Mutex
+import std.time.MonoTime
 
 // 排序字段映射：与 ui 层 SORT_LABELS 按下标一一对应（改动须两边同步）。
 public let SEARCH_SORT_FIELDS = ["title", "created_at", "updated_at", "lastread", "pagecount", "release_at"]
@@ -18,18 +19,29 @@ public let BROWSE_CATEGORY_ROW_LIMIT: Int64 = 8
 public let BROWSE_ROW_SIZE: Int64 = 12
 
 // 图片解码上限（最长边物理像素，0=不缩）：封面按最大展示位（详情 hero 200vp @2x）给 400，
-// 阅读页按 2000 封顶。按 key 前缀分档、档位固定，故内存 staged/纹理 key 无需带尺寸；
-// 磁盘缓存存原始字节，缩小只发生在解码期，各尺寸共用同一磁盘缓存条目。
+// 阅读页按 2000 封顶，侧栏/编辑器缩略图按 300。按 key 前缀分档、档位固定，故内存
+// staged/纹理 key 无需带尺寸；磁盘缓存存原始字节，缩小只发生在解码期，各尺寸共用同一
+// 磁盘缓存条目（thumb: 与 page: 下载同一原始字节流，只是解码档不同——注意两者 key 不同，
+// 磁盘缓存条目因此分档各存一份原始字节，见 #8 决策记录：以磁盘空间换取缩略图不再全页解码）。
 private let ASSET_DECODE_MAX_DIM: Int32 = 400
 private let PAGE_DECODE_MAX_DIM: Int32 = 2000
+private let THUMB_DECODE_MAX_DIM: Int32 = 300
 
-// key 前缀 → 解码尺寸档位（asset:=封面/资产，page:=阅读页）。
+// 磁盘缓存 sweep：启动一次之外按周期/写入量补扫（#10）。阈值沿用既有 2GB。
+private let SWEEP_MAX_BYTES: Int64 = 2 * 1024 * 1024 * 1024
+private let SWEEP_INTERVAL_MS: Int64 = 3600000 // 每小时兜底一次
+private let SWEEP_WRITE_TRIGGER_BYTES: Int64 = 512 * 1024 * 1024 // 累计新写入超 512MB 提前补扫
+
+// key 前缀 → 解码尺寸档位（asset:=封面/资产，page:=阅读页，thumb:=缩略图）。
 private func decodeMaxDimension(key: String): Int32 {
     if (key.startsWith("asset:")) {
         return ASSET_DECODE_MAX_DIM
     }
     if (key.startsWith("page:")) {
         return PAGE_DECODE_MAX_DIM
+    }
+    if (key.startsWith("thumb:")) {
+        return THUMB_DECODE_MAX_DIM
     }
     return 0
 }
@@ -620,6 +632,10 @@ public class AppModel {
     }
 
     // 探测全部服务器在线状态（登录页进场/列表变更后调用）。
+    // 探测用 LanluApi 是即用即弃的短生命周期实例（各含一个连接池），用完必须 close，
+    // 否则每次探测泄漏一个 RestClient 池（#31）。connect 超时用设置项
+    // probeConnectTimeoutSec（任务E持久化，默认 5s 保守值，#21）：失效地址的 TCP
+    // connect 挂死不再拖满 worker 池。
     public func probeServers(): Unit {
         for (p in settings.servers) {
             let id = p.id
@@ -627,8 +643,14 @@ public class AppModel {
                 "probe:${id}",
                 {
                     =>
-                        let _ = LanluApi(p.baseUrl).info()
-                        return id
+                        let probeApi = LanluApi(p.baseUrl,
+                            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+                        try {
+                            let _ = probeApi.info()
+                            return id
+                        } finally {
+                            probeApi.close()
+                        }
                 }
             )
         }
@@ -660,7 +682,8 @@ public class AppModel {
     }
 
     private func resumeProfile(p: ServerProfile): Unit {
-        let a = LanluApi(p.baseUrl)
+        let a = LanluApi(p.baseUrl,
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
         a.setToken(p.token)
         api = a
         let _ = worker.submit("me", {=> a.me()})
@@ -683,23 +706,35 @@ public class AppModel {
             case Some(x) => x
             case None => return
         }
-        let a = LanluApi(p.baseUrl)
+        let a = LanluApi(p.baseUrl,
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
         loading.value = true
         loginError.value = ""
         let sid = p.id
-        let _ = worker.submit(
+        let ok = worker.submit(
             "login",
             {
                 =>
-                    let _ = a.info() // 先探测：非 lanlu 服务/地址错误会在这里抛错
+                    // a 的所有权只随成功结果（含 TOTP 挑战）转交给 dispatch；
+                    // 任务抛错时 a 无人接管，必须就地 close，否则每次失败登录泄漏一个连接池（#31）。
                     try {
-                        let d = a.login(user, pass)
-                        return (a, d, sid, "")
-                    } catch (e: TotpRequired) {
-                        return (a, LoginData(), sid, e.challengeId)
+                        let _ = a.info() // 先探测：非 lanlu 服务/地址错误会在这里抛错
+                        try {
+                            let d = a.login(user, pass)
+                            return (a, d, sid, "")
+                        } catch (e: TotpRequired) {
+                            return (a, LoginData(), sid, e.challengeId)
+                        }
+                    } catch (e: Exception) {
+                        a.close()
+                        throw e
                     }
             }
         )
+        // 同名任务在途（快速重复登录）时 submit 去重返回 false：闭包不会执行，a 就地 close（#31）。
+        if (!ok) {
+            a.close()
+        }
     }
 
     public func verifyTotp(code: String, recoveryCode: String): Unit {
@@ -711,18 +746,29 @@ public class AppModel {
         if (cid.size == 0) {
             return
         }
-        let a = LanluApi(p.baseUrl)
+        let a = LanluApi(p.baseUrl,
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
         loading.value = true
         loginError.value = ""
         let sid = p.id
-        let _ = worker.submit(
+        let ok = worker.submit(
             "login-totp",
             {
                 =>
-                    let d = a.verifyTotpLogin(cid, code, recoveryCode)
-                    return (a, d, sid, "")
+                    // 同 login：a 只随成功结果转交 dispatch，抛错路径就地 close（#31）。
+                    try {
+                        let d = a.verifyTotpLogin(cid, code, recoveryCode)
+                        return (a, d, sid, "")
+                    } catch (e: Exception) {
+                        a.close()
+                        throw e
+                    }
             }
         )
+        // 同名任务在途时 submit 去重返回 false：闭包不会执行，a 就地 close（#31）。
+        if (!ok) {
+            a.close()
+        }
     }
 
     public func dismissTotp(): Unit {
@@ -776,7 +822,20 @@ public class AppModel {
             return
         }
         testConnResult.value = "testing"
-        let _ = worker.submit("testconn", {=> LanluApi(norm).info()})
+        // 即用即弃的测试实例（含连接池），try/finally 保证成败都 close（#31）。
+        let _ = worker.submit(
+            "testconn",
+            {
+                =>
+                    let testApi = LanluApi(norm,
+                        connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+                    try {
+                        return testApi.info()
+                    } finally {
+                        testApi.close()
+                    }
+            }
+        )
     }
 
     // 登出只清 active profile 的 token（服务器条目保留）；运行期镜像由 saveSettings 同步。
@@ -1467,16 +1526,67 @@ public class AppModel {
             case None =>
                 let c = ImageCache(defaultCacheRoot(activeBaseUrl()))
                 imageCache = c
-                // 启动时后台按 2GB 阈值做一次 LRU 清理（spec §5.3）
+                // 启动时后台按 2GB 阈值做一次 LRU 清理（spec §5.3）；周期补扫见 maybeSweepCache。
+                lastSweepAt = MonoTime.now()
                 let _ = worker.submit(
                     "sweep",
                     {
                         =>
-                            c.sweep(2 * 1024 * 1024 * 1024);
+                            c.sweep(SWEEP_MAX_BYTES);
                             return true
                     }
                 )
                 return c
+        }
+    }
+
+    // 磁盘缓存周期 sweep（#10）：启动一次之外，每小时兜底或累计新写入超阈值（512MB）时补扫。
+    // 与在途读取的竞争沿用 ImageCache 既有惯例兜底：sweep 跳过 .bin 在途半成品、按 mtime
+    // 最旧优先删（刚定稿、即将被解码的文件最后被考虑），解码侧打开失败经 decodeCachedOrEvict
+    // 剔除坏条目并置 error 态自愈（重试重新拉取）；.bin→rename 原子定稿惯例不变。
+    private var lastSweepAt: ?MonoTime = None
+    private var sweepBytesSinceSweep: Int64 = 0
+    private let sweepMutex = Mutex()
+
+    // 工作线程回调（图片任务 fetch 内）：累计新落盘的缓存字节。fetch 只在缓存未命中时
+    // 执行，其返回字节数即本次新写入量；计数只读写在锁内，UI 线程判定见 maybeSweepCache。
+    private func noteCacheWrite(bytes: Int64): Unit {
+        synchronized(sweepMutex) {
+            sweepBytesSinceSweep += bytes
+        }
+    }
+
+    // 周期 sweep 判定（pump 每迭代调用，UI 线程）：到点或写入超阈值才提交；worker 同名
+    // 去重——已在途的 sweep 不会叠加（提交被拒时保留计数与时刻，下轮迭代再试）。
+    private func maybeSweepCache(): Unit {
+        let c = match (imageCache) {
+            case Some(x) => x
+            case None => return
+        }
+        let due = match (lastSweepAt) {
+            case Some(at) => (MonoTime.now() - at).toMilliseconds() >= SWEEP_INTERVAL_MS
+            case None => true
+        }
+        var written: Int64 = 0
+        synchronized(sweepMutex) {
+            written = sweepBytesSinceSweep
+        }
+        if (!due && written < SWEEP_WRITE_TRIGGER_BYTES) {
+            return
+        }
+        let submitted = worker.submit(
+            "sweep",
+            {
+                =>
+                    c.sweep(SWEEP_MAX_BYTES)
+                    return true
+            }
+        )
+        if (submitted) {
+            lastSweepAt = MonoTime.now()
+            synchronized(sweepMutex) {
+                sweepBytesSinceSweep = 0
+            }
         }
     }
 
@@ -1499,7 +1609,8 @@ public class AppModel {
     private var imageQueue = ArrayList<(String, String, Bool)>() // (key, url, 高优先级?)
 
     // 已在途/已排队/已完成的 key 直接跳过（状态机去重，队列不会进重）；否则置 loading
-    // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）与 page:<arcid>:<pagePath>。
+    // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）、page:<arcid>:<pagePath>
+    // （阅读页）与 thumb:<arcid>:<pagePath>（300px 缩略图档）。
     // highPriority：当前可见的关键图（阅读当前页）置 true，滚屏封面/预取用默认 false。
     public func requestImage(key: String, url: String, highPriority!: Bool = false): Unit {
         let st = imageState(key)
@@ -1556,30 +1667,43 @@ public class AppModel {
                 imageState(key).value = "error"
                 return
         }
-        // 防御：page: 畸形 key（pagePath 缺分隔符）直接置 error 返回，
+        // 防御：page:/thumb: 畸形 key（pagePath 缺分隔符）直接置 error 返回，
         // 避免切出空 arcid 发出必然 404 的请求（key 由内部生成，正常不会触发）。
-        if (key.startsWith("page:") && key.removePrefix("page:").indexOf(":").isNone()) {
+        if ((key.startsWith("page:") && key.removePrefix("page:").indexOf(":").isNone()) ||
+            (key.startsWith("thumb:") && key.removePrefix("thumb:").indexOf(":").isNone())) {
             imageState(key).value = "error"
             return
         }
         activeImages++
         let c = cache()
-        let submitted = worker.submit(
+        // 图片任务走独立图片执行器（任务E submitImage，4 线程），不再阻塞交互 API 执行器
+        //（#22）；activeImages 并发硬上限 4 与优先级插队语义不变（见 requestImage/pump）。
+        let submitted = worker.submitImage(
             "img:${key}",
             {
                 =>
                     let fetch = {
                         =>
-                            if (key.startsWith("asset:")) {
-                                return a.assetBytes(Int64.parse(key.removePrefix("asset:")))
-                            }
-                            if (key.startsWith("page:")) {
+                            let bytes = if (key.startsWith("asset:")) {
+                                a.assetBytes(Int64.parse(key.removePrefix("asset:")))
+                            } else if (key.startsWith("page:")) {
                                 // page:<arcid>:<pagePath>（pagePath 本身可能含冒号，只切第一个）
                                 let rest = key.removePrefix("page:")
                                 let sep = rest.indexOf(":") ?? 0
-                                return a.pageBytes(rest[0..sep], rest[(sep + 1)..rest.size])
+                                a.pageBytes(rest[0..sep], rest[(sep + 1)..rest.size])
+                            } else if (key.startsWith("thumb:")) {
+                                // thumb:<arcid>:<pagePath>：与 page: 同一下载通道（原始字节），
+                                // 仅解码档不同（300px，见 decodeMaxDimension）。
+                                let rest = key.removePrefix("thumb:")
+                                let sep = rest.indexOf(":") ?? 0
+                                a.pageBytes(rest[0..sep], rest[(sep + 1)..rest.size])
+                            } else {
+                                throw Exception("未知图片 key: ${key}")
                             }
-                            throw Exception("未知图片 key: ${key}")
+                            // fetch 只在磁盘缓存未命中时执行，其返回字节即本次新落盘量（#10 周期
+                            // sweep 的写入触发计数，见 maybeSweepCache）。
+                            noteCacheWrite(Int64(bytes.size))
+                            return bytes
                     }
                     // 缓存原始字节 → 工作线程上 vips 按 key 档位缩小解码 RGBA；纹理创建留给
                     // UI 线程首帧惰性完成。解码失败时 decodeCachedOrEvict 会先剔除坏缓存再抛出，
@@ -1675,7 +1799,14 @@ public class AppModel {
             imgKey,
             {
                 =>
-                    let fetch = {=> a.assetBytes(assetId)}
+                    let fetch = {
+                        =>
+                            let bytes = a.assetBytes(assetId)
+                            // fetch 只在缓存未命中时执行，返回字节即本次新落盘量（#10 周期
+                            // sweep 的写入触发计数，同 startImageTask，见 maybeSweepCache）。
+                            noteCacheWrite(Int64(bytes.size))
+                            return bytes
+                    }
                     let path = c.ensureCached(imgKey, fetch)
                     let d = decodeBackdrop(path, 256)
                     return (imgKey, d)
@@ -1697,7 +1828,13 @@ public class AppModel {
             imgKey,
             {
                 =>
-                    let path = c.ensureCached(imgKey, {=> a.assetBytes(assetId)})
+                    let path = c.ensureCached(imgKey, {
+                        =>
+                            let bytes = a.assetBytes(assetId)
+                            // 同 requestBackdrop：未命中落盘量计入 #10 周期 sweep 触发计数。
+                            noteCacheWrite(Int64(bytes.size))
+                            return bytes
+                    })
                     let d = decodeBackdrop(path, 320, blurSigma: 14.0)
                     return (imgKey, d)
             }
@@ -2371,9 +2508,47 @@ public class AppModel {
 
     // ---- 每帧泵：把工作线程结果写回 State（UI 线程）----
 
+    /*
+     * pump 自带的周期定时器（chrome 自动隐藏 / 自动翻页 / 进度防抖尾巴）中最近一个的
+     * 剩余毫秒，供主循环注册定时帧请求（DesktopApp.requestFrameAfter）：循环空转等待时
+     * 在最近到期时刻被唤醒，醒后那次迭代正常 pump 触发对应逻辑。时钟基准与 pump 内部
+     * 一致（reader.clock），返回的是相对剩余量（已钳制 ≥0），与调用方时基无关。
+     * 无活动定时器时返回 None，主循环可无限期等待（输入/worker 唤醒兜底）。
+     */
+    public func nextPumpTimerMs(): ?Int64 {
+        var best: ?Int64 = None
+        let onReaderPage = match (page.value) {
+            case Page.Reader(_, _) => true
+            case _ => false
+        }
+        if (onReaderPage) {
+            if (reader.autoHide && reader.chromeVisible) {
+                best = earliestTimer(best, reader.lastActivityMs + READER_CHROME_AUTOHIDE_MS - reader.clock())
+            }
+            if (reader.autoPlay && reader.pageCount > 0) {
+                best = earliestTimer(best, lastAutoPlayTurnMs + reader.autoPlayIntervalSec * 1000 - reader.clock())
+            }
+            best = earliestTimer(best, reader.nextProgressFlushMs())
+        }
+        best
+    }
+
+    private func earliestTimer(current: ?Int64, candidate: ?Int64): ?Int64 {
+        match (candidate) {
+            case None => current
+            case Some(ms) =>
+                let clamped = max(Int64(0), ms)
+                match (current) {
+                    case Some(existing) => Some(min(existing, clamped))
+                    case None => Some(clamped)
+                }
+        }
+    }
+
     public func pump(): Unit {
         reader.tick() // 进度防抖周期驱动：窗口到点补发 pending 尾巴
         pollUploadFileDialog()
+        maybeSweepCache() // 磁盘缓存周期 sweep 判定（#10，判定本身零 I/O）
 
         // chrome 自动隐藏计时（T13）：autoHide 开且 READER_CHROME_AUTOHIDE_MS 无活动则隐藏
         // 顶栏，仅在阅读页生效（离开阅读器后 reader 状态闲置，不应静默翻转）。
@@ -2711,6 +2886,8 @@ public class AppModel {
                     let (a, d, sid, cid) = (p as (LanluApi, LoginData, String, String)).getOrThrow()
                     if (cid.size > 0) {
                         // 202 挑战：切 TOTP 表单，等待 verifyTotp 提交。
+                        // a 不转交（verifyTotp 另建实例），不 close 会泄漏一个连接池（#31）。
+                        a.close()
                         totpChallengeId.value = cid
                     } else {
                         totpChallengeId.value = ""

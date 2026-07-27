@@ -51,7 +51,7 @@ func usersPage(model: AppModel): Unit {
         if (users.size == 0) {
             pageLoading(model, "暂无用户或加载中…")
         }
-        ForEach(users.toArray(), key: {u: AdminUserItem => "${u.id}"}) {
+        ForEach(users, key: {u: AdminUserItem => "${u.id}"}) {
             u =>
                 let self = u.username == model.settings.username
                 HStack {
@@ -279,7 +279,7 @@ func tasksPage(model: AppModel): Unit {
             if (p.tasks.size == 0) {
                 Label("该状态下没有任务").fontSize(12.fp).muted()
             }
-            ForEach(p.tasks.toArray(), key: {t: TaskRecord => "${t.id}"}) {
+            ForEach(p.tasks, key: {t: TaskRecord => "${t.id}"}) {
                 t => taskCard(model, t, cancelId, cancelOpen)
             }
             Label("共 ${p.total} 个任务").fontSize(11.fp).muted()
@@ -552,7 +552,7 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
     if (tasks.size == 0) {
         Label("暂无定时任务").fontSize(12.fp).muted()
     }
-    ForEach(tasks.toArray(), key: {t: CronTask => "${t.id}"}) {
+    ForEach(tasks, key: {t: CronTask => "${t.id}"}) {
         t =>
             let panel = if (model.isLight()) {
                 LANLU_L_PANEL
@@ -788,9 +788,9 @@ func pluginsPage(model: AppModel): Unit {
     // 卡片网格（原型 .grid-3：三列）。同分类页做法：LazyGrid 与页层 ScrollView 嵌套
     // 会拿到无限高，故退化为 HStack 三列等宽分行布局（见 chunkCats 注释）。
     // 异步网格同样走 ForEach(key)，防止数据到达后的重建错位。
-    ForEachIndexed(chunkPlugins(filtered, 3).toArray()) {
+    ForEachIndexed(chunkPlugins(filtered, 3)) {
         _, row => HStack {
-            ForEach(row.toArray(), key: {p: PluginItem => p.namespace}) {
+            ForEach(row, key: {p: PluginItem => p.namespace}) {
                 p => VStack {
                     pluginCard(model, p, delNs, delOpen, cfgNs, cfgOpen)
                 }.flex()
@@ -983,7 +983,7 @@ private func statsSystemInfo(model: AppModel, info: ServerInfo): Unit {
             let _ = Label("-").fontSize(12.fp)
         } else {
             let _ = FlowRow {
-                ForEach(info.dbExtensions.toArray(), key: {ext => ext.name}) {
+                ForEach(info.dbExtensions, key: {ext => ext.name}) {
                     ext => pill(model, if (ext.version.size > 0) {
                         "${ext.name} ${ext.version}"
                     } else {

@@ -348,8 +348,8 @@ class ReaderDock <: Widget {
             })
         let _ = drawBodyButton(ctx, fwdRect, dy, "reader:dock:fwd", a)
         drawSkipSmall(ctx.renderer, fwdRect.centerX(), fwdRect.centerY() + dy, 1.0, dimColor(ctx, a))
-        // 播放进度：自绘滑条逐帧读 positionSec（playing 时 requestFrame 续帧，
-        // 不写 State 避免 60fps 重建）；durationSec==0 禁用。
+        // 播放进度：自绘滑条逐帧读 positionSec（playing 时 250ms 定时帧请求续帧，
+        // 不写 State 避免全树重建）；durationSec==0 禁用。
         drawPlaybackSeekBar(ctx, audioSeekRect.shift(0.0, dy), pb)
         let timeText = "${formatMediaClock(pb.positionSec)}/${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}"
         let tw = ctx.renderer.textWidth(timeText, pointSize: 12.0)

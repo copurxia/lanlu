@@ -3,7 +3,7 @@ package lanlu_client_next.net
 import ignite.client.*
 import std.collection.ArrayList
 import std.fs.{File, FileInfo, OpenMode, Path}
-import std.sync.Mutex
+import std.sync.{Mutex, SyncCounter}
 
 public class ApiException <: Exception {
     public let status: UInt16
@@ -37,18 +37,27 @@ class TokenStore {
     }
 }
 
+// 看门狗共享状态箱：spawn 的 lambda 不能捕获可变局部变量，装箱后只捕获不可变引用。
+private class WatchdogBox<T> {
+    var result: ?T = None
+    var failure: ?Exception = None
+}
+
 public class LanluApi {
     private let client: RestClient
     private let uploadClient: RestClient
     private let store = TokenStore()
     private let base: String
+    // 连接硬超时（仅 info() 生效，见 info 注释）：None = 不设（默认行为不变）。
+    private let connectTimeout: ?Duration
 
-    public init(baseUrl: String) {
+    public init(baseUrl: String, connectTimeout!: ?Duration = None) {
         var b = baseUrl.trimAscii()
         while (b.endsWith("/")) {
             b = b[0..b.size - 1]
         }
         base = b
+        this.connectTimeout = connectTimeout
         let s = store
         client = RestClient(readTimeout: Duration.second * 30, writeTimeout: Duration.second * 30, poolSize: 8)
             .baseUrl(base)
@@ -120,9 +129,48 @@ public class LanluApi {
         resp.body()
     }
 
+    // ignite RestClient / stdx ClientBuilder 均无 connectTimeout 配置（connector 注入也无法
+    // 穿过 RestClient），而 probe/登录前探测场景最怕的是 TCP connect 挂死（OS 默认重传可达
+    // 分钟级）。这里用看门狗实现等效硬超时：构造时传入 connectTimeout 后，info() 在独立
+    // 线程执行、调用方按超时等待；超时即抛 ApiException，残留的阻塞线程待其自行返回后回收
+    //（次数受探测频率约束，无累积风险）。只包 info()：页面/媒体等大响应不承受总时长上限。
     public func info(): ServerInfo {
+        match (connectTimeout) {
+            case Some(t) => withHardTimeout(t, {=> fetchInfo()})
+            case None => fetchInfo()
+        }
+    }
+
+    private func fetchInfo(): ServerInfo {
         // /api/info 返回裸 JSON 对象（无包络），unwrapDataRaw 兼容两种形态。
         JsonCodec.decode<ServerInfo>(unwrapDataRaw(checkedBody(client.get("/api/info"))))
+    }
+
+    private func withHardTimeout<T>(t: Duration, f: () -> T): T {
+        let done = SyncCounter(1)
+        // 仓颉限制：捕获可变局部变量的 lambda 只能直接调用（不能 spawn），
+        // 故共享状态装箱，spawn 只捕获不可变的箱引用。
+        let box = WatchdogBox<T>()
+        let _ = spawn {
+            try {
+                box.result = Some(f())
+            } catch (e: Exception) {
+                box.failure = Some(e)
+            }
+            done.dec()
+        }
+        done.waitUntilZero(timeout: t)
+        if (done.count > 0) {
+            throw ApiException(0, "连接超时（${t.toMilliseconds()}ms 内未建立连接）")
+        }
+        match (box.failure) {
+            case Some(e) => throw e
+            case None => ()
+        }
+        match (box.result) {
+            case Some(v) => v
+            case None => throw ApiException(0, "连接失败")
+        }
     }
 
     public func login(username: String, password: String): LoginData {

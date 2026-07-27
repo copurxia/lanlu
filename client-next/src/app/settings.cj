@@ -5,7 +5,8 @@ import std.collection.ArrayList
 import std.env.getVariable
 import std.fs.{exists, Directory, Path}
 import std.overflow.*
-import std.time.DateTime
+import std.sync.Mutex
+import std.time.{DateTime, MonoTime}
 
 // 一台已保存的 lanlu 服务器：列表管理 + 按服务器各存会话（token/username）。
 public class ServerProfile {
@@ -59,6 +60,9 @@ public class AppSettings {
     public var readerShowInfo: Bool = false // 媒体信息浮层开关（文件名/时长/位置等）
     public var readerAutoPlay: Bool = false // 自动播放（按间隔自动翻页，到底自动停）
     public var readerAutoPlayInterval: Int64 = 3 // 自动播放间隔（秒，1-10）
+    // 服务器在线探测（probe）连接硬超时（秒）：不可达服务器的 TCP connect 走 OS 默认重传
+    // 可达分钟级，探测必须短超时快速判离线。LanluApi(connectTimeout:) 的消费方。
+    public var probeConnectTimeoutSec: Int64 = 5
 
     // 多服务器列表与当前选中；旧三字段（serverUrl/token/username）仅作迁移与向后兼容同步。
     public var servers = ArrayList<ServerProfile>()
@@ -185,6 +189,10 @@ public func loadSettings(): AppSettings {
     if (s.readerAutoPlayInterval < 1 || s.readerAutoPlayInterval > 10) {
         s.readerAutoPlayInterval = 3
     }
+    s.probeConnectTimeoutSec = kv.getInt64("network.probe_connect_timeout_sec", defaultValue: 5)
+    if (s.probeConnectTimeoutSec < 1 || s.probeConnectTimeoutSec > 60) {
+        s.probeConnectTimeoutSec = 5
+    }
     s.activeServerId = kv.getString("servers.active_id")
     let count = kv.getInt64("servers.count")
     for (i in 0..count) {
@@ -206,7 +214,105 @@ public func loadSettings(): AppSettings {
     s
 }
 
+// ---- 落盘防抖（leading 即时 + trailing 合并）----
+// 滑条类高频调用（自动播放间隔拖动、窗口期连续设置变更）会逐次触发整表重写 + MMKV sync。
+// 这里给 saveSettings 加 300ms 合并：距上次落盘超窗 → 立即写（leading，开关类即时性不变）；
+// 窗口内的连续调用只记最新快照，由后台线程到点做一次 trailing flush（合并后只写最终值）。
+// 以下变量不 private 以便同包测试注入窗口/复位状态；saveClock 默认单调时钟毫秒。
+private let saveClockEpoch = MonoTime.now()
+var saveDebounceMs: Int64 = 300
+var saveClock: () -> Int64 = {=> (MonoTime.now() - saveClockEpoch).toMilliseconds() }
+private let saveStateMutex = Mutex()
+private let saveWriteMutex = Mutex()
+var lastSaveAtMs: Int64 = -86400000
+var pendingSave: ?AppSettings = None
+var saveFlushScheduled = false
+
 public func saveSettings(s: AppSettings): Unit {
+    var flushNow = false
+    var waitMs: Int64 = 0
+    synchronized(saveStateMutex) {
+        let now = saveClock()
+        if (now - lastSaveAtMs >= saveDebounceMs) {
+            lastSaveAtMs = now
+            flushNow = true
+        } else {
+            pendingSave = s
+            if (!saveFlushScheduled) {
+                saveFlushScheduled = true
+                waitMs = saveDebounceMs - (now - lastSaveAtMs)
+            }
+        }
+    }
+    if (flushNow) {
+        writeSettings(s)
+        return
+    }
+    if (waitMs > 0) {
+        // spawn 的 lambda 不能捕获可变局部变量：先固化为不可变副本。
+        let w = waitMs
+        let _ = spawn {
+            saveFlushLoop(w)
+        }
+    }
+}
+
+// trailing flush 线程：窗口起点固定在 leading 落盘时刻（不随窗口内调用顺延），
+// 到点后写最后一次快照。提前唤醒（时钟抖动）时按剩余时长续睡。
+private func saveFlushLoop(initialWaitMs: Int64): Unit {
+    var waitMs = initialWaitMs
+    while (true) {
+        sleep(Duration.millisecond * waitMs)
+        var target: ?AppSettings = None
+        var expired = false
+        synchronized(saveStateMutex) {
+            let now = saveClock()
+            let remain = saveDebounceMs - (now - lastSaveAtMs)
+            if (remain > 0) {
+                waitMs = remain
+            } else {
+                saveFlushScheduled = false
+                lastSaveAtMs = now
+                target = pendingSave
+                pendingSave = None
+                expired = true
+            }
+        }
+        match (target) {
+            case Some(s) => writeSettings(s)
+            case None => ()
+        }
+        // 窗口到期即退出：快照被 flushPendingSave 抢先取走（target=None）时也直接返回，
+        // 否则线程带着陈旧 waitMs 永远空转（再无 pendingSave 可写）。
+        if (expired) {
+            return
+        }
+    }
+}
+
+// 退出前把窗口内未 flush 的快照补写（否则最后一次变更可能丢）。
+// 包内可见：测试用它强制落盘，绕开防抖窗口。
+func flushPendingSave(): Unit {
+    var target: ?AppSettings = None
+    synchronized(saveStateMutex) {
+        target = pendingSave
+        pendingSave = None
+    }
+    match (target) {
+        case Some(s) => writeSettings(s)
+        case None => ()
+    }
+}
+
+// 实际落盘。trailing flush 在后台线程执行：此时读到的是 AppSettings 的合并最新值——
+// 正是防抖想要的语义；字段级撕裂（两个代次混读）对设置项无害。写路径本身串行化。
+private func writeSettings(s: AppSettings): Unit {
+    synchronized(saveWriteMutex) {
+        writeSettingsLocked(s)
+    }
+}
+
+private func writeSettingsLocked(s: AppSettings): Unit {
     let kv = store()
     s.syncActiveProfile()
     let oldCount = kv.getInt64("servers.count")
@@ -224,6 +330,7 @@ public func saveSettings(s: AppSettings): Unit {
     let _ = kv.set("reader.show_info", s.readerShowInfo)
     let _ = kv.set("reader.auto_play", s.readerAutoPlay)
     let _ = kv.set("reader.auto_play_interval", s.readerAutoPlayInterval)
+    let _ = kv.set("network.probe_connect_timeout_sec", s.probeConnectTimeoutSec)
     let _ = kv.set("servers.active_id", s.activeServerId)
     let _ = kv.set("servers.count", s.servers.size)
     for (i in 0..s.servers.size) {
@@ -244,6 +351,7 @@ public func saveSettings(s: AppSettings): Unit {
 }
 
 public func closeSettingsStore(): Unit {
+    flushPendingSave()
     match (settingsStore) {
         case Some(kv) => kv.sync()
         case None => ()

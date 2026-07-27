@@ -77,6 +77,7 @@ class ReaderStageState {
     var zoomed = false
     var scrollY: Float32 = 0.0        // 长图滚动偏移（vp；翻页/切 spread 复位）
     var lastLyricIndex: Int64 = -2
+    var lastVideoGeneration: UInt64 = 0   // 视频舞台已见的帧代际（新帧驱动续帧用）
     let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
     let outTween = Tween(TURN_OUT_MS, {t: Float32 => Easing.easeInOutCubic(t)})
     let inTween = Tween(TURN_IN_MS, {t: Float32 => Easing.easeOutCubic(t)})
@@ -227,8 +228,9 @@ func drawChevronGlyph(renderer: Renderer, cx: Float32, cy: Float32, forward: Boo
 }
 
 // 播放进度滑条（音频舞台/dock 共用自绘）：轨道 4vp + accent 填充 + 圆头。
-// 播放中每帧读 playback.positionSec 并 requestFrame 续帧（不写 State，避免 60fps 全树重建）；
-// durationSec==0（未知）/未加载时灰显禁用。拖拽几何换算在调用方的 handle 里（Slider 同款）。
+// 播放中每帧读 playback.positionSec 并以 250ms 定时帧请求续帧（不写 State，避免全树重建；
+// 进度条与 mm:ss 时钟的可见精度远低于 60fps，4Hz 足够）。durationSec==0（未知）/未加载时灰显禁用。
+// 拖拽几何换算在调用方的 handle 里（Slider 同款）。
 func drawPlaybackSeekBar(ctx: UiContext, rect: Rect, pb: PlaybackModel): Unit {
     let cy = rect.centerY()
     let dur = pb.durationSec
@@ -249,7 +251,7 @@ func drawPlaybackSeekBar(ctx: UiContext, rect: Rect, pb: PlaybackModel): Unit {
         ctx.renderer.fillCircle(rect.x + rect.w * amount, cy, 5.0, ctx.theme.accent)
     }
     if (pb.playing) {
-        ctx.requestFrame()
+        ctx.requestFrameAfter(250)
     }
 }
 
@@ -542,8 +544,16 @@ class ReaderStage <: Widget {
                 }
                 ctx.renderer.textCenter(status, frame, ctx.theme.onMediaDim, pointSize: 14.0)
         }
+        // 视频续帧由新帧驱动：takeVideoFrame 拿到新帧（videoGeneration 前进）时立即
+        // requestFrame 拉下一帧，高帧率视频满速跟上；无新帧时 33ms 兜底轮询等解码产出，
+        // 不再固定 60fps 全树重建。
         if (pb.playing) {
-            ctx.requestFrame()
+            if (pb.videoGeneration != st.lastVideoGeneration) {
+                st.lastVideoGeneration = pb.videoGeneration
+                ctx.requestFrame()
+            } else {
+                ctx.requestFrameAfter(33)
+            }
         }
     }
 

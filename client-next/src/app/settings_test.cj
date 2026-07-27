@@ -10,6 +10,11 @@ private func resetTestStore(): Unit {
         initializeSettingsStore(dir.toString())
         testStoreReady = true
     }
+    // 防抖状态复位：补写上一用例的快照并拉回 leading 即刻写语义，避免用例间串扰。
+    flushPendingSave()
+    lastSaveAtMs = -86400000
+    saveFlushScheduled = false
+    saveDebounceMs = 300
     clearSettings()
 }
 
@@ -21,6 +26,7 @@ func settingsDefaultsComeFromMmkv(): Unit {
     @Expect(s.readerMode, "single-ltr")
     @Expect(s.readerLongPage, true)
     @Expect(s.readerAutoPlayInterval, 3)
+    @Expect(s.probeConnectTimeoutSec, 5)
     @Expect(s.servers.size, 0)
     @Expect(s.serverUrl, "")
 }
@@ -78,6 +84,7 @@ func deletingLastServerRemovesMmkvEntries(): Unit {
     saveSettings(s)
     s.deleteServer(srv.id)
     saveSettings(s)
+    flushPendingSave() // 第二次调用落在防抖窗口内（trailing），强制补写后再校验
 
     let back = loadSettings()
     @Expect(back.servers.size, 0)
@@ -107,4 +114,41 @@ func settingsHelpersAreStable(): Unit {
     @Expect(themeToIndex("light"), 1)
     @Expect(indexToTheme(1), "light")
     @Expect(indexToTheme(2), "dark")
+}
+
+@Test
+func probeConnectTimeoutRoundTrip(): Unit {
+    resetTestStore()
+    let s = AppSettings()
+    s.probeConnectTimeoutSec = 9
+    saveSettings(s)
+    let back = loadSettings()
+    @Expect(back.probeConnectTimeoutSec, 9)
+}
+
+@Test
+func saveSettingsLeadingWriteIsImmediate(): Unit {
+    resetTestStore()
+    let s = AppSettings()
+    s.theme = "light"
+    saveSettings(s) // 距上次落盘远超窗口：leading 立即写
+    @Expect(loadSettings().theme, "light")
+}
+
+@Test
+func saveSettingsCoalescesBurstIntoTrailingFlush(): Unit {
+    resetTestStore()
+    saveDebounceMs = 150
+    let s = AppSettings()
+    s.theme = "light"
+    saveSettings(s) // leading：立即写 light
+    s.theme = "dark"
+    saveSettings(s) // 窗口内：只记快照，不落盘
+    @Expect(loadSettings().theme, "light") // 磁盘仍是 leading 值
+    var tries = 0
+    while (loadSettings().theme != "dark" && tries < 50) {
+        sleep(Duration.millisecond * 50)
+        tries++
+    }
+    @Expect(loadSettings().theme, "dark") // trailing flush 合并写入最终值
 }

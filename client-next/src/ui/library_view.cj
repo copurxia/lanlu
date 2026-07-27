@@ -68,7 +68,7 @@ private func sidebar(model: AppModel): Unit {
             navGroupHeader("分类")
             ScrollView(key: "sidebar-categories") {
                 VStack {
-                    ForEachIndexed(model.categories.value.toArray()) { i, c =>
+                    ForEachIndexed(model.categories.value) { i, c =>
                         NavItem(c.name, active: model.categoryIndex.value == i + 1,
                             count: "${c.archiveCount}") {=> model.selectCategory(i + 1) }
                     }
@@ -162,7 +162,7 @@ private func browseRowSection(model: AppModel, row: BrowseRow): Unit {
                 rowStripPlaceholder("加载失败，点击重试")
             }
         } else {
-            cardRow(model, row.key, row.items.toArray(), BROWSE_COVER_W, BROWSE_STRIP_H)
+            cardRow(model, row.key, row.items, BROWSE_COVER_W, BROWSE_STRIP_H)
         }
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }
@@ -230,8 +230,10 @@ private func searchGrid(model: AppModel): Unit {
     let cellW = gridCellWidth(w, cols)
     let coverH = cellW * 4.0 / 3.0
     // 行高 = 封面 + 标题/meta 文本区；LazyGrid 行高固定，按测得宽度逐帧现算。
-    LazyGrid(model.items.value.toArray(), cols, coverH + CARD_TEXT_H, spacing: GRID_SPACING,
-        columnSpacing: GRID_SPACING, id: "search-grid") { item =>
+    // (count, itemAt) 形式直接读 model 的 ArrayList，不为网格每帧 toArray 全量拷贝（评审 #29）。
+    let items = model.items.value
+    LazyGrid(items.size, cols, coverH + CARD_TEXT_H, spacing: GRID_SPACING,
+        columnSpacing: GRID_SPACING, id: "search-grid", itemAt: {i => items[i]}) { item =>
         searchItemCard(model, item, cellW)
     // Float32 走 padding 的 vp 重载（.vp 后缀仅 Int64/Float64 有）。
     }.padding(GRID_PADDING)

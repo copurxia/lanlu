@@ -373,7 +373,7 @@ private func trendBars(model: AppModel, data: ArrayList<TrendPoint>): Unit {
     }
     Label("最近 30 天 · 总阅读: ${total}").fontSize(11.fp).muted()
     HStack {
-        ForEachIndexed(data.toArray()) {
+        ForEachIndexed(data) {
             _, p =>
                 // 柱高 4..96vp，保底 4vp 让 0 值可见（.vp 后缀仅 Int64/Float64 有，故用 Float64）。
                 let h = 4.0 + 92.0 * Float64(p.count) / Float64(maxBar)
@@ -396,7 +396,7 @@ private func recentList(model: AppModel, items: ArrayList<SearchItem>, emptyText
         Label(emptyText).fontSize(12.fp).muted()
         return
     }
-    ForEach(items.toArray(), key: {it: SearchItem => it.arcid}) {
+    ForEach(items, key: {it: SearchItem => it.arcid}) {
         it => HStack {
             if (it.coverAssetId > 0) {
                 remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}", 36.vp, 48.vp)
@@ -776,7 +776,7 @@ private func authPage(model: AppModel): Unit {
         if (list.size == 0) {
             Label("暂无 Passkey").fontSize(12.fp).muted()
         }
-        ForEach(list.toArray(), key: {pk: PasskeyItem => "${pk.id}"}) {
+        ForEach(list, key: {pk: PasskeyItem => "${pk.id}"}) {
             pk => HStack {
                 VStack {
                     HStack {
@@ -814,7 +814,7 @@ private func authPage(model: AppModel): Unit {
         if (list.size == 0) {
             Label("暂无登录设备").fontSize(12.fp).muted()
         }
-        ForEach(list.toArray(), key: {s: SessionItem => "${s.id}"}) {
+        ForEach(list, key: {s: SessionItem => "${s.id}"}) {
             s => HStack {
                 VStack {
                     HStack {
@@ -873,7 +873,7 @@ private func authPage(model: AppModel): Unit {
         if (list.size == 0) {
             Label("暂无API Token").fontSize(12.fp).muted()
         }
-        ForEach(list.toArray(), key: {t: TokenItem => "${t.id}"}) {
+        ForEach(list, key: {t: TokenItem => "${t.id}"}) {
             t => HStack {
                 Label(if (t.name.size > 0) {
                     t.name

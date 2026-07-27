@@ -279,3 +279,59 @@ func playbackLoadResetsDuration(): Unit {
     f.model.load("arc1", 7, "p7")
     @Expect(f.model.durationSec, 0.0)
 }
+
+
+// ---- 歌词当前行：二分 + 单调前进缓存 ----
+
+@Test
+func lyricIndexAdvanceAndSeekBack(): Unit {
+    let f = PbFixture()
+    f.model.load("arc1", 4, "p4")
+    f.model.onDownloaded("arc1:4", "/cache/p4", lyrics: "[00:10.00]a\n[00:20.00]b\n[00:30.00]c")
+    @Expect(f.model.lyricsLines.size, 3)
+    f.model.play()
+    // 首行未到时 -1
+    @Expect(f.model.activeLyricIndex(), -1)
+    f.advance(10000) // t=10：行 0
+    @Expect(f.model.activeLyricIndex(), 0)
+    f.advance(15000) // t=25：单调前进快路径到行 1
+    @Expect(f.model.activeLyricIndex(), 1)
+    f.advance(10000) // t=35：行 2
+    @Expect(f.model.activeLyricIndex(), 2)
+    // seek 回退：位置回退走二分，结果仍正确
+    f.model.seekTo(5.0)
+    @Expect(f.model.activeLyricIndex(), -1)
+    f.model.seekTo(30.0)
+    @Expect(f.model.activeLyricIndex(), 2)
+}
+
+@Test
+func lyricIndexInvalidatedOnLyricsChange(): Unit {
+    let f = PbFixture()
+    f.model.load("arc1", 4, "p4")
+    f.model.onDownloaded("arc1:4", "/cache/p4", lyrics: "[00:01.00]a\n[00:02.00]b\n[00:03.00]c")
+    f.model.play()
+    f.advance(10000) // t=10：旧歌词末行
+    @Expect(f.model.activeLyricIndex(), 2)
+    // 同 key 歌词热替换：缓存索引必须复位，不能沿用到新列表
+    f.model.onLyricsDownloaded("arc1:4", "[00:01.00]x")
+    @Expect(f.model.lyricsLines.size, 1)
+    @Expect(f.model.activeLyricIndex(), 0)
+    // 清空歌词后恒 -1
+    f.model.loadLyrics(0)
+    @Expect(f.model.activeLyricIndex(), -1)
+}
+
+// 乱序 LRC：parse 出口按 timeSec 稳定排序（二分/单调前进缓存的有序假设），
+// 相同时间戳保持文件内原始先后。
+@Test
+func parseTimedLyricsSortsUnsortedInput(): Unit {
+    let lines = parseTimedLyrics("[00:30.00]c\n[00:10.00]a\n[00:20.00]b1\n[00:20.00]b2")
+    @Expect(lines.size, 4)
+    @Expect(lines[0].text, "a")
+    @Expect(lines[1].text, "b1") // 稳定：b1 先于 b2
+    @Expect(lines[2].text, "b2")
+    @Expect(lines[3].text, "c")
+    @Expect(lines[0].timeSec, 10.0)
+    @Expect(lines[3].timeSec, 30.0)
+}

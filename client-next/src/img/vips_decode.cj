@@ -1,5 +1,6 @@
 package lanlu_client_next.img
 
+import std.fs.{File, OpenMode, Path}
 import std.sync.Mutex
 import vips_ffi.*
 
@@ -43,7 +44,8 @@ public class DecodedImage {
 }
 
 // 任意格式图片文件 → RGBA 像素。失败抛异常（信息带 vips 错误串）。
-// 管线：imageNewFromFile → （可选）vips_resize 缩小 → autorot（按 EXIF 方向转正）
+// 管线：imageNewFromFile（JPEG 且需缩小时按档位带 [shrink=N] loader 选项重开，
+// 解码期 DCT 缩放）→ （可选）vips_resize 缩到档位 → autorot（按 EXIF 方向转正）
 // → colourspace(sRGB) → castUchar → bands 归一到 4 波段 → writeToMemory → 拷进 Array<UInt8>。
 // maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
 // 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
@@ -66,11 +68,33 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): DecodedIma
         // 可选缩小解码：最长边超过 maxDimension 时按比例缩（封面/阅读页省内存与解码耗时）。
         var src = inImg
         if (maxDimension > 0) {
-            let w0 = VipsApi.imageWidth(inImg)
-            let h0 = VipsApi.imageHeight(inImg)
-            let longest = max(Int64(w0), Int64(h0))
+            var w0 = VipsApi.imageWidth(inImg)
+            var h0 = VipsApi.imageHeight(inImg)
             if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
+            var longest = max(Int64(w0), Int64(h0))
             if (longest > Int64(maxDimension)) {
+                // shrink-on-load（#7）：JPEG 解码器支持 DCT 缩放（loader 选项 shrink=2/4/8），
+                // 按目标档位选最大 2 幂因子先缩（shrunk 最长边不低于目标档），余量仍交给
+                // vips_resize——避免全尺寸解码，JPEG 可获 4-8 倍解码加速。vips 是惰性管线，
+                // 上面的打开只读头部，带选项重开才真正决定解码分辨率；非 JPEG（其余 loader
+                // 没有 shrink 选项）或选项不被接受时保持原图走原 resize 路径，行为不变。
+                let shrink = jpegShrinkFactor(path, longest, maxDimension)
+                if (shrink > 1) {
+                    let optC = unsafe { LibC.mallocCString("${path}[shrink=${shrink}]") }
+                    let shrunk = VipsApi.imageNewFromFile(optC)
+                    unsafe { LibC.free(optC) }
+                    if (shrunk.isNotNull()) {
+                        VipsApi.unref(inImg)
+                        inImg = shrunk
+                        w0 = VipsApi.imageWidth(inImg)
+                        h0 = VipsApi.imageHeight(inImg)
+                        if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
+                        longest = max(Int64(w0), Int64(h0))
+                    } else {
+                        // 重开失败会在 vips 错误缓冲区留下记录，清掉以免污染后续真实错误的文案。
+                        let _ = VipsApi.takeErrorString()
+                    }
+                }
                 let scale = Float64(maxDimension) / Float64(longest)
                 let resizeRc = VipsApi.resize(inImg, CPointer<VipsImagePtr>(inout resizedImg), scale)
                 if (resizeRc != 0 || resizedImg.isNull()) {
@@ -248,6 +272,36 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         VipsApi.unref(normImg)
         VipsApi.free(mem)
     }
+}
+
+// JPEG 魔数（FF D8 FF）嗅探：缓存条目是 .img 后缀（内容可为任意编码），不能按扩展名
+// 判断 loader；只读前 3 字节，失败（文件不可读/过短）按非 JPEG 处理（走原 resize 路径）。
+private func isJpegFile(path: String): Bool {
+    try {
+        let f = File(Path(path), OpenMode.Read)
+        var head = Array<UInt8>(3, repeat: 0u8)
+        let n = try {
+            f.read(head)
+        } finally {
+            f.close()
+        }
+        return n >= 3 && head[0] == 0xFFu8 && head[1] == 0xD8u8 && head[2] == 0xFFu8
+    } catch (_: Exception) {
+        return false
+    }
+}
+
+// 按目标档位选最大 2 幂 shrink 因子（2/4/8）：shrunk 最长边不得低于 maxDimension，
+// 否则缩小过度、最终 resize 就得放大（糊）。非 JPEG 恒为 1（不启用 shrink-on-load）。
+private func jpegShrinkFactor(path: String, longest: Int64, maxDimension: Int32): Int64 {
+    if (!isJpegFile(path)) {
+        return 1
+    }
+    var shrink: Int64 = 1
+    while (shrink < 8 && longest / (shrink * 2) >= Int64(maxDimension)) {
+        shrink *= 2
+    }
+    shrink
 }
 
 // 1 波段（灰度）→ RGBA：灰度通道三复制成 RGB，再补常数 alpha 255。

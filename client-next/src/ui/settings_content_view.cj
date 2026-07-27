@@ -48,9 +48,9 @@ func categoriesPage(model: AppModel): Unit {
     }
     // SizeProbe 探测网格真实宽度：横幅封面按 (宽-2间距)/3 的单元格宽铺满（设计稿满宽横幅）。
     SizeProbe(width: model.contentWidth) {
-    ForEachIndexed(chunkCats(filteredCats(cats, q.value, status.value), 3).toArray()) { _, row =>
+    ForEachIndexed(chunkCats(filteredCats(cats, q.value, status.value), 3)) { _, row =>
         HStack {
-            ForEach(row.toArray(), key: { c: AdminCategoryItem => c.catid }) { c =>
+            ForEach(row, key: { c: AdminCategoryItem => c.catid }) { c =>
                 VStack {
                     categoryCard(model, c, delCat, delOpen)
                 }.flex()
@@ -189,7 +189,7 @@ func tagsPage(model: AppModel): Unit {
             if (p.items.size == 0) {
                 Label("未找到标签").fontSize(12.fp).muted()
             }
-            ForEach(p.items.toArray(), key: { t: AdminTagItem => "${t.id}" }) { t =>
+            ForEach(p.items, key: { t: AdminTagItem => "${t.id}" }) { t =>
                 // 行卡（原型 .s-card 单行）：图标盒 + 命名空间徽章（空则不显示）+ 名称 + 翻译行 + 右侧操作。
                 HStack {
                     VStack {
@@ -285,7 +285,7 @@ func filtersPage(model: AppModel): Unit {
         pageLoading(model, "暂无数据")
     }
     detailCard(model, "筛选器列表") {
-        ForEachIndexed(list.toArray()) { i, f =>
+        ForEachIndexed(list) { i, f =>
             HStack {
                 // 拖拽手柄：应用字体无 ⠿（U+28FF）字形（真机渲染为豆腐块），改用覆盖范围内的 ≡（U+2261）。
                 Label("≡").fontSize(12.fp).muted()

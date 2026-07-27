@@ -135,6 +135,10 @@ main(): Int64 {
             } else {
                 None
             }), theme: lanluThemeFor(settings.theme))
+    // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
+    // SDL_WaitEventTimeout 的主循环立即唤醒；醒后那次迭代的 onTick/pump 正常 drain，
+    // 图片到货/UI 更新不再等下一个输入事件。
+    model.worker.onResult = { => app.requestWake() }
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
     app.setMinimumSize(960, 640)
@@ -145,9 +149,15 @@ main(): Int64 {
     // 空转零渲染：主循环每次迭代泵回工作线程结果（drain 为空时不写任何 State，
     // dirty-frame skipping 使该迭代不重建/不绘制）；不能用 FrameHandler 做这件事——
     // 它必须每帧 requestFrame 才能持续触发，会强制 60fps 全量重建+绘制。
+    // pump 的周期定时器（chrome 自动隐藏/自动翻页/进度防抖尾巴）注册为定时帧请求：
+    // 循环空转等待（SDL_WaitEventTimeout）时在最近到期时刻唤醒，醒后本次迭代已正常 pump。
     app.onTick = {
         =>
             model.pump()
+            match (model.nextPumpTimerMs()) {
+                case Some(ms) => app.requestFrameAfter(UInt64(ms))
+                case None => ()
+            }
             let ww = Int64(app.sdlWindow.width)
             if (ww != model.windowWidth.value) {
                 model.windowWidth.value = ww

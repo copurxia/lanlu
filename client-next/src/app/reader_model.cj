@@ -616,6 +616,18 @@ public class ReaderModel {
         }
     }
 
+    // 进度防抖尾巴距触发的剩余毫秒（主循环注册定时帧请求用，AppModel.nextPumpTimerMs）；
+    // 无 pending 时 None，从未上报过时 tick 会立即发，故剩余 0。
+    public func nextProgressFlushMs(): ?Int64 {
+        if (!pendingReport) {
+            return None
+        }
+        match (lastReportAtMs) {
+            case Some(t) => Some(max(Int64(0), READER_PROGRESS_DEBOUNCE_MS - (clock() - t)))
+            case None => Some(Int64(0))
+        }
+    }
+
     // 离开阅读器/换档案前调用：pending 立即发，不等防抖窗口（尾巴不丢）。
     public func flushProgress(): Unit {
         if (pendingReport) {
@@ -948,23 +960,32 @@ public class ReaderModel {
         }
     }
 
-    // 预取目标：当前真实页前后各 2 页（pageList 0 基，跨 segment 边界照常），越界裁剪。
-    // 虚拟页上以本 segment 最后真实页为基准。
+    // 预取目标：当前 spread 两侧各 2 页（pageList 0 基，跨 segment 边界照常），越界裁剪。
+    // 基准为整个 spread（首页..末页），spread 自身页不重复预取；双页模式下一 spread
+    // 第二页（spread 末页 +2）因此在窗口内。单页模式退化为旧的前后各 2 页语义。
+    // 虚拟页上以本 segment 最后真实页为基准（视为单页 spread）。
     public func prefetchTargets(): Array<Int64> {
         let total = pageList.size
         let out = ArrayList<Int64>()
         if (total == 0) {
             return out.toArray()
         }
-        let base = match (realOfStream(_index)) {
-            case Some(p) => p
-            case None => total - 1
+        var base = total - 1
+        var spreadEnd = base
+        let s = snapToSpreadStart(_index)
+        match (realOfStream(s)) {
+            case Some(p) =>
+                base = p
+                spreadEnd = p + spreadSizeAt(s) - 1
+            case None => ()
         }
-        for (d in [-2, -1, 1, 2]) {
-            let i = base + d
-            if (i >= 0 && i < total) {
+        var i = max(0, base - 2)
+        let hi = min(total - 1, spreadEnd + 2)
+        while (i <= hi) {
+            if (i < base || i > spreadEnd) {
                 out.add(i)
             }
+            i += 1
         }
         out.toArray()
     }

@@ -4,6 +4,53 @@ import std.collection.ArrayList
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
 
+// ---- 标量快路径（#32）----
+// decodeRaw 对每字段做 fromUtf8 + ByteBuffer 重写 + JsonReader 二次 tokenize（3 次拷贝 +
+// 重新解析）。readValueBytes 拿到的原始字节若是规范 JSON 整数字面量（可选负号、无前导零、
+// ≤18 位——18 位最大 10^18-1 < Int64.Max，绝无溢出），直接手工累积，跳过整个 JsonReader。
+// 任何非规范形态（空白、null、浮点、指数、前导零、超长）一律回退 decodeRaw 旧路径，
+// 因此对任意输入与旧实现逐字节等价（dto_test 有等价性用例守住这一点）。
+func fastInt64(b: Array<UInt8>, fallback: Int64): Int64 {
+    var i: Int64 = 0
+    let negative = b.size > 0 && b[0] == 0x2Du8 // '-'
+    if (negative) {
+        i = 1
+    }
+    let digits = b.size - i
+    if (digits < 1 || digits > 18) {
+        return decodeRaw<Int64>(b, fallback)
+    }
+    if (b[i] == 0x30u8 && digits > 1) {
+        return decodeRaw<Int64>(b, fallback) // 前导零：非规范形态回退
+    }
+    var v: Int64 = 0
+    while (i < b.size) {
+        let c = b[i]
+        if (c < 0x30u8 || c > 0x39u8) {
+            return decodeRaw<Int64>(b, fallback)
+        }
+        v = v * 10 + Int64(c - 0x30u8)
+        i++
+    }
+    if (negative) {
+        return -v
+    }
+    v
+}
+
+// Bool 快路径：逐字节等于 "true"/"false" 直接定值，其余（null、空白、异常形态）回退
+// decodeRaw 旧路径，语义等价。
+func fastBool(b: Array<UInt8>, fallback: Bool): Bool {
+    if (b.size == 4 && b[0] == 0x74u8 && b[1] == 0x72u8 && b[2] == 0x75u8 && b[3] == 0x65u8) {
+        return true
+    }
+    if (b.size == 5 && b[0] == 0x66u8 && b[1] == 0x61u8 && b[2] == 0x6Cu8 && b[3] == 0x73u8 &&
+        b[4] == 0x65u8) {
+        return false
+    }
+    decodeRaw<Bool>(b, fallback)
+}
+
 public class Envelope {
     public var code: Int64 = 0
     public var message: String = ""
@@ -22,7 +69,7 @@ public func parseEnvelope(body: String): Envelope {
                 while (r.peek() != EndObject) {
                     let n = r.readName()
                     match (n) {
-                        case "code" => env.code = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "code" => env.code = fastInt64(r.readValueBytes(), 0)
                         case "message" => env.message = decodeRaw<String>(r.readValueBytes(), "")
                         case "data" => env.dataRaw = rawText(r.readValueBytes())
                         case _ => r.skip()
@@ -118,8 +165,8 @@ public class ServerInfo <: JsonDeserializable<ServerInfo> {
                             case "version_name" => res.versionName = decodeRaw<String>(r.readValueBytes(), "")
                             case "version_desc" => res.versionDesc = decodeRaw<String>(r.readValueBytes(), "")
                             case "motd" => res.motd = decodeRaw<String>(r.readValueBytes(), "")
-                            case "total_archives" => res.totalArchives = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "total_pages_read" => res.totalPagesRead = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "total_archives" => res.totalArchives = fastInt64(r.readValueBytes(), 0)
+                            case "total_pages_read" => res.totalPagesRead = fastInt64(r.readValueBytes(), 0)
                             case "db_extensions" =>
                                 r.startArray()
                                 while (r.peek() != EndArray) {
@@ -149,7 +196,7 @@ public class DbExtension <: JsonDeserializable<DbExtension> {
         while (r.peek() != EndObject) {
             match (r.readName()) {
                 case "name" => ext.name = decodeRaw<String>(r.readValueBytes(), "")
-                case "enabled" => ext.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
+                case "enabled" => ext.enabled = fastBool(r.readValueBytes(), false)
                 case "version" => ext.version = decodeRaw<String>(r.readValueBytes(), "")
                 case _ => r.skip()
             }
@@ -190,9 +237,9 @@ public class LoginData <: JsonDeserializable<LoginData> {
         r.startObject()
         while (r.peek() != EndObject) {
             match (r.readName()) {
-                case "id" => userId = decodeRaw<Int64>(r.readValueBytes(), 0)
+                case "id" => userId = fastInt64(r.readValueBytes(), 0)
                 case "username" => username = decodeRaw<String>(r.readValueBytes(), "")
-                case "isAdmin" => isAdmin = decodeRaw<Bool>(r.readValueBytes(), false)
+                case "isAdmin" => isAdmin = fastBool(r.readValueBytes(), false)
                 case _ => r.skip()
             }
         }
@@ -268,18 +315,18 @@ public class SearchItem <: JsonDeserializable<SearchItem> {
                             case "arcid" => res.arcid = decodeRaw<String>(r.readValueBytes(), "")
                             case "type" => res.itemType = decodeRaw<String>(r.readValueBytes(), "")
                             case "tankoubon_id" => res.tankoubonId = decodeRaw<String>(r.readValueBytes(), "")
-                            case "archive_count" => res.archiveCount = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "archive_count" => res.archiveCount = fastInt64(r.readValueBytes(), 0)
                             case "title" => res.title = decodeRaw<String>(r.readValueBytes(), "")
                             case "description" => res.description = decodeRaw<String>(r.readValueBytes(), "")
                             case "tags" => res.tagsCsv = decodeRaw<String>(r.readValueBytes(), "")
                             case "archivetype" => res.archivetype = decodeRaw<String>(r.readValueBytes(), "")
                             case "filename" => res.filename = decodeRaw<String>(r.readValueBytes(), "")
-                            case "pagecount" => res.pagecount = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "progress" => res.progress = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "size" => res.size = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "lastreadtime" => res.lastreadtime = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "isnew" => res.isnew = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "isfavorite" => res.isfavorite = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "pagecount" => res.pagecount = fastInt64(r.readValueBytes(), 0)
+                            case "progress" => res.progress = fastInt64(r.readValueBytes(), 0)
+                            case "size" => res.size = fastInt64(r.readValueBytes(), 0)
+                            case "lastreadtime" => res.lastreadtime = fastInt64(r.readValueBytes(), 0)
+                            case "isnew" => res.isnew = fastBool(r.readValueBytes(), false)
+                            case "isfavorite" => res.isfavorite = fastBool(r.readValueBytes(), false)
                             case "assets" => res.coverAssetId = parseCoverFromAssetsObject(r.readValueBytes())
                             case _ => r.skip()
                         }
@@ -301,7 +348,7 @@ private func parseCoverFromAssetsObject(b: Array<UInt8>): Int64 {
         r.startObject()
         while (r.peek() != EndObject) {
             match (r.readName()) {
-                case "cover" => id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                case "cover" => id = fastInt64(r.readValueBytes(), 0)
                 case _ => r.skip()
             }
         }
@@ -333,10 +380,10 @@ public func parseSearchPage(body: String): SearchPage {
                                 res.items.add(SearchItem.fromJson(r))
                             }
                             r.endArray()
-                        case "page" => res.page = decodeRaw<Int64>(r.readValueBytes(), 1)
-                        case "pageSize" => res.pageSize = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "recordsFiltered" => res.recordsFiltered = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "recordsTotal" => res.recordsTotal = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "page" => res.page = fastInt64(r.readValueBytes(), 1)
+                        case "pageSize" => res.pageSize = fastInt64(r.readValueBytes(), 0)
+                        case "recordsFiltered" => res.recordsFiltered = fastInt64(r.readValueBytes(), 0)
+                        case "recordsTotal" => res.recordsTotal = fastInt64(r.readValueBytes(), 0)
                         case _ => r.skip()
                     }
                 }
@@ -380,10 +427,10 @@ public func parseCategoryList(body: String): ArrayList<CategoryItem> {
                     let item = CategoryItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => item.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => item.id = fastInt64(r.readValueBytes(), 0)
                             case "catid" => item.catid = decodeRaw<String>(r.readValueBytes(), "")
                             case "name" => item.name = decodeRaw<String>(r.readValueBytes(), "")
-                            case "archive_count" => item.archiveCount = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "archive_count" => item.archiveCount = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -455,17 +502,17 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
                             case "thumbnail_hash" => res.thumbnailHash = decodeRaw<String>(r.readValueBytes(), "")
                             case "tags" => res.tags = parseStringArray(rawText(r.readValueBytes()))
                             case "capabilities" => res.capabilities = parseStringArray(rawText(r.readValueBytes()))
-                            case "pagecount" => res.pagecount = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "progress" => res.progress = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "file_size" => res.size = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "size" => res.size = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "isnew" => res.isnew = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "isfavorite" => res.isfavorite = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "pagecount" => res.pagecount = fastInt64(r.readValueBytes(), 0)
+                            case "progress" => res.progress = fastInt64(r.readValueBytes(), 0)
+                            case "file_size" => res.size = fastInt64(r.readValueBytes(), 0)
+                            case "size" => res.size = fastInt64(r.readValueBytes(), 0)
+                            case "isnew" => res.isnew = fastBool(r.readValueBytes(), false)
+                            case "isfavorite" => res.isfavorite = fastBool(r.readValueBytes(), false)
                             case "assets" => res.coverAssetId = parseCoverFromAssetsArray(rawText(r.readValueBytes()))
-                            case "release_at" => res.release_at = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "created_at" => res.created_at = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "updated_at" => res.updated_at = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "lastreadtime" => res.lastreadtime = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "release_at" => res.release_at = fastInt64(r.readValueBytes(), 0)
+                            case "created_at" => res.created_at = fastInt64(r.readValueBytes(), 0)
+                            case "updated_at" => res.updated_at = fastInt64(r.readValueBytes(), 0)
+                            case "lastreadtime" => res.lastreadtime = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -494,7 +541,7 @@ private func parseCoverFromAssetsArray(raw: String): Int64 {
             while (r.peek() != EndObject) {
                 match (r.readName()) {
                     case "key" => key = decodeRaw<String>(r.readValueBytes(), "")
-                    case "value" => value = decodeRaw<Int64>(r.readValueBytes(), 0)
+                    case "value" => value = fastInt64(r.readValueBytes(), 0)
                     case _ => r.skip()
                 }
             }
@@ -725,10 +772,10 @@ private func applyPageMetadata(page: PageInfo, raw: String): Unit {
                     }
                 case "description" => page.description = decodeRaw<String>(r.readValueBytes(), "")
                 case "release_at" => page.releaseAt = decodeRaw<String>(r.readValueBytes(), "")
-                case "order_index" => page.orderIndex = decodeRaw<Int64>(r.readValueBytes(), 0)
-                case "hidden_in_files" => page.hiddenInFiles = decodeRaw<Bool>(r.readValueBytes(), false)
+                case "order_index" => page.orderIndex = fastInt64(r.readValueBytes(), 0)
+                case "hidden_in_files" => page.hiddenInFiles = fastBool(r.readValueBytes(), false)
                 case "thumb_asset_id" =>
-                    let thumbId = decodeRaw<Int64>(r.readValueBytes(), 0)
+                    let thumbId = fastInt64(r.readValueBytes(), 0)
                     if (thumbId > 0) {
                         page.thumbAssetId = thumbId
                     }
@@ -772,7 +819,7 @@ private func metadataThumbAssetId(raw: String): Int64 {
         var assetId: Int64 = 0
         while (r.peek() != EndObject) {
             match (r.readName()) {
-                case "thumb_asset_id" => assetId = decodeRaw<Int64>(r.readValueBytes(), 0)
+                case "thumb_asset_id" => assetId = fastInt64(r.readValueBytes(), 0)
                 case _ => r.skip()
             }
         }
@@ -814,7 +861,7 @@ private func metadataLyricsAssetId(raw: String): Int64 {
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
                             case "slot" => slot = decodeRaw<String>(r.readValueBytes(), "").trimAscii().toAsciiLower()
-                            case "asset_id" => id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "asset_id" => id = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -885,14 +932,14 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
                             case "title" => res.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "description" => res.description = decodeRaw<String>(r.readValueBytes(), "")
                             case "tags" => res.tags = parseTankTags(r.readValueBytes())
-                            case "archive_count" => res.archiveCount = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "pagecount" => res.totalPages = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "archive_count" => res.archiveCount = fastInt64(r.readValueBytes(), 0)
+                            case "pagecount" => res.totalPages = fastInt64(r.readValueBytes(), 0)
                             case "progress" => res.progress = Float32(decodeRaw<Float64>(r.readValueBytes(), 0.0))
                             case "children" => res.coverArcid = firstChildArcid(r.readValueBytes())
                             case "assets" => res.coverAssetId = parseTankCoverAssets(r.readValueBytes())
                             case "created_at" => res.createdAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "updated_at" => res.updatedAt = decodeRaw<String>(r.readValueBytes(), "")
-                            case "isfavorite" => res.isfavorite = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "isfavorite" => res.isfavorite = fastBool(r.readValueBytes(), false)
                             case _ => r.skip()
                         }
                     }
@@ -1079,10 +1126,10 @@ public func parseUserStats(body: String): UserStats {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "favoriteCount" => s.favoriteCount = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "readCount" => s.readCount = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "totalPagesRead" => s.totalPagesRead = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "totalArchives" => s.totalArchives = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "favoriteCount" => s.favoriteCount = fastInt64(r.readValueBytes(), 0)
+                        case "readCount" => s.readCount = fastInt64(r.readValueBytes(), 0)
+                        case "totalPagesRead" => s.totalPagesRead = fastInt64(r.readValueBytes(), 0)
+                        case "totalArchives" => s.totalArchives = fastInt64(r.readValueBytes(), 0)
                         case _ => r.skip()
                     }
                 }
@@ -1172,7 +1219,7 @@ public func parseTrendList(body: String): ArrayList<TrendPoint> {
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
                             case "date" => p.date = decodeRaw<String>(r.readValueBytes(), "")
-                            case "count" => p.count = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "count" => p.count = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -1205,7 +1252,7 @@ public func parseCloudTags(body: String): ArrayList<CloudTag> {
                         match (r.readName()) {
                             case "tag" => t.tag = decodeRaw<String>(r.readValueBytes(), "")
                             case "display" => t.display = decodeRaw<String>(r.readValueBytes(), "")
-                            case "count" => t.count = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "count" => t.count = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -1289,10 +1336,10 @@ public func parseTotpStatus(body: String): TotpStatus {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "enabled" => s.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
+                        case "enabled" => s.enabled = fastBool(r.readValueBytes(), false)
                         case "credentialName" => s.credentialName = decodeRaw<String>(r.readValueBytes(), "")
                         case "createdAt" => s.createdAt = decodeRaw<String>(r.readValueBytes(), "")
-                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = decodeRaw<Int64>(r.readValueBytes(),
+                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = fastInt64(r.readValueBytes(),
                             0)
                         case _ => r.skip()
                     }
@@ -1331,13 +1378,13 @@ public func parseSessionList(body: String): ArrayList<SessionItem> {
                     let it = SessionItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "prefix" => it.prefix = decodeRaw<String>(r.readValueBytes(), "")
                             case "createdAt" => it.createdAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "lastUsedAt" => it.lastUsedAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "lastUsedIp" => it.lastUsedIp = decodeRaw<String>(r.readValueBytes(), "")
-                            case "current" => it.current = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "current" => it.current = fastBool(r.readValueBytes(), false)
                             case _ => r.skip()
                         }
                     }
@@ -1375,7 +1422,7 @@ public func parseTokenList(body: String): ArrayList<TokenItem> {
                     let it = TokenItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "prefix" => it.prefix = decodeRaw<String>(r.readValueBytes(), "")
                             // token 明文仅创建响应返回一次，列表里没有。
@@ -1419,11 +1466,11 @@ public func parsePasskeyList(body: String): ArrayList<PasskeyItem> {
                     let it = PasskeyItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "credentialId" => it.credentialId = decodeRaw<String>(r.readValueBytes(), "")
                             case "algorithm" => it.algorithm = decodeRaw<String>(r.readValueBytes(), "")
-                            case "userVerified" => it.userVerified = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "userVerified" => it.userVerified = fastBool(r.readValueBytes(), false)
                             case "lastUsedAt" => it.lastUsedAt = decodeRaw<String>(r.readValueBytes(), "")
                             case _ => r.skip()
                         }
@@ -1462,9 +1509,9 @@ public func parseAdminUserList(body: String): ArrayList<AdminUserItem> {
                     let it = AdminUserItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "username" => it.username = decodeRaw<String>(r.readValueBytes(), "")
-                            case "isAdmin" => it.isAdmin = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "isAdmin" => it.isAdmin = fastBool(r.readValueBytes(), false)
                             case "createdAt" => it.createdAt = decodeRaw<String>(r.readValueBytes(), "")
                             case _ => r.skip()
                         }
@@ -1611,16 +1658,16 @@ public func parseAdminCategoryList(body: String): ArrayList<AdminCategoryItem> {
                     let it = AdminCategoryItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "catid" => it.catid = decodeRaw<String>(r.readValueBytes(), "")
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "scan_path" => it.scanPath = decodeRaw<String>(r.readValueBytes(), "")
                             case "description" => it.description = decodeRaw<String>(r.readValueBytes(), "")
-                            case "sort_order" => it.sortOrder = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "enabled" => it.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "sort_order" => it.sortOrder = fastInt64(r.readValueBytes(), 0)
+                            case "enabled" => it.enabled = fastBool(r.readValueBytes(), false)
                             case "plugins" => it.plugins = parseStringArray(rawText(r.readValueBytes()))
-                            case "cover_asset_id" => it.coverAssetId = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "archive_count" => it.archiveCount = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "cover_asset_id" => it.coverAssetId = fastInt64(r.readValueBytes(), 0)
+                            case "archive_count" => it.archiveCount = fastInt64(r.readValueBytes(), 0)
                             case _ => r.skip()
                         }
                     }
@@ -1709,7 +1756,7 @@ public func parseTagListPage(body: String): TagListPage {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "total" => page.total = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "total" => page.total = fastInt64(r.readValueBytes(), 0)
                         case "items" => itemsRaw = rawText(r.readValueBytes())
                         case _ => r.skip()
                     }
@@ -1732,7 +1779,7 @@ public func parseTagListPage(body: String): TagListPage {
                     let it = AdminTagItem()
                     while (ir.peek() != EndObject) {
                         match (ir.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(ir.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(ir.readValueBytes(), 0)
                             case "namespace" => it.namespace = decodeRaw<String>(ir.readValueBytes(), "")
                             case "name" => it.name = decodeRaw<String>(ir.readValueBytes(), "")
                             case "links" => it.links = decodeRaw<String>(ir.readValueBytes(), "")
@@ -1785,7 +1832,7 @@ public func parseSmartFilterList(body: String): ArrayList<SmartFilterItem> {
                     let it = SmartFilterItem()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "icon" => it.icon = decodeRaw<String>(r.readValueBytes(), "")
                             case "query" => it.query = decodeRaw<String>(r.readValueBytes(), "")
@@ -1793,10 +1840,10 @@ public func parseSmartFilterList(body: String): ArrayList<SmartFilterItem> {
                             case "sort_order" => it.sortOrder = decodeRaw<String>(r.readValueBytes(), "desc")
                             case "date_from" => it.dateFrom = decodeRaw<String>(r.readValueBytes(), "")
                             case "date_to" => it.dateTo = decodeRaw<String>(r.readValueBytes(), "")
-                            case "newonly" => it.newonly = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "untaggedonly" => it.untaggedonly = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "sort_order_num" => it.sortOrderNum = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "enabled" => it.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "newonly" => it.newonly = fastBool(r.readValueBytes(), false)
+                            case "untaggedonly" => it.untaggedonly = fastBool(r.readValueBytes(), false)
+                            case "sort_order_num" => it.sortOrderNum = fastInt64(r.readValueBytes(), 0)
+                            case "enabled" => it.enabled = fastBool(r.readValueBytes(), false)
                             case _ => r.skip()
                         }
                     }
@@ -1873,7 +1920,7 @@ public func parseTaskListPage(data: String): TaskListPage {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "total" => page.total = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "total" => page.total = fastInt64(r.readValueBytes(), 0)
                         case "tasks" => tasksRaw = rawText(r.readValueBytes())
                         case _ => r.skip()
                     }
@@ -1896,7 +1943,7 @@ public func parseTaskListPage(data: String): TaskListPage {
                     let it = TaskRecord()
                     while (tr.peek() != EndObject) {
                         match (tr.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(tr.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(tr.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(tr.readValueBytes(), "")
                             case "status" => it.status = decodeRaw<String>(tr.readValueBytes(), "")
                             case "phase" => it.phase = decodeRaw<String>(tr.readValueBytes(), "")
@@ -1906,8 +1953,8 @@ public func parseTaskListPage(data: String): TaskListPage {
                             case "result" => it.result = rawText(tr.readValueBytes())
                             case "waiting_reason" => it.waitingReason = decodeRaw<String>(tr.readValueBytes(), "")
                             case "trigger_source" => it.triggerSource = decodeRaw<String>(tr.readValueBytes(), "")
-                            case "progress" => it.progress = decodeRaw<Int64>(tr.readValueBytes(), 0)
-                            case "priority" => it.priority = decodeRaw<Int64>(tr.readValueBytes(), 0)
+                            case "progress" => it.progress = fastInt64(tr.readValueBytes(), 0)
+                            case "priority" => it.priority = fastInt64(tr.readValueBytes(), 0)
                             case "created_at" => it.createdAt = decodeRaw<String>(tr.readValueBytes(), "")
                             case "started_at" => it.startedAt = decodeRaw<String>(tr.readValueBytes(), "")
                             case "completed_at" => it.completedAt = decodeRaw<String>(tr.readValueBytes(), "")
@@ -1984,9 +2031,9 @@ public func parseCronStatus(body: String): CronStatus {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "running" => s.running = decodeRaw<Bool>(r.readValueBytes(), false)
-                        case "totalTasks" => s.totalTasks = decodeRaw<Int64>(r.readValueBytes(), 0)
-                        case "enabledTasks" => s.enabledTasks = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "running" => s.running = fastBool(r.readValueBytes(), false)
+                        case "totalTasks" => s.totalTasks = fastInt64(r.readValueBytes(), 0)
+                        case "enabledTasks" => s.enabledTasks = fastInt64(r.readValueBytes(), 0)
                         case _ => r.skip()
                     }
                 }
@@ -2014,7 +2061,7 @@ public func parseCronTaskList(body: String): ArrayList<CronTask> {
                     let it = CronTask()
                     while (r.peek() != EndObject) {
                         match (r.readName()) {
-                            case "id" => it.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "id" => it.id = fastInt64(r.readValueBytes(), 0)
                             case "name" => it.name = decodeRaw<String>(r.readValueBytes(), "")
                             case "cronExpression" => it.cronExpression = decodeRaw<String>(r.readValueBytes(), "")
                             case "taskType" => it.taskType = decodeRaw<String>(r.readValueBytes(), "")
@@ -2028,12 +2075,12 @@ public func parseCronTaskList(body: String): ArrayList<CronTask> {
                                 } else {
                                     parameterRaw
                                 }
-                            case "enabled" => it.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "priority" => it.priority = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "timeoutSeconds" => it.timeoutSeconds = decodeRaw<Int64>(r.readValueBytes(), 0)
-                            case "runCount" => it.runCount = decodeRaw<Int64>(r.readValueBytes(), 0)
+                            case "enabled" => it.enabled = fastBool(r.readValueBytes(), false)
+                            case "priority" => it.priority = fastInt64(r.readValueBytes(), 0)
+                            case "timeoutSeconds" => it.timeoutSeconds = fastInt64(r.readValueBytes(), 0)
+                            case "runCount" => it.runCount = fastInt64(r.readValueBytes(), 0)
                             case "nextRunAt" => it.nextRunAt = decodeRaw<String>(r.readValueBytes(), "")
-                            case "lastRunSuccess" => it.lastRunSuccess = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "lastRunSuccess" => it.lastRunSuccess = fastBool(r.readValueBytes(), false)
                             case "lastRunAt" =>
                                 it.lastRunAt = decodeRaw<String>(r.readValueBytes(), "")
                                 it.hasLastRun = it.lastRunAt.size > 0
@@ -2100,7 +2147,7 @@ public func parseCronValidate(body: String): CronValidateResult {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "valid" => s.valid = decodeRaw<Bool>(r.readValueBytes(), false)
+                        case "valid" => s.valid = fastBool(r.readValueBytes(), false)
                         case "error" => s.error = decodeRaw<String>(r.readValueBytes(), "")
                         case "nextRuns" => s.nextRuns = parseStringArray(rawText(r.readValueBytes()))
                         case _ => r.skip()
@@ -2153,9 +2200,9 @@ public func parsePluginList(body: String): ArrayList<PluginItem> {
                             case "author" => it.author = decodeRaw<String>(r.readValueBytes(), "")
                             case "description" => it.description = decodeRaw<String>(r.readValueBytes(), "")
                             case "update_url" => it.updateUrl = decodeRaw<String>(r.readValueBytes(), "")
-                            case "enabled" => it.enabled = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "installed" => it.installed = decodeRaw<Bool>(r.readValueBytes(), false)
-                            case "has_schema" => it.hasSchema = decodeRaw<Bool>(r.readValueBytes(), false)
+                            case "enabled" => it.enabled = fastBool(r.readValueBytes(), false)
+                            case "installed" => it.installed = fastBool(r.readValueBytes(), false)
+                            case "has_schema" => it.hasSchema = fastBool(r.readValueBytes(), false)
                             case _ => r.skip()
                         }
                     }
@@ -2231,7 +2278,7 @@ public func parseCreatedToken(body: String): TokenItem {
                 r.startObject()
                 while (r.peek() != EndObject) {
                     match (r.readName()) {
-                        case "id" => t.id = decodeRaw<Int64>(r.readValueBytes(), 0)
+                        case "id" => t.id = fastInt64(r.readValueBytes(), 0)
                         case "name" => t.name = decodeRaw<String>(r.readValueBytes(), "")
                         case "prefix" => t.prefix = decodeRaw<String>(r.readValueBytes(), "")
                         case "token" => t.token = decodeRaw<String>(r.readValueBytes(), "")
