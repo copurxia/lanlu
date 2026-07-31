@@ -68,9 +68,9 @@ func serverListPanel(model: AppModel): Unit {
         HStack {
             Label("服务器").fontSize(15.fp)
             Spacer()
-            // 原型是金色软底小方块＋（30×30），cui Button 最小宽 72vp，ClickArea+Label 拼。
+            // 原型是金色软底小方块（30×30），用矢量图标避免依赖全角加号字形。
             ClickArea(onClick: {=> model.openServerModal("") }) {
-                Label("＋").fontSize(14.fp).foregroundColor(accentOf(model))
+                Icon(IconName.Plus, size: 14.vp, color: accentOf(model))
                     .padding(9.vp, 4.vp).background(accentSoftOf(model), 8.vp)
             }
         }.hug().padding(14.vp, 12.vp)
@@ -84,7 +84,8 @@ func serverListPanel(model: AppModel): Unit {
                     Label("还没有服务器").fontSize(13.fp).tight()
                     Label("添加一个 Lanlu 服务器开始使用；支持保存多个服务器，随时切换")
                         .fontSize(11.fp).muted().tight()
-                    Button("＋ 添加服务器", {=> model.openServerModal("") }).role(ButtonRole.Primary)
+                    IconButton(IconName.Plus, label: Some("添加服务器"), role: ButtonRole.Primary,
+                        onClick: {=> model.openServerModal("") })
                 }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(24.vp, 20.vp)
             }.padding(12.vp, 0.vp)
         } else {
@@ -127,7 +128,8 @@ func serverCard(model: AppModel, p: ServerProfile): Unit {
                 }.spacing(2.vp)
                 Spacer()
                 // 在线状态点（probeServers 探测）：绿=在线 红=离线 灰=未知/在途。
-                Label("●").fontSize(7.fp).foregroundColor(probeColorOf(model, p.id))
+                VStack {}.width(7.vp).height(7.vp)
+                    .background(probeColorOf(model, p.id), 999.vp)
                 cardActions(model, p, confirming)
             }.spacing(9.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(11.vp, 9.vp)
         }.alignment(Alignment.TopLeading)
@@ -172,7 +174,8 @@ func loginFormPanel(model: AppModel): Unit {
                 // 登录失败内联错误条（原型 .login-error 红底红边），替代 toast。
                 if (model.loginError.value.size > 0) {
                     tintBar(model.loginError.value, LANLU_DANGER,
-                        Color.rgba(224, 93, 93, 26), Color.rgba(224, 93, 93, 89))
+                        Color.rgba(224, 93, 93, 26), Color.rgba(224, 93, 93, 89),
+                        icon: Some(IconName.Close))
                 }
                 if (model.totpChallengeId.value.size > 0) {
                     totpFormPanel(model)
@@ -192,10 +195,16 @@ func loginFormPanel(model: AppModel): Unit {
 // cui Button Normal 默认带 buttonSurface 填充色，在弹窗里显得突兀。
 
 // tinted 提示条（错误红/TOTP 金/测试绿）：SurfaceCard 填充+描边，阴影给全透明。宽度与输入框对齐。
-func tintBar(text: String, fg: Color, bg: Color, border: Color): Unit {
+func tintBar(text: String, fg: Color, bg: Color, border: Color, icon!: ?IconName = None): Unit {
     ZStack {
         SurfaceCard(bg, border, radius: 9.0, shadow: Color.rgba(0, 0, 0, 0))
-        Label(text).fontSize(12.fp).foregroundColor(fg).tight().padding(10.vp, 8.vp)
+        HStack {
+            match (icon) {
+                case Some(value) => Icon(value, size: 12.vp, color: fg)
+                case None => ()
+            }
+            Label(text).fontSize(12.fp).foregroundColor(fg).tight()
+        }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(10.vp, 8.vp)
     }.alignment(Alignment.TopLeading).width(320.vp)
 }
 
@@ -277,7 +286,10 @@ func totpFormPanel(model: AppModel): Unit {
         busyPrimaryButton(model, "验 证", {=> model.verifyTotp(code.value.trimAscii(), recovery.value.trimAscii()) })
     }.padding(0.vp, 6.vp, 0.vp, 0.vp)
     ClickArea(onClick: {=> model.dismissTotp() }) {
-        Label("← 返回密码登录").fontSize(12.fp).foregroundColor(accentOf(model))
+        HStack {
+            Icon(IconName.ChevronLeft, size: 13.vp, color: accentOf(model))
+            Label("返回密码登录").fontSize(12.fp).foregroundColor(accentOf(model))
+        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Center)
     }
 }
 
@@ -323,8 +335,10 @@ func testResultLabel(model: AppModel): Unit {
     if (r == "testing") {
         Label("正在测试…").fontSize(12.fp).muted().tight()
     } else if (r == "ok") {
-        tintBar("✓ 连接成功", LANLU_SUCCESS, Color.rgba(76, 175, 125, 26), Color.rgba(76, 175, 125, 89))
+        tintBar("连接成功", LANLU_SUCCESS, Color.rgba(76, 175, 125, 26), Color.rgba(76, 175, 125, 89),
+            icon: Some(IconName.Check))
     } else if (r.size > 0) {
-        tintBar("✕ ${r}", LANLU_DANGER, Color.rgba(224, 93, 93, 26), Color.rgba(224, 93, 93, 89))
+        tintBar(r, LANLU_DANGER, Color.rgba(224, 93, 93, 26), Color.rgba(224, 93, 93, 89),
+            icon: Some(IconName.Close))
     }
 }

@@ -1,0 +1,281 @@
+name: Client Next CI
+
+on:
+  push:
+    paths:
+      - "client-next/**"
+      - "packages/cangjie-gui/**"
+      - "packages/vips_ffi/**"
+      - "packages/libvlc_ffi/**"
+      - "packages/fontkit_ffi/**"
+      - "cangjie-repo.toml"
+      - ".github/workflows/client-next.yml"
+  pull_request:
+    paths:
+      - "client-next/**"
+      - "packages/cangjie-gui/**"
+      - "packages/vips_ffi/**"
+      - "packages/libvlc_ffi/**"
+      - "packages/fontkit_ffi/**"
+      - "cangjie-repo.toml"
+      - ".github/workflows/client-next.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-next-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Quality report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v2
+        with:
+          channel: sts
+          version: 1.1.3
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          cjc -v
+          cjfmt -v
+          cjlint -v
+
+      # client-next has pre-existing formatting differences. Keep this advisory until
+      # the baseline is formatted, then remove continue-on-error to make it a gate.
+      - name: Check formatting (advisory)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          format_root="${RUNNER_TEMP}/client-next-format"
+          report="client-next/reports/cjfmt.diff"
+          mkdir -p "${format_root}/src" client-next/reports
+          cp -a client-next/src/. "${format_root}/src/"
+          cp -a client-next/build.cj "${format_root}/build.cj"
+
+          cjfmt -d "${format_root}" -c client-next/cangjie-format.toml
+
+          format_clean=true
+          diff -ru client-next/src "${format_root}/src" > "${report}" || format_clean=false
+          diff -u client-next/build.cj "${format_root}/build.cj" >> "${report}" || format_clean=false
+          if [ "${format_clean}" != true ]; then
+            echo "::warning::client-next contains files that cjfmt would change; see the quality report artifact."
+            exit 1
+          fi
+
+      - name: Run cjlint
+        run: |
+          set -euo pipefail
+          mkdir -p client-next/reports
+          cjlint -f client-next/src -r json -o client-next/reports/cjlint
+          test -s client-next/reports/cjlint.json
+          issue_count="$(jq 'length' client-next/reports/cjlint.json)"
+          {
+            echo "### client-next cjlint"
+            echo
+            echo "Reported issues: ${issue_count} (report-only baseline)."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-quality-${{ github.sha }}
+          path: client-next/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  build-test:
+    name: Build, test and headless smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
+      KV4CJ_COMMIT: 46c27f92e44b1665325f00802e6e730c7bdfcf04
+      MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify in-repository dependencies
+        run: |
+          set -euo pipefail
+          required_files=(
+            packages/cangjie-gui/cjpm.toml
+            packages/cangjie-gui/sdl/.sdl3/libSDL3.so.0.4.2
+            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so.0.2.2
+            packages/vips_ffi/cjpm.toml
+            packages/libvlc_ffi/cjpm.toml
+            packages/fontkit_ffi/native/Cargo.lock
+          )
+          for required_file in "${required_files[@]}"; do
+            if [ ! -f "${required_file}" ]; then
+              echo "::error file=${required_file}::Required client-next dependency is missing from the checkout."
+              exit 1
+            fi
+          done
+
+          sdl_dir="packages/cangjie-gui/sdl/.sdl3"
+          ln -sfn libSDL3.so.0.4.2 "${sdl_dir}/libSDL3.so.0"
+          ln -sfn libSDL3.so.0 "${sdl_dir}/libSDL3.so"
+          ln -sfn libSDL3_ttf.so.0.2.2 "${sdl_dir}/libSDL3_ttf.so.0"
+          ln -sfn libSDL3_ttf.so.0 "${sdl_dir}/libSDL3_ttf.so"
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v2
+        with:
+          channel: sts
+          version: 1.1.3
+
+      - name: Install native build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev \
+            libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev \
+            libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
+            libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6
+
+      - name: Cache Cangjie and Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cjpm/git
+            ~/.cjpm/repository
+            ~/.cargo/git
+            ~/.cargo/registry
+            packages/fontkit_ffi/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+
+      - name: Download stdx
+        env:
+          STDX_URL: ${{ vars.STDX_URL }}
+        run: |
+          set -euo pipefail
+          : "${STDX_URL:?Missing repository variable STDX_URL}"
+          curl --fail --location --retry 3 --output "${RUNNER_TEMP}/stdx.zip" "${STDX_URL}"
+          unzip -q "${RUNNER_TEMP}/stdx.zip" -d stdx
+          test -d "${CANGJIE_STDX_PATH}"
+
+      - name: Fetch pinned kv4cj source
+        run: |
+          set -euo pipefail
+          mkdir -p ref
+          git clone --depth 1 --branch V1.0.3 https://gitcode.com/Cangjie-TPC/kv4cj.git ref/kv4cj
+          actual_commit="$(git -C ref/kv4cj rev-parse HEAD)"
+          if [ "${actual_commit}" != "${KV4CJ_COMMIT}" ]; then
+            echo "::error::Unexpected kv4cj commit ${actual_commit}."
+            exit 1
+          fi
+
+          # V1.0.3 points at an obsolete stdx directory layout. The application already
+          # supplies the current stdx binary dependency, so remove the duplicate entry.
+          sed -i \
+            '/^\[target.x86_64-unknown-linux-gnu\]/,/^[[:space:]]*path-option[[:space:]]*=/d' \
+            ref/kv4cj/cjpm.toml
+
+      - name: Build pinned MMKV native libraries
+        run: |
+          set -euo pipefail
+          mmkv_source="${RUNNER_TEMP}/MMKV"
+          mmkv_build="${RUNNER_TEMP}/MMKV-build"
+          git clone --depth 1 --branch v1.2.15 https://github.com/Tencent/MMKV.git "${mmkv_source}"
+          actual_commit="$(git -C "${mmkv_source}" rev-parse HEAD)"
+          if [ "${actual_commit}" != "${MMKV_COMMIT}" ]; then
+            echo "::error::Unexpected MMKV commit ${actual_commit}."
+            exit 1
+          fi
+
+          sed -i '/add_library(core/,/STATIC/ s/STATIC/SHARED/' "${mmkv_source}/Core/CMakeLists.txt"
+          # MMKV 1.2.15 relied on a transitive stdint include that newer GCC releases
+          # no longer provide. Make the pinned source portable across runner compilers.
+          sed -i '/#include <string>/i #include <cstdint>' "${mmkv_source}/Core/MMKVPredef.h"
+          cmake -S "${mmkv_source}/Core" -B "${mmkv_build}" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${mmkv_build}" --parallel
+          install -Dm755 "${mmkv_build}/libcore.so" ref/kv4cj/lib/libcore.so
+
+          (
+            cd ref/kv4cj/mmkv_cpp
+            ./configure
+            make -j"$(nproc)"
+          )
+          test -s ref/kv4cj/lib/libmymmkv.so
+
+      - name: Configure native library path
+        run: |
+          set -euo pipefail
+          native_paths="${GITHUB_WORKSPACE}/ref/kv4cj/lib:${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
+          printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Verify native libraries
+        run: |
+          set -euo pipefail
+          libraries=(
+            ref/kv4cj/lib/libcore.so
+            ref/kv4cj/lib/libmymmkv.so
+            packages/cangjie-gui/sdl/.sdl3/libSDL3.so
+            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so
+          )
+          for library in "${libraries[@]}"; do
+            echo "Checking ${library}"
+            if ldd "${library}" | tee /dev/stderr | grep -q 'not found'; then
+              echo "::error file=${library}::A native runtime dependency is missing."
+              exit 1
+            fi
+          done
+
+      - name: Show compiler version
+        run: cjc -v
+
+      - name: Build client-next
+        working-directory: client-next
+        run: cjpm build -V
+
+      - name: Run client-next tests
+        working-directory: client-next
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          cjpm test \
+            --no-color \
+            --parallel nCores \
+            --timeout-each 60s \
+            --report-path test-results \
+            --report-format xml
+
+      - name: Run headless snapshot smoke test
+        working-directory: client-next
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -euo pipefail
+          timeout 30s ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
+          test -s client-next.bmp
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-test-evidence-${{ github.sha }}
+          path: |
+            client-next/test-results/
+            client-next/client-next.bmp
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1449,11 +1449,11 @@ public func batchActionBar(model: AppModel, onAddToTank: () -> Unit, onDelete: (
     ZStack {
         HStack {
             Label("已选 ${model.selectedCount()} 项").fontSize(12.5.fp)
-            Button("收藏", {=> model.batchFavorite(arcids, tankIds, true)})
-            Button("取消收藏", {=> model.batchFavorite(arcids, tankIds, false)})
-            Button("加入合集", onAddToTank).enabled(arcids.size > 0)
+            Button("收藏", {=> model.batchFavorite(arcids, tankIds, true)}).style(ghostStyleOf(model))
+            Button("取消收藏", {=> model.batchFavorite(arcids, tankIds, false)}).style(ghostStyleOf(model))
+            Button("加入合集", onAddToTank).style(ghostStyleOf(model)).enabled(arcids.size > 0)
             Button("删除", onDelete).role(ButtonRole.Danger)
-            Button("退出", {=> model.exitSelection()})
+            Button("退出", {=> model.exitSelection()}).style(ghostStyleOf(model))
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             .padding(14.vp, 8.vp).background(panel, 999.vp)
         StaticBorder(999.0)
@@ -1836,7 +1836,8 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 Spacer()
                 ZStack {
                     VStack {
-                        Button(data.primaryLabel, data.onPrimary).role(ButtonRole.Primary)
+                        IconButton(IconName.Play, label: Some(data.primaryLabel), role: ButtonRole.Primary,
+                            onClick: data.onPrimary)
                             .enabled(data.primaryEnabled)
                         HStack {
                             actionIcons()
@@ -2092,14 +2093,13 @@ public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId:
 
 // ── 页面预览（原型 .pv-*：缩略图/列表/树三态；已读页半透明，媒体页带类型图标）──
 
-// 媒体页类型图标（原型 pvTypes 的字体可及适配：🎬→▶ 🎵→♪ 📄→▤；
-// 应用字体 NotoSansCJK/msyh 不含 emoji，此处只能用文本符号，图像页无图标）。
-public func pageTypeIcon(pageType: String): String {
+// 媒体页类型图标统一走 CUI 矢量图标，不依赖应用字体的符号/emoji 覆盖范围。
+public func pageTypeIcon(pageType: String): ?IconName {
     match (pageType) {
-        case "video" => "▶"
-        case "audio" => "♪"
-        case "html" => "▤"
-        case _ => ""
+        case "video" => Some(IconName.Play)
+        case "audio" => Some(IconName.Music)
+        case "html" => Some(IconName.NewDocument)
+        case _ => None
     }
 }
 
@@ -2160,8 +2160,10 @@ private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
                     Label("${no}").fontSize(9.fp).foregroundColor(if (read) { badgeFgRead } else { badgeFg })
                         .padding(6.vp, 1.vp).background(badgeBg, 5.vp)
                     Spacer()
-                    if (icon.size > 0) {
-                        Label(icon).fontSize(10.fp).foregroundColor(if (read) { iconFgRead } else { iconFg })
+                    match (icon) {
+                        case Some(value) => Icon(value, size: 10.vp,
+                            color: if (read) { iconFgRead } else { iconFg })
+                        case None => ()
                     }
                 }.hug()
             }.padding(5.vp)
@@ -2184,7 +2186,7 @@ private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }
 
-// 树态（原型 #pv-tree）：按目录分组（首次出现序），目录行「▾ dir（N）」+ 成员行缩进。
+// 树态（原型 #pv-tree）：按目录分组（首次出现序），目录行用向下矢量图标 + 成员行缩进。
 private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     // 预分组：目录 → 页码列表（保持原顺序）。
@@ -2206,8 +2208,10 @@ private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
             match (grouped.get(d)) {
                 case Some(list) =>
                     let dirName = if (d.size > 0) { d } else { "（根目录）" }
-                    // ▼ U+25BC（原型 ▾ U+25BE 在 NotoSansCJK/msyh 无字形，同族大三角代替）。
-                    Label("▼ ${dirName}（${list.size}）").fontSize(12.fp).padding(8.vp, 8.vp, 8.vp, 4.vp)
+                    HStack {
+                        Icon(IconName.ChevronDown, size: 12.vp)
+                        Label("${dirName}（${list.size}）").fontSize(12.fp)
+                    }.spacing(5.vp).hug().padding(8.vp, 8.vp, 8.vp, 4.vp)
                     for (i in list) {
                         let no = i + 1
                         let p = pages[i]
@@ -2221,7 +2225,7 @@ private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
 }
 
 // 列表/树共用行：indent 为左侧额外缩进（树态成员行用）；点击进阅读器对应页。
-private func pvRow(model: AppModel, no: Int64, name: String, icon: String, read: Bool,
+private func pvRow(model: AppModel, no: Int64, name: String, icon: ?IconName, read: Bool,
     indent: Float32, onOpen: () -> Unit): Unit {
     let light = model.isLight()
     // 已读变淡：整行是纯 Label，opacity 修饰器只作用 surface 填充（对行是死代码）——
@@ -2247,8 +2251,9 @@ private func pvRow(model: AppModel, no: Int64, name: String, icon: String, read:
                 }
                 Label("${no}").fontSize(12.fp).foregroundColor(fg).width(30.vp)
                 Label(name).fontSize(12.fp).foregroundColor(fg).maxLines(1).flex()
-                if (icon.size > 0) {
-                    Label(icon).fontSize(11.fp).foregroundColor(iconFg)
+                match (icon) {
+                    case Some(value) => Icon(value, size: 11.vp, color: iconFg)
+                    case None => ()
                 }
             }.spacing(10.vp).hug().padding(8.vp, 4.vp)
         }.alignment(Alignment.TopLeading)
@@ -2307,7 +2312,7 @@ private func memberCard(model: AppModel, item: SearchItem, coverW: Float32,
 }
 
 // 选择模式成员卡（网格态）：不走 homeCoverCard（该卡归书库多选改造），用简化卡——
-// 封面 + 标题/meta，点击 = 切换选中；选中态为 accentSoft 高亮底 + 标题行 ✓ 前缀。
+// 封面 + 标题/meta，点击 = 切换选中；选中态为 accentSoft 高亮底 + 标题行勾选图标。
 private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     let light = model.isLight()
     let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
@@ -2324,7 +2329,7 @@ private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32
             }
             HStack {
                 if (selected) {
-                    Label("✓").fontSize(12.fp).foregroundColor(accent)
+                    Icon(IconName.Check, size: 12.vp, color: accent)
                 }
                 Label(item.title).fontSize(12.fp).maxLines(1).flex()
             }.spacing(4.vp).hug()
@@ -2344,7 +2349,7 @@ private let MEMBER_ROW_H: Float32 = 72.0
 private let MEMBER_LIST_MAX_H: Float32 = 736.0
 
 // 列表态（原型 .member-row）：序号 + 40×56 mini 封面 + 标题/meta + 90vp mini 进度条。
-// 选择模式：行首 ✓ 勾选位、点击 = 切换选中（而非打开详情）、选中行铺 accentSoft 高亮底。
+// 选择模式：行首勾选图标位、点击 = 切换选中（而非打开详情）、选中行铺 accentSoft 高亮底。
 // 非选择模式：序号位让位给行首勾选圆圈（frontend 列表项 hover 勾选入口），点击 = 进入
 // 选择模式并选中本行（onEnterSelection，tank 详情由调用方记录选择归属）。
 public func memberListContent(model: AppModel, members: Array<SearchItem>,
@@ -2368,8 +2373,9 @@ public func memberListContent(model: AppModel, members: Array<SearchItem>,
         }) {
             HStack {
                 if (selecting) {
-                    Label(if (selected) { "✓" } else { "" }).fontSize(12.fp)
-                        .foregroundColor(accent).width(18.vp)
+                    VStack {
+                        if (selected) { Icon(IconName.Check, size: 12.vp, color: accent) }
+                    }.crossAxisAlignment(CrossAxisAlignment.Center).width(18.vp)
                 } else {
                     MemberRowSelectEntry(it.arcid, {=> onEnterSelection(it.arcid) })
                 }

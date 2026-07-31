@@ -173,11 +173,11 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
                                 open.value = false
                                 model.createTankAndAdd(name, arcidListOf(arcid))
                             }
-                    })
+                    }).role(ButtonRole.Primary)
                 }.spacing(8.vp)
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false})
+                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
                 }
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(360.vp)
             LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})
@@ -216,6 +216,7 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                 HStack {
                     TextField(query, key: "dlg.tankadd.field:${tankId}").flex()
                     Button("搜索", {=> submitTankAddSearch(model, cell, tankId, query.value.trimAscii()) })
+                        .style(ghostStyleOf(model))
                 }.spacing(8.vp)
                 if (cell.error().size > 0) {
                     Label("搜索失败：${cell.error()}").fontSize(12.fp).muted()
@@ -245,8 +246,12 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                                                     picked.value = picked.value
                                             }) {
                                                 HStack {
-                                                    Label(if (on) { "✓" } else { "" }).fontSize(12.fp)
-                                                        .foregroundColor(accent).width(18.vp)
+                                                    VStack {
+                                                        if (on) {
+                                                            Icon(IconName.Check, size: 12.vp, color: accent)
+                                                        }
+                                                    }.crossAxisAlignment(CrossAxisAlignment.Center)
+                                                        .width(18.vp)
                                                     Label(it.title).fontSize(13.fp).maxLines(1).flex()
                                                     Label("${it.pagecount} 页").fontSize(11.fp).muted()
                                                 }.spacing(8.vp).hug().padding(8.vp, 6.vp)
@@ -264,7 +269,7 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                 }
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false})
+                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
                     Button("添加 ${picked.value.size} 个", {
                         =>
                             if (picked.value.size > 0) {
@@ -275,7 +280,7 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                                 }
                                 model.addArchivesToTank(tankId, ids)
                             }
-                    })
+                    }).role(ButtonRole.Primary)
                 }.spacing(8.vp)
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(420.vp)
             LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})

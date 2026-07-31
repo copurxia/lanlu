@@ -668,8 +668,12 @@ private class ReaderSegmentHeader <: Widget {
         let ps: Float32 = 12.0
         let th = ctx.renderer.textHeight(pointSize: ps)
         let x = frame.x + 6.0 + Float32(depth) * 14.0
-        let fitted = sidebarEllipsize(ctx, "▾  ${title}", frame.right() - 8.0 - x, ps)
-        ctx.renderer.text(fitted, x, frame.centerY() - th / 2.0, ctx.theme.accent, pointSize: ps)
+        let iconSize: Float32 = 12.0
+        let textX = x + iconSize + 6.0
+        let fitted = sidebarEllipsize(ctx, title, frame.right() - 8.0 - textX, ps)
+        drawIcon(ctx.renderer, IconName.ChevronDown,
+            Rect(x, frame.centerY() - iconSize / 2.0, iconSize, iconSize), ctx.theme.accent)
+        ctx.renderer.text(fitted, textX, frame.centerY() - th / 2.0, ctx.theme.accent, pointSize: ps)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {

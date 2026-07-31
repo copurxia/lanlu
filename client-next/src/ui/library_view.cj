@@ -66,7 +66,7 @@ public func libraryView(model: AppModel): Unit {
         }
     }.spacing(0.0)
     // 批量删除二次确认（Modal 不占布局，挂根级即可）。
-    confirmModal(deleteOpen, "删除所选内容？", "将删除当前选中的档案/合集，此操作不可撤销。", "删除", {
+    confirmModal(model, deleteOpen, "删除所选内容？", "将删除当前选中的档案/合集，此操作不可撤销。", "删除", {
         =>
             let (arcids, tankIds) = splitSelection(model)
             model.batchDelete(arcids, tankIds)
@@ -198,19 +198,19 @@ private func browseRowSection(model: AppModel, row: BrowseRow): Unit {
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }
 
-// 行头右侧操作：随机行「换一批」；继续阅读/分类行「查看更多 ›」。
+// 行头右侧操作：随机行「换一批」；继续阅读/分类行「查看更多」。
 private func rowTrailing(model: AppModel, row: BrowseRow): Unit {
     if (row.key == "random") {
         reshuffleLink(model) {=> model.refreshRandomRow() }
     } else if (row.key == "resume") {
-        moreLink(model, "查看更多 ›") {=> model.viewAllRow(row.key) }
+        moreLink(model, "查看更多") {=> model.viewAllRow(row.key) }
     } else {
-        moreLink(model, "查看更多 ›") {=> model.openCategory(row.catid) }
+        moreLink(model, "查看更多") {=> model.openCategory(row.catid) }
     }
 }
 
 // 「换一批」：无边框 icon+文字链接（原型 .row-head .more：muted 12fp，hover accent；
-// 与「查看更多 ›」同为行头轻量操作，不用带边框的 IconButton）。
+// 与「查看更多」同为行头轻量操作，不用带边框的 IconButton）。
 private func reshuffleLink(model: AppModel, onClick: () -> Unit): Unit {
     let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
     ClickArea(onClick: onClick) {
@@ -225,7 +225,10 @@ private func moreLink(model: AppModel, text: String, onClick: () -> Unit): Unit 
     // 原型 .row-head .more：常态 muted、hover 才 accent（构建期无 hover 上下文，取常态色）。
     let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
     ClickArea(onClick: onClick) {
-        Label(text).fontSize(12.fp).foregroundColor(muted)
+        HStack {
+            Label(text).fontSize(12.fp).foregroundColor(muted)
+            Icon(IconName.ChevronRight, size: 12.vp, color: muted)
+        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Center)
     }
 }
 
@@ -311,11 +314,11 @@ private func emptyState(model: AppModel): Unit {
 
 private func pager(model: AppModel): Unit {
     HStack {
-        IconButton(IconName.ChevronLeft, label: Some("上一页")) {=>
+        IconButton(IconName.ChevronLeft, label: Some("上一页"), style: Some(ghostStyleOf(model))) {=>
             if (model.currentPage.value > 1) { model.submitSearch(model.currentPage.value - 1) }
         }.enabled(model.currentPage.value > 1)
         Label("第 ${model.currentPage.value} / ${model.maxPage()} 页").fontSize(12.fp).muted()
-        IconButton(IconName.ChevronRight, label: Some("下一页")) {=>
+        IconButton(IconName.ChevronRight, label: Some("下一页"), style: Some(ghostStyleOf(model))) {=>
             if (model.currentPage.value < model.maxPage()) { model.submitSearch(model.currentPage.value + 1) }
         }.enabled(model.currentPage.value < model.maxPage())
     }.spacing(12.vp).mainAxisAlignment(MainAxisAlignment.Center).hug().padding(10.vp)

@@ -32,9 +32,11 @@ func categoriesPage(model: AppModel): Unit {
         }.flex()
         SegmentedControl(["所有状态", "已启用", "已禁用"],
             status.project(get: {v => v }, set: {_, v => v }))
-        Button("▶ 扫描媒体库", {=> model.actScanAllCategories() })
+        IconButton(IconName.Play, label: Some("扫描媒体库"), style: Some(ghostStyleOf(model)),
+            onClick: {=> model.actScanAllCategories() })
         // 创建/编辑弹窗含插件排序列表，首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("＋ 创建分类", {=> model.todoToast("创建分类（编辑弹窗）") }).role(ButtonRole.Primary)
+        IconButton(IconName.Plus, label: Some("创建分类"), role: ButtonRole.Primary,
+            onClick: {=> model.todoToast("创建分类（编辑弹窗）") })
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
 
     // 卡片网格（原型 .grid-3：三列，封面横幅 + 名称/数量/开关 + 操作行）。
@@ -62,7 +64,7 @@ func categoriesPage(model: AppModel): Unit {
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
     }
     }
-    confirmModal(delOpen, "确认删除分类",
+    confirmModal(model, delOpen, "确认删除分类",
         "将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。", "删除", {=>
         model.actDeleteCategory(delCat.value)
     })
@@ -127,10 +129,10 @@ private func categoryCard(model: AppModel, c: AdminCategoryItem, delCat: State<S
             Label(if (c.description.size > 0) { c.description } else { "暂无描述" })
                 .fontSize(11.fp).muted().maxLines(2)
             HStack {
-                // 「▶ 扫描」均分整行（设计稿 flex-1），行尾「编辑/删除」不再贴卡片右缘。
+                // 「扫描」均分整行（设计稿 flex-1），行尾「编辑/删除」不再贴卡片右缘。
                 // cui Button 无 flex 修饰，故包一层 HStack 兜底。
-                HStack { Button("▶ 扫描", {=> model.actScanCategory(c.catid) })
-                    .style(ghostStyleOf(model)).enabled(c.enabled) }.flex()
+                HStack { IconButton(IconName.Play, label: Some("扫描"), style: Some(ghostStyleOf(model)),
+                    onClick: {=> model.actScanCategory(c.catid) }).enabled(c.enabled) }.flex()
                 Button("编辑", {=> model.todoToast("分类编辑弹窗") }).style(ghostStyleOf(model))
                 Button("删除", {=>
                     delCat.value = c.catid
@@ -175,10 +177,11 @@ func tagsPage(model: AppModel): Unit {
             q.value = ""
             nsIdx.value = 0
             pageIdx.value = 0
-        })
+        }).style(ghostStyleOf(model))
         Spacer()
         // 创建/编辑弹窗首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("＋ 创建新标签", {=> model.todoToast("标签编辑弹窗") }).role(ButtonRole.Primary)
+        IconButton(IconName.Plus, label: Some("创建新标签"), role: ButtonRole.Primary,
+            onClick: {=> model.todoToast("标签编辑弹窗") })
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
 
     // 标签行列表（原型：图标 + 命名空间徽章 + 名称 + 翻译行 + 操作）。
@@ -221,13 +224,17 @@ func tagsPage(model: AppModel): Unit {
                 Label("显示第 ${pageIdx.value * 20 + 1} 到 ${shownEnd} 项，共 ${p.total} 个标签")
                     .fontSize(11.fp).muted()
                 Spacer()
-                Button("‹", {=> if (pageIdx.value > 0) { pageIdx.value -= 1 } }).enabled(pageIdx.value > 0)
+                IconButton(IconName.ChevronLeft, style: Some(ghostStyleOf(model)),
+                    onClick: {=> if (pageIdx.value > 0) { pageIdx.value -= 1 } })
+                    .enabled(pageIdx.value > 0)
                 Label("${pageIdx.value + 1} / ${(p.total + 19) / 20}").fontSize(11.fp).muted()
-                Button("›", {=> pageIdx.value += 1 }).enabled((pageIdx.value + 1) * 20 < p.total)
+                IconButton(IconName.ChevronRight, style: Some(ghostStyleOf(model)),
+                    onClick: {=> pageIdx.value += 1 })
+                    .enabled((pageIdx.value + 1) * 20 < p.total)
             }.crossAxisAlignment(CrossAxisAlignment.Center).hug()
         case None => pageLoading(model, "标签加载中…")
     }
-    confirmModal(delOpen, "确认删除标签", "确定要删除此标签吗？此操作无法撤销。", "删除", {=>
+    confirmModal(model, delOpen, "确认删除标签", "确定要删除此标签吗？此操作无法撤销。", "删除", {=>
         model.actDeleteTag(delId.value)
         // 清空已加载标记：下次构建按当前筛选强制重拉（model 侧 act.tag 不再统一 reload）。
         loadedKey.value = ""
@@ -275,7 +282,8 @@ func filtersPage(model: AppModel): Unit {
     HStack {
         Spacer()
         // 编辑/添加弹窗首版走 todoToast（YAGNI，计划评审已确认）。
-        Button("＋ 添加", {=> model.todoToast("智能分类编辑弹窗") }).role(ButtonRole.Primary)
+        IconButton(IconName.Plus, label: Some("添加"), role: ButtonRole.Primary,
+            onClick: {=> model.todoToast("智能分类编辑弹窗") })
     }.hug()
 
     let delId = rememberState<Int64>("filters.delId", {=> -1})
@@ -287,14 +295,16 @@ func filtersPage(model: AppModel): Unit {
     detailCard(model, "筛选器列表") {
         ForEachIndexed(list) { i, f =>
             HStack {
-                // 拖拽手柄：应用字体无 ⠿（U+28FF）字形（真机渲染为豆腐块），改用覆盖范围内的 ≡（U+2261）。
-                Label("≡").fontSize(12.fp).muted()
+                Icon(IconName.Grip, size: 14.vp,
+                    color: if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED })
                 VStack {
                     Label(if (f.name.size > 0) { f.name } else { "未命名" }).fontSize(13.fp)
                     Label(filterSummary(f)).fontSize(10.fp).muted().maxLines(1)
                 }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-                Button("↑", {=> model.actMoveFilter(f.id, true) }).style(ghostStyleOf(model)).enabled(i > 0)
-                Button("↓", {=> model.actMoveFilter(f.id, false) }).style(ghostStyleOf(model)).enabled(i < list.size - 1)
+                IconButton(IconName.ChevronUp, style: Some(ghostStyleOf(model)),
+                    onClick: {=> model.actMoveFilter(f.id, true) }).enabled(i > 0)
+                IconButton(IconName.ChevronDown, style: Some(ghostStyleOf(model)),
+                    onClick: {=> model.actMoveFilter(f.id, false) }).enabled(i < list.size - 1)
                 // cui Switch 两参数均位置参数；绑定件按 filter id 唯一化 key（见 switchBindKeyed）。
                 Switch("", switchBindKeyed("filters.${f.id}", f.enabled, {v => model.actToggleFilter(f.id) }))
                 Button("编辑", {=> model.todoToast("智能分类编辑弹窗") }).style(ghostStyleOf(model))
@@ -305,7 +315,7 @@ func filtersPage(model: AppModel): Unit {
             }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).flexible(false).fillWidth().padding(0.vp, 6.vp)
         }
     }
-    confirmModal(delOpen, "确认删除", "确定要删除此智能分类吗？", "删除", {=>
+    confirmModal(model, delOpen, "确认删除", "确定要删除此智能分类吗？", "删除", {=>
         model.actDeleteFilter(delId.value)
     })
 }

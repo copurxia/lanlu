@@ -604,9 +604,8 @@ class ReaderStage <: Widget {
             ctx.renderer.fillRoundedRect(audioLayout.cover, 8.0, Color.rgb(18, 18, 18))
             let cx = audioLayout.cover.centerX()
             let cy = audioLayout.cover.centerY()
-            let noteW = ctx.renderer.textWidth("♪", pointSize: 26.0)
-            let noteH = ctx.renderer.textHeight(pointSize: 26.0)
-            ctx.renderer.text("♪", cx - noteW / 2.0, cy - noteH / 2.0, ctx.theme.accent, pointSize: 26.0)
+            drawIcon(ctx.renderer, IconName.Music, Rect(cx - 16.0, cy - 16.0, 32.0, 32.0),
+                ctx.theme.accent, weight: 2.0)
         }
         var title = ""
         match (model.reader.pageAt(pageIdx)) {

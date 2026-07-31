@@ -81,6 +81,19 @@ cd client-next
 LD_LIBRARY_PATH=../ref/kv4cj/lib:$LD_LIBRARY_PATH cjpm test
 ```
 
+## GitHub CI
+
+GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client-next` 或其仓库内依赖变更时运行，
+也支持手动触发。CI 固定使用仓颉 STS 1.1.3，依次执行生产构建、全量测试和
+`SDL_VIDEODRIVER=dummy` 无头快照冒烟测试。
+
+运行前需在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置
+`STDX_URL`，值为 Linux x86_64 cjnative static stdx 压缩包的下载地址。CI 会在 runner 中按固定提交构建
+kv4cj V1.0.3 与 MMKV 1.2.15，不依赖开发机 `ref/kv4cj` 目录中的预编译文件。
+
+`cjlint` 报告和 `cjfmt` 差异会作为 artifact 保留 14 天。当前格式检查为建议项；完成现有代码格式化
+基线清理后，可移除工作流中该步骤的 `continue-on-error`，将其升级为合并门槛。
+
 ## 界面快照（无头环境冒烟）
 
 内置 `--snapshot` 参数（CangjieGUI DesktopApp 提供）：渲染若干帧后写出 BMP 并退出，

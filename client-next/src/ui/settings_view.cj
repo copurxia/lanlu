@@ -536,23 +536,24 @@ private func cachePage(model: AppModel): Unit {
 }
 
 private func aboutPage(model: AppModel): Unit {
+    let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
     pageHeader("关于", "版本信息与项目链接")
     detailCard(model, "Lanlu 桌面客户端") {
         Label("v0.1.0 · CangjieGUI").fontSize(12.fp).muted()
         // 链接类入口暂无对应能力，点击走统一「暂未实现」toast（同书库惯例）。
         ClickArea(onClick: {=> model.todoToast("项目主页")}) {
             settingRowIcon(model, "项目主页", "", GhostGlyph.Home) {
-                Label("›").fontSize(13.fp).muted()
+                Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
         ClickArea(onClick: {=> model.todoToast("开源许可")}) {
             settingRowIcon(model, "开源许可", "", GhostGlyph.Pages) {
-                Label("›").fontSize(13.fp).muted()
+                Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
         ClickArea(onClick: {=> model.todoToast("检查更新")}) {
             settingRowIcon(model, "检查更新", "当前已是最新版本", GhostGlyph.Named(IconName.Refresh)) {
-                Label("›").fontSize(13.fp).muted()
+                Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
     }
@@ -567,7 +568,7 @@ private func logoutConfirmModal(model: AppModel, logoutOpen: State<Bool>): Unit 
             Label("将清除该服务器在本机保存的会话，服务器与缓存目录会保留。").fontSize(12.fp).muted()
             HStack {
                 Spacer()
-                Button("取消", {=> logoutOpen.value = false})
+                Button("取消", {=> logoutOpen.value = false}).style(ghostStyleOf(model))
                 Button(
                     "退出登录",
                     {
@@ -636,14 +637,15 @@ func formField(label: String, text: State<String>, placeholder: String, masked!:
 }
 
 // 通用确认弹窗（原型 #confirm-mask）：destructive 动作二次确认。
-func confirmModal(open: State<Bool>, title: String, desc: String, confirmText: String, onConfirm: () -> Unit): Unit {
+func confirmModal(model: AppModel, open: State<Bool>, title: String, desc: String, confirmText: String,
+    onConfirm: () -> Unit): Unit {
     Modal(open, body: {
         => VStack {
             Label(title).fontSize(15.fp)
             Label(desc).fontSize(12.fp).muted()
             HStack {
                 Spacer()
-                Button("取消", {=> open.value = false})
+                Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
                 Button(
                     confirmText,
                     {
@@ -750,10 +752,10 @@ private func authPage(model: AppModel): Unit {
                 if (tp.enabled) {
                     settingRow(model, "双重验证已启用",
                         "${tp.credentialName} · 创建于 ${tp.createdAt} · 未使用恢复码数量: ${tp.recoveryCodesRemaining}") {
-                        Button("刷新", {=> model.loadAuthSecurity()})
+                        Button("刷新", {=> model.loadAuthSecurity()}).style(ghostStyleOf(model))
                     }
                     settingRow(model, "恢复码", "重新生成后，旧恢复码将全部失效") {
-                        Button("重新生成恢复码", {=> model.actTotpRegenerate()})
+                        Button("重新生成恢复码", {=> model.actTotpRegenerate()}).style(ghostStyleOf(model))
                     }
                     settingRow(model, "关闭双重验证", "") {
                         Button("关闭双重验证", {=> totpOffOpen.value = true}).role(ButtonRole.Danger)
@@ -766,7 +768,7 @@ private func authPage(model: AppModel): Unit {
             case None => pageLoading(model, "加载中…")
         }
     }
-    confirmModal(totpOffOpen, "关闭双重验证？", "关闭后账号将仅受密码保护，安全性会降低。", "关闭", {
+    confirmModal(model, totpOffOpen, "关闭双重验证？", "关闭后账号将仅受密码保护，安全性会降低。", "关闭", {
         => model.actTotpDisable()
     })
 
@@ -807,8 +809,8 @@ private func authPage(model: AppModel): Unit {
     detailCard(model, "登录设备列表") {
         HStack {
             Spacer()
-            Button("退出其他设备", {=> revokeOthersOpen.value = true})
-            Button("刷新", {=> model.loadAuthSecurity()})
+            Button("退出其他设备", {=> revokeOthersOpen.value = true}).style(ghostStyleOf(model))
+            Button("刷新", {=> model.loadAuthSecurity()}).style(ghostStyleOf(model))
         }.spacing(8.vp)
         let list = model.sessions.value
         if (list.size == 0) {
@@ -844,7 +846,7 @@ private func authPage(model: AppModel): Unit {
             }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(0.vp, 6.vp)
         }
     }
-    confirmModal(revokeOthersOpen, "确认退出其他设备？", "当前设备会保持登录，其他所有登录设备会立即失效。",
+    confirmModal(model, revokeOthersOpen, "确认退出其他设备？", "当前设备会保持登录，其他所有登录设备会立即失效。",
         "退出其他设备", {
             => model.actRevokeOtherSessions()
         })

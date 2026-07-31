@@ -79,6 +79,7 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                     HStack {
                         Label("合集列表加载失败").fontSize(12.fp).muted()
                         Button("重试", {=> loadTankPickerList(model, list, loading, failed)})
+                            .style(ghostStyleOf(model))
                     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
                 } else {
                     let needle = filter.value.trimAscii().toAsciiLower()
@@ -122,7 +123,7 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                 }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false})
+                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
                 }
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(380.vp)
     })

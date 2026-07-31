@@ -77,7 +77,7 @@ func usersPage(model: AppModel): Unit {
                                 resetPw.value = ""
                                 resetOpen.value = true
                         }
-                    ).enabled(!self)
+                    ).style(ghostStyleOf(model)).enabled(!self)
                     // 角色开关：cui Bindable 仅 State.project 一种产出途径，按 brief 备选方案——
                     // 本地 rememberState 初值取 u.isAdmin，set 里直接提交服务端（同外观页主题分段写法），
                     // 失败由 handleError 提示，列表随 act.* 内部 reload 刷新。
@@ -108,7 +108,7 @@ func usersPage(model: AppModel): Unit {
                     .padding(0.vp, 6.vp)
         }
     }
-    confirmModal(delOpen, "确认删除用户", "您确定要删除此用户吗？此操作无法撤销。", "删除", {
+    confirmModal(model, delOpen, "确认删除用户", "您确定要删除此用户吗？此操作无法撤销。", "删除", {
         => model.actDeleteUser(delId.value)
     })
     // 重置密码弹窗（原型 dialog：新密码 + 确认动作）。
@@ -118,7 +118,7 @@ func usersPage(model: AppModel): Unit {
             formField("新密码", resetPw, "请输入新密码（至少6位）", masked: true)
             HStack {
                 Spacer()
-                Button("取消", {=> resetOpen.value = false})
+                Button("取消", {=> resetOpen.value = false}).style(ghostStyleOf(model))
                 Button("重置密码", {
                     => if (resetPw.value.size >= 6) {
                         resetOpen.value = false
@@ -285,7 +285,7 @@ func tasksPage(model: AppModel): Unit {
             Label("共 ${p.total} 个任务").fontSize(11.fp).muted()
         case None => pageLoading(model, "任务列表加载中…")
     }
-    confirmModal(cancelOpen, "取消任务", "确定要取消这个任务吗？", "取消任务", {
+    confirmModal(model, cancelOpen, "取消任务", "确定要取消这个任务吗？", "取消任务", {
         => model.actCancelTask(cancelId.value)
     })
 }
@@ -327,16 +327,19 @@ private func taskCard(model: AppModel, t: TaskRecord, cancelId: State<Int64>, ca
                 pill(model, t.triggerSource, PillTone.Outline)
             }
             if (t.status == "pending" || t.status == "running" || t.status == "waiting") {
-                Button(
-                    "⏹ 取消",
-                    {
+                IconButton(
+                    IconName.Stop,
+                    label: Some("取消"),
+                    role: ButtonRole.Danger,
+                    onClick: {
                         =>
                             cancelId.value = t.id
                             cancelOpen.value = true
                     }
-                ).role(ButtonRole.Danger)
+                )
             } else if (t.status == "failed" || t.status == "stopped") {
-                Button("▶ 重试", {=> model.actRetryTask(t.id)})
+                IconButton(IconName.Play, label: Some("重试"), style: Some(ghostStyleOf(model)),
+                    onClick: {=> model.actRetryTask(t.id)})
             }
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
         HStack {
@@ -499,7 +502,7 @@ func cronPage(model: AppModel): Unit {
                     "停止服务"
                 } else {
                     "启动服务"
-                }, {=> model.actCronServiceToggle()})
+                }, {=> model.actCronServiceToggle()}).style(ghostStyleOf(model))
                 Spacer()
                 cronStatusMetric("总任务数", st.totalTasks)
                 cronStatusMetric("已启用", st.enabledTasks)
@@ -569,7 +572,8 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
                     }
                     pill(model, taskTypeLabel(t.taskType), PillTone.Outline)
                     Spacer()
-                    Button("立即执行", {=> model.actCronTrigger(t.id)})
+                    IconButton(IconName.Play, label: Some("立即执行"), style: Some(ghostStyleOf(model)),
+                        onClick: {=> model.actCronTrigger(t.id)})
                     Switch("", switchBindKeyed("cron.${t.id}", t.enabled, {v => model.actCronToggle(t.id, v)}))
                     IconButton(IconName.Pencil, label: Some("编辑"), style: Some(ghostStyleOf(model)),
                         onClick: {=> onEdit(t)})
@@ -588,11 +592,7 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
                     cronMetaCell("Cron 表达式", t.cronExpression)
                     cronMetaCell("优先级", "${t.priority}")
                     cronMetaCell("执行次数", "${t.runCount}")
-                    cronMetaCell("上次执行", if (t.hasLastRun) {
-                        "${t.lastRunAt} ${if (t.lastRunSuccess) { "✓" } else { "✗" }}"
-                    } else {
-                        "从未执行"
-                    })
+                    cronLastRunCell(t)
                 }.spacing(24.vp).hug().fillWidth()
                 if (t.enabled && t.nextRunAt.size > 0) {
                     Label("下次执行: ${t.nextRunAt}").fontSize(11.fp).foregroundColor(if (model.isLight()) {
@@ -609,7 +609,7 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
                 .background(panel, 14.vp)
                 .fillWidth()
     }
-    confirmModal(delOpen, "删除定时任务", "确定要删除此定时任务吗？此操作无法撤销。", "删除", {
+    confirmModal(model, delOpen, "删除定时任务", "确定要删除此定时任务吗？此操作无法撤销。", "删除", {
         => model.actCronDelete(delId.value)
     })
 }
@@ -618,6 +618,19 @@ private func cronMetaCell(label: String, value: String): Unit {
     HStack {
         Label("${label}:").fontSize(10.fp).muted()
         Label(value).fontSize(11.fp).maxLines(1)
+    }.spacing(5.vp).flex()
+}
+
+private func cronLastRunCell(t: CronTask): Unit {
+    HStack {
+        Label("上次执行:").fontSize(10.fp).muted()
+        if (t.hasLastRun) {
+            Icon(if (t.lastRunSuccess) { IconName.Check } else { IconName.Close }, size: 12.vp,
+                color: if (t.lastRunSuccess) { LANLU_SUCCESS } else { LANLU_DANGER })
+            Label(t.lastRunAt).fontSize(11.fp).maxLines(1)
+        } else {
+            Label("从未执行").fontSize(11.fp).maxLines(1)
+        }
     }.spacing(5.vp).flex()
 }
 
@@ -690,7 +703,7 @@ private func cronEditorModal(
             }.spacing(18.vp).crossAxisAlignment(CrossAxisAlignment.End).hug().fillWidth()
             HStack {
                 Spacer()
-                Button("取消", {=> open.value = false})
+                Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
                 Button(
                     "保存",
                     {
@@ -804,7 +817,7 @@ func pluginsPage(model: AppModel): Unit {
     if (filtered.size == 0) {
         let _ = Label("暂无插件").fontSize(12.fp).muted()
     }
-    confirmModal(delOpen, "删除插件", "确定要删除该插件吗？此操作将同时删除插件文件，不可恢复。", "删除", {
+    confirmModal(model, delOpen, "删除插件", "确定要删除该插件吗？此操作将同时删除插件文件，不可恢复。", "删除", {
         => model.actPluginDelete(delNs.value)
     })
     pluginConfigModal(model, cfgNs, cfgOpen)
@@ -889,7 +902,7 @@ private func pluginCard(model: AppModel, p: PluginItem, delNs: State<String>, de
                         cfgNs.value = p.namespace
                         cfgOpen.value = true
                 }
-            ).enabled(p.installed && p.hasSchema)
+            ).style(ghostStyleOf(model)).enabled(p.installed && p.hasSchema)
         }.crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
     }
         .spacing(8.vp)
@@ -911,7 +924,7 @@ private func pluginConfigModal(model: AppModel, cfgNs: State<String>, cfgOpen: S
                 .muted()
             HStack {
                 Spacer()
-                Button("取消", {=> cfgOpen.value = false})
+                Button("取消", {=> cfgOpen.value = false}).style(ghostStyleOf(model))
                 Button("关闭", {=> cfgOpen.value = false}).role(ButtonRole.Primary)
             }.spacing(8.vp)
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(440.vp)

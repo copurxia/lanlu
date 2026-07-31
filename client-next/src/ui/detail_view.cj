@@ -200,7 +200,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
         tank: false)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局，同 settings_view 惯例）。
     addToTankDialog(model, addTankOpen, m.arcid)
-    confirmModal(delOpen, "删除档案？", "「${m.title}」将被删除，此操作不可恢复。", "删除", {
+    confirmModal(model, delOpen, "删除档案？", "「${m.title}」将被删除，此操作不可恢复。", "删除", {
         => model.deleteArchive(m.arcid)
     })
 }
@@ -235,7 +235,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     hero.progressText = "已读 ${pct}%"
     hero.summary = oneLineSummary(t.description)
     hero.tags = t.tags
-    hero.primaryLabel = "▶ 从头开始阅读"
+    hero.primaryLabel = "从头开始阅读"
     hero.primaryEnabled = members.size > 0
     hero.onPrimary = {=> model.startTankReading()}
 
@@ -323,16 +323,16 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
         tank: true)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局）。
     tankAddArchivesDialog(model, addOpen, t.id)
-    confirmModal(delOpen, "删除合集？", "合集「${t.name}」将被删除，成员档案保留在书库中。", "删除", {
+    confirmModal(model, delOpen, "删除合集？", "合集「${t.name}」将被删除，成员档案保留在书库中。", "删除", {
         => model.deleteCurrentTank(t.id)
     })
-    confirmModal(removeOpen, "从合集移除？", "将 ${model.selectedCount()} 个档案移出合集（档案保留在书库中）。", "移除", {
+    confirmModal(model, removeOpen, "从合集移除？", "将 ${model.selectedCount()} 个档案移出合集（档案保留在书库中）。", "移除", {
         =>
             model.removeTankMembers(t.id, selectedArcidList(model))
             model.exitSelection()
             detailSelectionOwner = ""
     })
-    confirmModal(batchDelOpen, "删除选中档案？", "将删除 ${model.selectedCount()} 个档案，此操作不可恢复。", "删除", {
+    confirmModal(model, batchDelOpen, "删除选中档案？", "将删除 ${model.selectedCount()} 个档案，此操作不可恢复。", "删除", {
         =>
             model.batchDelete(selectedArcidList(model), ArrayList<String>())
             detailSelectionOwner = ""
@@ -359,14 +359,16 @@ private func tankMemberBatchBar(model: AppModel, removeOpen: State<Bool>,
         Label("已选 ${model.selectedCount()} 项").fontSize(12.fp)
         Spacer()
         Button("收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), true) })
+            .style(ghostStyleOf(model))
         Button("取消收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), false) })
-        Button("从合集移除", {=> removeOpen.value = true })
+            .style(ghostStyleOf(model))
+        Button("从合集移除", {=> removeOpen.value = true }).style(ghostStyleOf(model))
         Button("删除", {=> batchDelOpen.value = true }).role(ButtonRole.Danger)
         Button("退出", {
             =>
                 model.exitSelection()
                 detailSelectionOwner = ""
-        })
+        }).style(ghostStyleOf(model))
     }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
         .padding(10.vp).background(elev, 10.vp)
 }
@@ -444,12 +446,12 @@ private func oneLineSummary(s: String): String {
 
 private func readButtonLabel(m: ArchiveMeta): String {
     if (m.progress <= 0) {
-        return "▶ 开始阅读"
+        return "开始阅读"
     }
     if (m.progress >= m.pagecount) {
-        return "▶ 重新阅读"
+        return "重新阅读"
     }
-    "▶ 继续阅读 · P.${m.progress + 1}"
+    "继续阅读 · P.${m.progress + 1}"
 }
 
 // 档案 meta 行（原型：48 页 · 96.2 MB · 发布于 … · 更新于 …）。
