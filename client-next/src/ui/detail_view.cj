@@ -17,6 +17,64 @@ import std.collection.ArrayList
 
 // ---- 档案详情 ----
 
+// 选择模式归属（全局 selectionMode 与书库页共用一套）：tank 详情成员区多选入口（卡片
+// hover 勾选钮 / 列表行首圆圈）进入时记录 tank id，空串表示非 tank 详情来源。
+// 框架无页面卸载钩子，详情页构建期按归属守卫清理，
+// 避免把 tank 成员的选择态带进档案详情/其他合集（书库直达返回的残留见批次说明）。
+private var detailSelectionOwner: String = ""
+
+// Danger 语义图标钮（详情操作卡「删除」）：形制同 GhostIconButton（34/28 见 size），
+// 图标与 hover 底取危险红；不动 widgets.cj 共享的 GhostIconButton（并行任务在改）。
+class DangerIconButton <: Widget {
+    private let glyph: GhostGlyph
+    private let hoverId: String
+    private let onClick: () -> Unit
+    private let size: Float32
+    private var frame = Rect.zero()
+
+    public init(glyph: GhostGlyph, hoverId: String, size!: Float32 = 34.0, onClick!: () -> Unit) {
+        this.glyph = glyph
+        this.hoverId = hoverId
+        this.onClick = onClick
+        this.size = size
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(size, size)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let hovered = ctx.isHovered(hoverId)
+        let radius: Float32 = if (size >= 34.0) { 9.0 } else { 8.0 }
+        if (hovered) {
+            ctx.renderer.fillRoundedRect(frame, radius, Color.rgba(0xE0, 0x5D, 0x5D, 30))
+        }
+        drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(),
+            Color.rgb(0xE0, 0x5D, 0x5D))
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(hoverId, CursorShape.Interactive)
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    onClick()
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
+}
+
 public func detailView(model: AppModel): Unit {
     match (model.meta.value) {
         case None => Panel {Label("加载中…").muted()}
@@ -25,6 +83,13 @@ public func detailView(model: AppModel): Unit {
 }
 
 private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
+    // tank 详情进入的选择态不带进档案详情（框架无卸载钩子，构建期守卫一次性清理）。
+    if (model.selectionMode.value && detailSelectionOwner.size > 0) {
+        model.exitSelection()
+        detailSelectionOwner = ""
+    }
+    let addTankOpen = rememberState<Bool>("detail.addTankOpen:${m.arcid}", {=> false})
+    let delOpen = rememberState<Bool>("detail.delOpen:${m.arcid}", {=> false})
     let pct = memberReadPct(m.pagecount, m.progress)
     let hero = DetailHeroData()
     // 徽标行（原型：金「档案 · 图像」+ 灰「2024」「同人志」；蓝色「已完结」无数据字段不做）。
@@ -64,14 +129,17 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
         =>
             // 矢量图标钮（28vp 紧凑尺寸）：编辑走 sdl 图标库 Pencil，下载/加入合集/更多
             // 为 GhostGlyph 手绘矢量（替代原 ⬇/⊕/编/⋯ 文本兜底）。
-            // 下载/加入合集/编辑/更多动作留 TODO（T11 范围外）。
+            // 加入合集/删除已接（第二波）；下载/更多动作留 TODO。
             GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
                 => model.toggleFavorite(m.arcid, !m.isfavorite)
             }
             GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {=> model.todoToast("下载")}
-            GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> model.todoToast("加入合集")}
+            GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> addTankOpen.value = true }
             GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
                 => model.openArchiveMetadataEditor(m.arcid)
+            }
+            DangerIconButton(GhostGlyph.Named(IconName.Trash), "detail:delete", size: 28.0) {
+                => delOpen.value = true
             }
             GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
@@ -130,6 +198,11 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     }
     detailSkeleton(model, backdropKey, hero, m.coverAssetId, actionIcons, mainCards.toArray(), sideCards.toArray(),
         tank: false)
+    // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局，同 settings_view 惯例）。
+    addToTankDialog(model, addTankOpen, m.arcid)
+    confirmModal(delOpen, "删除档案？", "「${m.title}」将被删除，此操作不可恢复。", "删除", {
+        => model.deleteArchive(m.arcid)
+    })
 }
 
 // ---- 合集详情 ----
@@ -142,6 +215,16 @@ public func tankView(model: AppModel): Unit {
 }
 
 private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
+    // 选择态归属守卫：selectionMode 与书库页共用一套，进入本合集详情时发现选择是在
+    // 别处（书库/其他合集/档案详情）进入的即退出，避免把外部选择态带进成员区。
+    if (model.selectionMode.value && detailSelectionOwner != t.id) {
+        model.exitSelection()
+        detailSelectionOwner = ""
+    }
+    let delOpen = rememberState<Bool>("tank.delOpen:${t.id}", {=> false})
+    let addOpen = rememberState<Bool>("tank.addOpen:${t.id}", {=> false})
+    let removeOpen = rememberState<Bool>("tank.removeOpen:${t.id}", {=> false})
+    let batchDelOpen = rememberState<Bool>("tank.batchDelOpen:${t.id}", {=> false})
     let members = model.tankMembers.value
     let pct = tankReadPct(t)
     let hero = DetailHeroData()
@@ -158,11 +241,17 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
 
     let actionIcons: () -> Unit = {
         =>
-            // 合集 3 图标（用户决定：不与档案同构；设计稿 tank 视图下载/加入合集为 only-archive）。
-            // 收藏/编辑/更多动作留 TODO。矢量图标钮（28vp）。
-            GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0) {=> model.todoToast("合集收藏")}
+            // 合集 4+1 图标（用户决定：不与档案同构；设计稿 tank 视图下载/加入合集为 only-archive）。
+            // 收藏/添加档案/删除已接（第二波）；更多动作留 TODO。矢量图标钮（28vp）。
+            GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0, active: t.isfavorite) {
+                => model.setTankFavoriteOnDetail(t.id, !t.isfavorite)
+            }
+            GhostIconButton(GhostGlyph.AddTank, "tank:addarchives", size: 28.0) {=> addOpen.value = true }
             GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {
                 => model.openTankMetadataEditor(t.id)
+            }
+            DangerIconButton(GhostGlyph.Named(IconName.Trash), "tank:delete", size: 28.0) {
+                => delOpen.value = true
             }
             GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作")}
     }
@@ -172,6 +261,13 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     let filterMemo = rememberState<MemberFilterMemo>("detail:tank:member-filter", {=> MemberFilterMemo()}).value
 
     // 主列：收录档案（网格/列表切换 + 即时筛选 + 计数）→ 相关推荐（无数据隐藏）
+    // 多选入口对齐 frontend：成员区无显式按钮，由卡片 hover 浮层勾选钮 / 列表行首
+    // 勾选圆圈进入（onEnterMemberSelection 记录选择归属再 enterSelection）。
+    let onEnterMemberSelection: (String) -> Unit = {
+        arcid =>
+            detailSelectionOwner = t.id
+            model.enterSelection(arcid)
+    }
     let mainCards = ArrayList<() -> Unit>()
     if (members.size > 0) {
         mainCards.add({
@@ -186,9 +282,13 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
                     if (shown.size == 0) {
                         Label("无匹配档案").fontSize(12.fp).muted()
                     } else if (model.tankMemberViewIndex.value == 1) {
-                        memberListContent(model, shown)
+                        memberListContent(model, shown, onEnterMemberSelection)
                     } else {
-                        memberGridContent(model, shown)
+                        memberGridContent(model, shown, onEnterMemberSelection)
+                    }
+                    // 选择模式批量栏（成员区底部）：已选计数 + 收藏/取消收藏/移除/删除/退出。
+                    if (model.selectionMode.value) {
+                        tankMemberBatchBar(model, removeOpen, batchDelOpen)
                     }
             }
         })
@@ -221,6 +321,54 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     }
     detailSkeleton(model, backdropKey, hero, t.coverAssetId, actionIcons, mainCards.toArray(), sideCards.toArray(),
         tank: true)
+    // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局）。
+    tankAddArchivesDialog(model, addOpen, t.id)
+    confirmModal(delOpen, "删除合集？", "合集「${t.name}」将被删除，成员档案保留在书库中。", "删除", {
+        => model.deleteCurrentTank(t.id)
+    })
+    confirmModal(removeOpen, "从合集移除？", "将 ${model.selectedCount()} 个档案移出合集（档案保留在书库中）。", "移除", {
+        =>
+            model.removeTankMembers(t.id, selectedArcidList(model))
+            model.exitSelection()
+            detailSelectionOwner = ""
+    })
+    confirmModal(batchDelOpen, "删除选中档案？", "将删除 ${model.selectedCount()} 个档案，此操作不可恢复。", "删除", {
+        =>
+            model.batchDelete(selectedArcidList(model), ArrayList<String>())
+            detailSelectionOwner = ""
+    })
+}
+
+// ---- 合集成员多选批量栏 ----
+
+// 已选档案 id 列表（tank 成员均为档案 id，无需按 isTankItem 拆分）。
+private func selectedArcidList(model: AppModel): ArrayList<String> {
+    let ids = ArrayList<String>()
+    for (id in model.selectedIds.value) {
+        ids.add(id)
+    }
+    ids
+}
+
+// 选择模式批量操作栏：已选计数 + 收藏/取消收藏/从合集移除/删除/退出。
+// 移除/删除为 destructive 动作，先落确认框（open 状态由 tankDetailBody 持有）。
+private func tankMemberBatchBar(model: AppModel, removeOpen: State<Bool>,
+    batchDelOpen: State<Bool>): Unit {
+    let elev = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    HStack {
+        Label("已选 ${model.selectedCount()} 项").fontSize(12.fp)
+        Spacer()
+        Button("收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), true) })
+        Button("取消收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), false) })
+        Button("从合集移除", {=> removeOpen.value = true })
+        Button("删除", {=> batchDelOpen.value = true }).role(ButtonRole.Danger)
+        Button("退出", {
+            =>
+                model.exitSelection()
+                detailSelectionOwner = ""
+        })
+    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
+        .padding(10.vp).background(elev, 10.vp)
 }
 
 // 成员筛选 memo 缓存（rememberState 跨帧保留）：结果仅在筛选词或成员代次变化时重算。

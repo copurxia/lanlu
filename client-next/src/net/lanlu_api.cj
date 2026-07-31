@@ -282,6 +282,29 @@ public class LanluApi {
         let _ = checked(client.put("/api/tankoubons/${percentEncode(id)}/metadata", body))
     }
 
+    public func deleteArchive(arcid: String): Unit {
+        let _ = checked(client.delete("/api/archives/${percentEncode(arcid)}"))
+    }
+
+    public func deleteTankoubon(id: String): Unit {
+        let _ = checked(client.delete("/api/tankoubons/${percentEncode(id)}"))
+    }
+
+    // 新建合集：PUT /api/tankoubons?name=X（name 在 query），响应 data 为 {success, tankoubon_id}。
+    public func createTankoubon(name: String): String {
+        let env = checked(client.put("/api/tankoubons?name=${percentEncode(name)}", ""))
+        uploadResultText(env.dataRaw, "tankoubon_id")
+    }
+
+    // 合集成员增删：PUT/DELETE /api/tankoubons/{tankId}/{arcid}。
+    public func addTankMember(tankId: String, arcid: String): Unit {
+        let _ = checked(client.put("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}", ""))
+    }
+
+    public func removeTankMember(tankId: String, arcid: String): Unit {
+        let _ = checked(client.delete("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}"))
+    }
+
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。
     public func listArchiveTankoubons(arcid: String): ArrayList<TankoubonInfo> {
         parseTankoubonList(checkedBody(client.get("/api/archives/${arcid}/tankoubons")))

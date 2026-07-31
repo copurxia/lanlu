@@ -474,6 +474,8 @@ private class NavPill <: Widget {
                 }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (homeRect(ctx).contains(x, y)) {
+                    // 离开合集/详情页时清掉残留的多选状态，避免污染书库页。
+                    model.exitSelection()
                     model.page.value = Page.Library
                     return true
                 }
@@ -577,7 +579,11 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         TitleBarBackground()
         HStack {
             if (showBack) {
-                GhostIconButton(GhostGlyph.Back, "titlebar:back") {=> model.page.value = Page.Library}
+                GhostIconButton(GhostGlyph.Back, "titlebar:back") {=>
+                    // 离开合集/详情页时清掉残留的多选状态，避免污染书库页。
+                    model.exitSelection()
+                    model.page.value = Page.Library
+                }
             }
             HStack {
                 brandLogo(28.vp)

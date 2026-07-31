@@ -3,7 +3,7 @@ package lanlu_client_next.ui
 import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SearchItem, TankoubonInfo, PageInfo}
-import std.collection.{ArrayList, HashMap}
+import std.collection.{ArrayList, HashMap, HashSet}
 import std.fs.{exists, Path}
 import std.math.{cos, sin}
 
@@ -674,6 +674,70 @@ class CoverBorder <: Widget {
     }
 }
 
+// 多选选中描边（第二波）：叠在封面顶层的 2px accent 圆角描边，仅选中态挂载，
+// 圆角与 CoverBorder 同源（短边 7.2%），线宽内收 1px 避免盖出封面弧外。
+class SelectionRing <: Widget {
+    private var frame = Rect.zero()
+
+    public init() {
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(0.0, 0.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let radius = min(frame.w, frame.h) * 0.072 - 0.5
+        ctx.renderer.strokeRoundedRect(frame.inset(1.0), radius, Pen(width: 2.0, color: ctx.theme.accent))
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
+
+// 多选勾选圆点（第二波，对齐 frontend 卡片 check 角标）：封面右上 20vp 圆，
+// 选中=accent 实底白勾；未选=半透黑底白描边（叠在封面上不随主题翻转，取舍同 tankBadge）。
+class SelectionDot <: Widget {
+    private let selected: Bool
+    private var frame = Rect.zero()
+
+    public init(selected: Bool) {
+        this.selected = selected
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(20.0, 20.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let cx = frame.centerX()
+        let cy = frame.centerY()
+        if (selected) {
+            ctx.renderer.fillCircle(cx, cy, 9.0, ctx.theme.accent)
+            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 6.0, cy - 6.0, 12.0, 12.0),
+                Color.rgb(255, 255, 255))
+        } else {
+            ctx.renderer.fillCircle(cx, cy, 9.0, Color.rgba(0, 0, 0, 110))
+            ctx.renderer.strokeCircle(cx, cy, 9.0, Pen(width: 1.4, color: Color.rgba(255, 255, 255, 170)))
+        }
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
+
 // 侧栏导航项（原型 .side-item）：全宽行（高 34），圆角 9；激活铺 accentSoft 圆角底 +
 // accent 文字（.side-item.on），hover 铺 overlayHover 底且文字保持主文字色，
 // 可选左侧 18vp 前置图标（原型 .side-item .ico，书库侧栏不带、设置导航带），
@@ -922,8 +986,10 @@ class CoverProgress <: Widget {
     }
 }
 
-// 封面浮层操作层：对应 frontend BaseMediaCard 左下角两个 32×32 secondary icon button。
-// 绘制与命中共用 detailsRect/favoriteRect，避免布局包装层造成视觉位置与点击 frame 偏离。
+// 封面浮层操作层：对应 frontend BaseMediaCard 左下角 32×32 secondary icon button
+// （详情/收藏），外加「多选」入口钮（frontend hover 菜单的 multiselect 项——点击
+// 进入选择模式并选中本卡，即 model.enterSelection）。
+// 绘制与命中共用 detailsRect/favoriteRect/selectRect，避免布局包装层造成视觉位置与点击 frame 偏离。
 class CardHoverActions <: Widget {
     private let key: String
     private let hoverVisible: State<Bool>
@@ -931,16 +997,18 @@ class CardHoverActions <: Widget {
     private let favorited: Bool
     private let onDetails: () -> Unit
     private let onFavorite: () -> Unit
+    private let onSelect: () -> Unit
     private var frame = Rect.zero()
 
     public init(key: String, visible: State<Bool>, progress: Float32, favorited: Bool,
-        onDetails: () -> Unit, onFavorite: () -> Unit) {
+        onDetails: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit) {
         this.key = key
         this.hoverVisible = visible
         this.progress = progress
         this.favorited = favorited
         this.onDetails = onDetails
         this.onFavorite = onFavorite
+        this.onSelect = onSelect
         emit(this)
     }
 
@@ -958,6 +1026,11 @@ class CardHoverActions <: Widget {
 
     private func favoriteRect(): Rect {
         Rect(frame.x + 49.0, frame.y + frame.h - 42.0, 32.0, 32.0)
+    }
+
+    // 多选入口钮：排在详情/收藏之后（frontend hover 菜单的 multiselect 项）。
+    private func selectRect(): Rect {
+        Rect(frame.x + 88.0, frame.y + frame.h - 42.0, 32.0, 32.0)
     }
 
     private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph, hoverId: String,
@@ -979,8 +1052,10 @@ class CardHoverActions <: Widget {
     public func draw(ctx: UiContext): Unit {
         let detailsT = max(0.0, min(1.0, (progress - 0.06) / 0.94))
         let favoriteT = max(0.0, min(1.0, (progress - 0.16) / 0.84))
+        let selectT = max(0.0, min(1.0, (progress - 0.26) / 0.74))
         drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), "cover-details:${key}", false, detailsT)
         drawButton(ctx, favoriteRect(), GhostGlyph.Heart, "cover-favorite:${key}", favorited, favoriteT)
+        drawButton(ctx, selectRect(), GhostGlyph.Named(IconName.Check), "cover-select:${key}", false, selectT)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -993,6 +1068,8 @@ class CardHoverActions <: Widget {
                     ctx.claimHover("cover-details:${key}", CursorShape.Interactive)
                 } else if (favoriteRect().contains(x, y)) {
                     ctx.claimHover("cover-favorite:${key}", CursorShape.Interactive)
+                } else if (selectRect().contains(x, y)) {
+                    ctx.claimHover("cover-select:${key}", CursorShape.Interactive)
                 }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (favoriteRect().contains(x, y)) {
@@ -1001,6 +1078,10 @@ class CardHoverActions <: Widget {
                 }
                 if (detailsRect().contains(x, y)) {
                     onDetails()
+                    return true
+                }
+                if (selectRect().contains(x, y)) {
+                    onSelect()
                     return true
                 }
             case _ => ()
@@ -1104,6 +1185,7 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
 public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
         {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
+        {=> model.enterSelection(item.arcid) },
         isNew: item.isnew, tank: false, favorited: item.isfavorite,
         pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
@@ -1113,13 +1195,17 @@ public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
     homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%",
         coverW, item.coverAssetId, {=> model.openTank(item.id) }, {=> model.toggleTankFavoriteOnCard(item.id) },
+        {=> model.enterSelection(item.id) },
         isNew: false, tank: true, favorited: item.isfavorite, pct: item.readPct,
         summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 卡片公共骨架：封面 ZStack（可选叠层/封面/描边/角标/进度/悬浮信息层）+ 标题 + meta。
+// onSelect 为 hover 浮层「多选」入口（frontend hover 菜单的 multiselect 项）：进入选择模式
+// 并选中本卡；tank 详情成员卡由调用方在回调里顺带记录 detailSelectionOwner（见 detail_view）。
 private func homeCoverCard(model: AppModel, id: String, title: String, meta: String, coverW: Float32,
-    coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, isNew!: Bool, tank!: Bool,
+    coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit,
+    isNew!: Bool, tank!: Bool,
     favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = ""): Unit {
     let coverH = coverW * 4.0 / 3.0
     let cardKey = if (tank) { "tank:${id}" } else { "arc:${id}" }
@@ -1132,7 +1218,18 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
     let overlayT = overlayTween.value
     // HoverLift 在绘制期同步悬停态，下一帧构建与 BaseMediaCard 一致的信息/操作浮层。
     let overlayHovered = rememberState<Bool>("cover-overlay:${cardKey}", {=> false})
-    ClickArea(onClick: onClick) {
+    // 多选（第二波）：选择模式下单击 = 切换选中（不再打开详情），选中卡叠 accent
+    // 描边 + 右上勾选圆点；浮层详情/收藏操作在选择模式下整层不挂载。
+    let selecting = model.selectionMode.value
+    let selected = model.isSelected(id)
+    ClickArea(onClick: {
+        =>
+            if (selecting) {
+                model.toggleSelected(id)
+            } else {
+                onClick()
+            }
+    }) {
         VStack {
             ZStack {
                 if (tank) {
@@ -1150,18 +1247,30 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     noCoverBox(model, coverW, coverH)
                 }
                 CoverBorder(hoverId)
+                if (selecting && selected) {
+                    SelectionRing()
+                }
                 if (overlayT > 0.001) {
                     CoverClipStart()
                     cardHoverOverlay(summary, tagsCsv, coverH, overlayT)
                     CoverClipEnd()
                 }
                 // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
-                CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite)
-                // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）。
+                // 选择模式下不挂载：浮层按钮的详情/收藏语义与 toggle 选中冲突。
+                if (!selecting) {
+                    CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite,
+                        onSelect)
+                }
+                // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）；
+                // 选择模式下 NEW 让位给勾选圆点（选择态比「新到」更需要一目了然）。
                 HStack {
                     if (tank) { tankBadge(model) }
                     Spacer()
-                    if (isNew && !tank) { newBadge() }
+                    if (selecting) {
+                        SelectionDot(selected)
+                    } else if (isNew && !tank) {
+                        newBadge()
+                    }
                 }.crossAxisAlignment(CrossAxisAlignment.Start).padding(8.vp)
                 // 底部进度条：全宽（两端内缩在 CoverProgress 内部处理）。
                 if (pct > 0) {
@@ -1179,7 +1288,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
 }
 
 // BaseMediaCard 同款封面悬浮层：底部渐变上依次放标签、三行简介和详情/收藏操作。
-// 多选不属于此层；卡片主体点击仍保持原有打开详情行为，内部操作会先消费点击事件。
+// 选择模式的 toggle 由 homeCoverCard 的 ClickArea 分派，本浮层及其操作层仅在非选择模式挂载。
 private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32, progress: Float32): Unit {
     let tags = cardHoverTags(tagsCsv)
     let maxTags: Int64 = if (summary.size > 0) { 5 } else { 8 }
@@ -1297,6 +1406,58 @@ public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem
         id: "browse:${rowKey}") { i =>
         searchItemCard(model, items[i], coverW)
     }.height(stripH)
+}
+
+// ── 多选批量操作（第二波；对齐 frontend useHomeSelection + HomeBatchActionBar）──
+
+// 把选中的 id 按条目类型拆成档案/合集两列（model.batch* 的两列入参）。类型依据当前
+// 已加载条目（搜索结果 + 浏览行）判定；未匹配的 id 按档案处理——翻页/重搜/切页都会
+// exitSelection（见 model），正常不会有不可见残留选中。
+public func splitSelection(model: AppModel): (ArrayList<String>, ArrayList<String>) {
+    let tankIds = HashSet<String>()
+    for (item in model.items.value) {
+        if (isTankItem(item)) {
+            tankIds.add(item.tankoubonId)
+        }
+    }
+    for (row in model.browseRows.value) {
+        for (item in row.items) {
+            if (isTankItem(item)) {
+                tankIds.add(item.tankoubonId)
+            }
+        }
+    }
+    let arcids = ArrayList<String>()
+    let tanks = ArrayList<String>()
+    for (id in model.selectedIds.value) {
+        if (tankIds.contains(id)) {
+            tanks.add(id)
+        } else {
+            arcids.add(id)
+        }
+    }
+    (arcids, tanks)
+}
+
+// 底部悬浮胶囊批量栏：已选计数 + 收藏/取消收藏/加入合集/删除/退出。
+// 删除（二次确认）与加入合集（选合集对话框）的弹窗状态由调用方持有，这里只透传回调；
+// 「加入合集」仅档案可加入，无档案选中时禁用。胶囊造型同阅读器页码 pill（panel 底 +
+// 全圆角 + StaticBorder 描边）。
+public func batchActionBar(model: AppModel, onAddToTank: () -> Unit, onDelete: () -> Unit): Unit {
+    let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    let (arcids, tankIds) = splitSelection(model)
+    ZStack {
+        HStack {
+            Label("已选 ${model.selectedCount()} 项").fontSize(12.5.fp)
+            Button("收藏", {=> model.batchFavorite(arcids, tankIds, true)})
+            Button("取消收藏", {=> model.batchFavorite(arcids, tankIds, false)})
+            Button("加入合集", onAddToTank).enabled(arcids.size > 0)
+            Button("删除", onDelete).role(ButtonRole.Danger)
+            Button("退出", {=> model.exitSelection()})
+        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+            .padding(14.vp, 8.vp).background(panel, 999.vp)
+        StaticBorder(999.0)
+    }
 }
 
 // ── 详情页共用骨架与组件（Task 11；原型 home-detail-redesign.html「档案详情/合集详情」视图）──
@@ -2113,8 +2274,11 @@ private func pageFileName(p: PageInfo): String {
 
 // ── 合集成员（原型 .member-grid / .member-list；成员行含 mini 进度条）──
 
-// 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格，悬停提供详情与收藏图标按钮。
-public func memberGridContent(model: AppModel, members: Array<SearchItem>): Unit {
+// 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格，悬停提供详情/收藏/多选图标按钮。
+// onEnterSelection：hover 浮层「多选」入口回调（进入选择模式并选中该项；tank 详情由
+// 调用方顺带记录选择归属，见 detail_view.detailSelectionOwner）。
+public func memberGridContent(model: AppModel, members: Array<SearchItem>,
+    onEnterSelection: (String) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0
     var cols = if (w <= 0.0) { 4 } else { Int64((w + 12.0) / 152.0) }
     if (cols < 2) { cols = 2 }
@@ -2124,16 +2288,51 @@ public func memberGridContent(model: AppModel, members: Array<SearchItem>): Unit
     let gridH = Float32(rows) * (coverH + MEMBER_TEXT_H) + Float32(rows - 1) * 16.0
     LazyGrid(members, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0,
         id: "member-grid") { item =>
-        memberCard(model, item, cellW)
+        if (model.selectionMode.value) {
+            memberSelectCard(model, item, cellW)
+        } else {
+            memberCard(model, item, cellW, onEnterSelection)
+        }
     }.height(gridH)
 }
 
-// 成员卡：复用首页卡骨架，悬停提供详情与收藏图标按钮。
-private func memberCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
+// 成员卡：复用首页卡骨架，悬停提供详情/收藏/多选图标按钮。
+private func memberCard(model: AppModel, item: SearchItem, coverW: Float32,
+    onEnterSelection: (String) -> Unit): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
         {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
+        {=> onEnterSelection(item.arcid) },
         isNew: item.isnew, tank: false, favorited: item.isfavorite,
         pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+}
+
+// 选择模式成员卡（网格态）：不走 homeCoverCard（该卡归书库多选改造），用简化卡——
+// 封面 + 标题/meta，点击 = 切换选中；选中态为 accentSoft 高亮底 + 标题行 ✓ 前缀。
+private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
+    let light = model.isLight()
+    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
+    let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
+    let selected = model.isSelected(item.arcid)
+    let coverH = coverW * 4.0 / 3.0
+    ClickArea(onClick: {=> model.toggleSelected(item.arcid) }) {
+        VStack {
+            if (item.coverAssetId > 0) {
+                remoteImage(model, "asset:${item.coverAssetId}", "/api/assets/${item.coverAssetId}",
+                    Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp))
+            } else {
+                noCoverBox(model, coverW, coverH)
+            }
+            HStack {
+                if (selected) {
+                    Label("✓").fontSize(12.fp).foregroundColor(accent)
+                }
+                Label(item.title).fontSize(12.fp).maxLines(1).flex()
+            }.spacing(4.vp).hug()
+            Label(memberMeta(item, memberReadPct(item.pagecount, item.progress))).fontSize(11.fp)
+                .muted().maxLines(1)
+        }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+            .background(if (selected) { accentSoft } else { Color.rgba(0, 0, 0, 0) }, 10.vp)
+    }
 }
 
 // 列表态行高：40×56 mini 封面 + 上下 8vp 内边距 = 72vp（LazyList 定高行）。
@@ -2145,14 +2344,35 @@ private let MEMBER_ROW_H: Float32 = 72.0
 private let MEMBER_LIST_MAX_H: Float32 = 736.0
 
 // 列表态（原型 .member-row）：序号 + 40×56 mini 封面 + 标题/meta + 90vp mini 进度条。
-public func memberListContent(model: AppModel, members: Array<SearchItem>): Unit {
+// 选择模式：行首 ✓ 勾选位、点击 = 切换选中（而非打开详情）、选中行铺 accentSoft 高亮底。
+// 非选择模式：序号位让位给行首勾选圆圈（frontend 列表项 hover 勾选入口），点击 = 进入
+// 选择模式并选中本行（onEnterSelection，tank 详情由调用方记录选择归属）。
+public func memberListContent(model: AppModel, members: Array<SearchItem>,
+    onEnterSelection: (String) -> Unit): Unit {
+    let light = model.isLight()
+    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
+    let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
     let contentH = Float32(members.size) * MEMBER_ROW_H + Float32(max(0, members.size - 1)) * 2.0
     LazyList(members.size, {_ => MEMBER_ROW_H}, spacing: 2.0,
         key: {i => members[i].arcid}, id: "member-list") { i =>
         let it = members[i]
         let pct = memberReadPct(it.pagecount, it.progress)
-        ClickArea(onClick: {=> model.openDetail(it.arcid) }) {
+        let selecting = model.selectionMode.value
+        let selected = selecting && model.isSelected(it.arcid)
+        ClickArea(onClick: {=>
+            if (model.selectionMode.value) {
+                model.toggleSelected(it.arcid)
+            } else {
+                model.openDetail(it.arcid)
+            }
+        }) {
             HStack {
+                if (selecting) {
+                    Label(if (selected) { "✓" } else { "" }).fontSize(12.fp)
+                        .foregroundColor(accent).width(18.vp)
+                } else {
+                    MemberRowSelectEntry(it.arcid, {=> onEnterSelection(it.arcid) })
+                }
                 Label("${i + 1}").fontSize(11.fp).muted().width(30.vp)
                 if (it.coverAssetId > 0) {
                     remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}",
@@ -2166,8 +2386,59 @@ public func memberListContent(model: AppModel, members: Array<SearchItem>): Unit
                 }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
                 ProgressTrack(pct, 4.0).width(90.vp)
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(8.vp)
+                .background(if (selected) { accentSoft } else { Color.rgba(0, 0, 0, 0) }, 8.vp)
         }
     }.height(min(contentH, MEMBER_LIST_MAX_H))
+}
+
+// 成员列表行首多选入口（frontend 列表项的勾选圆圈）：常态 muted 空心圆，hover 转
+// accent 实底白勾提示可点；点击消费事件（不穿透到行 ClickArea 的打开详情）。
+class MemberRowSelectEntry <: Widget {
+    private let hoverId: String
+    private let onEnter: () -> Unit
+    private var frame = Rect.zero()
+
+    public init(arcid: String, onEnter: () -> Unit) {
+        this.hoverId = "member-select:${arcid}"
+        this.onEnter = onEnter
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(18.0, 18.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let cx = frame.centerX()
+        let cy = frame.centerY()
+        if (ctx.isHovered(hoverId)) {
+            ctx.renderer.fillCircle(cx, cy, 8.0, ctx.theme.accent)
+            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 5.0, cy - 5.0, 10.0, 10.0),
+                Color.rgb(255, 255, 255))
+        } else {
+            ctx.renderer.strokeCircle(cx, cy, 8.0, Pen(width: 1.2, color: ctx.theme.mutedText))
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(hoverId, CursorShape.Interactive)
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    onEnter()
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
 }
 
 // 成员行 meta：「N 页 · 已读 X%」或仅「N 页」（与首页卡 meta 同规）。

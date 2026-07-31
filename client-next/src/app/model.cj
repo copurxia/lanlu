@@ -4,7 +4,7 @@ import cui.{FileDialogRequest, FileDialogResult, State, Toaster, ToastKind, clea
     onPixelImageEvicted, stagePixelImage}
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
-import std.collection.{ArrayList, HashMap}
+import std.collection.{ArrayList, HashMap, HashSet}
 import std.convert.Parsable
 import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.math.sqrt
@@ -163,6 +163,12 @@ public class AppModel {
     public let favOnly = State<Bool>(false)
     public let newOnly = State<Bool>(false)
     public let untaggedOnly = State<Bool>(false)
+
+    // ---- 多选（书库网格与合集成员列表共用一套状态）----
+    // 条目 key 规则：档案用 arcid，tank 条目用其 tankoubon_id（与 SearchItem.itemType
+    // == "tankoubon" 的区分逻辑配合，UI 层先判 isTank 再取对应 id）。
+    public let selectionMode = State<Bool>(false)
+    public let selectedIds = State<HashSet<String>>(HashSet<String>())
 
     // 右侧上传抽屉：分类使用 categories 的数组下标；系统文件对话框是异步请求，
     // 每次 onTick 由 pump 轮询，传输任务则走现有固定工作线程池。
@@ -1779,6 +1785,19 @@ public class AppModel {
         let _ = worker.submit("tankrelated:${tankid}", {=> a.relatedTankoubons(tankid, 12)})
     }
 
+    // 重取合集详情（成员增删/收藏切换成功后刷新）：与 openTank 同三路并发，
+    // 但不清空现有 State、不切页（避免已渲染内容闪空）。同名任务在途去重兜底。
+    private func refreshTankDetail(tankid: String): Unit {
+        let a = api ?? return
+        let _ = worker.submit("tankmeta:${tankid}", {=> a.getTankoubon(tankid)})
+        let q = SearchQuery()
+        q.tankoubonId = tankid
+        q.sortby = "tank_order"
+        q.order = "asc"
+        q.pageSize = 10000
+        let _ = worker.submit("tankmembers:${tankid}", {=> a.search(q)})
+    }
+
     // 合集主操作：从首个成员档案开始阅读（按钮在无成员时禁用，不会空调用）。
     public func startTankReading(): Unit {
         let members = tankMembers.value
@@ -2345,6 +2364,213 @@ public class AppModel {
                 =>
                     a.setIsNew(arcid, isNew)
                     return isNew
+            }
+        )
+    }
+
+    // ---- 多选操作 ----
+
+    // 长按/右键首项进入选择模式并选中该项。
+    public func enterSelection(id: String): Unit {
+        selectionMode.value = true
+        selectedIds.value.add(id)
+        selectedIds.value = selectedIds.value
+    }
+
+    // 选择模式下点选：切换选中态（空选不自动退出，退出由 exitSelection 显式控制）。
+    public func toggleSelected(id: String): Unit {
+        if (selectedIds.value.contains(id)) {
+            selectedIds.value.remove(id)
+        } else {
+            selectedIds.value.add(id)
+        }
+        selectedIds.value = selectedIds.value
+    }
+
+    public func clearSelection(): Unit {
+        selectedIds.value.clear()
+        selectedIds.value = selectedIds.value
+    }
+
+    public func exitSelection(): Unit {
+        clearSelection()
+        selectionMode.value = false
+    }
+
+    public func isSelected(id: String): Bool {
+        selectedIds.value.contains(id)
+    }
+
+    public func selectedCount(): Int64 {
+        selectedIds.value.size
+    }
+
+    // ---- 详情页/批量动作 ----
+
+    // 删除档案：成功后 toast、若仍在该档案详情页则退回书库，并刷新列表（dispatch 处理）。
+    public func deleteArchive(arcid: String): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "deletearchive:${arcid}",
+            {
+                =>
+                    a.deleteArchive(arcid)
+                    return arcid
+            }
+        )
+    }
+
+    // 删除合集：成功后 toast、若仍在该合集详情页则退回书库，并刷新列表（dispatch 处理）。
+    public func deleteCurrentTank(id: String): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "deletetank:${id}",
+            {
+                =>
+                    a.deleteTankoubon(id)
+                    return id
+            }
+        )
+    }
+
+    // 合集详情页收藏切换：复用 setTankFavorite，乐观更新详情页数据的 isfavorite
+    // （卡片场景见 toggleTankFavoriteOnCard；失败由 handleError 统一 toast）。
+    public func setTankFavoriteOnDetail(id: String, fav: Bool): Unit {
+        match (tank.value) {
+            case Some(t) =>
+                if (t.id == id) {
+                    t.isfavorite = fav
+                    tank.value = Some(t)
+                }
+            case None => ()
+        }
+        let a = api ?? return
+        let _ = worker.submit(
+            "tank-favorite:${id}",
+            {
+                =>
+                    a.setTankFavorite(id, fav)
+                    return fav
+            }
+        )
+    }
+
+    // 批量加入合集：逐个 addTankMember，单条失败不打断批量，
+    // 完成后 toast 成功/总数并刷新合集详情成员列表与书库（dispatch 处理）。
+    public func addArchivesToTank(tankId: String, arcids: ArrayList<String>): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "tankadd:${tankId}",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (arcid in arcids) {
+                        try {
+                            a.addTankMember(tankId, arcid)
+                            ok += 1
+                        } catch (_: Exception) {
+                            // 单条失败跳过，结果按 成功/总数 汇报
+                        }
+                    }
+                    return (ok, arcids.size)
+            }
+        )
+    }
+
+    // 新建合集并批量加入：createTankoubon 后逐个 addTankMember。
+    public func createTankAndAdd(name: String, arcids: ArrayList<String>): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "tankcreate:${name}",
+            {
+                =>
+                    let tankId = a.createTankoubon(name)
+                    var ok: Int64 = 0
+                    for (arcid in arcids) {
+                        try {
+                            a.addTankMember(tankId, arcid)
+                            ok += 1
+                        } catch (_: Exception) {
+                            // 单条失败跳过，结果按 成功/总数 汇报
+                        }
+                    }
+                    return (ok, arcids.size)
+            }
+        )
+    }
+
+    // 批量移出合集：逐个 removeTankMember，完成后刷新合集详情（dispatch 处理）。
+    public func removeTankMembers(tankId: String, arcids: ArrayList<String>): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "tankremove:${tankId}",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (arcid in arcids) {
+                        try {
+                            a.removeTankMember(tankId, arcid)
+                            ok += 1
+                        } catch (_: Exception) {
+                            // 单条失败跳过，结果按 成功/总数 汇报
+                        }
+                    }
+                    return (ok, arcids.size)
+            }
+        )
+    }
+
+    // 批量删除：档案与合集按 id 分两列传入（UI 层按 isTankItem 拆分 selectedIds），
+    // 逐个删除；完成后 toast 成功/总数、刷新书库并退出选择模式（dispatch 处理）。
+    public func batchDelete(arcids: ArrayList<String>, tankIds: ArrayList<String>): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "batch.delete",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (arcid in arcids) {
+                        try {
+                            a.deleteArchive(arcid)
+                            ok += 1
+                        } catch (_: Exception) {
+                        }
+                    }
+                    for (tankId in tankIds) {
+                        try {
+                            a.deleteTankoubon(tankId)
+                            ok += 1
+                        } catch (_: Exception) {
+                        }
+                    }
+                    return (ok, arcids.size + tankIds.size)
+            }
+        )
+    }
+
+    // 批量收藏/取消收藏：档案走 setFavorite、合集走 setTankFavorite；完成后 toast + 刷新。
+    public func batchFavorite(arcids: ArrayList<String>, tankIds: ArrayList<String>, fav: Bool): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "batch.favorite",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (arcid in arcids) {
+                        try {
+                            a.setFavorite(arcid, fav)
+                            ok += 1
+                        } catch (_: Exception) {
+                        }
+                    }
+                    for (tankId in tankIds) {
+                        try {
+                            a.setTankFavorite(tankId, fav)
+                            ok += 1
+                        } catch (_: Exception) {
+                        }
+                    }
+                    return (fav, ok, arcids.size + tankIds.size)
             }
         )
     }
@@ -3268,6 +3494,96 @@ public class AppModel {
                     }
                 case None => ()
             }
+        } else if (name.startsWith("deletearchive:")) {
+            // 删除档案成功：toast、仍在该详情页则退回书库、刷新列表。
+            toaster.show("档案已删除", kind: ToastKind.Success)
+            let arcid = name.removePrefix("deletearchive:")
+            match (page.value) {
+                case Page.Detail(cur) =>
+                    if (arcid == cur) {
+                        page.value = Page.Library
+                    }
+                case _ => ()
+            }
+            refreshLibrary()
+        } else if (name.startsWith("deletetank:")) {
+            // 删除合集成功：toast、仍在该合集详情页则退回书库、刷新列表。
+            toaster.show("合集已删除", kind: ToastKind.Success)
+            let tankid = name.removePrefix("deletetank:")
+            match (page.value) {
+                case Page.Tank(cur) =>
+                    if (tankid == cur) {
+                        page.value = Page.Library
+                    }
+                case _ => ()
+            }
+            refreshLibrary()
+        } else if (name.startsWith("tankadd:")) {
+            // 批量加入合集完成：toast 成功/总数，刷新合集详情成员列表与书库。
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total) = (p as (Int64, Int64)).getOrThrow()
+                    toaster.show("已加入合集 ${ok}/${total}", kind: ToastKind.Success)
+                case None => ()
+            }
+            let tankid = name.removePrefix("tankadd:")
+            match (page.value) {
+                case Page.Tank(cur) =>
+                    if (tankid == cur) {
+                        refreshTankDetail(tankid)
+                    }
+                case _ => ()
+            }
+            refreshLibrary()
+        } else if (name.startsWith("tankremove:")) {
+            // 批量移出合集完成：toast 成功/总数，刷新合集详情成员列表。
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total) = (p as (Int64, Int64)).getOrThrow()
+                    toaster.show("已移出合集 ${ok}/${total}", kind: ToastKind.Success)
+                case None => ()
+            }
+            let tankid = name.removePrefix("tankremove:")
+            match (page.value) {
+                case Page.Tank(cur) =>
+                    if (tankid == cur) {
+                        refreshTankDetail(tankid)
+                    }
+                case _ => ()
+            }
+        } else if (name.startsWith("tankcreate:")) {
+            // 新建合集并加入完成：toast 成功/总数，刷新书库（新合集卡片入场）。
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total) = (p as (Int64, Int64)).getOrThrow()
+                    toaster.show("合集已创建（加入 ${ok}/${total}）", kind: ToastKind.Success)
+                case None => ()
+            }
+            refreshLibrary()
+        } else if (name == "batch.delete") {
+            // 批量删除完成：toast 成功/总数、刷新书库并退出选择模式。
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total) = (p as (Int64, Int64)).getOrThrow()
+                    toaster.show("已删除 ${ok}/${total}", kind: ToastKind.Success)
+                case None => ()
+            }
+            refreshLibrary()
+            exitSelection()
+        } else if (name == "batch.favorite") {
+            // 批量收藏完成：toast 成功/总数并刷新书库（保留选择模式，便于连续操作）。
+            match (r.payload) {
+                case Some(p) =>
+                    let (fav, ok, total) = (p as (Bool, Int64, Int64)).getOrThrow()
+                    let verb = if (fav) {
+                        "已收藏"
+                    } else {
+                        "已取消收藏"
+                    }
+                    toaster.show("${verb} ${ok}/${total}", kind: ToastKind.Success)
+                case None => ()
+            }
+            refreshLibrary()
         } else if (name.startsWith("favorite:") || name.startsWith("isnew:")) {
             // 收藏/未读切换成功：仍在详情页/阅读页则重取元数据刷新展示
             match (page.value) {

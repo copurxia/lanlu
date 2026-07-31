@@ -2,6 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
+import std.collection.ArrayList
 
 // 与 app 包 SEARCH_SORT_FIELDS 按下标一一对应（改动须两边同步）。
 private let SORT_LABELS = ["标题", "创建时间", "更新时间", "最近阅读", "页数", "发布日期"]
@@ -26,23 +27,51 @@ private let GRID_SPACING: Float32 = 16.0
 // 分类计数 + 设置）｜右边线｜主区（顶部工具条 + 双模式内容：浏览=横排行，搜索/过滤=密网格+分页）。
 // 卡片/行组件在 widgets.cj（archiveCard/tankCard/cardRow/sectionHeader）。
 public func libraryView(model: AppModel): Unit {
+    // 批量操作相关弹窗状态：删除二次确认（confirmModal 同款）、加入合集对话框；
+    // arcids 在打开对话框那一刻快照（选择可能在对话框存续期间继续变化）。
+    let deleteOpen = rememberState<Bool>("lib.batchDeleteOpen", {=> false})
+    let addTankOpen = rememberState<Bool>("lib.addTankOpen", {=> false})
+    let addTankArcids = rememberState<ArrayList<String>>("lib.addTankArcids", {=> ArrayList<String>()})
     // 根 HStack 默认 8vp 间距会在侧栏/边线/内容区之间留出死区，必须清零。
     HStack {
         sidebar(model)
         Divider(axis: Axis.Vertical)
         // SizeProbe 包住整个内容区：搜索网格（自适应列数）与工具条（窄宽适配）都读它。
         SizeProbe(width: model.contentWidth) {
-            VStack {
-                toolbar(model)
-                // 工具条下不画分割线：原型 .home-tools 无底边线，主区唯一的横向分界是顶栏底线。
-                if (model.isBrowseMode()) {
-                    browseContent(model)
-                } else {
-                    searchContent(model)
+            ZStack {
+                VStack {
+                    toolbar(model)
+                    // 工具条下不画分割线：原型 .home-tools 无底边线，主区唯一的横向分界是顶栏底线。
+                    if (model.isBrowseMode()) {
+                        browseContent(model)
+                    } else {
+                        searchContent(model)
+                    }
                 }
-            }
+                // 多选批量栏（第二波，frontend HomeBatchActionBar）：选择模式且有选中时
+                // 悬浮底部居中胶囊；Spacer 列把它压到内容区底边并留出 14vp 间距。
+                if (model.selectionMode.value && model.selectedCount() > 0) {
+                    VStack {
+                        Spacer()
+                        batchActionBar(model, {
+                            =>
+                                // 合集条目不可加入合集：只快照档案列。
+                                let (arcids, _) = splitSelection(model)
+                                addTankArcids.value = arcids
+                                addTankOpen.value = true
+                        }, {=> deleteOpen.value = true })
+                    }.fillWidth().padding(0.vp, 0.vp, 0.vp, 14.vp)
+                }
+            }.alignment(Alignment.TopLeading)
         }
     }.spacing(0.0)
+    // 批量删除二次确认（Modal 不占布局，挂根级即可）。
+    confirmModal(deleteOpen, "删除所选内容？", "将删除当前选中的档案/合集，此操作不可撤销。", "删除", {
+        =>
+            let (arcids, tankIds) = splitSelection(model)
+            model.batchDelete(arcids, tankIds)
+    })
+    addToTankDialog(model, addTankOpen, addTankArcids)
 }
 
 // ---- 左侧栏（原型 #home-side：224vp，无自带底色、与主区同为窗口 BG，仅右边线分隔）----
@@ -130,6 +159,8 @@ private func toolbar(model: AppModel): Unit {
         if (!model.isBrowseMode() && !narrow) {
             Label("共 ${model.recordsTotal.value} 项").fontSize(12.fp).muted()
         }
+        // 多选入口对齐 frontend：无显式开关，由卡片 hover 浮层的勾选按钮进入
+        // （CardHoverActions → model.enterSelection），退出由批量栏承担。
         // 原型 .home-tools 的 ⟳：纯图标无边框钮。
         GhostIconButton(GhostGlyph.Named(IconName.Refresh), "toolbar:refresh") {=>
             model.refreshLibrary()
