@@ -16,10 +16,11 @@ jobs:
           submodules: true
 
       - name: Setup Cangjie
-        uses: Zxilly/setup-cangjie@v2
+        uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
           version: latest
+          components: stdx
 
       - name: Install build tools
         run: |
@@ -52,15 +53,6 @@ jobs:
           set -eux
           xmake --version
 
-      - name: Download stdx
-        env:
-          STDX_URL: ${{ vars.STDX_URL }}
-        run: |
-          set -eux
-          : "${STDX_URL:?Missing repository variable STDX_URL}"
-          wget -O s.zip "$STDX_URL"
-          unzip -q s.zip -d stdx
-
       - name: Checkout WasmEdge source (public)
         uses: actions/checkout@v4
         with:
@@ -70,7 +62,7 @@ jobs:
 
       - name: Build backend
         env:
-          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
+          CANGJIE_STDX_PATH: ${{ env.CANGJIE_STDX_PATH_STATIC }}
           WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
         run: |
           unset GIT_DIR GIT_WORK_TREE

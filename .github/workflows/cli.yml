@@ -68,23 +68,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Cangjie
-        uses: Zxilly/setup-cangjie@v2
+        uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
           version: latest
-
-      - name: Download stdx
-        env:
-          STDX_URL: ${{ vars.STDX_URL }}
-        run: |
-          set -eux
-          : "${STDX_URL:?Missing repository variable STDX_URL}"
-          wget -O s.zip "$STDX_URL"
-          unzip -q s.zip -d stdx
+          components: stdx
 
       - name: Build lanlu-cli
         env:
-          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
+          CANGJIE_STDX_PATH: ${{ env.CANGJIE_STDX_PATH_STATIC }}
         run: |
           set -eux
           cd lanlu/cli
