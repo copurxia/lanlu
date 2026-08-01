@@ -65,7 +65,7 @@ func advancedFilterDialog(model: AppModel): Unit {
                 Button(model.t("common.filter"), {=> model.applyAdvancedFilter()})
                     .role(ButtonRole.Primary)
                     .enabled(!model.loading.value)
-            }.spacing(8.vp)
+            }.spacing(8.vp).fillWidth()
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(420.vp)
     })
 }
