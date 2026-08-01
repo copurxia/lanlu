@@ -1982,7 +1982,7 @@ public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
                 TagChip(t, model.isLight(), "tf:${t}") {=>
                     model.searchText.value = t
                     model.submitFilter()
-                    model.page.value = Page.Library
+                    model.navigate(Page.Library)
                 }
             }
             i += 1
@@ -2006,7 +2006,7 @@ public func tagGroups(model: AppModel, tags: ArrayList<String>): Unit {
                     TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}") {=>
                         model.searchText.value = v[1]
                         model.submitFilter()
-                        model.page.value = Page.Library
+                        model.navigate(Page.Library)
                     }
                 }
             }.spacing(7.vp)

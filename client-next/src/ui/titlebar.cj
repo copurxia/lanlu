@@ -679,7 +679,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                     => model.openUploadDrawer()
                 }
                 GhostIconButton(GhostGlyph.Gear, "titlebar:settings") {
-                    => model.page.value = Page.Settings
+                    => model.navigate(Page.Settings)
                 }
             } else {
                 Spacer()

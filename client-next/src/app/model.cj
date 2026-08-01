@@ -197,6 +197,11 @@ private class NativeImageReleaser <: PixelReleaser {
 // 详情页多级编辑草稿。根层编辑档案，子层逐页编辑；草稿只在 UI 线程修改。
 public class AppModel {
     public let page = State<Page>(Page.Login)
+    // 页面过渡（交叉淡化）：navigate() 不立即切页，先置 pending 标志让
+    // PageTransition 在下一帧捕获旧页面（GPU 快照），捕获完成后
+    // commitPendingPage() 才真正切页。直接赋 page.value（快照播种/测试）跳过动画。
+    public var pageTransitionPending = false
+    private var pendingPage: ?Page = None
     public let toaster = Toaster()
     public var settings: AppSettings
     private let localizer = Localizer()
@@ -958,7 +963,7 @@ public class AppModel {
             imageStates.clear()
         }
         isAdmin.value = false
-        page.value = Page.Login
+        navigate(Page.Login)
     }
 
     // ---- 书库查询（即时应用语义：状态变更即写 query 并查询，无「应用」按钮）----
@@ -988,16 +993,37 @@ public class AppModel {
 
     // ---- 书架（library-redesign.html）----
 
+    // 页面过渡入口：不立即切页，先置 pending 标志，让 PageTransition 在下一帧
+    // 捕获旧页面（GPU 快照）后调 commitPendingPage() 真正切页，产生 200ms 交叉
+    // 淡化。同页（含参数相同）不播过渡；快照播种/测试直接赋 page.value 跳过动画。
+    public func navigate(target: Page): Unit {
+        if (pageEquals(page.value, target)) {
+            return
+        }
+        pendingPage = Some(target)
+        pageTransitionPending = true
+    }
+
+    // PageTransition 捕获旧帧后调用：提交挂起的页面切换。
+    public func commitPendingPage(): Unit {
+        match (pendingPage) {
+            case Some(p) =>
+                page.value = p
+                pendingPage = None
+            case None => ()
+        }
+    }
+
     public func openHome(): Unit {
         exitSelection()
         clearAutocomplete()
-        page.value = Page.Library
+        navigate(Page.Library)
     }
 
     public func openShelf(): Unit {
         exitSelection()
         clearAutocomplete()
-        page.value = Page.Shelf
+        navigate(Page.Shelf)
         if (shelfTab.value == 0) {
             if (!shelfFavoritesLoaded) { loadShelfFavorites() }
         } else if (!shelfHistoryLoaded) {
@@ -2068,7 +2094,7 @@ public class AppModel {
         detailPages.value = ArrayList<PageInfo>()
         parentTanks.value = ArrayList<TankoubonInfo>()
         relatedItems.value = ArrayList<SearchItem>()
-        page.value = Page.Detail(arcid)
+        navigate(Page.Detail(arcid))
         let a = api ?? return
         let lang = language.value
         let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
@@ -2089,7 +2115,7 @@ public class AppModel {
         tankMembers.value = ArrayList<SearchItem>()
         tankRelated.value = ArrayList<TankoubonInfo>()
         tankFilter.value = ""
-        page.value = Page.Tank(tankid)
+        navigate(Page.Tank(tankid))
         let a = api ?? return
         let lang = language.value
         let _ = worker.submitTagged("tankmeta:${tankid}", lang, {=> a.getTankoubon(tankid, lang: lang)})
@@ -2206,7 +2232,7 @@ public class AppModel {
         // lastAutoPlayTurnMs（来自上一本书或 AppModel 初始值 0）导致立即触发翻页并误判末页。
         // 必须在 api ?? return 之前，否则离线模式会跳过重置。
         lastAutoPlayTurnMs = reader.clock()
-        page.value = Page.Reader(arcid, startPage)
+        navigate(Page.Reader(arcid, startPage))
         let a = api ?? return
         let _ = worker.submit("files:${arcid}", {=> a.files(arcid)})
         // 顶栏标题与收藏态（reader-redesign #topbar）：复用元数据通道。
@@ -3556,7 +3582,7 @@ public class AppModel {
                             imageStates.clear()
                         }
                         isAdmin.value = d.isAdmin
-                        page.value = Page.Library
+                        navigate(Page.Library)
                         loadCategories()
                         loadBrowseRows()
                     }
@@ -3585,7 +3611,7 @@ public class AppModel {
                 case Some(p) => isAdmin.value = (p as LoginData).getOrThrow().isAdmin
                 case None => ()
             }
-            page.value = Page.Library
+            navigate(Page.Library)
             loadCategories()
             loadBrowseRows()
         } else if (name.startsWith("autocomplete:")) {
@@ -3940,7 +3966,7 @@ public class AppModel {
             match (page.value) {
                 case Page.Detail(cur) =>
                     if (arcid == cur) {
-                        page.value = Page.Library
+                        navigate(Page.Library)
                     }
                 case _ => ()
             }
@@ -3952,7 +3978,7 @@ public class AppModel {
             match (page.value) {
                 case Page.Tank(cur) =>
                     if (tankid == cur) {
-                        page.value = Page.Library
+                        navigate(Page.Library)
                     }
                 case _ => ()
             }
@@ -4878,6 +4904,6 @@ public class AppModel {
     public func searchFromSettings(tag: String): Unit {
         searchText.value = tag
         submitFilter()
-        page.value = Page.Library
+        navigate(Page.Library)
     }
 }

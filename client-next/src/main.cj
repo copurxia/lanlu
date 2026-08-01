@@ -188,6 +188,10 @@ main(): Int64 {
                     rootView(model)
                 }.spacing(0.0)
             }
+            // 页面切换交叉淡化：navigate() 推迟切页，本层在旧页留存的那一帧捕获
+            // GPU 快照，提交切页后旧帧 200ms 淡出。置于页面内容之上、浮层之下，
+            // 快照只含页面主体（titlebar+页区），抽屉/Toast 不受影响。
+            PageTransition(model)
             uploadDrawer(app.sdlWindow, model)
             metadataEditOverlay(model)
             ThemeRipple(model)

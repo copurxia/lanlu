@@ -272,7 +272,7 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
                 Label(model.settings.username).fontSize(15.fp)
                 Label(model.settings.serverUrl).fontSize(11.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            Button(model.t("overview.switchServer"), {=> model.page.value = Page.Login})
+            Button(model.t("overview.switchServer"), {=> model.navigate(Page.Login)})
                 .key("overview.switchServer")
                 .role(ButtonRole.Primary)
             Button(model.t("overview.logout"), {=> logoutOpen.value = true})
