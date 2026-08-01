@@ -1685,7 +1685,8 @@ public class WasmHostBridge {
         if (archiveId.size == 0 || entryName.trimAscii().size == 0) {
             return (false, "{}", "missing archive_id/entry_name")
         }
-        if (length <= 0) {
+        // length=0 是合法的探测请求（只查询 total_size），仅拒绝负数
+        if (length < 0) {
             return (false, "{}", "invalid length")
         }
         let safeName = normalizeSafeRelPath(entryName)
