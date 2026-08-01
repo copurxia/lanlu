@@ -19,8 +19,13 @@ func decodePngToRgba(): Unit {
     let d = decodeFileToRgba(src)
     @Expect(d.width, 1i32)
     @Expect(d.height, 1i32)
-    // RGBA 四波段：像素长度必须 == width*height*4
-    @Expect(d.pixels.size, Int64(d.width) * Int64(d.height) * 4)
+    // RGBA 四波段：像素长度必须 == width*height*4（原生内存按同尺寸记账）
+    @Expect(d.size, Int64(d.width) * Int64(d.height) * 4)
+    @Expect(d.copyPixels().size, d.size)  // 拷贝路径与大小一致（测试断言用）
+    @Expect(d.isClosed(), false)
+    d.close()
+    @Expect(d.isClosed(), true)
+    d.close()  // 幂等：二次释放不崩溃
     remove(dir, recursive: true)
 }
 
@@ -49,7 +54,8 @@ func decodeJpegFullSize(): Unit {
     let d = decodeFileToRgba(src)
     @Expect(d.width, 64i32)
     @Expect(d.height, 64i32)
-    @Expect(d.pixels.size, 64 * 64 * 4)
+    @Expect(d.size, 64 * 64 * 4)
+    d.close()
     remove(dir, recursive: true)
 }
 
@@ -64,12 +70,13 @@ func decodeJpegShrinkOnLoad(): Unit {
     let d = decodeFileToRgba(src, maxDimension: 16i32)
     @Expect(d.width, 16i32)
     @Expect(d.height, 16i32)
-    @Expect(d.pixels.size, 16 * 16 * 4)
+    @Expect(d.size, 16 * 16 * 4)
     // 缩小解码 + RGBA 归一后不应是全黑/全透明（验证像素真实解出）。
     var sum: Int64 = 0
-    for (b in d.pixels) {
+    for (b in d.copyPixels()) {
         sum += Int64(b)
     }
     @Expect(sum > 0, true)
+    d.close()
     remove(dir, recursive: true)
 }

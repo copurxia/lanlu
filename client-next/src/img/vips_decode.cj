@@ -1,6 +1,7 @@
 package lanlu_client_next.img
 
 import std.fs.{File, OpenMode, Path}
+import std.math.sqrt
 import std.sync.Mutex
 import vips_ffi.*
 
@@ -25,32 +26,77 @@ private func ensureVips(): Unit {
                     vipsReady = Some(false)
                     throw Exception("libvips 初始化失败: ${VipsApi.takeErrorString()}")
                 }
+                // 与解码池线程数（worker.cj DECODE_THREADS=2）对齐：libvips 内部并发
+                // 过高会与多个解码 worker 叠加造成 CPU 过度订阅（P1.6 流水线）。
+                VipsApi.setConcurrency(2)
                 vipsReady = Some(true)
         }
     }
 }
 
-// vips 解码产物：RGBA 像素（R,G,B,A 字节序，长度 == width*height*4）。
-public class DecodedImage {
+// vips 解码产物（原生内存版）：RGBA 像素（R,G,B,A 字节序，长度 == width*height*4）直接
+// 保存在 libvips 分配的内存中，不再 memcpy 成整图 Array<UInt8>。指针所有权唯一：
+// close() 幂等释放（vips_free）；释放点覆盖被替换/淘汰/上传完成/清缓存/退出等全部路径。
+// 所有权转移纪律：工作线程创建，UI 线程经 stageNativePixelImage 接管后由 cui 释放。
+public class NativeDecodedImage {
     public let width: Int32
     public let height: Int32
-    public let pixels: Array<UInt8>
+    public let size: Int64
+    private var ptr: ?CPointer<UInt8> = None
 
-    public init(width: Int32, height: Int32, pixels: Array<UInt8>) {
+    public init(width: Int32, height: Int32, ptr: CPointer<UInt8>, size: Int64) {
         this.width = width
         this.height = height
-        this.pixels = pixels
+        this.size = size
+        this.ptr = Some(ptr)
+    }
+
+    // 底层指针；已释放时返回空指针（调用方按需防御）。
+    public func pointer(): CPointer<UInt8> {
+        match (ptr) {
+            case Some(p) => p
+            case None => CPointer<UInt8>()
+        }
+    }
+
+    public func isClosed(): Bool {
+        ptr.isNone()
+    }
+
+    // 幂等释放：已释放则忽略。UI 线程调用（cui 的 staged 释放路径）。
+    public func close(): Unit {
+        match (ptr) {
+            case Some(p) =>
+                VipsApi.free(CPointer<Unit>(p))
+                ptr = None
+            case None => ()
+        }
+    }
+
+    // 一次性拷回仓颉数组：仅测试断言/兼容旧行为用，主链路不得调用（会产生整图数组）。
+    public func copyPixels(): Array<UInt8> {
+        let out = Array<UInt8>(size, repeat: 0u8)
+        match (ptr) {
+            case Some(p) =>
+                unsafe {
+                    let handle = acquireArrayRawData(out)
+                    memcpy(handle.pointer, p, UIntNative(size))
+                    releaseArrayRawData(handle)
+                }
+            case None => ()
+        }
+        out
     }
 }
 
-// 任意格式图片文件 → RGBA 像素。失败抛异常（信息带 vips 错误串）。
+// 任意格式图片文件 → 原生 RGBA 内存。失败抛异常（信息带 vips 错误串）。
 // 管线：imageNewFromFile（JPEG 且需缩小时按档位带 [shrink=N] loader 选项重开，
 // 解码期 DCT 缩放）→ （可选）vips_resize 缩到档位 → autorot（按 EXIF 方向转正）
 // → colourspace(sRGB) → castUchar → bands 归一到 4 波段 → writeToMemory → 拷进 Array<UInt8>。
 // maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
 // 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
 // 仅在工作线程调用（vips 解码是 CPU 重活，UI 线程纪律见 model.startImageTask）。
-public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): DecodedImage {
+public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDecodedImage {
     ensureVips()
     var inImg: VipsImagePtr = CPointer<VipsImage>()
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()
@@ -142,13 +188,10 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): DecodedIma
         let expected = Int64(w) * Int64(h) * 4
         if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected}") }
 
-        let pixels = Array<UInt8>(n, repeat: 0u8)
-        unsafe {
-            let handle = acquireArrayRawData(pixels)
-            memcpy(handle.pointer, CPointer<UInt8>(mem), size)
-            releaseArrayRawData(handle)
-        }
-        return DecodedImage(w, h, pixels)
+        // 所有权移交给 NativeDecodedImage：mem 置空，finally 不再释放。
+        let img = NativeDecodedImage(w, h, CPointer<UInt8>(mem), n)
+        mem = CPointer<Unit>()
+        return img
     } finally {
         // VipsApi.unref/free 内部自带空指针判断；未走到的步骤保持空指针，自然跳过。
         VipsApi.unref(inImg)
@@ -167,7 +210,7 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): DecodedIma
 // maxDimension 透传 decodeFileToRgba（缩小解码，见上）；evict 的 key 是磁盘缓存
 // 条目 key（原始字节），与尺寸档位无关。
 public func decodeCachedOrEvict(cache: ImageCache, key: String, path: String,
-    maxDimension!: Int32 = 0): DecodedImage {
+    maxDimension!: Int32 = 0): NativeDecodedImage {
     try {
         return decodeFileToRgba(path, maxDimension: maxDimension)
     } catch (e: Exception) {
@@ -181,7 +224,7 @@ public func decodeCachedOrEvict(cache: ImageCache, key: String, path: String,
 // 旧实现只缩到 ~48px 宽靠 SDL Linear 放大得到"模糊"，高对比内容（漫画线稿）会糊成脏块；
 // 改为中间尺寸（~256px）+ sigma 高斯模糊，质感对齐原型 filter: blur(36px)。
 // blurSigma 为高斯核 sigma（中间图像素单位），0 表示不模糊（回退旧行为的逃生口）。
-public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0): DecodedImage {
+public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0): NativeDecodedImage {
     ensureVips()
     var inImg: VipsImagePtr = CPointer<VipsImage>()
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()
@@ -255,13 +298,10 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         let expected = Int64(bw) * Int64(bh) * 4
         if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected}") }
 
-        let pixels = Array<UInt8>(n, repeat: 0u8)
-        unsafe {
-            let handle = acquireArrayRawData(pixels)
-            memcpy(handle.pointer, CPointer<UInt8>(mem), size)
-            releaseArrayRawData(handle)
-        }
-        return DecodedImage(bw, bh, pixels)
+        // 所有权移交给 NativeDecodedImage：mem 置空，finally 不再释放。
+        let img = NativeDecodedImage(bw, bh, CPointer<UInt8>(mem), n)
+        mem = CPointer<Unit>()
+        return img
     } finally {
         VipsApi.unref(inImg)
         VipsApi.unref(resizedImg)
@@ -271,6 +311,62 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         VipsApi.unref(u8Img)
         VipsApi.unref(normImg)
         VipsApi.free(mem)
+    }
+}
+
+// 封面圆角（asset: key 专用）：直接修改原生 RGBA 内存的 alpha——把四角（半径≈7.2%
+// 短边）以外的像素 alpha 清零、1px 羽化带按覆盖率衰减。纹理混合模式下透明角露出页面
+// 底得到真圆角封面。在工作线程（解码后、返回前）调用，避免 UI dispatch() 遍历整张
+// 封面像素；阅读页（page: key）不处理。
+public func roundCoverAlphaNative(d: NativeDecodedImage): Unit {
+    let w = Int64(d.width)
+    let h = Int64(d.height)
+    let r = Float64(min(w, h)) * 0.072
+    if (r < 2.0) {
+        return
+    }
+    let ri = Int64(r) + 1
+    let ptr = d.pointer()
+    if (ptr.isNull()) {
+        return
+    }
+    for (cy in 0..ri) {
+        for (cx in 0..ri) {
+            // 角弧圆心在各角内侧 (r, r) 处；dist > r 的像素在圆角之外。
+            let dist = sqrt((r - Float64(cx)) * (r - Float64(cx)) + (r - Float64(cy)) * (r - Float64(cy)))
+            if (dist > r + 0.5) {
+                setCornerAlphaNative(ptr, cx, cy, w, h, 0u8)
+            } else if (dist > r - 0.5) {
+                // 1px 羽化带：按覆盖率衰减 alpha，边缘无锯齿。
+                let coverage = r + 0.5 - dist
+                setCornerAlphaScaledNative(ptr, cx, cy, w, h, coverage)
+            }
+        }
+    }
+}
+
+// 四角镜像像素的 alpha 置为给定值（原生指针直写）。
+private func setCornerAlphaNative(ptr: CPointer<UInt8>, cx: Int64, cy: Int64, w: Int64, h: Int64, a: UInt8): Unit {
+    let xs = [cx, w - 1 - cx]
+    let ys = [cy, h - 1 - cy]
+    for (y in ys) {
+        for (x in xs) {
+            unsafe { (ptr + (y * w + x) * 4 + 3).write(a) }
+        }
+    }
+}
+
+// 四角镜像像素的 alpha 按覆盖率缩放（羽化，原生指针直写）。
+private func setCornerAlphaScaledNative(ptr: CPointer<UInt8>, cx: Int64, cy: Int64, w: Int64, h: Int64,
+    coverage: Float64): Unit {
+    let xs = [cx, w - 1 - cx]
+    let ys = [cy, h - 1 - cy]
+    for (y in ys) {
+        for (x in xs) {
+            let i = (y * w + x) * 4 + 3
+            let cur = unsafe { (ptr + i).read() }
+            unsafe { (ptr + i).write(UInt8(Float64(cur) * coverage)) }
+        }
     }
 }
 

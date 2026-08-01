@@ -1,14 +1,14 @@
 package lanlu_client_next.app
 
-import cui.{FileDialogRequest, FileDialogResult, State, Toaster, ToastKind, clearImageCache, clearPixelImages, 
-    onPixelImageEvicted, stagePixelImage}
+import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache, clearPixelImages, 
+    onPixelImageEvicted, stageNativePixelImage}
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.convert.Parsable
 import std.fs.{Directory, File, FileInfo, Path, exists}
-import std.math.sqrt
+import std.io.OutputStream
 import std.sync.Mutex
 import std.time.MonoTime
 
@@ -22,8 +22,8 @@ public let BROWSE_ROW_SIZE: Int64 = 12
 // 图片解码上限（最长边物理像素，0=不缩）：封面按最大展示位（详情 hero 200vp @2x）给 400，
 // 阅读页按 2000 封顶，侧栏/编辑器缩略图按 300。按 key 前缀分档、档位固定，故内存
 // staged/纹理 key 无需带尺寸；磁盘缓存存原始字节，缩小只发生在解码期，各尺寸共用同一
-// 磁盘缓存条目（thumb: 与 page: 下载同一原始字节流，只是解码档不同——注意两者 key 不同，
-// 磁盘缓存条目因此分档各存一份原始字节，见 #8 决策记录：以磁盘空间换取缩略图不再全页解码）。
+// 磁盘缓存条目（thumb: 与 page: 经 rawKeyFor 映射为同一 page: 原始 key，磁盘只存
+// 一份原始字节，解码档不同；backdrop 与普通封面共享 asset:<id> 原始缓存）。
 private let ASSET_DECODE_MAX_DIM: Int32 = 400
 private let PAGE_DECODE_MAX_DIM: Int32 = 2000
 private let THUMB_DECODE_MAX_DIM: Int32 = 300
@@ -45,6 +45,17 @@ private func decodeMaxDimension(key: String): Int32 {
         return THUMB_DECODE_MAX_DIM
     }
     return 0
+}
+
+// 展示 key → 原始资源 key（网络去重与磁盘缓存的粒度）：thumb: 与 page: 共用同一
+// 原始页面字节（仅解码档不同），映射为 page: 使磁盘只存一份；backdrop 展示 key
+// 不在此映射（其下载方显式使用 asset:<id> 原始 key，见 requestBackdrop 系列）。
+// asset:/page: 本身即原始 key，原样返回。
+private func rawKeyFor(key: String): String {
+    if (key.startsWith("thumb:")) {
+        return "page:${key.removePrefix("thumb:")}"
+    }
+    key
 }
 
 // 浏览模式的一行（随机推荐或某个分类）。元素内部字段可变；任何变更后须整体重赋值
@@ -133,6 +144,53 @@ private func parsePositiveInt(raw: String, fallback: Int64): Int64 {
         }
     } catch (_: Exception) {
         fallback
+    }
+}
+
+// 图片下载写入器：CacheWriter 接口实现，按展示 key 分派到 LanluApi 流式下载接口。
+// 用接口而非函数闭包：仓颉 1.1.3 运行时缺陷——被函数参数传递的闭包在 spawn 线程
+// 中调用时若写捕获字段会触发 GC WriteStaticRef 屏障 SIGSEGV；接口方法调用不触发
+//（见 image_cache.cj CacheWriter 注释与探针验证）。
+private class ImageWriter <: CacheWriter {
+    let owner: AppModel
+    let a: LanluApi
+    let key: String
+    init(owner: AppModel, a: LanluApi, key: String) {
+        this.owner = owner
+        this.a = a
+        this.key = key
+    }
+    public func writeTo(output: OutputStream): Int64 {
+        let n = if (key.startsWith("asset:")) {
+            a.downloadAssetTo(Int64.parse(key.removePrefix("asset:")), output)
+        } else if (key.startsWith("page:")) {
+            // page:<arcid>:<pagePath>（pagePath 本身可能含冒号，只切第一个）
+            let rest = key.removePrefix("page:")
+            let sep = rest.indexOf(":") ?? 0
+            a.downloadPageTo(rest[0..sep], rest[(sep + 1)..rest.size], output)
+        } else if (key.startsWith("thumb:")) {
+            // thumb:<arcid>:<pagePath>：与 page: 同一下载通道（原始字节），仅解码档不同。
+            let rest = key.removePrefix("thumb:")
+            let sep = rest.indexOf(":") ?? 0
+            a.downloadPageTo(rest[0..sep], rest[(sep + 1)..rest.size], output)
+        } else {
+            throw Exception("未知图片 key: ${key}")
+        }
+        // 只在缓存未命中时执行，返回字节即本次新落盘量（#10 周期 sweep 的写入触发计数）。
+        owner.noteCacheWrite(n)
+        return n
+    }
+}
+
+// NativeDecodedImage 的释放适配器：把 vips 原生像素的释放权交给 cui 的 staged 条目
+//（接口而非闭包：规避仓颉 1.1.3 闭包作为参数跨线程写字段触发 GC 屏障 SIGSEGV）。
+private class NativeImageReleaser <: PixelReleaser {
+    let img: NativeDecodedImage
+    init(img: NativeDecodedImage) {
+        this.img = img
+    }
+    public func release(): Unit {
+        img.close()
     }
 }
 
@@ -286,6 +344,8 @@ public class AppModel {
     public let cacheInfo = State<String>("")
     // 当前登录用户是否管理员：控制设置页「服务器」分组入口显隐（LoginData.isAdmin）。
     public let isAdmin = State<Bool>(false)
+    // 诊断：就绪像素纹理被预算淘汰后重新请求的次数（连续翻页抖动监控，见 pixelCacheDiagnostics）。
+    public var pixelEvictRedecodeCount: Int64 = 0
 
     // ---- 设置区扩展：各板块数据（进场加载，随 State 重建自动刷新视图） ----
     public let userStats = State<?UserStats>(None)
@@ -329,6 +389,8 @@ public class AppModel {
                     case Some(st) =>
                         if (st.value == "ready") {
                             st.value = ""
+                            // 诊断：就绪纹理被预算淘汰 → 状态复位 → 重新可见时需重解码。
+                            pixelEvictRedecodeCount++
                         }
                     case None => ()
                 }
@@ -881,13 +943,20 @@ public class AppModel {
         )
     }
 
-    // 登出只清 active profile 的 token（服务器条目保留）；运行期镜像由 saveSettings 同步。
+    // 登出：清 active profile 的 token（服务器条目保留）并复位图片/纹理缓存——
+    // 换账号重新登录可能落到另一台服务器，旧服务器的 staged/纹理残留会导致串图
+    //（与换服登录同款清理，顺序：先路径纹理、后像素纹理（纹理→staged），见 clearCache）。
     public func logout(): Unit {
         match (settings.activeProfile()) {
             case Some(p) => p.token = ""
             case None => ()
         }
         persistSettings(settings)
+        clearImageCache() // cui 路径纹理缓存（按文件路径解码的 GPU 纹理）
+        clearPixelImages() // cui 像素纹理缓存（含已建纹理与 staged 像素）
+        synchronized(imageMutex) {
+            imageStates.clear()
+        }
         isAdmin.value = false
         page.value = Page.Login
     }
@@ -1761,9 +1830,10 @@ public class AppModel {
     private var sweepBytesSinceSweep: Int64 = 0
     private let sweepMutex = Mutex()
 
-    // 工作线程回调（图片任务 fetch 内）：累计新落盘的缓存字节。fetch 只在缓存未命中时
-    // 执行，其返回字节数即本次新写入量；计数只读写在锁内，UI 线程判定见 maybeSweepCache。
-    private func noteCacheWrite(bytes: Int64): Unit {
+    // 工作线程回调（图片任务下载写入器内）：累计新落盘的缓存字节。下载写入器只在缓存
+    // 未命中时执行，其返回字节数即本次新写入量；计数只读写在锁内，UI 线程判定见
+    // maybeSweepCache。public 供 ImageWriter（CacheWriter 实现）调用。
+    public func noteCacheWrite(bytes: Int64): Unit {
         synchronized(sweepMutex) {
             sweepBytesSinceSweep += bytes
         }
@@ -1815,11 +1885,24 @@ public class AppModel {
         }
     }
 
+    // 图片仍被需要（工作线程协作式取消判定，P2.7）：状态为 loading 才算在途需要；
+    // 已被 cancelImage 复位（""）或完成（"ready"）的不再需要（ready 的结果已有纹理）。
+    private func isImageWanted(key: String): Bool {
+        synchronized(imageMutex) {
+            match (imageStates.get(key)) {
+                case Some(st) => st.value == "loading"
+                case None => false
+            }
+        }
+    }
+
     // 图片并发硬上限 4（spec §6）：超出进队列，完成一个补一个。
-    // 队列条目带优先级：高优先级（阅读当前页等）插到低优先级（封面/预取）排队条目之前，
-    // 同优先级保持 FIFO。requestImage 与 pump 都在 UI 线程运行，计数无需加锁。
+    // 队列拆成高优先级 FIFO 与普通优先级 FIFO（P2.8）：高优先级插队不再重建整个
+    // ArrayList，只往高优先级队列尾部追加；同优先级保持 FIFO。requestImage 与 pump
+    // 都在 UI 线程运行，计数无需加锁。
     private var activeImages: Int64 = 0
-    private var imageQueue = ArrayList<(String, String, Bool)>() // (key, url, 高优先级?)
+    private var imageQueueHi = ArrayList<(String, String)>() // (key, url) 高优先级
+    private var imageQueueLo = ArrayList<(String, String)>() // (key, url) 普通优先级
 
     // 已在途/已排队/已完成的 key 直接跳过（状态机去重，队列不会进重）；否则置 loading
     // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）、page:<arcid>:<pagePath>
@@ -1832,37 +1915,35 @@ public class AppModel {
         }
         st.value = "loading"
         if (activeImages >= 4) {
+            // 按优先级进各自 FIFO：高优先级始终先于低优先级补位（P2.8，无整队列复制）。
             if (highPriority) {
-                // 插到最后一个高优先级条目之后（越过所有低优先级排队项）。
-                var i: Int64 = 0
-                while (i < imageQueue.size && imageQueue[i][2]) {
-                    i++
-                }
-                let next = ArrayList<(String, String, Bool)>()
-                for (j in 0..i) {
-                    next.add(imageQueue[j])
-                }
-                next.add((key, url, true))
-                for (j in i..imageQueue.size) {
-                    next.add(imageQueue[j])
-                }
-                imageQueue = next
+                imageQueueHi.add((key, url))
             } else {
-                imageQueue.add((key, url, false))
+                imageQueueLo.add((key, url))
             }
             return
         }
         startImageTask(key, url)
     }
 
-    // 取消未开始的排队请求（滚出屏幕的封面等）：从队列移除并复位状态，
+    // 取消未开始的排队请求（滚出屏幕的封面等）：从两个优先级队列移除并复位状态，
     // 之后重新可见时 requestImage 可再次入队。已开始/在途任务不干预——
-    // 其完成结果落磁盘/staged 缓存无害。仅 UI 线程调用（同 requestImage/pump 纪律）。
+    // 其完成结果落磁盘/staged 缓存无害（P2.7 的协作式取消点会跳过解码）。
+    // 仅 UI 线程调用（同 requestImage/pump 纪律）。
     public func cancelImage(key: String): Unit {
         var i: Int64 = 0
-        while (i < imageQueue.size) {
-            if (imageQueue[i][0] == key) {
-                let _ = imageQueue.remove(at: i)
+        while (i < imageQueueHi.size) {
+            if (imageQueueHi[i][0] == key) {
+                let _ = imageQueueHi.remove(at: i)
+                imageState(key).value = ""
+                return
+            }
+            i++
+        }
+        i = 0
+        while (i < imageQueueLo.size) {
+            if (imageQueueLo[i][0] == key) {
+                let _ = imageQueueLo.remove(at: i)
                 imageState(key).value = ""
                 return
             }
@@ -1889,41 +1970,56 @@ public class AppModel {
         }
         activeImages++
         let c = cache()
-        // 图片任务走独立图片执行器（任务E submitImage，4 线程），不再阻塞交互 API 执行器
-        //（#22）；activeImages 并发硬上限 4 与优先级插队语义不变（见 requestImage/pump）。
-        let submitted = worker.submitImage(
-            "img:${key}",
+        // 图片任务走三级流水线（P1.6）：下载阶段在独立下载池（4 线程），完成后在下载
+        // 线程内把解码阶段提交到独立解码池（2 线程、有界队列 32 背压）；两阶段都不再
+        // 占用交互 API 池（#22）。activeImages 并发硬上限 4 与优先级插队语义不变
+        //（见 requestImage/pump）。
+        // 下载阶段使用独立命名空间 "imgdl:" 避免与解码阶段 "img:" 的 inflight 冲突
+        //（workLoop 在 job 返回后才释放 inflight，job 内部 submitDecode 时下载条目仍在）；
+        // 解码阶段使用 "img:" 使 UI dispatch 正常处理结果。single-flight 已在 ImageCache
+        // 层保证磁盘只下载一次。
+        let submitted = worker.submitDownload(
+            "imgdl:${key}",
             {
                 =>
-                    let fetch = {
+                    // 下载写入器：流式把原始字节写入缓存临时文件（固定缓冲，不随
+                    // 图片大小增长）；返回本次落盘字节数（#10 周期 sweep 的写入触发计数）。
+                    let writer = ImageWriter(this, a, key)
+                    // 缓存原始字节（工作线程上流式落盘，按原始资源 key 去重/共用：thumb
+                    // 与 page 共享同一份原始页面文件）
+                    let rawKey = rawKeyFor(key)
+                    let path = c.ensureCached(rawKey, writer)
+                    // 下载完成 → 提交解码阶段（解码池；队列满则阻塞下载线程产生背压）。
+                    // 解码阶段使用 "img:" 命名空间（与下载阶段 "imgdl:" 分开），inflight
+                    // 不冲突；UI dispatch 按 "img:" 正常处理解码结果。
+                    let ok = worker.submitDecode("img:${key}", {
                         =>
-                            let bytes = if (key.startsWith("asset:")) {
-                                a.assetBytes(Int64.parse(key.removePrefix("asset:")))
-                            } else if (key.startsWith("page:")) {
-                                // page:<arcid>:<pagePath>（pagePath 本身可能含冒号，只切第一个）
-                                let rest = key.removePrefix("page:")
-                                let sep = rest.indexOf(":") ?? 0
-                                a.pageBytes(rest[0..sep], rest[(sep + 1)..rest.size])
-                            } else if (key.startsWith("thumb:")) {
-                                // thumb:<arcid>:<pagePath>：与 page: 同一下载通道（原始字节），
-                                // 仅解码档不同（300px，见 decodeMaxDimension）。
-                                let rest = key.removePrefix("thumb:")
-                                let sep = rest.indexOf(":") ?? 0
-                                a.pageBytes(rest[0..sep], rest[(sep + 1)..rest.size])
-                            } else {
-                                throw Exception("未知图片 key: ${key}")
+                            // 协作式取消点：下载完成但图片已不可见（状态被复位/取消）时
+                            // 保留磁盘缓存并跳过解码（省 CPU；重新可见时再解码）。
+                            if (!isImageWanted(key)) {
+                                return (key, Option<NativeDecodedImage>.None)
                             }
-                            // fetch 只在磁盘缓存未命中时执行，其返回字节即本次新落盘量（#10 周期
-                            // sweep 的写入触发计数，见 maybeSweepCache）。
-                            noteCacheWrite(Int64(bytes.size))
-                            return bytes
+                            // vips 按展示 key 档位缩小解码原生 RGBA；纹理创建留给 UI 线程
+                            // 首帧惰性完成。解码失败时 decodeCachedOrEvict 会先剔除坏缓存
+                            //（原始 key 条目）再抛出，重试可重新拉取。解码期间标记引用，
+                            // sweep 不得删除正在被 vips 打开的文件（P2.9）。
+                            c.markReferenced(rawKey)
+                            let d = try {
+                                decodeCachedOrEvict(c, rawKey, path, maxDimension: decodeMaxDimension(key))
+                            } finally {
+                                c.clearReferenced(rawKey)
+                            }
+                            // 封面圆角在工作线程内完成（原生内存直改 alpha，避免 UI dispatch
+                            // 遍历整张封面像素）；阅读页（page:/thumb:）不处理。
+                            if (key.startsWith("asset:")) {
+                                roundCoverAlphaNative(d)
+                            }
+                            return (key, Some(d))
+                    })
+                    if (!ok) {
+                        throw Exception("解码任务提交失败: ${key}")
                     }
-                    // 缓存原始字节 → 工作线程上 vips 按 key 档位缩小解码 RGBA；纹理创建留给
-                    // UI 线程首帧惰性完成。解码失败时 decodeCachedOrEvict 会先剔除坏缓存再抛出，
-                    // 重试可重新拉取。
-                    let path = c.ensureCached(key, fetch)
-                    let d = decodeCachedOrEvict(c, key, path, maxDimension: decodeMaxDimension(key))
-                    return (key, d)
+                    return true
             }
         )
         // 同名任务在途时 submit 去重返回 false：回滚并发计数，否则旧任务只减一次导致额度泄漏。
@@ -1934,14 +2030,17 @@ public class AppModel {
         }
     }
 
-    // 图片任务结束（成功或失败都调）：计数复位并补发队首（高优先级已在入队时排前）。
+    // 图片任务结束（成功或失败都调）：计数复位并补发队首（高优先级队列先于普通队列）。
     private func finishImageTask(): Unit {
         activeImages--
         if (activeImages < 0) {
             activeImages = 0
         }
-        if (imageQueue.size > 0) {
-            let (k, u, _) = imageQueue.remove(at: 0)
+        if (imageQueueHi.size > 0) {
+            let (k, u) = imageQueueHi.remove(at: 0)
+            startImageTask(k, u)
+        } else if (imageQueueLo.size > 0) {
+            let (k, u) = imageQueueLo.remove(at: 0)
             startImageTask(k, u)
         }
     }
@@ -2046,15 +2145,11 @@ public class AppModel {
             imgKey,
             {
                 =>
-                    let fetch = {
-                        =>
-                            let bytes = a.assetBytes(assetId)
-                            // fetch 只在缓存未命中时执行，返回字节即本次新落盘量（#10 周期
-                            // sweep 的写入触发计数，同 startImageTask，见 maybeSweepCache）。
-                            noteCacheWrite(Int64(bytes.size))
-                            return bytes
-                    }
-                    let path = c.ensureCached(imgKey, fetch)
+                    // 与普通封面共享 asset:<id> 原始缓存文件（只分别执行普通解码或高斯
+                    // 模糊解码），避免同一封面产生两份磁盘缓存。
+                    let writer = ImageWriter(this, a, "asset:${assetId}")
+                    let rawKey = "asset:${assetId}"
+                    let path = c.ensureCached(rawKey, writer)
                     let d = decodeBackdrop(path, 256)
                     return (imgKey, d)
             }
@@ -2075,13 +2170,10 @@ public class AppModel {
             imgKey,
             {
                 =>
-                    let path = c.ensureCached(imgKey, {
-                        =>
-                            let bytes = a.assetBytes(assetId)
-                            // 同 requestBackdrop：未命中落盘量计入 #10 周期 sweep 触发计数。
-                            noteCacheWrite(Int64(bytes.size))
-                            return bytes
-                    })
+                    // 与普通封面共享 asset:<id> 原始缓存文件，只解码档/模糊参数不同。
+                    let writer = ImageWriter(this, a, "asset:${assetId}")
+                    let rawKey = "asset:${assetId}"
+                    let path = c.ensureCached(rawKey, writer)
                     let d = decodeBackdrop(path, 320, blurSigma: 14.0)
                     return (imgKey, d)
             }
@@ -2173,18 +2265,32 @@ public class AppModel {
         reader.flushProgress()
     }
 
+    // 预取目标快照：上一次预取集合与本次的差集 = 已离开预取区的页，取消其未开始任务
+    //（P2.7 可见性驱动取消；已开始的让其完成，结果落磁盘/staged 无害）。
+    private var lastPrefetchKeys = HashSet<String>()
+
     // 预取当前页前后各 2 页（经图片管线，并发上限由 requestImage 保证）。
     public func prefetchAround(): Unit {
         let total = pages.value.size
         let cur = readerIndex.value
+        let next = HashSet<String>()
         for (d in [-2, -1, 1, 2]) {
             let idx = cur + d
             if (idx >= 1 && idx <= total) {
                 let pid = pages.value[idx - 1].id
-                requestImage("page:${readerArcid}:${pid}",
+                let key = "page:${readerArcid}:${pid}"
+                next.add(key)
+                requestImage(key,
                     "/api/archives/${readerArcid}/page?path=${percentEncode(pid)}")
             }
         }
+        // 离开预取区且尚未开始的任务取消（排队中移除；在途/已完成的跳过）。
+        for (old in lastPrefetchKeys) {
+            if (!next.contains(old)) {
+                cancelImage(old)
+            }
+        }
+        lastPrefetchKeys = next
     }
 
     // ---- 阅读器顶栏（T13：reader-redesign #topbar）----
@@ -3012,55 +3118,8 @@ public class AppModel {
         toaster.show(t("cache.cleared"), kind: ToastKind.Success)
     }
 
-    // 封面圆角（asset: key 专用）：框架渲染器只有矩形裁剪，纹理无法在绘制期切圆角；
-    // 在登记像素前把四角（半径≈7.2% 短边——首页 168vp 封面 ≈12vp、详情 hero 200vp ≈14vp，
-    // 对齐原型 .card .cover/.cover-big 的 12/14px，1px 羽化）以外的像素 alpha 清零——
-    // 纹理混合模式下透明角露出页面底，得到真圆角封面。阅读页（page: key）不处理。
-    private func roundCoverCorners(d: DecodedImage): Unit {
-        let w = Int64(d.width)
-        let h = Int64(d.height)
-        let r = Float64(min(w, h)) * 0.072
-        if (r < 2.0) {
-            return
-        }
-        let ri = Int64(r) + 1
-        for (cy in 0..ri) {
-            for (cx in 0..ri) {
-                // 角弧圆心在各角内侧 (r, r) 处；dist > r 的像素在圆角之外。
-                let dist = sqrt((r - Float64(cx)) * (r - Float64(cx)) + (r - Float64(cy)) * (r - Float64(cy)))
-                if (dist > r + 0.5) {
-                    setCornerAlpha(d, cx, cy, w, h, 0u8)
-                } else if (dist > r - 0.5) {
-                    // 1px 羽化带：按覆盖率衰减 alpha，边缘无锯齿。
-                    let coverage = r + 0.5 - dist
-                    setCornerAlphaScaled(d, cx, cy, w, h, coverage)
-                }
-            }
-        }
-    }
-
-    // 四角镜像像素的 alpha 置为给定值。
-    private func setCornerAlpha(d: DecodedImage, cx: Int64, cy: Int64, w: Int64, h: Int64, a: UInt8): Unit {
-        let xs = [cx, w - 1 - cx]
-        let ys = [cy, h - 1 - cy]
-        for (y in ys) {
-            for (x in xs) {
-                d.pixels[(y * w + x) * 4 + 3] = a
-            }
-        }
-    }
-
-    // 四角镜像像素的 alpha 按覆盖率缩放（羽化）。
-    private func setCornerAlphaScaled(d: DecodedImage, cx: Int64, cy: Int64, w: Int64, h: Int64, coverage: Float64): Unit {
-        let xs = [cx, w - 1 - cx]
-        let ys = [cy, h - 1 - cy]
-        for (y in ys) {
-            for (x in xs) {
-                let i = (y * w + x) * 4 + 3
-                d.pixels[i] = UInt8(Float64(d.pixels[i]) * coverage)
-            }
-        }
-    }
+    // 封面圆角说明（asset: key 专用）：实现已移至 img 包 roundCoverAlphaNative，在解码
+    // 工作线程内直接修改原生 RGBA 内存，不再经 UI dispatch 遍历像素（见 startImageTask）。
 
     // ---- 每帧泵：把工作线程结果写回 State（UI 线程）----
 
@@ -3234,6 +3293,13 @@ public class AppModel {
                 logout()
                 showError(r.error)
             }
+            return
+        }
+        // 图片下载阶段失败：置 error 态并补发队列（与 img: 解码失败同款处理）。
+        // 下载阶段成功的中间结果在 dispatch 中静默忽略。
+        if (r.name.startsWith("imgdl:")) {
+            finishImageTask()
+            imageState(r.name.removePrefix("imgdl:")).value = "error"
             return
         }
         // 图片任务失败不 toast，只置 error 态并补发队列。
@@ -3480,8 +3546,12 @@ public class AppModel {
                         persistSettings(settings)
                         // 换服登录必须复位图片缓存：缓存目录按 serverUrl 派生，而 imageStates
                         // 的 key（asset:42 等）与服务器无关，不复位会把旧服务器的图误判为
-                        // “已加载”，新下载也会落进旧目录。
+                        // “已加载”，新下载也会落进旧目录；CUI 的路径/像素纹理（含 staged）
+                        // 也按同一 key 键控，必须一并释放，否则同 asset id 显示上一台服务器
+                        // 的旧图（顺序：先路径纹理、后像素纹理（纹理→staged），见 clearCache）。
                         imageCache = None
+                        clearImageCache()
+                        clearPixelImages()
                         synchronized(imageMutex) {
                             imageStates.clear()
                         }
@@ -3973,27 +4043,34 @@ public class AppModel {
                 case Some(p) => serverInfo.value = Some((p as ServerInfo).getOrThrow())
                 case None => ()
             }
+        } else if (name.startsWith("imgdl:")) {
+            // 下载阶段成功是中间结果（解码由下载线程内提交到解码池），静默忽略。
         } else if (name.startsWith("img:")) {
             finishImageTask()
             let key = name.removePrefix("img:")
             match (r.payload) {
                 case Some(p) =>
-                    // 像素已在工作线程解好；这里只登记 staged 像素（UI 线程），
-                    // 纹理由 PixelImageView 首帧绘制时惰性创建。
-                    let (k, d) = (p as (String, DecodedImage)).getOrThrow()
-                    if (k.startsWith("asset:")) {
-                        roundCoverCorners(d)
+                    // 载荷 (String, ?NativeDecodedImage)：None = 下载完成但已不可见，跳过解码
+                    // 的结果（静默，状态保持当前值，重新可见时会再次入队）。
+                    let (k, d) = (p as (String, ?NativeDecodedImage)).getOrThrow()
+                    match (d) {
+                        case Some(img) =>
+                            // 像素已在工作线程解好（圆角也已就地完成）；这里只登记 staged
+                            // 原生像素（UI 线程，所有权交 cui 释放），纹理由 PixelImageView
+                            // 首帧绘制时惰性创建。
+                            stageNativePixelImage(k, img.width, img.height, img.pointer(), NativeImageReleaser(img))
+                            imageState(k).value = "ready"
+                        case None => ()
                     }
-                    stagePixelImage(k, d.width, d.height, d.pixels)
-                    imageState(k).value = "ready"
                 case None => imageState(key).value = "error"
             }
         } else if (name.startsWith("backdrop:")) {
-            // backdrop 解码到货：直接 stage 像素（不经过 img 管线，不需圆角），失败静默。
+            // backdrop 解码到货：直接登记 staged 原生像素（不经过 img 管线，不需圆角），
+            // 失败静默。
             match (r.payload) {
                 case Some(p) =>
-                    let (k, d) = (p as (String, DecodedImage)).getOrThrow()
-                    stagePixelImage(k, d.width, d.height, d.pixels)
+                    let (k, d) = (p as (String, NativeDecodedImage)).getOrThrow()
+                    stageNativePixelImage(k, d.width, d.height, d.pointer(), NativeImageReleaser(d))
                     if (k.startsWith("backdrop:audio:")) {
                         imageState(k).value = "ready"
                     }

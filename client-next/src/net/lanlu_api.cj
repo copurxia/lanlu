@@ -3,6 +3,7 @@ package lanlu_client_next.net
 import ignite.client.*
 import std.collection.ArrayList
 import std.fs.{File, FileInfo, OpenMode, Path}
+import std.io.OutputStream
 import std.sync.{Mutex, SyncCounter}
 
 public class ApiException <: Exception {
@@ -268,6 +269,45 @@ public class LanluApi {
 
     public func assetBytes(assetId: Int64): Array<UInt8> {
         checkedBytes(client.get("/api/assets/${assetId}"))
+    }
+
+    // 流式下载资产原始字节到 output（固定缓冲逐块复制，不随响应大小增长），
+    // 返回写入字节数。完整读完后连接可回池复用；错误语义同 checkedBytes，
+    // 错误体只读上限 64KB 诊断文本后关闭响应（禁止无上限 body()）。
+    public func downloadAssetTo(assetId: Int64, output: OutputStream): Int64 {
+        downloadChecked(client.get("/api/assets/${assetId}"), output)
+    }
+
+    // 流式下载阅读页原始字节到 output（同 downloadAssetTo 语义）。
+    public func downloadPageTo(arcid: String, pagePath: String, output: OutputStream): Int64 {
+        downloadChecked(client.get(pageUrl(arcid, pagePath)), output)
+    }
+
+    // 流式下载公共逻辑：401/状态码/错误体诊断语义与 checkedBytes 一致。
+    private func downloadChecked(resp: ClientResponse, output: OutputStream): Int64 {
+        if (resp.status == 401) {
+            resp.close()
+            throw ApiException(401, "登录状态已失效，请重新登录")
+        }
+        if (!resp.isSuccess()) {
+            // 页面/媒体接口的服务端错误体包含归档路径、条目读取等具体原因。只读
+            // 上限 64KB 诊断文本（一次 read 不超缓冲），随后关闭响应释放连接。
+            let detail = try {
+                let buf = Array<UInt8>(65536, repeat: 0u8)
+                let n = resp.bodyStream().read(buf)
+                if (n > 0) { String.fromUtf8(buf[0..n]) } else { "" }
+            } catch (_: Exception) {
+                ""
+            }
+            resp.close()
+            let t = detail.trimAscii()
+            throw ApiException(resp.status, if (t.size > 0) {
+                "HTTP ${resp.status}: ${t}"
+            } else {
+                "HTTP ${resp.status}"
+            })
+        }
+        resp.downloadTo(output)
     }
 
     // 合集列表：GET /api/tankoubons 返回裸 {"filtered":N,"result":[...],"total":N}（无包络）。

@@ -79,6 +79,10 @@ foreign func g_object_unref(obj: CPointer<Unit>): Unit
 
 foreign func g_free(mem: CPointer<Unit>): Unit
 
+// libvips 全局并发度（vips_concurrency_set）：控制 vips 内部线程池大小，避免与
+// 应用层多个解码 worker 叠加造成 CPU 过度订阅（见 client-next P1.6 流水线）。
+foreign func vips_concurrency_set(n: Int32): Unit
+
 /**
  * Public wrapper API.
  *
@@ -88,6 +92,11 @@ foreign func g_free(mem: CPointer<Unit>): Unit
 public class VipsApi {
     public static func initialize(argv0: CString): Int32 {
         return unsafe { vips_init(argv0) }
+    }
+
+    // libvips 内部并发度：n <= 0 恢复默认。应在 vips_init 成功后调用一次。
+    public static func setConcurrency(n: Int32): Unit {
+        unsafe { vips_concurrency_set(n) }
     }
 
     public static func shutdown(): Unit {
