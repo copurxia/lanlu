@@ -22,6 +22,9 @@ jobs:
           version: latest
           components: stdx
 
+      - name: Export CANGJIE_STDX_PATH
+        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}" >> "${GITHUB_ENV}"
+
       - name: Install build tools
         run: |
           set -eux
@@ -62,7 +65,6 @@ jobs:
 
       - name: Build backend
         env:
-          CANGJIE_STDX_PATH: ${{ env.CANGJIE_STDX_PATH_STATIC }}
           WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
         run: |
           unset GIT_DIR GIT_WORK_TREE
