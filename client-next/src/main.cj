@@ -11,6 +11,7 @@ func rootView(model: AppModel): Unit {
     match (model.page.value) {
         case Page.Login => loginView(model)
         case Page.Library => libraryView(model) // Task 8 提供
+        case Page.Shelf => shelfView(model)
         case Page.Detail(_) => detailView(model) // Task 11：档案详情（共用骨架）
         case Page.Tank(_) => tankView(model) // Task 11：合集详情（共用骨架）
         case Page.Reader(_, _) => readerView(model)

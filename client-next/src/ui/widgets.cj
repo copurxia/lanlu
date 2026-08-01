@@ -742,7 +742,7 @@ class SelectionDot <: Widget {
 // accent 文字（.side-item.on），hover 铺 overlayHover 底且文字保持主文字色，
 // 可选左侧 18vp 前置图标（原型 .side-item .ico，书库侧栏不带、设置导航带），
 // 可选右侧 muted 计数（11fp）；左键抬起触发 onClick。自定义 Widget（同 ClickSensor 协议）。
-class NavItem <: Widget {
+public class NavItem <: Widget {
     private let label: String
     private let count: String
     private let active: Bool
@@ -1190,6 +1190,15 @@ public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Uni
         pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
+// 书架历史卡片复用同一封面骨架，但 meta 改为“相对阅读时间 · 页数”。
+public func archiveCardWithMeta(model: AppModel, item: SearchItem, coverW: Float32, meta: String): Unit {
+    homeCoverCard(model, item.arcid, item.title, meta, coverW, item.coverAssetId,
+        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
+        {=> model.enterSelection(item.arcid) },
+        isNew: item.isnew, tank: false, favorited: item.isfavorite,
+        pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+}
+
 // 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上开书图标「合集」角标，
 // meta 为「N 个档案 · X%」。点击进合集详情（T11 接通路由）。
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
@@ -1283,7 +1292,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
             }.alignment(Alignment.TopLeading).width(coverW).height(coverH)
             Label(title).maxLines(1).fontSize(12.5.fp)
             Label(meta).fontSize(11.fp).muted()
-        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start)
+        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(coverW)
     }
 }
 
@@ -1627,7 +1636,7 @@ class HoverFill <: Widget {
 
 // 进度轨道条（原型 .hero-prog .bar / .prog-card .bar / .member-row .prog-mini）：
 // 轨道 ctx.theme.overlayTrack（明暗自适），填充 accent；宽由构造给定（自适应交给父容器修饰器）。
-class ProgressTrack <: Widget {
+public class ProgressTrack <: Widget {
     private let pct: Int64
     private let h: Float32
     private var frame = Rect.zero()

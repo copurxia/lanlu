@@ -268,10 +268,12 @@ private class SearchChrome <: Widget {
 // 画的占位文案），空态且未聚焦时画占位文本；不消费任何事件，点击穿透给 TextField。
 private class SearchPlaceholder <: Widget {
     private let model: AppModel
+    private let shelf: Bool
     private var frame = Rect.zero()
 
-    public init(model: AppModel) {
+    public init(model: AppModel, shelf: Bool) {
         this.model = model
+        this.shelf = shelf
         emit(this)
     }
 
@@ -285,10 +287,11 @@ private class SearchPlaceholder <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         // 占位文案仅在有输入时隐藏（与浏览器 placeholder 一致：聚焦但为空时仍显示）。
-        if (model.searchText.value.size > 0) {
+        let value = if (shelf) { model.shelfSearchText.value } else { model.searchText.value }
+        if (value.size > 0) {
             return
         }
-        let ph = model.t("nav.search")
+        let ph = if (shelf) { model.t("shelf.search") } else { model.t("nav.search") }
         let th = ctx.renderer.textHeight(pointSize: 13.0)
         ctx
             .renderer
@@ -404,9 +407,7 @@ private class SearchKeys <: Widget {
     }
 }
 
-// 导航胶囊（原型 .nav-pill）：elev 底 + 1px 描边 + 全圆角容器，选中项 accentSoft 底 +
-// accent 字。「首页」点击回书库页；「书架」「在线源」无对应页面，置灰禁用（点击无反应，
-// hover 不给手型——比假跳转诚实）。
+// 导航胶囊（原型 .nav-pill）：首页与书架均为真实页面；在线源尚未落地，保持禁用。
 private class NavPill <: Widget {
     private let model: AppModel
     private let labels: Array<String>
@@ -434,9 +435,14 @@ private class NavPill <: Widget {
         frame = rect
     }
 
-    // 「首页」项矩形（其余项禁用，不需要命中区）。
-    private func homeRect(ctx: UiContext): Rect {
-        Rect(frame.x + 3.0, frame.y + 3.0, itemWidth(ctx, labels[0]), frame.h - 6.0)
+    private func itemRect(ctx: UiContext, index: Int64): Rect {
+        var x = frame.x + 3.0
+        var i: Int64 = 0
+        while (i < index) {
+            x += itemWidth(ctx, labels[i]) + 2.0
+            i++
+        }
+        Rect(x, frame.y + 3.0, itemWidth(ctx, labels[index]), frame.h - 6.0)
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -449,10 +455,12 @@ private class NavPill <: Widget {
             let w = itemWidth(ctx, labels[i])
             let item = Rect(x, frame.y + 3.0, w, frame.h - 6.0)
             let th = ctx.renderer.textHeight(pointSize: 12.5)
-            if (i == 0) {
-                // 首页恒为选中态（本客户端当前唯一已实现的导航目标）。
+            let active = if (i == 0) { !model.isShelfContext() } else { i == 1 && model.isShelfContext() }
+            if (active) {
                 ctx.renderer.fillRoundedRect(item, item.h / 2.0, ctx.theme.accentSoft)
                 drawPillText(ctx, labels[i], item, th, ctx.theme.accent)
+            } else if (i < 2) {
+                drawPillText(ctx, labels[i], item, th, ctx.theme.mutedText)
             } else {
                 // 禁用态：muted 再降透明度，视觉置灰。
                 let m = ctx.theme.mutedText
@@ -470,14 +478,16 @@ private class NavPill <: Widget {
     public func handle(ctx: UiContext, event: UiEvent): Bool {
         match (event) {
             case UiEvent.MouseMove(x, y) =>
-                if (homeRect(ctx).contains(x, y)) {
-                    ctx.claimHover("titlebar:nav-home", CursorShape.Interactive)
+                if (itemRect(ctx, 0).contains(x, y) || itemRect(ctx, 1).contains(x, y)) {
+                    ctx.claimHover("titlebar:nav", CursorShape.Interactive)
                 }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
-                if (homeRect(ctx).contains(x, y)) {
-                    // 离开合集/详情页时清掉残留的多选状态，避免污染书库页。
-                    model.exitSelection()
-                    model.page.value = Page.Library
+                if (itemRect(ctx, 0).contains(x, y)) {
+                    model.openHome()
+                    return true
+                }
+                if (itemRect(ctx, 1).contains(x, y)) {
+                    model.openShelf()
                     return true
                 }
             case _ => ()
@@ -572,6 +582,10 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         case Page.Detail(_) | Page.Tank(_) | Page.Settings => true
         case _ => false
     }
+    let onShelf = match (model.page.value) {
+        case Page.Shelf => true
+        case _ => false
+    }
     let searchTween = rememberState<Tween>("titlebar:search-expand", {
         => Tween(SEARCH_EXPAND_MS, Easing.easeOutCubic)
     }).value
@@ -581,9 +595,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         HStack {
             if (showBack) {
                 GhostIconButton(GhostGlyph.Back, "titlebar:back") {=>
-                    // 离开合集/详情页时清掉残留的多选状态，避免污染书库页。
-                    model.exitSelection()
-                    model.page.value = Page.Library
+                    model.leaveDetailOrSettings()
                 }
             }
             HStack {
@@ -596,10 +608,13 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 ZStack {
                     SearchChrome(model)
                     // chrome 关闭：外壳由 SearchChrome 自绘，避免 TextField 默认底/边再套一层。
-                    TextField(model.searchText, key: SEARCH_FIELD_ID, chrome: false).padding(SEARCH_ICON_INSET + 4.0,
+                    TextField(if (onShelf) { model.shelfSearchText } else { model.searchText },
+                        key: SEARCH_FIELD_ID, chrome: false).padding(SEARCH_ICON_INSET + 4.0,
                         0.0, SEARCH_KBD_INSET + 4.0, 0.0)
-                    SearchPlaceholder(model)
-                    SearchAutocomplete(model, SEARCH_FIELD_ID)
+                    SearchPlaceholder(model, onShelf)
+                    if (!onShelf) {
+                        SearchAutocomplete(model, SEARCH_FIELD_ID)
+                    }
                     SearchExpandTicker(searchTween, searchProgress)
                 }.alignment(Alignment.TopLeading).width(searchLayoutWidth(window.width, showBack, searchProgress))
                 Spacer()

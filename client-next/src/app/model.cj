@@ -196,6 +196,25 @@ public class AppModel {
     // 本任务仅保存选择状态（原型 home-tools 的第二个下拉）。
     public let tankGroupIndex = State<Int64>(0)
 
+    // 书架（收藏 / 阅读历史）：两路数据独立加载，切换 Tab 时保留已到货内容。
+    // 搜索词与首页全局搜索分离；标题栏会按当前页面绑定对应 State。
+    public let shelfTab = State<Int64>(0) // 0=收藏 1=阅读历史
+    public let shelfFilter = State<Int64>(0) // 0=全部 1=未读完 2=仅合集 3=新入库
+    public let shelfSearchText = State<String>("")
+    public let shelfFavoriteSortIndex = State<Int64>(0)
+    public let shelfHistorySortIndex = State<Int64>(0)
+    public let shelfFavorites = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let shelfHistory = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let shelfFavoritesLoading = State<Bool>(false)
+    public let shelfHistoryLoading = State<Bool>(false)
+    public let shelfFavoritesFailed = State<Bool>(false)
+    public let shelfHistoryFailed = State<Bool>(false)
+    public let shelfContentWidth = State<Float32>(0.0)
+    private var shelfFavoritesLoaded = false
+    private var shelfHistoryLoaded = false
+    // 从书架打开详情/合集/阅读器时，详情顶栏返回书架而不是首页。
+    private var detailReturnToShelf = false
+
     // 详情/阅读
     public let meta = State<?ArchiveMeta>(None)
     public let pages = State<ArrayList<PageInfo>>(ArrayList<PageInfo>())
@@ -883,6 +902,105 @@ public class AppModel {
         let _ = worker.submitTagged("search", query.lang, {=> a.search(q)})
     }
 
+    // ---- 书架（library-redesign.html）----
+
+    public func openHome(): Unit {
+        exitSelection()
+        clearAutocomplete()
+        page.value = Page.Library
+    }
+
+    public func openShelf(): Unit {
+        exitSelection()
+        clearAutocomplete()
+        page.value = Page.Shelf
+        if (shelfTab.value == 0) {
+            if (!shelfFavoritesLoaded) { loadShelfFavorites() }
+        } else if (!shelfHistoryLoaded) {
+            loadShelfHistory()
+        }
+    }
+
+    public func isShelfContext(): Bool {
+        match (page.value) {
+            case Page.Shelf => true
+            case Page.Detail(_) | Page.Tank(_) | Page.Reader(_, _) => detailReturnToShelf
+            case _ => false
+        }
+    }
+
+    public func leaveDetailOrSettings(): Unit {
+        exitSelection()
+        match (page.value) {
+            case Page.Detail(_) | Page.Tank(_) =>
+                if (detailReturnToShelf) { openShelf() } else { openHome() }
+            case _ => openHome()
+        }
+    }
+
+    public func selectShelfTab(index: Int64): Unit {
+        let next = if (index == 1) { 1 } else { 0 }
+        if (shelfTab.value == next) { return }
+        shelfTab.value = next
+        if (next == 0) {
+            if (!shelfFavoritesLoaded) { loadShelfFavorites() }
+        } else if (!shelfHistoryLoaded) {
+            loadShelfHistory()
+        }
+    }
+
+    public func toggleShelfFilter(index: Int64): Unit {
+        shelfFilter.value = if (shelfFilter.value == index) { 0 } else { index }
+    }
+
+    public func setShelfSort(index: Int64): Unit {
+        if (shelfTab.value == 0) {
+            if (shelfFavoriteSortIndex.value == index) { return }
+            shelfFavoriteSortIndex.value = index
+            loadShelfFavorites()
+        } else {
+            if (shelfHistorySortIndex.value == index) { return }
+            shelfHistorySortIndex.value = index
+            loadShelfHistory()
+        }
+    }
+
+    public func refreshShelf(): Unit {
+        if (shelfTab.value == 0) { loadShelfFavorites() } else { loadShelfHistory() }
+    }
+
+    private func loadShelfFavorites(): Unit {
+        let a = api ?? return
+        let q = SearchQuery()
+        q.favoriteonly = true
+        q.groupbyTanks = true
+        q.pageSize = 1000
+        q.lang = language.value
+        match (shelfFavoriteSortIndex.value) {
+            case 1 => q.sortby = "title"; q.order = "asc"
+            case 2 => q.sortby = "pagecount"; q.order = "desc"
+            case _ => q.sortby = "created_at"; q.order = "desc"
+        }
+        shelfFavoritesLoading.value = true
+        shelfFavoritesFailed.value = false
+        let _ = worker.submitTagged("shelf:favorites", q.lang, {=> a.search(q)})
+    }
+
+    private func loadShelfHistory(): Unit {
+        let a = api ?? return
+        let q = SearchQuery()
+        q.pageSize = 1000
+        q.lang = language.value
+        match (shelfHistorySortIndex.value) {
+            case 1 => q.sortby = "title"; q.order = "asc"
+            case 2 => q.sortby = "pagecount"; q.order = "desc"
+            case _ => q.sortby = "lastread"; q.order = "desc"
+        }
+        shelfHistoryLoading.value = true
+        shelfHistoryFailed.value = false
+        let _ = worker.submitTagged("shelf:history", q.lang, {=> a.search(q)})
+    }
+
     // 浏览模式 ⟺ 无搜索词、无侧栏过滤（收藏/未读/无标签均关）、未选分类、未「查看更多」出站。
     // 模式是派生态而非独立状态：任何动作改完状态后经 applyFilters 收束。
     // browseExited 是唯一例外：横排行的「查看更多」（继续阅读/新到）不带任何过滤条件，
@@ -947,6 +1065,11 @@ public class AppModel {
     // 工具条「搜索」：写入关键词并收束查询；清空词后搜索即回浏览模式（复位出站标记）。
     public func submitFilter(): Unit {
         clearAutocomplete()
+        match (page.value) {
+            // 书架搜索由 shelfSearchText 即时、本地过滤；Enter 只负责收起补全。
+            case Page.Shelf => return
+            case _ => ()
+        }
         browseExited = false
         query.filter = searchText.value
         applyFilters()
@@ -1757,6 +1880,12 @@ public class AppModel {
     // ---- 详情/阅读（Task 9/10 的视图调用）----
 
     public func openDetail(arcid: String): Unit {
+        match (page.value) {
+            case Page.Shelf => detailReturnToShelf = true
+            // 详情层级内继续跳转或阅读器返回时保留最初来源。
+            case Page.Detail(_) | Page.Tank(_) | Page.Reader(_, _) => ()
+            case _ => detailReturnToShelf = false
+        }
         // 离开阅读器（典型路径就是 Esc/← 详情）前把进度尾巴发掉（去重丢尾教训）；
         // 无 pending 时为空操作。
         reader.flushProgress()
@@ -1778,6 +1907,11 @@ public class AppModel {
 
     // 打开合集详情：元数据 + 成员档案 + 相关合集三路并发。
     public func openTank(tankid: String): Unit {
+        match (page.value) {
+            case Page.Shelf => detailReturnToShelf = true
+            case Page.Detail(_) | Page.Tank(_) | Page.Reader(_, _) => ()
+            case _ => detailReturnToShelf = false
+        }
         tank.value = None
         tankMembers.value = ArrayList<SearchItem>()
         tankRelated.value = ArrayList<TankoubonInfo>()
@@ -1882,6 +2016,10 @@ public class AppModel {
     }
 
     public func openReader(arcid: String, startPage: Int64): Unit {
+        match (page.value) {
+            case Page.Shelf => detailReturnToShelf = true
+            case _ => ()
+        }
         playback.stop() // 换档案/重进阅读器：停掉上一媒体（旧进程不得泄漏）
         lastLane = Book // 与 reader.open 的 activeLane=Book 复位对齐
         readerArcid = arcid
@@ -2332,12 +2470,28 @@ public class AppModel {
                 it.isfavorite = target
             }
         }
+        for (it in shelfFavorites.value) {
+            if (it.arcid == arcid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
+        for (it in shelfHistory.value) {
+            if (it.arcid == arcid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
         if (!found) {
             return
         }
         items.value = items.value
         browseRows.value = browseRows.value
         tankMembers.value = tankMembers.value
+        shelfFavorites.value = shelfFavorites.value
+        shelfHistory.value = shelfHistory.value
         toggleFavorite(arcid, target)
     }
 
@@ -2375,6 +2529,13 @@ public class AppModel {
                 it.isfavorite = target
             }
         }
+        for (it in shelfFavorites.value) {
+            if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
+                found = true
+                target = !it.isfavorite
+                it.isfavorite = target
+            }
+        }
         match (tank.value) {
             case Some(it) =>
                 if (it.id == tankid) {
@@ -2392,6 +2553,7 @@ public class AppModel {
         browseRows.value = browseRows.value
         parentTanks.value = parentTanks.value
         tankRelated.value = tankRelated.value
+        shelfFavorites.value = shelfFavorites.value
         let a = api ?? return
         let nextFavorite = target
         let _ = worker.submit(
@@ -2741,6 +2903,7 @@ public class AppModel {
     private func refreshLocalizedData(): Unit {
         match (page.value) {
             case Page.Library => refreshLibrary()
+            case Page.Shelf => refreshShelf()
             case Page.Detail(arcid) => refreshDetailLocalized(arcid)
             case Page.Tank(tankid) => refreshTankDetail(tankid)
             case Page.Reader(arcid, _) => refreshMeta(arcid)
@@ -2933,6 +3096,21 @@ public class AppModel {
     }
 
     private func handleError(r: ApiResult): Unit {
+        // 书架两路错误在页面内联呈现；普通网络失败不再叠一层 toast。
+        if (r.name == "shelf:favorites" || r.name == "shelf:history") {
+            if (r.name == "shelf:favorites") {
+                shelfFavoritesLoading.value = false
+                shelfFavoritesFailed.value = true
+            } else {
+                shelfHistoryLoading.value = false
+                shelfHistoryFailed.value = true
+            }
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+                showError(r.error)
+            }
+            return
+        }
         if (r.name.startsWith("upload:")) {
             let id = r.name.removePrefix("upload:")
             match (findUpload(id)) {
@@ -3287,6 +3465,24 @@ public class AppModel {
                     items.value = sp.items
                     recordsTotal.value = sp.recordsTotal
                     currentPage.value = sp.page
+                case None => ()
+            }
+        } else if (name == "shelf:favorites") {
+            shelfFavoritesLoading.value = false
+            match (r.payload) {
+                case Some(p) =>
+                    shelfFavorites.value = (p as SearchPage).getOrThrow().items
+                    shelfFavoritesLoaded = true
+                    shelfFavoritesFailed.value = false
+                case None => ()
+            }
+        } else if (name == "shelf:history") {
+            shelfHistoryLoading.value = false
+            match (r.payload) {
+                case Some(p) =>
+                    shelfHistory.value = (p as SearchPage).getOrThrow().items
+                    shelfHistoryLoaded = true
+                    shelfHistoryFailed.value = false
                 case None => ()
             }
         } else if (name == "set.overview") {
@@ -3683,7 +3879,15 @@ public class AppModel {
                 case None => ()
             }
             refreshLibrary()
+        } else if (name.startsWith("tank-favorite:")) {
+            // 取消收藏后条目应从书架即时消失；重取同时校正乐观更新。
+            if (shelfFavoritesLoaded) { loadShelfFavorites() }
+            match (page.value) {
+                case Page.Tank(tankid) => refreshTankDetail(tankid)
+                case _ => ()
+            }
         } else if (name.startsWith("favorite:") || name.startsWith("isnew:")) {
+            if (name.startsWith("favorite:") && shelfFavoritesLoaded) { loadShelfFavorites() }
             // 收藏/未读切换成功：仍在详情页/阅读页则重取元数据刷新展示
             match (page.value) {
                 case Page.Detail(arcid) => refreshMeta(arcid)

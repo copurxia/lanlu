@@ -9,6 +9,7 @@ import lanlu_client_next.net.{CategoryItem, SearchItem, ArchiveMeta, TankoubonIn
 import std.collection.ArrayList
 import std.convert.Parsable
 import std.env.getCommandLine
+import std.time.DateTime
 
 // ── 临时快照播种装置（Task E3 验证专用，用后删除，不随产品交付）──
 // 命令行 --seed-browse / --seed-search 触发：全程离线（api 保持 None），直接向
@@ -28,6 +29,7 @@ public func harnessSeedMode(): String {
     for (a in getCommandLine()) {
         if (a == "--seed-browse") { return "browse" }
         if (a == "--seed-search") { return "search" }
+        if (a == "--seed-shelf") { return "shelf" }
         if (a == "--seed-detail") { return "detail" }
         if (a == "--seed-metadata") { return "metadata" }
         if (a == "--seed-tank") { return "tank" }
@@ -100,6 +102,10 @@ public func seedLibrarySnapshot(model: AppModel, mode: String): Unit {
         seedReader(model)
         return
     }
+    if (mode == "shelf") {
+        seedShelf(model)
+        return
+    }
     model.page.value = Page.Library
     seedCategories(model)
     if (mode == "search") {
@@ -119,6 +125,38 @@ private func seedCategories(model: AppModel): Unit {
     cats.add(makeCategory(4, "CAT_4", "写真集", 17))
     cats.add(makeCategory(5, "CAT_5", "小说", 9))
     model.categories.value = cats
+}
+
+// 书架重设计：收藏含聚合合集，历史带今天/本周/更早三组与续读横幅。
+// --shelf-history 可直接拍阅读历史态。
+private func seedShelf(model: AppModel): Unit {
+    model.page.value = Page.Shelf
+    let favorites = seedItems(model, 18, 700)
+    for (i in 0..favorites.size) {
+        favorites[i].isfavorite = true
+        if (i == 3 || i == 10) {
+            favorites[i].itemType = "tankoubon"
+            favorites[i].tankoubonId = "TANK_S${i}"
+            favorites[i].archiveCount = 4 + i
+        }
+    }
+    model.shelfFavorites.value = favorites
+
+    let history = seedItems(model, 24, 800)
+    let now = DateTime.now().toUnixTimeStamp().toSeconds()
+    for (i in 0..history.size) {
+        history[i].lastreadtime = if (i < 8) {
+            now - (i + 1) * 3600
+        } else if (i < 17) {
+            now - (i - 6) * 86400
+        } else {
+            now - (i + 2) * 86400
+        }
+    }
+    model.shelfHistory.value = history
+    if (harnessHasArg("--shelf-history")) {
+        model.shelfTab.value = 1
+    }
 }
 
 private func makeCategory(id: Int64, catid: String, name: String, count: Int64): CategoryItem {

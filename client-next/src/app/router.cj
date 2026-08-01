@@ -4,6 +4,7 @@ package lanlu_client_next.app
 public enum Page {
     | Login
     | Library
+    | Shelf
     | Detail(String)          // arcid
     | Tank(String)            // tankoubon_id
     | Reader(String, Int64)   // arcid, 起始页（1 基）
