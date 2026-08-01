@@ -219,7 +219,7 @@ class HoverSensor <: Widget {
 // Book/Pages/Disk/Box 为设置页统计卡增补（替代 ♥/▤/▣/● 文本符号，原型 .stat-card 图标）；
 // Tag/Globe/Sparkle/Monitor/Chart/Info 为设置导航图标增补（原型 #set-nav .side-item .ico）。
 public enum GhostGlyph {
-    | Named(IconName) | Gear | Theme | Search | Back | Menu | Swap | Heart | Download | AddTank | Ellipsis
+    | Named(IconName) | Gear | Theme | Search | Filter | Back | Menu | Swap | Heart | Download | AddTank | Ellipsis
     | Book | Pages | Disk | Box | Tag | Globe | Sparkle | Monitor | Chart | Info | Home
 }
 
@@ -257,6 +257,15 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
             let pen = Pen(width: 1.4, color: color)
             renderer.strokeCircle(cx - 1.0, cy - 1.0, 5.2, pen)
             renderer.strokeLine(cx + 3.0, cy + 3.0, cx + 6.8, cy + 6.8, pen)
+        case GhostGlyph.Filter =>
+            // 漏斗：对齐 frontend 的 lucide Filter，宽口收束为短竖柄。
+            let pen = Pen(width: 1.5, color: color)
+            renderer.strokeLine(cx - 7.0, cy - 6.0, cx + 7.0, cy - 6.0, pen)
+            renderer.strokeLine(cx - 7.0, cy - 6.0, cx - 1.8, cy, pen)
+            renderer.strokeLine(cx + 7.0, cy - 6.0, cx + 1.8, cy, pen)
+            renderer.strokeLine(cx - 1.8, cy, cx - 1.8, cy + 6.5, pen)
+            renderer.strokeLine(cx - 1.8, cy + 6.5, cx + 1.8, cy + 4.5, pen)
+            renderer.strokeLine(cx + 1.8, cy + 4.5, cx + 1.8, cy, pen)
         case GhostGlyph.Back =>
             // ←：水平干线 + 左向箭头头。
             let pen = Pen(width: 1.6, color: color)

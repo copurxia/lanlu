@@ -25,6 +25,8 @@ private let DRAG_BRAND_W: Int32 = 100
 private let SEARCH_REST_W: Float32 = 460.0
 private let SEARCH_EXPANDED_W: Float32 = 680.0
 private let SEARCH_EXPAND_MS: Int64 = 220
+// 首页搜索框右侧筛选钮占 34vp，外加 HStack 的 10vp 间距。
+private let FILTER_BUTTON_SLOT_W: Float32 = 44.0
 // 右侧固定带保留宽（右内边距 16 + 胶囊 ≈182 + 设置/主题 34×2 + 用户芯片 ≤150 + 分隔线 13
 // + 窗口控制 118 + 间距 6×10 ≈ 607，取 640 留安全边；用户名超长的芯片已截断兜底）。
 private let DRAG_RIGHT_RESERVE: Int32 = 640
@@ -35,9 +37,10 @@ private let DRAG_BACK_OFFSET: Int32 = 44
 
 // 标题栏拖动矩形集：品牌区恒有；搜索框在品牌区与右侧固定带之间水平居中（前后各一个
 // Spacer），两侧弹性空隙各注册一块（窗口过窄空隙不存在则不注册，避免盖住交互控件）。
-// hasBack：详情/合集页顶栏最左有返回钮，拖动矩形整体避让（品牌矩形与左预留带右移）。
+// hasBack：详情/合集页顶栏最左有返回钮，拖动矩形整体避让（品牌矩形与左预留带右移）；
+// hasFilter：首页搜索框右侧有筛选钮，搜索簇与右侧拖动带均须为它留出命中空间。
 // 坐标为逻辑 vp。
-public func titleBarDragRects(windowWidth: Int32, hasBack: Bool): Array<(Int32, Int32, Int32, Int32)> {
+public func titleBarDragRects(windowWidth: Int32, hasBack: Bool, hasFilter: Bool): Array<(Int32, Int32, Int32, Int32)> {
     let rects = ArrayList<(Int32, Int32, Int32, Int32)>()
     let brandX: Int32 = if (hasBack) {
         16 + DRAG_BACK_OFFSET
@@ -48,11 +51,17 @@ public func titleBarDragRects(windowWidth: Int32, hasBack: Bool): Array<(Int32, 
     let leftReserve = brandX + DRAG_BRAND_W
     let freeW = windowWidth - leftReserve - DRAG_RIGHT_RESERVE
     if (freeW > 0) {
-        let searchW = min(Int32(SEARCH_EXPANDED_W), freeW)
-        let side = (freeW - searchW) / 2
+        let filterSlot: Int32 = if (hasFilter) {
+            Int32(FILTER_BUTTON_SLOT_W)
+        } else {
+            0
+        }
+        let searchW = min(Int32(SEARCH_EXPANDED_W), max(0, freeW - filterSlot))
+        let searchClusterW = searchW + filterSlot
+        let side = (freeW - searchClusterW) / 2
         if (side > 0) {
             rects.add((leftReserve, 0, side, TITLEBAR_HEIGHT))
-            rects.add((leftReserve + side + searchW, 0, side, TITLEBAR_HEIGHT))
+            rects.add((leftReserve + side + searchClusterW, 0, side, TITLEBAR_HEIGHT))
         }
     }
     rects.toArray()
@@ -287,11 +296,19 @@ private class SearchPlaceholder <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         // 占位文案仅在有输入时隐藏（与浏览器 placeholder 一致：聚焦但为空时仍显示）。
-        let value = if (shelf) { model.shelfSearchText.value } else { model.searchText.value }
+        let value = if (shelf) {
+            model.shelfSearchText.value
+        } else {
+            model.searchText.value
+        }
         if (value.size > 0) {
             return
         }
-        let ph = if (shelf) { model.t("shelf.search") } else { model.t("nav.search") }
+        let ph = if (shelf) {
+            model.t("shelf.search")
+        } else {
+            model.t("nav.search")
+        }
         let th = ctx.renderer.textHeight(pointSize: 13.0)
         ctx
             .renderer
@@ -344,13 +361,18 @@ private func searchWidth(progress: Float32): Float32 {
 
 // 以与拖动区相同的几何预算限制宽度：常规窗口拿到完整动画宽度，
 // 窄窗口则优先保留右侧导航/窗口按钮，搜索框自适应收窄。
-private func searchLayoutWidth(windowWidth: Int32, hasBack: Bool, progress: Float32): Float32 {
+private func searchLayoutWidth(windowWidth: Int32, hasBack: Bool, hasFilter: Bool, progress: Float32): Float32 {
     let brandX: Int32 = if (hasBack) {
         16 + DRAG_BACK_OFFSET
     } else {
         0
     }
-    let available = max(0.0, Float32(windowWidth - brandX - DRAG_BRAND_W - DRAG_RIGHT_RESERVE))
+    let filterSlot: Float32 = if (hasFilter) {
+        FILTER_BUTTON_SLOT_W
+    } else {
+        0.0
+    }
+    let available = max(0.0, Float32(windowWidth - brandX - DRAG_BRAND_W - DRAG_RIGHT_RESERVE) - filterSlot)
     min(searchWidth(progress), available)
 }
 
@@ -408,14 +430,25 @@ private class SearchKeys <: Widget {
 }
 
 // 导航胶囊（原型 .nav-pill）：首页与书架均为真实页面；在线源尚未落地，保持禁用。
+// 选中底块用一个 0（首页）↔ 1（书架）的弹簧驱动，并在两端实际 Rect 之间插值，
+// 因此中英文标签宽度不同也能同时平滑改变 x / width；弹簧初值取当前上下文，首帧静止。
 private class NavPill <: Widget {
     private let model: AppModel
     private let labels: Array<String>
+    private let indicatorSpring: Spring
     private var frame = Rect.zero()
 
     public init(model: AppModel) {
         this.model = model
         this.labels = [model.t("nav.home"), model.t("nav.shelf"), model.t("nav.sources")]
+        let start: Float32 = if (model.isShelfContext()) {
+            1.0
+        } else {
+            0.0
+        }
+        this.indicatorSpring = rememberState<Spring>("titlebar:nav:indicator", {
+            => Spring(start, stiffness: 260.0, damping: 28.0)
+        }).value
         emit(this)
     }
 
@@ -450,17 +483,28 @@ private class NavPill <: Widget {
         ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: ctx
             .theme
             .panelEdge))
+        let target: Float32 = if (model.isShelfContext()) {
+            1.0
+        } else {
+            0.0
+        }
+        // 钳制轻微的弹簧过冲，避免高亮越出首尾可选项；速度与回弹仍由 Spring 保留。
+        let position = clampF32(indicatorSpring.animate(ctx, target: target), 0.0, 1.0)
+        let home = itemRect(ctx, 0)
+        let shelf = itemRect(ctx, 1)
+        let indicator = Rect(home.x + (shelf.x - home.x) * position, home.y, home.w + (shelf.w - home.w) * position,
+            home.h)
+        ctx.renderer.fillRoundedRect(indicator, indicator.h / 2.0, ctx.theme.accentSoft)
+
         var x = frame.x + 3.0
         for (i in 0..labels.size) {
             let w = itemWidth(ctx, labels[i])
             let item = Rect(x, frame.y + 3.0, w, frame.h - 6.0)
             let th = ctx.renderer.textHeight(pointSize: 12.5)
-            let active = if (i == 0) { !model.isShelfContext() } else { i == 1 && model.isShelfContext() }
-            if (active) {
-                ctx.renderer.fillRoundedRect(item, item.h / 2.0, ctx.theme.accentSoft)
-                drawPillText(ctx, labels[i], item, th, ctx.theme.accent)
-            } else if (i < 2) {
-                drawPillText(ctx, labels[i], item, th, ctx.theme.mutedText)
+            if (i == 0) {
+                drawPillText(ctx, labels[i], item, th, ctx.theme.mutedText.lerp(ctx.theme.accent, 1.0 - position))
+            } else if (i == 1) {
+                drawPillText(ctx, labels[i], item, th, ctx.theme.mutedText.lerp(ctx.theme.accent, position))
             } else {
                 // 禁用态：muted 再降透明度，视觉置灰。
                 let m = ctx.theme.mutedText
@@ -586,6 +630,10 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         case Page.Shelf => true
         case _ => false
     }
+    let onLibrary = match (model.page.value) {
+        case Page.Library => true
+        case _ => false
+    }
     let searchTween = rememberState<Tween>("titlebar:search-expand", {
         => Tween(SEARCH_EXPAND_MS, Easing.easeOutCubic)
     }).value
@@ -594,8 +642,8 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         TitleBarBackground()
         HStack {
             if (showBack) {
-                GhostIconButton(GhostGlyph.Back, "titlebar:back") {=>
-                    model.leaveDetailOrSettings()
+                GhostIconButton(GhostGlyph.Back, "titlebar:back") {
+                    => model.leaveDetailOrSettings()
                 }
             }
             HStack {
@@ -608,15 +656,23 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 ZStack {
                     SearchChrome(model)
                     // chrome 关闭：外壳由 SearchChrome 自绘，避免 TextField 默认底/边再套一层。
-                    TextField(if (onShelf) { model.shelfSearchText } else { model.searchText },
-                        key: SEARCH_FIELD_ID, chrome: false).padding(SEARCH_ICON_INSET + 4.0,
-                        0.0, SEARCH_KBD_INSET + 4.0, 0.0)
+                    TextField(if (onShelf) {
+                        model.shelfSearchText
+                    } else {
+                        model.searchText
+                    }, key: SEARCH_FIELD_ID, chrome: false).padding(SEARCH_ICON_INSET + 4.0, 0.0, SEARCH_KBD_INSET + 4.0,
+                        0.0)
                     SearchPlaceholder(model, onShelf)
                     if (!onShelf) {
                         SearchAutocomplete(model, SEARCH_FIELD_ID)
                     }
                     SearchExpandTicker(searchTween, searchProgress)
-                }.alignment(Alignment.TopLeading).width(searchLayoutWidth(window.width, showBack, searchProgress))
+                }
+                    .alignment(Alignment.TopLeading)
+                    .width(searchLayoutWidth(window.width, showBack, onLibrary, searchProgress))
+                if (onLibrary) {
+                    GhostIconButton(GhostGlyph.Filter, "titlebar:filter") {=> model.openAdvancedFilter()}
+                }
                 Spacer()
                 NavPill(model)
                 GhostIconButton(GhostGlyph.Named(IconName.Upload), "titlebar:upload") {

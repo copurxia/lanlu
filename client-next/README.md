@@ -5,7 +5,8 @@
 ## 简介
 
 lanlu-client-next 是 lanlu 服务器的原生桌面客户端，使用仓颉语言编写，UI 基于
-[CangjieGUI](../packages/cangjie-gui)（cui，本地路径依赖）。覆盖 v1 范围：登录、书库浏览
+[CangjieGUI](https://gitcode.com/copur/CangjieGUI)（cui；本地开发使用 `../packages/cangjie-gui`，
+CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 （搜索/排序/分类/过滤/分页）、档案详情、内置图片阅读器、设置页（概览 dashboard/账户安全/外观/缓存 + 管理板块：分类/标签/智能分类/用户/系统设置/任务/定时任务/插件/统计信息）。
 
 ## 功能特性
@@ -96,7 +97,8 @@ GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client
 
 运行前需在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置
 `STDX_URL` 和 `STDX_WINDOWS_URL`，分别指向 Linux 与 Windows x86_64 cjnative static stdx 压缩包。
-CI 会在 runner 中按固定提交构建 kv4cj 与 MMKV 1.2.15，不依赖开发机 `ref/kv4cj` 目录中的预编译文件。
+CI 会先将固定提交的 CangjieGUI 克隆到 `packages/cangjie-gui`，并按固定提交构建 kv4cj 与
+MMKV 1.2.15；这些步骤均不依赖开发机目录或其中的预编译文件。
 
 `cjlint` 报告和 `cjfmt` 差异会作为 artifact 保留 14 天。当前格式检查为建议项；完成现有代码格式化
 基线清理后，可移除工作流中该步骤的 `continue-on-error`，将其升级为合并门槛。

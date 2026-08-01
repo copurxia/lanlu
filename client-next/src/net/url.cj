@@ -35,6 +35,8 @@ public class SearchQuery {
     public var order: String = "asc"
     public var page: Int64 = 1
     public var pageSize: Int64 = 40
+    public var dateFrom: String = ""
+    public var dateTo: String = ""
     public var newonly: Bool = false
     public var untaggedonly: Bool = false
     public var favoriteonly: Bool = false
@@ -53,6 +55,8 @@ public func buildSearchQuery(q: SearchQuery): String {
     parts.add("pageSize=${q.pageSize}")
     if (q.sortby.size > 0) { parts.add("sortby=${percentEncode(q.sortby)}") }
     if (q.order.size > 0) { parts.add("order=${percentEncode(q.order)}") }
+    if (q.dateFrom.size > 0) { parts.add("date_from=${percentEncode(q.dateFrom)}") }
+    if (q.dateTo.size > 0) { parts.add("date_to=${percentEncode(q.dateTo)}") }
     if (q.newonly) { parts.add("newonly=1") }
     if (q.untaggedonly) { parts.add("untaggedonly=1") }
     if (q.favoriteonly) { parts.add("favoriteonly=1") }

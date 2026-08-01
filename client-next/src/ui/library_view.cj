@@ -81,6 +81,7 @@ public func libraryView(model: AppModel): Unit {
             model.batchDelete(arcids, tankIds)
     })
     addToTankDialog(model, addTankOpen, addTankArcids)
+    advancedFilterDialog(model)
 }
 
 // ---- 左侧栏（原型 #home-side：224vp，无自带底色、与主区同为窗口 BG，仅右边线分隔）----
@@ -127,7 +128,7 @@ private func navGroupHeader(text: String): Unit {
 // 「全部档案」的激活态：无任何侧栏过滤且未选分类（搜索词不影响导航激活态）。
 private func allFilterInactive(model: AppModel): Bool {
     !model.favOnly.value && !model.newOnly.value && !model.untaggedOnly.value &&
-        model.categoryIndex.value == 0
+        model.dateFrom.value.size == 0 && model.dateTo.value.size == 0 && model.categoryIndex.value == 0
 }
 
 // ---- 工具条（原型 .home-tools：排序/方向/合集聚合下拉 + 右侧计数 + 纯图标刷新钮）----

@@ -30,6 +30,7 @@ private var dragRegionChrome = true
 private var dragRegionReaderPanel = false
 private var dragRegionUploadDrawer = false
 private var dragRegionHasBack = false
+private var dragRegionHasFilter = false
 
 private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     let w = window.width
@@ -41,11 +42,16 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
         case Page.Detail(_) | Page.Tank(_) | Page.Settings => true
         case _ => false
     }
+    let hasFilter = match (model.page.value) {
+        case Page.Library => true
+        case _ => false
+    }
     let chrome = !isReader || model.reader.chromeVisible
     let readerPanelOpen = isReader && (model.readerSidebarOpen.value || model.readerSettingsOpen.value)
     let uploadPanelOpen = model.uploadDrawerOpen.value
     if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && readerPanelOpen ==
-        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && hasBack == dragRegionHasBack) {
+        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && hasBack == dragRegionHasBack &&
+        hasFilter == dragRegionHasFilter) {
         return
     }
     dragRegionWidth = w
@@ -54,6 +60,7 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     dragRegionReaderPanel = readerPanelOpen
     dragRegionUploadDrawer = uploadPanelOpen
     dragRegionHasBack = hasBack
+    dragRegionHasFilter = hasFilter
     // 不支持 hit-test 的视频驱动（如快照装置的 dummy）会拒绝注册：忽略即可，窗口照常
     // 可用，只是没有 OS 托管拖动（与 desktop_app 忽略光标/IME 锚点拒绝同一惯例）。
     try {
@@ -66,7 +73,7 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
                 window.setDragRegions(Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0)))
             }
         } else {
-            window.setDragRegions(titleBarDragRects(w, hasBack))
+            window.setDragRegions(titleBarDragRects(w, hasBack, hasFilter))
         }
     } catch (_: Exception) {
         ()

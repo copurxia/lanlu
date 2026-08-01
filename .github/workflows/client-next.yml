@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - "client-next/**"
-      - "packages/cangjie-gui/**"
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
       - "packages/fontkit_ffi/**"
@@ -13,7 +12,6 @@ on:
   pull_request:
     paths:
       - "client-next/**"
-      - "packages/cangjie-gui/**"
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
       - "packages/fontkit_ffi/**"
@@ -31,6 +29,9 @@ concurrency:
 defaults:
   run:
     shell: bash
+
+env:
+  CANGJIE_GUI_COMMIT: 80444c327adb3a578a685bd3e99d3e4f48ad2772
 
 jobs:
   quality:
@@ -110,6 +111,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Fetch pinned CangjieGUI source
+        run: |
+          set -euo pipefail
+          git clone https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+          git -C packages/cangjie-gui checkout --detach "${CANGJIE_GUI_COMMIT}"
+          actual_commit="$(git -C packages/cangjie-gui rev-parse HEAD)"
+          if [ "${actual_commit}" != "${CANGJIE_GUI_COMMIT}" ]; then
+            echo "::error::Unexpected CangjieGUI commit ${actual_commit}."
+            exit 1
+          fi
+
       - name: Verify in-repository dependencies
         run: |
           set -euo pipefail
@@ -160,7 +172,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ env.CANGJIE_GUI_COMMIT }}-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
       - name: Download stdx
         env:
@@ -292,6 +304,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Fetch pinned CangjieGUI source
+        run: |
+          $ErrorActionPreference = "Stop"
+          git clone https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+          git -C packages/cangjie-gui checkout --detach $env:CANGJIE_GUI_COMMIT
+          $actualCommit = (git -C packages/cangjie-gui rev-parse HEAD).Trim()
+          if ($actualCommit -ne $env:CANGJIE_GUI_COMMIT) {
+            throw "Unexpected CangjieGUI commit $actualCommit"
+          }
+
       - name: Verify in-repository dependencies
         run: |
           $ErrorActionPreference = "Stop"
@@ -340,7 +362,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ env.CANGJIE_GUI_COMMIT }}-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
       - name: Download Windows stdx
         env:

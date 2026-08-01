@@ -26,7 +26,7 @@ func longPageMaxOffset(fittedH: Float32, frameH: Float32): Float32 {
     max(0.0, fittedH - frameH)
 }
 
-// 滚轮单位 → 滚动像素（无惯性跟手，不做 Spring）。
+// 滚轮单位 → 滚动目标距离；实际位置由 SmoothScroll 的 ease-out 曲线追踪。
 private let LONG_PAGE_WHEEL_PX: Float32 = 48.0
 
 // 条漫滚动与 CUI 其他滚动容器保持同一手感（一个滚轮刻度 72vp）。内容宽度对齐
@@ -93,8 +93,7 @@ func webtoonLazyRange(heights: Array<Float32>, scroll: Float32, viewportH: Float
     }
     let buffer = max(0.0, viewportH) * 3.0
     let first = max(0, webtoonIndexAtOffset(heights, max(0.0, scroll - buffer)) - 4)
-    let last = min(heights.size - 1,
-        webtoonIndexAtOffset(heights, scroll + max(0.0, viewportH) + buffer) + 4)
+    let last = min(heights.size - 1, webtoonIndexAtOffset(heights, scroll + max(0.0, viewportH) + buffer) + 4)
     (first, last)
 }
 
@@ -139,15 +138,17 @@ private let STAGE_ZOOM: Float32 = 2.0
 class ReaderStageState {
     var inited = false
     var lastIndex: Int64 = -1
-    var curKeys: Array<String> = []   // 当前 spread 的纹理 key（非图片页为 ""）
-    var prevKeys: Array<String> = []  // 上一 spread（滑出层用）
+    var curKeys: Array<String> = [] // 当前 spread 的纹理 key（非图片页为 ""）
+    var prevKeys: Array<String> = [] // 上一 spread（滑出层用）
     var dx: Float32 = 0.0
     var dy: Float32 = 0.0
     var zoomed = false
-    var scrollY: Float32 = 0.0        // 长图滚动偏移（vp；翻页/切 spread 复位）
+    let scrollY = State<Float32>(0.0) // 长图滚动偏移（vp；翻页/切 spread 复位）
+    let longPageMotion = SmoothScroll(0.0)
     // 条漫是一个完整流的连续滚动面，不复用逐页 scrollY。scroll 自身是 State，滚轮
     // 写入后即触发下一帧重建；其余几何缓存随 ReaderStage 重建继续保留。
     let webtoonScroll = State<Float32>(0.0)
+    let webtoonMotion = SmoothScroll(0.0)
     let webtoonBar = ScrollBar("reader:stage:webtoon:bar")
     var webtoonHeights: Array<Float32> = []
     var webtoonArchive = ""
@@ -159,7 +160,7 @@ class ReaderStageState {
     var webtoonZoomOriginX: Float32 = 0.5
     var webtoonZoomOriginY: Float32 = 0.5
     var lastLyricIndex: Int64 = -2
-    var lastVideoGeneration: UInt64 = 0   // 视频舞台已见的帧代际（新帧驱动续帧用）
+    var lastVideoGeneration: UInt64 = 0 // 视频舞台已见的帧代际（新帧驱动续帧用）
     let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
     let outTween = Tween(TURN_OUT_MS, {t: Float32 => Easing.easeInOutCubic(t)})
     let inTween = Tween(TURN_IN_MS, {t: Float32 => Easing.easeOutCubic(t)})
@@ -406,12 +407,12 @@ class ReaderStage <: Widget {
             case Some(i) => match (r.pageAt(i)) {
                 case Some(p) =>
                     if (p.thumbAssetId > 0) {
-                    audioCoverKey = "asset:${p.thumbAssetId}"
-                    audioBackdropKey = model.requestAudioBackdrop(p.thumbAssetId)
-                    if (model.imageState(audioCoverKey).value == "") {
-                        model.requestImage(audioCoverKey, "/api/assets/${p.thumbAssetId}", highPriority: true)
+                        audioCoverKey = "asset:${p.thumbAssetId}"
+                        audioBackdropKey = model.requestAudioBackdrop(p.thumbAssetId)
+                        if (model.imageState(audioCoverKey).value == "") {
+                            model.requestImage(audioCoverKey, "/api/assets/${p.thumbAssetId}", highPriority: true)
+                        }
                     }
-                }
                 case None => ()
             }
             case None => ()
@@ -438,7 +439,7 @@ class ReaderStage <: Widget {
             st.curKeys = keys
             st.lastIndex = r.index
             st.zoomed = false // 缩放态翻页时复位（任务约束）
-            st.scrollY = 0.0  // 长图滚动偏移随 spread 复位
+            st.scrollY.value = 0.0 // 长图滚动偏移随 spread 复位
             st.outTween.reset(0.0)
             st.inTween.reset(0.0)
         } else {
@@ -465,8 +466,8 @@ class ReaderStage <: Widget {
         }
         let estimate = webtoonEstimatedHeight(width, st.webtoonViewportH)
         if (reset) {
-            st.webtoonHeights = Array<Float32>(count, {i =>
-                if (r.realPageAtStream(i).isSome()) {
+            st.webtoonHeights = Array<Float32>(count, {
+                i => if (r.realPageAtStream(i).isSome()) {
                     estimate
                 } else {
                     max(320.0, st.webtoonViewportH)
@@ -479,8 +480,8 @@ class ReaderStage <: Widget {
         } else if (st.webtoonHeights.size != count) {
             // 无缝续读只在尾部追加：保留既有测量值与滚动锚点，仅为新流项补估算高。
             let old = st.webtoonHeights
-            st.webtoonHeights = Array<Float32>(count, {i =>
-                if (i < old.size) {
+            st.webtoonHeights = Array<Float32>(count, {
+                i => if (i < old.size) {
                     old[i]
                 } else if (r.realPageAtStream(i).isSome()) {
                     estimate
@@ -516,8 +517,9 @@ class ReaderStage <: Widget {
                                 let top = webtoonOffsetBefore(st.webtoonHeights, streamIndex)
                                 let bottom = top + st.webtoonHeights[streamIndex]
                                 model.requestImage(key, readerPageUrl(arcid, page.id),
-                                    highPriority: top < st.webtoonScroll.value + viewport &&
-                                    bottom > st.webtoonScroll.value)
+                                    highPriority: top < st.webtoonScroll.value + viewport && bottom > st
+                                        .webtoonScroll
+                                        .value)
                             }
                         }
                     case None => ()
@@ -590,9 +592,9 @@ class ReaderStage <: Widget {
                 drawVideoStage(ctx, i)
             case None => match (audioPage) {
                 case Some(i) => drawAudioStage(ctx, i)
-            case None =>
-                ctx.renderer.fill(frame, ctx.theme.stageBg)
-                drawImageStage(ctx)
+                case None =>
+                    ctx.renderer.fill(frame, ctx.theme.stageBg)
+                    drawImageStage(ctx)
             }
         }
         if (model.readerShowInfo.value) {
@@ -607,6 +609,9 @@ class ReaderStage <: Widget {
         if (st.webtoonHeights.size == 0) {
             return
         }
+        let contentHeight = webtoonContentHeight(st.webtoonHeights)
+        let _ = st.webtoonMotion.animate(ctx, st.webtoonScroll, contentHeight, frame.h)
+        syncWebtoonIndex()
         let contentW = webtoonContentWidth(frame.w)
         let contentX = frame.centerX() - contentW / 2.0
         let scroll = st.webtoonScroll.value
@@ -638,8 +643,7 @@ class ReaderStage <: Widget {
                                 if (imageStatus == "ready") {
                                     match (pixelTexture(ctx.renderer, key)) {
                                         case Some(tex) =>
-                                            let measured = webtoonImageHeight(tex.width, tex.height, contentW,
-                                                rowHeight)
+                                            let measured = webtoonImageHeight(tex.width, tex.height, contentW, rowHeight)
                                             let heightDelta = measured - rowHeight
                                             if (heightDelta > 1.0 || heightDelta < -1.0) {
                                                 rowHeight = measured
@@ -652,12 +656,11 @@ class ReaderStage <: Widget {
                                                 let anchorX = dest.x + dest.w * st.webtoonZoomOriginX
                                                 let anchorY = dest.y + dest.h * st.webtoonZoomOriginY
                                                 dest = Rect(anchorX - (anchorX - dest.x) * zoom,
-                                                    anchorY - (anchorY - dest.y) * zoom, dest.w * zoom,
-                                                    dest.h * zoom)
+                                                    anchorY - (anchorY - dest.y) * zoom, dest.w * zoom, dest.h * zoom)
                                             }
                                             ctx.renderer.texture(tex, dest)
-                                        case None => drawPagePlaceholder(ctx,
-                                            Rect(contentX, rowY, contentW, rowHeight), model.t("common.loading"))
+                                        case None => drawPagePlaceholder(ctx, Rect(contentX, rowY, contentW, rowHeight),
+                                            model.t("common.loading"))
                                     }
                                 } else if (imageStatus == "error") {
                                     drawPagePlaceholder(ctx, Rect(contentX, rowY, contentW, rowHeight),
@@ -706,11 +709,16 @@ class ReaderStage <: Widget {
         let track = Rect(frame.right() - 8.0, frame.y + 2.0, 6.0, max(0.0, frame.h - 4.0))
         let thumbHeight = max(18.0, track.h * frame.h / contentHeight)
         let maxOffset = max(1.0, contentHeight - frame.h)
-        let thumbY = track.y + (track.h - thumbHeight) * max(0.0,
-            min(1.0, st.webtoonScroll.value / maxOffset))
+        let thumbY = track.y + (track.h - thumbHeight) * max(0.0, min(1.0, st.webtoonScroll.value / maxOffset))
         ctx.renderer.fill(track, ctx.theme.panelEdge.withAlpha(28))
-        ctx.renderer.fill(Rect(track.x, thumbY, track.w, thumbHeight),
-            ctx.theme.accent.withAlpha(if (st.webtoonBar.dragging(ctx)) { 230 } else { 180 }))
+        ctx
+            .renderer
+            .fill(Rect(track.x, thumbY, track.w, thumbHeight),
+                ctx.theme.accent.withAlpha(if (st.webtoonBar.dragging(ctx)) {
+                    230
+                } else {
+                    180
+                }))
     }
 
     private func pageCell(i: Int64): Rect {
@@ -780,9 +788,13 @@ class ReaderStage <: Widget {
                             // pushClip 裁回舞台；只在动画停稳的当前页启用（滑动层走 contain）。
                             let fittedH = longPageFittedHeight(tex.width, tex.height, frame.w)
                             let maxOff = longPageMaxOffset(fittedH, frame.h)
-                            st.scrollY = max(0.0, min(maxOff, st.scrollY))
+                            let clamped = max(0.0, min(maxOff, st.scrollY.value))
+                            if (clamped != st.scrollY.value) {
+                                st.scrollY.value = clamped
+                            }
+                            let visibleScroll = st.longPageMotion.animate(ctx, st.scrollY, fittedH, frame.h)
                             ctx.renderer.pushClip(frame)
-                            drawTextureAlpha(ctx, tex, Rect(frame.x, frame.y - st.scrollY, frame.w, fittedH), alpha)
+                            drawTextureAlpha(ctx, tex, Rect(frame.x, frame.y - visibleScroll, frame.w, fittedH), alpha)
                             ctx.renderer.popClip()
                         } else {
                             drawTextureAlpha(ctx, tex, dest.shift(ox, oy), alpha)
@@ -904,8 +916,7 @@ class ReaderStage <: Widget {
             ctx.renderer.fillRoundedRect(audioLayout.cover, 8.0, Color.rgb(18, 18, 18))
             let cx = audioLayout.cover.centerX()
             let cy = audioLayout.cover.centerY()
-            drawIcon(ctx.renderer, IconName.Music, Rect(cx - 16.0, cy - 16.0, 32.0, 32.0),
-                ctx.theme.accent, weight: 2.0)
+            drawIcon(ctx.renderer, IconName.Music, Rect(cx - 16.0, cy - 16.0, 32.0, 32.0), ctx.theme.accent, weight: 2.0)
         }
         var title = ""
         match (model.reader.pageAt(pageIdx)) {
@@ -1058,8 +1069,7 @@ class ReaderStage <: Widget {
         ctx.renderer.fillRoundedRect(c, 14.0, ctx.theme.panel)
         ctx.renderer.strokeRoundedRect(c.inset(0.5), 13.5, Pen(width: 1.0, color: ctx.theme.panelEdge))
         var y = c.y + 36.0
-        ctx.renderer.textCenter(model.t("reader.finished"), Rect(c.x, y, c.w, 24.0), ctx.theme.text,
-            pointSize: 17.0)
+        ctx.renderer.textCenter(model.t("reader.finished"), Rect(c.x, y, c.w, 24.0), ctx.theme.text, pointSize: 17.0)
         y += 32.0
         // 本 segment 标题：segment 回填优先，元数据兜底。
         var title = r.activeSegmentTitle
@@ -1084,15 +1094,14 @@ class ReaderStage <: Widget {
         } else if (r.seamlessNext) {
             drawNextLine(ctx, y, model.t("reader.loadingNext"), false)
         } else if (model.readerNextTitle.value.size > 0) {
-            drawNextLine(ctx, y, model.t("reader.nextArchive",
-                params: [("title", model.readerNextTitle.value)]), true)
+            drawNextLine(ctx, y, model.t("reader.nextArchive", params: [("title", model.readerNextTitle.value)]), true)
         } else {
             drawNextLine(ctx, y, model.t("reader.resolvingNext"), false)
         }
         // 按钮（seamless 关）：打开下一档案（候选未解析到时灰显）/ 查看详情。
         if (!r.seamlessNext) {
-            drawEndButton(ctx, endOpenRect, "reader:end:open", model.t("reader.openNext"),
-                model.hasNextCandidate(), true)
+            drawEndButton(ctx, endOpenRect, "reader:end:open", model.t("reader.openNext"), model.hasNextCandidate(),
+                true)
             drawEndButton(ctx, endDetailRect, "reader:end:detail", model.t("reader.viewDetails"), true, false)
         }
     }
@@ -1124,7 +1133,7 @@ class ReaderStage <: Widget {
         } else if (primary) {
             if (hovered) {
                 ctx.theme.accent.withAlpha(220)
-        } else {
+            } else {
                 ctx.theme.accent
             }
         } else {
@@ -1259,12 +1268,8 @@ class ReaderStage <: Widget {
                     return false
                 }
                 model.noteReaderActivity()
-                let maxOffset = max(0.0, contentHeight - frame.h)
-                let next = max(0.0, min(maxOffset, st.webtoonScroll.value - wheelY * WEBTOON_WHEEL_PX))
-                if (next != st.webtoonScroll.value) {
-                    st.webtoonScroll.value = next
-                    syncWebtoonIndex()
-                }
+                let _ = st.webtoonMotion.scrollBy(ctx, st.webtoonScroll, -wheelY * WEBTOON_WHEEL_PX, contentHeight,
+                    frame.h)
                 return true
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
                 if (!frame.contains(x, y)) {
@@ -1287,10 +1292,10 @@ class ReaderStage <: Widget {
                                         let rowTop = webtoonOffsetBefore(st.webtoonHeights, streamIndex)
                                         let contentX = frame.centerX() - webtoonContentWidth(frame.w) / 2.0
                                         st.webtoonZoomIndex = streamIndex
-                                        st.webtoonZoomOriginX = max(0.0, min(1.0,
-                                            (x - contentX) / webtoonContentWidth(frame.w)))
-                                        st.webtoonZoomOriginY = max(0.0, min(1.0,
-                                            (contentOffset - rowTop) / st.webtoonHeights[streamIndex]))
+                                        st.webtoonZoomOriginX = max(0.0,
+                                            min(1.0, (x - contentX) / webtoonContentWidth(frame.w)))
+                                        st.webtoonZoomOriginY = max(0.0,
+                                            min(1.0, (contentOffset - rowTop) / st.webtoonHeights[streamIndex]))
                                     }
                                     ctx.requestFrame()
                                     return true
@@ -1327,8 +1332,7 @@ class ReaderStage <: Widget {
                 if (!frame.contains(x, y) || st.webtoonHeights.size == 0) {
                     return false
                 }
-                let streamIndex = webtoonIndexAtOffset(st.webtoonHeights,
-                    st.webtoonScroll.value + y - frame.y)
+                let streamIndex = webtoonIndexAtOffset(st.webtoonHeights, st.webtoonScroll.value + y - frame.y)
                 match (model.reader.realPageAtStream(streamIndex)) {
                     case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
                         case Some(page) =>
@@ -1364,18 +1368,10 @@ class ReaderStage <: Widget {
                 //（frontend 边缘倒计时 toast 省略：直接翻页）。滚动跟手无惯性。
                 match (longPageMax(ctx)) {
                     case Some(maxOff) =>
-                        if (dy > 0.0) {
-                            if (st.scrollY >= maxOff - 0.5) {
-                                wheelTurn(true)
-                            } else {
-                                st.scrollY = min(maxOff, st.scrollY + dy * LONG_PAGE_WHEEL_PX)
-                            }
-                        } else if (dy < 0.0) {
-                            if (st.scrollY <= 0.5) {
-                                wheelTurn(false)
-                            } else {
-                                st.scrollY = max(0.0, st.scrollY + dy * LONG_PAGE_WHEEL_PX)
-                            }
+                        if (dy != 0.0 &&
+                            !st.longPageMotion.scrollBy(ctx, st.scrollY, dy * LONG_PAGE_WHEEL_PX, maxOff + frame.h,
+                            frame.h)) {
+                            wheelTurn(dy > 0.0)
                         }
                     case None =>
                         if (dy > 0.0) {

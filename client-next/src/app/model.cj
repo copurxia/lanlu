@@ -166,6 +166,19 @@ public class AppModel {
     public let favOnly = State<Bool>(false)
     public let newOnly = State<Bool>(false)
     public let untaggedOnly = State<Bool>(false)
+    public let dateFrom = State<String>("")
+    public let dateTo = State<String>("")
+    // 高级筛选弹窗由标题栏打开、书库页承载，因此可见性与草稿状态归模型统一持有。
+    // 草稿仅在「应用」时写回查询状态；取消不会污染当前结果。
+    public let advancedFilterOpen = State<Bool>(false)
+    public let advancedSortIndex = State<Int64>(0)
+    public let advancedOrderIndex = State<Int64>(0)
+    public let advancedFavOnly = State<Bool>(false)
+    public let advancedNewOnly = State<Bool>(false)
+    public let advancedUntaggedOnly = State<Bool>(false)
+    public let advancedTankGroupIndex = State<Int64>(0)
+    public let advancedDateFrom = State<String>("")
+    public let advancedDateTo = State<String>("")
 
     // ---- 多选（书库网格与合集成员列表共用一套状态）----
     // 条目 key 规则：档案用 arcid，tank 条目用其 tankoubon_id（与 SearchItem.itemType
@@ -892,6 +905,8 @@ public class AppModel {
             "desc"
         }
         query.categoryId = selectedCategoryId()
+        query.dateFrom = dateFrom.value
+        query.dateTo = dateTo.value
         query.favoriteonly = favOnly.value
         query.newonly = newOnly.value
         query.untaggedonly = untaggedOnly.value
@@ -1019,7 +1034,64 @@ public class AppModel {
 
     public func isBrowseMode(): Bool {
         !browseExited && query.filter.size == 0 && !favOnly.value && !newOnly.value && !untaggedOnly.value &&
-            categoryIndex.value == 0
+            dateFrom.value.size == 0 && dateTo.value.size == 0 && categoryIndex.value == 0
+    }
+
+    // 标题栏筛选钮入口：每次打开都以当前已应用条件重建草稿，确保取消后再次打开不残留。
+    public func openAdvancedFilter(): Unit {
+        advancedSortIndex.value = sortIndex.value
+        advancedOrderIndex.value = orderIndex.value
+        advancedFavOnly.value = favOnly.value
+        advancedNewOnly.value = newOnly.value
+        advancedUntaggedOnly.value = untaggedOnly.value
+        advancedTankGroupIndex.value = tankGroupIndex.value
+        advancedDateFrom.value = dateFrom.value
+        advancedDateTo.value = dateTo.value
+        advancedFilterOpen.value = true
+    }
+
+    // 应用高级筛选后明确进入结果网格；即使只改变排序，也应与 frontend 的筛选动作一致地发起查询。
+    public func applyAdvancedFilter(): Unit {
+        sortIndex.value = advancedSortIndex.value
+        orderIndex.value = advancedOrderIndex.value
+        favOnly.value = advancedFavOnly.value
+        newOnly.value = advancedNewOnly.value
+        untaggedOnly.value = advancedUntaggedOnly.value
+        tankGroupIndex.value = advancedTankGroupIndex.value
+        dateFrom.value = advancedDateFrom.value.trimAscii()
+        dateTo.value = advancedDateTo.value.trimAscii()
+        query.dateFrom = dateFrom.value
+        query.dateTo = dateTo.value
+        browseExited = true
+        advancedFilterOpen.value = false
+        submitSearch(1)
+    }
+
+    // 重置只清高级筛选条件，保留搜索词与当前分类；无搜索/分类时回到书库浏览视图。
+    public func resetAdvancedFilter(): Unit {
+        let tankGroupingChanged = tankGroupIndex.value != 0
+        sortIndex.value = 0
+        orderIndex.value = 0
+        favOnly.value = false
+        newOnly.value = false
+        untaggedOnly.value = false
+        tankGroupIndex.value = 0
+        dateFrom.value = ""
+        dateTo.value = ""
+        query.dateFrom = ""
+        query.dateTo = ""
+        advancedFilterOpen.value = false
+        browseExited = false
+        if (isBrowseMode()) {
+            if (tankGroupingChanged) {
+                for (r in browseRows.value) {
+                    r.requested = false
+                }
+                loadBrowseRows()
+            }
+        } else {
+            submitSearch(1)
+        }
     }
 
     // 合集聚合开关：index 0 = 开（与 ui 的 TANK_GROUP_LABELS 同步）。
@@ -1058,6 +1130,8 @@ public class AppModel {
         untaggedOnly.value = (kind == 3)
         if (kind == 0) {
             categoryIndex.value = 0
+            dateFrom.value = ""
+            dateTo.value = ""
         }
         applyFilters()
     }

@@ -18,6 +18,8 @@ func searchQueryOmitsEmptyParamsAndEncodesFilter(): Unit {
     q2.sortby = "lastread"
     q2.order = "desc"
     q2.page = 3
+    q2.dateFrom = "2026-07-01"
+    q2.dateTo = "2026-07-31"
     q2.favoriteonly = true
     let s = buildSearchQuery(q2)
     @Expect(s.contains("filter=foo%20bar"))
@@ -25,6 +27,8 @@ func searchQueryOmitsEmptyParamsAndEncodesFilter(): Unit {
     @Expect(s.contains("sortby=lastread"))
     @Expect(s.contains("order=desc"))
     @Expect(s.contains("page=3"))
+    @Expect(s.contains("date_from=2026-07-01"))
+    @Expect(s.contains("date_to=2026-07-31"))
     @Expect(s.contains("favoriteonly=1"))
     @Expect(!s.contains("newonly"))
 }
