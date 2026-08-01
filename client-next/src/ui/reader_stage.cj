@@ -29,6 +29,75 @@ func longPageMaxOffset(fittedH: Float32, frameH: Float32): Float32 {
 // 滚轮单位 → 滚动像素（无惯性跟手，不做 Spring）。
 private let LONG_PAGE_WHEEL_PX: Float32 = 48.0
 
+// 条漫滚动与 CUI 其他滚动容器保持同一手感（一个滚轮刻度 72vp）。内容宽度对齐
+// frontend：桌面最多 800px，两侧各留 16px 安全边距；窄窗口占满可用宽度。
+private let WEBTOON_WHEEL_PX: Float32 = 72.0
+private let WEBTOON_MAX_WIDTH: Float32 = 800.0
+private let WEBTOON_SIDE_PADDING: Float32 = 16.0
+private let WEBTOON_MIN_PAGE_HEIGHT: Float32 = 100.0
+
+func webtoonContentWidth(frameW: Float32): Float32 {
+    max(1.0, min(WEBTOON_MAX_WIDTH, frameW - WEBTOON_SIDE_PADDING * 2.0))
+}
+
+func webtoonEstimatedHeight(contentW: Float32, viewportH: Float32): Float32 {
+    max(WEBTOON_MIN_PAGE_HEIGHT, min(viewportH * 0.7, contentW * 1.5))
+}
+
+func webtoonImageHeight(imgW: Float32, imgH: Float32, contentW: Float32, fallback: Float32): Float32 {
+    if (imgW <= 0.0 || imgH <= 0.0 || contentW <= 0.0) {
+        return fallback
+    }
+    max(WEBTOON_MIN_PAGE_HEIGHT, imgH * contentW / imgW)
+}
+
+// frontend 以 scrollTop + viewport*0.3 作为当前页阈值；这里保留相同语义。
+func webtoonIndexAtOffset(heights: Array<Float32>, offset: Float32): Int64 {
+    if (heights.size == 0) {
+        return 0
+    }
+    let target = max(0.0, offset)
+    var top: Float32 = 0.0
+    for (i in 0..heights.size) {
+        let bottom = top + max(0.0, heights[i])
+        if (target < bottom) {
+            return Int64(i)
+        }
+        top = bottom
+    }
+    heights.size - 1
+}
+
+func webtoonContentHeight(heights: Array<Float32>): Float32 {
+    var total: Float32 = 0.0
+    for (height in heights) {
+        total += max(0.0, height)
+    }
+    total
+}
+
+func webtoonOffsetBefore(heights: Array<Float32>, index: Int64): Float32 {
+    var total: Float32 = 0.0
+    let end = max(0, min(index, heights.size))
+    for (i in 0..end) {
+        total += max(0.0, heights[i])
+    }
+    total
+}
+
+// 只物化可视区附近页面：与 frontend 相同取上下各 3 屏缓冲，并额外扩 4 页，
+// 既覆盖快速滚轮/触控板跳跃，也不会把整本档案一次加入图片下载队列。
+func webtoonLazyRange(heights: Array<Float32>, scroll: Float32, viewportH: Float32): (Int64, Int64) {
+    if (heights.size == 0) {
+        return (0, -1)
+    }
+    let buffer = max(0.0, viewportH) * 3.0
+    let first = max(0, webtoonIndexAtOffset(heights, max(0.0, scroll - buffer)) - 4)
+    let last = min(heights.size - 1,
+        webtoonIndexAtOffset(heights, scroll + max(0.0, viewportH) + buffer) + 4)
+    (first, last)
+}
+
 // 翻页位移向量（纯函数）：新页滑入的来源方向单位向量——LTR forward 从右进 (1,0)、
 // RTL forward 从左进 (-1,0)、TTB forward 从下进 (0,1)；旧页滑出恒为反向。
 // webtoon 返回零向量：滚动驱动模式不做位移翻页动画（原型 #stage.webtoon 豁免）。
@@ -76,6 +145,19 @@ class ReaderStageState {
     var dy: Float32 = 0.0
     var zoomed = false
     var scrollY: Float32 = 0.0        // 长图滚动偏移（vp；翻页/切 spread 复位）
+    // 条漫是一个完整流的连续滚动面，不复用逐页 scrollY。scroll 自身是 State，滚轮
+    // 写入后即触发下一帧重建；其余几何缓存随 ReaderStage 重建继续保留。
+    let webtoonScroll = State<Float32>(0.0)
+    let webtoonBar = ScrollBar("reader:stage:webtoon:bar")
+    var webtoonHeights: Array<Float32> = []
+    var webtoonArchive = ""
+    var webtoonContentW: Float32 = 0.0
+    var webtoonViewportH: Float32 = 720.0
+    var webtoonSyncedIndex: Int64 = -1
+    var wasWebtoon = false
+    var webtoonZoomIndex: Int64 = -1
+    var webtoonZoomOriginX: Float32 = 0.5
+    var webtoonZoomOriginY: Float32 = 0.5
     var lastLyricIndex: Int64 = -2
     var lastVideoGeneration: UInt64 = 0   // 视频舞台已见的帧代际（新帧驱动续帧用）
     let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
@@ -363,7 +445,86 @@ class ReaderStage <: Widget {
             // 同页重建（图片 ready / 设置变更等）：刷新 key 快照，不动动画。
             st.curKeys = keys
         }
+        match (r.mode) {
+            case ReadingMode.Webtoon => prepareWebtoonState()
+            case _ =>
+                st.wasWebtoon = false
+                st.webtoonZoomIndex = -1
+        }
         emit(this)
+    }
+
+    private func prepareWebtoonState(): Unit {
+        let r = model.reader
+        let count = r.streamItemCount
+        let reset = !st.wasWebtoon || st.webtoonArchive != r.arcid
+        let width = if (st.webtoonContentW > 0.0) {
+            st.webtoonContentW
+        } else {
+            WEBTOON_MAX_WIDTH
+        }
+        let estimate = webtoonEstimatedHeight(width, st.webtoonViewportH)
+        if (reset) {
+            st.webtoonHeights = Array<Float32>(count, {i =>
+                if (r.realPageAtStream(i).isSome()) {
+                    estimate
+                } else {
+                    max(320.0, st.webtoonViewportH)
+                }
+            })
+            st.webtoonScroll.value = 0.0
+            st.webtoonArchive = r.arcid
+            st.webtoonZoomIndex = -1
+            st.webtoonSyncedIndex = -1
+        } else if (st.webtoonHeights.size != count) {
+            // 无缝续读只在尾部追加：保留既有测量值与滚动锚点，仅为新流项补估算高。
+            let old = st.webtoonHeights
+            st.webtoonHeights = Array<Float32>(count, {i =>
+                if (i < old.size) {
+                    old[i]
+                } else if (r.realPageAtStream(i).isSome()) {
+                    estimate
+                } else {
+                    max(320.0, st.webtoonViewportH)
+                }
+            })
+        }
+        // reader.index 与上次由滚动同步的索引不同，说明来源是初始进度、滑条或侧栏，
+        // 需要像 frontend pendingWebtoonScrollToIndex 一样跳到目标页顶部。
+        if (reset || r.index != st.webtoonSyncedIndex) {
+            st.webtoonScroll.value = webtoonOffsetBefore(st.webtoonHeights, r.index)
+            st.webtoonSyncedIndex = r.index
+        }
+        st.wasWebtoon = true
+        requestVisibleWebtoonImages()
+    }
+
+    private func requestVisibleWebtoonImages(): Unit {
+        if (st.webtoonHeights.size == 0) {
+            return
+        }
+        let viewport = max(1.0, st.webtoonViewportH)
+        let (first, last) = webtoonLazyRange(st.webtoonHeights, st.webtoonScroll.value, viewport)
+        for (streamIndex in first..last + 1) {
+            match (model.reader.realPageAtStream(streamIndex)) {
+                case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
+                    case Some(page) =>
+                        if (page.pageType == "image" || page.pageType == "") {
+                            let arcid = model.reader.arcidOfReal(realIndex)
+                            let key = readerPageKey(arcid, page.id)
+                            if (model.imageState(key).value == "") {
+                                let top = webtoonOffsetBefore(st.webtoonHeights, streamIndex)
+                                let bottom = top + st.webtoonHeights[streamIndex]
+                                model.requestImage(key, readerPageUrl(arcid, page.id),
+                                    highPriority: top < st.webtoonScroll.value + viewport &&
+                                    bottom > st.webtoonScroll.value)
+                            }
+                        }
+                    case None => ()
+                }
+                case None => ()
+            }
+        }
     }
 
     public func measure(_: UiContext, available: Size): Size {
@@ -372,6 +533,25 @@ class ReaderStage <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        match (model.reader.mode) {
+            case ReadingMode.Webtoon =>
+                let nextWidth = webtoonContentWidth(frame.w)
+                let widthDelta = nextWidth - st.webtoonContentW
+                if (st.webtoonContentW > 0.0 && (widthDelta > 1.0 || widthDelta < -1.0)) {
+                    let ratio = nextWidth / st.webtoonContentW
+                    for (i in 0..st.webtoonHeights.size) {
+                        st.webtoonHeights[i] = max(WEBTOON_MIN_PAGE_HEIGHT, st.webtoonHeights[i] * ratio)
+                    }
+                    st.webtoonScroll.value = max(0.0, st.webtoonScroll.value * ratio)
+                }
+                st.webtoonContentW = nextWidth
+                st.webtoonViewportH = max(1.0, frame.h)
+                let maxOffset = max(0.0, webtoonContentHeight(st.webtoonHeights) - frame.h)
+                if (st.webtoonScroll.value > maxOffset) {
+                    st.webtoonScroll.value = maxOffset
+                }
+            case _ => ()
+        }
         audioLayout.resolve(frame)
         backRect = audioLayout.back
         playRect = audioLayout.play
@@ -388,6 +568,15 @@ class ReaderStage <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
+        match (model.reader.mode) {
+            case ReadingMode.Webtoon =>
+                drawWebtoonStage(ctx)
+                if (model.readerShowInfo.value) {
+                    drawMediaInfo(ctx)
+                }
+                return
+            case _ => ()
+        }
         // 虚拟结束页：绘制结束卡片（替代图片/音频舞台，对齐 frontend
         // ReaderCollectionEndPage，单栏卡片简化版）。
         if (model.reader.onVirtualEnd) {
@@ -412,6 +601,117 @@ class ReaderStage <: Widget {
     }
 
     // ── 图片舞台 ──
+
+    private func drawWebtoonStage(ctx: UiContext): Unit {
+        ctx.renderer.fill(frame, ctx.theme.stageBg)
+        if (st.webtoonHeights.size == 0) {
+            return
+        }
+        let contentW = webtoonContentWidth(frame.w)
+        let contentX = frame.centerX() - contentW / 2.0
+        let scroll = st.webtoonScroll.value
+        let viewportTop = scroll
+        let viewportBottom = scroll + frame.h
+        let first = webtoonIndexAtOffset(st.webtoonHeights, viewportTop)
+        let last = webtoonIndexAtOffset(st.webtoonHeights, viewportBottom)
+        var top = webtoonOffsetBefore(st.webtoonHeights, first)
+        var geometryChanged = false
+        endCardRect = Rect.zero()
+        endOpenRect = Rect.zero()
+        endDetailRect = Rect.zero()
+
+        ctx.renderer.pushClip(frame)
+        for (streamIndex in first..last + 1) {
+            var rowHeight = st.webtoonHeights[streamIndex]
+            let rowY = frame.y + top - scroll
+            let rowBottom = top + rowHeight
+            // 绘制区只物化当前视口；上下三屏的加载窗口已在
+            // requestVisibleWebtoonImages 处理。
+            if (rowBottom >= viewportTop && top <= viewportBottom) {
+                match (model.reader.realPageAtStream(streamIndex)) {
+                    case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
+                        case Some(page) =>
+                            if (page.pageType == "image" || page.pageType == "") {
+                                let arcid = model.reader.arcidOfReal(realIndex)
+                                let key = readerPageKey(arcid, page.id)
+                                let imageStatus = model.imageState(key).value
+                                if (imageStatus == "ready") {
+                                    match (pixelTexture(ctx.renderer, key)) {
+                                        case Some(tex) =>
+                                            let measured = webtoonImageHeight(tex.width, tex.height, contentW,
+                                                rowHeight)
+                                            let heightDelta = measured - rowHeight
+                                            if (heightDelta > 1.0 || heightDelta < -1.0) {
+                                                rowHeight = measured
+                                                st.webtoonHeights[streamIndex] = measured
+                                                geometryChanged = true
+                                            }
+                                            var dest = Rect(contentX, rowY, contentW, rowHeight)
+                                            if (st.webtoonZoomIndex == streamIndex) {
+                                                let zoom: Float32 = STAGE_ZOOM
+                                                let anchorX = dest.x + dest.w * st.webtoonZoomOriginX
+                                                let anchorY = dest.y + dest.h * st.webtoonZoomOriginY
+                                                dest = Rect(anchorX - (anchorX - dest.x) * zoom,
+                                                    anchorY - (anchorY - dest.y) * zoom, dest.w * zoom,
+                                                    dest.h * zoom)
+                                            }
+                                            ctx.renderer.texture(tex, dest)
+                                        case None => drawPagePlaceholder(ctx,
+                                            Rect(contentX, rowY, contentW, rowHeight), model.t("common.loading"))
+                                    }
+                                } else if (imageStatus == "error") {
+                                    drawPagePlaceholder(ctx, Rect(contentX, rowY, contentW, rowHeight),
+                                        model.t("reader.loadFailedRetry"))
+                                } else {
+                                    drawPagePlaceholder(ctx, Rect(contentX, rowY, contentW, rowHeight),
+                                        model.t("common.loading"))
+                                }
+                            } else {
+                                // frontend 在条漫流内也给非图片页独立行；原生端尚未提供
+                                // 可同时运行多个媒体播放器的能力，保留连续几何并诚实占位。
+                                drawUnsupported(ctx, Rect(contentX, rowY, contentW, rowHeight), realIndex)
+                            }
+                        case None => ()
+                    }
+                    case None =>
+                        let endFrame = Rect(contentX, rowY, contentW, rowHeight)
+                        layoutEndCard(endFrame)
+                        drawCollectionEnd(ctx)
+                }
+            }
+            top += rowHeight
+        }
+        ctx.renderer.popClip()
+        drawWebtoonScrollBar(ctx)
+        if (geometryChanged) {
+            // 本帧的 last 是按旧估算高算出的；立即续一帧用实测高重算可视范围，
+            // 同时让新进入 3 屏缓冲区的页面开始懒加载。
+            ctx.requestFrame()
+        }
+    }
+
+    private func layoutEndCard(container: Rect): Unit {
+        let cw = min(420.0, container.w - 48.0)
+        let ch = min(320.0, container.h - 48.0)
+        endCardRect = Rect(container.centerX() - cw / 2.0, container.centerY() - ch / 2.0, cw, ch)
+        endOpenRect = Rect(endCardRect.x + 32.0, endCardRect.bottom() - 64.0, 160.0, 36.0)
+        endDetailRect = Rect(endCardRect.right() - 32.0 - 120.0, endCardRect.bottom() - 64.0, 120.0, 36.0)
+    }
+
+    private func drawWebtoonScrollBar(ctx: UiContext): Unit {
+        let contentHeight = webtoonContentHeight(st.webtoonHeights)
+        if (contentHeight <= frame.h || frame.h <= 0.0) {
+            return
+        }
+        let track = Rect(frame.right() - 8.0, frame.y + 2.0, 6.0, max(0.0, frame.h - 4.0))
+        let thumbHeight = max(18.0, track.h * frame.h / contentHeight)
+        let maxOffset = max(1.0, contentHeight - frame.h)
+        let thumbY = track.y + (track.h - thumbHeight) * max(0.0,
+            min(1.0, st.webtoonScroll.value / maxOffset))
+        ctx.renderer.fill(track, ctx.theme.panelEdge.withAlpha(28))
+        ctx.renderer.fill(Rect(track.x, thumbY, track.w, thumbHeight),
+            ctx.theme.accent.withAlpha(if (st.webtoonBar.dragging(ctx)) { 230 } else { 180 }))
+    }
 
     private func pageCell(i: Int64): Rect {
         if (keys.size <= 1) {
@@ -487,12 +787,12 @@ class ReaderStage <: Widget {
                         } else {
                             drawTextureAlpha(ctx, tex, dest.shift(ox, oy), alpha)
                         }
-                    case None => drawPagePlaceholder(ctx, cell.shift(ox, oy), "加载中…")
+                    case None => drawPagePlaceholder(ctx, cell.shift(ox, oy), model.t("common.loading"))
                 }
             } else if (st8 == "error") {
-                drawPagePlaceholder(ctx, cell.shift(ox, oy), "加载失败，点击重试")
+                drawPagePlaceholder(ctx, cell.shift(ox, oy), model.t("reader.loadFailedRetry"))
             } else {
-                drawPagePlaceholder(ctx, cell.shift(ox, oy), "加载中…")
+                drawPagePlaceholder(ctx, cell.shift(ox, oy), model.t("common.loading"))
             }
         }
     }
@@ -508,7 +808,7 @@ class ReaderStage <: Widget {
             case Some(p) => pt = p.pageType
             case None => ()
         }
-        let hint = "该页类型（${pt}）不支持阅读，请翻页"
+        let hint = model.t("reader.unsupported", params: [("type", pt)])
         ctx.renderer.textCenter(hint, cell, ctx.theme.mutedText, pointSize: 13.0)
     }
 
@@ -524,7 +824,7 @@ class ReaderStage <: Widget {
                 .renderer
                 .texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
             case None =>
-                var title = "视频"
+                var title = model.t("reader.video")
                 match (model.reader.pageAt(pageIdx)) {
                     case Some(p) => title = if (p.title.size > 0) {
                         p.title
@@ -534,13 +834,13 @@ class ReaderStage <: Widget {
                     case None => ()
                 }
                 let status = if (pb.error.size > 0) {
-                    "加载失败：${pb.error}"
+                    model.t("reader.loadFailed", params: [("error", pb.error)])
                 } else if (pb.loading) {
-                    "正在下载 ${title}…"
+                    model.t("reader.downloading", params: [("title", title)])
                 } else if (pb.loaded) {
-                    "点击底部播放按钮"
+                    model.t("reader.clickPlay")
                 } else {
-                    "准备视频…"
+                    model.t("reader.preparingVideo")
                 }
                 ctx.renderer.textCenter(status, frame, ctx.theme.onMediaDim, pointSize: 14.0)
         }
@@ -619,11 +919,11 @@ class ReaderStage <: Widget {
         let titleRect = Rect(audioLayout.meta.x, audioLayout.meta.y, audioLayout.meta.w, 28.0)
         ctx.renderer.textCenter(title, titleRect, onMedia, pointSize: 20.0)
         let sub = if (pb.error.size > 0) {
-            "加载失败：${pb.error}"
+            model.t("reader.loadFailed", params: [("error", pb.error)])
         } else if (pb.loading) {
-            "加载中…"
+            model.t("common.loading")
         } else if (!pb.loaded) {
-            "未加载"
+            model.t("reader.notLoaded")
         } else {
             "${formatMediaClock(pb.positionSec)} / ${if (pb.durationSec > 0.0) { formatMediaClock(pb.durationSec) } else { "--:--" }}"
         }
@@ -682,7 +982,7 @@ class ReaderStage <: Widget {
                 row++
             }
         } else {
-            ctx.renderer.textCenter("暂无歌词", area, ctx.theme.onMediaDim, pointSize: 14.0)
+            ctx.renderer.textCenter(model.t("reader.noLyrics"), area, ctx.theme.onMediaDim, pointSize: 14.0)
         }
         ctx.renderer.popClip()
     }
@@ -758,7 +1058,8 @@ class ReaderStage <: Widget {
         ctx.renderer.fillRoundedRect(c, 14.0, ctx.theme.panel)
         ctx.renderer.strokeRoundedRect(c.inset(0.5), 13.5, Pen(width: 1.0, color: ctx.theme.panelEdge))
         var y = c.y + 36.0
-        ctx.renderer.textCenter("已读完", Rect(c.x, y, c.w, 24.0), ctx.theme.text, pointSize: 17.0)
+        ctx.renderer.textCenter(model.t("reader.finished"), Rect(c.x, y, c.w, 24.0), ctx.theme.text,
+            pointSize: 17.0)
         y += 32.0
         // 本 segment 标题：segment 回填优先，元数据兜底。
         var title = r.activeSegmentTitle
@@ -777,20 +1078,22 @@ class ReaderStage <: Widget {
         // 下一档案行：可选封面（AppModel 解析候选后经 asset 管线请求）+ 状态文案。
         let nextTitle = r.nextSegmentTitle
         if (nextTitle.size > 0) {
-            drawNextLine(ctx, y, "下一档案：${nextTitle}", true)
+            drawNextLine(ctx, y, model.t("reader.nextArchive", params: [("title", nextTitle)]), true)
         } else if (r.appendError.size > 0) {
             drawNextLine(ctx, y, r.appendError, false)
         } else if (r.seamlessNext) {
-            drawNextLine(ctx, y, "正在加载下一档案…", false)
+            drawNextLine(ctx, y, model.t("reader.loadingNext"), false)
         } else if (model.readerNextTitle.value.size > 0) {
-            drawNextLine(ctx, y, "下一档案：${model.readerNextTitle.value}", true)
+            drawNextLine(ctx, y, model.t("reader.nextArchive",
+                params: [("title", model.readerNextTitle.value)]), true)
         } else {
-            drawNextLine(ctx, y, "正在解析下一档案…", false)
+            drawNextLine(ctx, y, model.t("reader.resolvingNext"), false)
         }
         // 按钮（seamless 关）：打开下一档案（候选未解析到时灰显）/ 查看详情。
         if (!r.seamlessNext) {
-            drawEndButton(ctx, endOpenRect, "reader:end:open", "打开下一档案", model.hasNextCandidate(), true)
-            drawEndButton(ctx, endDetailRect, "reader:end:detail", "查看详情", true, false)
+            drawEndButton(ctx, endOpenRect, "reader:end:open", model.t("reader.openNext"),
+                model.hasNextCandidate(), true)
+            drawEndButton(ctx, endDetailRect, "reader:end:detail", model.t("reader.viewDetails"), true, false)
         }
     }
 
@@ -870,10 +1173,10 @@ class ReaderStage <: Widget {
                     // 加载态：没有「缓存命中/解码耗时」数据源，只报真实状态。
                     let st8 = model.imageState(key).value
                     parts.add(match (st8) {
-                        case "ready" => "已解码"
-                        case "error" => "加载失败"
-                        case "loading" => "下载中"
-                        case _ => "排队中"
+                        case "ready" => model.t("reader.decoded")
+                        case "error" => model.t("reader.loadFailedShort")
+                        case "loading" => model.t("reader.downloadInProgress")
+                        case _ => model.t("reader.queued")
                     })
                 }
             case None => ()
@@ -926,20 +1229,131 @@ class ReaderStage <: Widget {
         }
     }
 
-    // 滚轮翻页：webtoon 维持旧 gotoPage ±1 整页步进（turnPage 对 webtoon 豁免）；
-    // 其余模式走 spread 步进。
+    // 非条漫滚轮翻页走 spread 步进；条漫由 handleWebtoon 连续滚动，不进入这里。
     private func wheelTurn(forward: Bool): Unit {
         match (model.reader.mode) {
-            case ReadingMode.Webtoon => model.gotoPage(model.readerIndex.value + if (forward) {
-                1
-            } else {
-                -1
-            })
+            case ReadingMode.Webtoon => ()
             case _ => model.readerTurnPage(forward)
         }
     }
 
+    private func syncWebtoonIndex(): Unit {
+        if (st.webtoonHeights.size == 0) {
+            return
+        }
+        let threshold = st.webtoonScroll.value + frame.h * 0.3
+        let streamIndex = webtoonIndexAtOffset(st.webtoonHeights, threshold)
+        if (streamIndex != st.webtoonSyncedIndex) {
+            // 先标记再广播：readerVersion 会立即重建视图；新实例据此识别这是滚动
+            // 驱动的页码变化，不把 scroll 强行吸回页首。
+            st.webtoonSyncedIndex = streamIndex
+            model.syncWebtoonScrollPage(streamIndex)
+        }
+    }
+
+    private func handleWebtoon(ctx: UiContext, event: UiEvent): Bool {
+        let contentHeight = webtoonContentHeight(st.webtoonHeights)
+        match (event) {
+            case UiEvent.MouseWheel(_, wheelY, x, y) =>
+                if (!frame.contains(x, y)) {
+                    return false
+                }
+                model.noteReaderActivity()
+                let maxOffset = max(0.0, contentHeight - frame.h)
+                let next = max(0.0, min(maxOffset, st.webtoonScroll.value - wheelY * WEBTOON_WHEEL_PX))
+                if (next != st.webtoonScroll.value) {
+                    st.webtoonScroll.value = next
+                    syncWebtoonIndex()
+                }
+                return true
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (!frame.contains(x, y)) {
+                    return false
+                }
+                if (st.webtoonBar.press(ctx, frame, st.webtoonScroll, contentHeight, frame.h, x, y)) {
+                    syncWebtoonIndex()
+                    return true
+                }
+                if (model.reader.doubleTapZoom && ctx.clickCount >= 2) {
+                    let contentOffset = st.webtoonScroll.value + y - frame.y
+                    let streamIndex = webtoonIndexAtOffset(st.webtoonHeights, contentOffset)
+                    match (model.reader.realPageAtStream(streamIndex)) {
+                        case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
+                            case Some(page) =>
+                                if (page.pageType == "image" || page.pageType == "") {
+                                    if (st.webtoonZoomIndex == streamIndex) {
+                                        st.webtoonZoomIndex = -1
+                                    } else {
+                                        let rowTop = webtoonOffsetBefore(st.webtoonHeights, streamIndex)
+                                        let contentX = frame.centerX() - webtoonContentWidth(frame.w) / 2.0
+                                        st.webtoonZoomIndex = streamIndex
+                                        st.webtoonZoomOriginX = max(0.0, min(1.0,
+                                            (x - contentX) / webtoonContentWidth(frame.w)))
+                                        st.webtoonZoomOriginY = max(0.0, min(1.0,
+                                            (contentOffset - rowTop) / st.webtoonHeights[streamIndex]))
+                                    }
+                                    ctx.requestFrame()
+                                    return true
+                                }
+                            case None => ()
+                        }
+                        case None => ()
+                    }
+                }
+            case UiEvent.MouseMove(x, y) =>
+                if (st.webtoonBar.drag(ctx, frame, st.webtoonScroll, contentHeight, frame.h, y)) {
+                    syncWebtoonIndex()
+                    return true
+                }
+                if (model.reader.onVirtualEnd && !model.reader.seamlessNext) {
+                    if (endOpenRect.contains(x, y) && model.hasNextCandidate()) {
+                        ctx.claimHover("reader:end:open", CursorShape.Interactive)
+                    }
+                    if (endDetailRect.contains(x, y)) {
+                        ctx.claimHover("reader:end:detail", CursorShape.Interactive)
+                    }
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (model.reader.onVirtualEnd && !model.reader.seamlessNext) {
+                    if (endOpenRect.contains(x, y) && model.hasNextCandidate()) {
+                        model.openReaderNext()
+                        return true
+                    }
+                    if (endDetailRect.contains(x, y)) {
+                        model.openDetail(model.readerArcid)
+                        return true
+                    }
+                }
+                if (!frame.contains(x, y) || st.webtoonHeights.size == 0) {
+                    return false
+                }
+                let streamIndex = webtoonIndexAtOffset(st.webtoonHeights,
+                    st.webtoonScroll.value + y - frame.y)
+                match (model.reader.realPageAtStream(streamIndex)) {
+                    case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
+                        case Some(page) =>
+                            if (page.pageType == "image" || page.pageType == "") {
+                                let arcid = model.reader.arcidOfReal(realIndex)
+                                let key = readerPageKey(arcid, page.id)
+                                if (model.imageState(key).value == "error") {
+                                    model.retryImage(key, readerPageUrl(arcid, page.id))
+                                    return true
+                                }
+                            }
+                        case None => ()
+                    }
+                    case None => ()
+                }
+            case _ => ()
+        }
+        false
+    }
+
     public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (model.reader.mode) {
+            case ReadingMode.Webtoon => return handleWebtoon(ctx, event)
+            case _ => ()
+        }
         match (event) {
             case UiEvent.MouseWheel(_, dy, x, y) =>
                 if (!frame.contains(x, y)) {

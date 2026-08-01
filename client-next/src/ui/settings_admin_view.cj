@@ -206,8 +206,13 @@ func noticeRow(model: AppModel, text: String): Unit {
 // 单个设置项：按 valueType 渲染控件；草稿存 rememberState("sys.{key}")，并返回草稿 State 供保存回调读取。
 private func sysSettingRow(model: AppModel, s: SysSetting): State<String> {
     let draft = rememberState<String>("sys.${s.key}", {=> s.value})
-    let title = if (s.descriptionZh.size > 0) {
-        "${s.descriptionZh}  ${s.key}"
+    let description = if (model.language.value == "en" && s.descriptionEn.size > 0) {
+        s.descriptionEn
+    } else {
+        s.descriptionZh
+    }
+    let title = if (description.size > 0) {
+        "${description}  ${s.key}"
     } else {
         s.key
     }

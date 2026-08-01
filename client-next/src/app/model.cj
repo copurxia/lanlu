@@ -2,6 +2,7 @@ package lanlu_client_next.app
 
 import cui.{FileDialogRequest, FileDialogResult, State, Toaster, ToastKind, clearImageCache, clearPixelImages, 
     onPixelImageEvicted, stagePixelImage}
+import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap, HashSet}
@@ -140,6 +141,8 @@ public class AppModel {
     public let page = State<Page>(Page.Login)
     public let toaster = Toaster()
     public var settings: AppSettings
+    private let localizer = Localizer()
+    public let language: State<String>
     public var api: ?LanluApi = None
     public let worker = ApiWorker()
 
@@ -280,6 +283,7 @@ public class AppModel {
 
     public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()}) {
         settings = s
+        language = State<String>(resolveLanguage(s.languagePreference))
         this.persistSettings = persistSettings
         reader = ReaderModel(s)
         readerShowInfo = State<Bool>(s.readerShowInfo)
@@ -456,7 +460,8 @@ public class AppModel {
         metadataPluginPreview.value = false
         let a = api ?? return
         let id = item.arcid
-        let _ = worker.submit("editmeta:${id}", {=> a.metadata(id)})
+        let lang = language.value
+        let _ = worker.submitTagged("editmeta:${id}", lang, {=> a.metadata(id, lang: lang)})
         let _ = worker.submit("editfiles:${id}", {=> a.files(id)})
     }
 
@@ -872,9 +877,10 @@ public class AppModel {
         query.newonly = newOnly.value
         query.untaggedonly = untaggedOnly.value
         query.groupbyTanks = tankGroupOn()
+        query.lang = language.value
         loading.value = true
         let q = query
-        let _ = worker.submit("search", {=> a.search(q)})
+        let _ = worker.submitTagged("search", query.lang, {=> a.search(q)})
     }
 
     // 浏览模式 ⟺ 无搜索词、无侧栏过滤（收藏/未读/无标签均关）、未选分类、未「查看更多」出站。
@@ -963,7 +969,9 @@ public class AppModel {
         autocompleteSuggestions.value = ArrayList<TagSuggestion>()
         autocompleteLoading.value = true
         autocompleteVisible.value = true
-        let _ = worker.submit(taskName, {=> (requestId, queryText, a.tagAutocomplete(queryText, 10))})
+        let lang = language.value
+        let _ = worker.submitTagged(taskName, lang,
+            {=> (requestId, queryText, a.tagAutocomplete(queryText, 10, lang: lang))})
     }
 
     public func dismissAutocomplete(): Unit {
@@ -1394,8 +1402,8 @@ public class AppModel {
         }
         let old = browseRows.value
         let rows = ArrayList<BrowseRow>()
-        rows.add(findOrCreateRow(old, "resume", "继续阅读", ""))
-        rows.add(findOrCreateRow(old, "random", "随机推荐", ""))
+        rows.add(findOrCreateRow(old, "resume", t("library.resume"), ""))
+        rows.add(findOrCreateRow(old, "random", t("library.random"), ""))
         let cats = categories.value
         var n: Int64 = 0
         while (n < cats.size && n < BROWSE_CATEGORY_ROW_LIMIT) {
@@ -1457,21 +1465,23 @@ public class AppModel {
         let a = api ?? return r.requested = true
         r.loading = true
         r.failed = false
+        let lang = language.value
         if (r.key == "random") {
-            let _ = worker.submit("row:random", {=> a.randomSearch(BROWSE_ROW_SIZE)})
+            let _ = worker.submitTagged("row:random", lang, {=> a.randomSearch(BROWSE_ROW_SIZE, lang: lang)})
         } else {
             // 继续阅读 = 最近阅读倒序；分类行 = 该分类默认序。两者都随「合集聚合」开关
             // 带 groupby_tanks（随机行走 randomSearch 独立接口，不参与聚合）。
             let q = SearchQuery()
             q.pageSize = BROWSE_ROW_SIZE
             q.groupbyTanks = tankGroupOn()
+            q.lang = lang
             if (r.key == "resume") {
                 q.sortby = "lastread"
                 q.order = "desc"
             } else {
                 q.categoryId = r.catid
             }
-            let _ = worker.submit("row:${r.key}", {=> a.search(q)})
+            let _ = worker.submitTagged("row:${r.key}", lang, {=> a.search(q)})
         }
     }
 
@@ -1758,11 +1768,12 @@ public class AppModel {
         relatedItems.value = ArrayList<SearchItem>()
         page.value = Page.Detail(arcid)
         let a = api ?? return
-        let _ = worker.submit("meta:${arcid}", {=> a.metadata(arcid)})
+        let lang = language.value
+        let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
         // 辅助卡片数据（页面预览/所属合集/相关推荐）：失败静默，卡片无数据即隐藏。
         let _ = worker.submit("dfiles:${arcid}", {=> a.files(arcid)})
-        let _ = worker.submit("ptanks:${arcid}", {=> a.listArchiveTankoubons(arcid)})
-        let _ = worker.submit("related:${arcid}", {=> a.relatedArchives(arcid, 12)})
+        let _ = worker.submitTagged("ptanks:${arcid}", lang, {=> a.listArchiveTankoubons(arcid, lang: lang)})
+        let _ = worker.submitTagged("related:${arcid}", lang, {=> a.relatedArchives(arcid, 12, lang: lang)})
     }
 
     // 打开合集详情：元数据 + 成员档案 + 相关合集三路并发。
@@ -1773,7 +1784,8 @@ public class AppModel {
         tankFilter.value = ""
         page.value = Page.Tank(tankid)
         let a = api ?? return
-        let _ = worker.submit("tankmeta:${tankid}", {=> a.getTankoubon(tankid)})
+        let lang = language.value
+        let _ = worker.submitTagged("tankmeta:${tankid}", lang, {=> a.getTankoubon(tankid, lang: lang)})
         // 成员档案走 search?tankoubon_id=X&sortby=tank_order（对齐 frontend
         // tankoubon/page.tsx fetchArchives：合集内序、大 pageSize 一次取全）。
         let q = SearchQuery()
@@ -1781,21 +1793,29 @@ public class AppModel {
         q.sortby = "tank_order"
         q.order = "asc"
         q.pageSize = 10000
-        let _ = worker.submit("tankmembers:${tankid}", {=> a.search(q)})
-        let _ = worker.submit("tankrelated:${tankid}", {=> a.relatedTankoubons(tankid, 12)})
+        q.lang = lang
+        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.search(q)})
+        let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
+            => a.relatedTankoubons(tankid, 12, lang: lang)
+        })
     }
 
     // 重取合集详情（成员增删/收藏切换成功后刷新）：与 openTank 同三路并发，
     // 但不清空现有 State、不切页（避免已渲染内容闪空）。同名任务在途去重兜底。
     private func refreshTankDetail(tankid: String): Unit {
         let a = api ?? return
-        let _ = worker.submit("tankmeta:${tankid}", {=> a.getTankoubon(tankid)})
+        let lang = language.value
+        let _ = worker.submitTagged("tankmeta:${tankid}", lang, {=> a.getTankoubon(tankid, lang: lang)})
         let q = SearchQuery()
         q.tankoubonId = tankid
         q.sortby = "tank_order"
         q.order = "asc"
         q.pageSize = 10000
-        let _ = worker.submit("tankmembers:${tankid}", {=> a.search(q)})
+        q.lang = lang
+        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.search(q)})
+        let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
+            => a.relatedTankoubons(tankid, 12, lang: lang)
+        })
     }
 
     // 合集主操作：从首个成员档案开始阅读（按钮在无成员时禁用，不会空调用）。
@@ -1886,7 +1906,8 @@ public class AppModel {
         let a = api ?? return
         let _ = worker.submit("files:${arcid}", {=> a.files(arcid)})
         // 顶栏标题与收藏态（reader-redesign #topbar）：复用元数据通道。
-        let _ = worker.submit("meta:${arcid}", {=> a.metadata(arcid)})
+        let lang = language.value
+        let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
     }
 
     // 翻到显示页码 n（1 基）：seamlessNext 开 = 当前 segment 内页码，关 = 全局页码
@@ -1895,6 +1916,19 @@ public class AppModel {
         reader.gotoDisplayPage(n - 1)
         readerIndex.value = reader.displayPage
         readerPageSlider.value = Float32(reader.displayPage)
+    }
+
+    // 条漫滚动位置 -> 0 基流索引。这里不能走 gotoPage（其入参是当前 segment 的
+    // 1 基显示页码），否则无缝续读跨 segment 后会跳回错误页。滚动只在实际跨页时
+    // 广播，避免每个滚轮事件都重建整棵阅读器视图。
+    public func syncWebtoonScrollPage(streamIndex: Int64): Unit {
+        if (streamIndex == reader.index) {
+            return
+        }
+        reader.gotoPage(streamIndex)
+        readerIndex.value = reader.displayPage
+        readerPageSlider.value = Float32(reader.displayPage)
+        readerVersion.value += 1
     }
 
     // dock Book lane 的 ‹ ›：按阅读顺序步进一个 spread（方向换算不需要——dock 按钮
@@ -2118,12 +2152,14 @@ public class AppModel {
         appendInFlight = true
         let appended = reader.appendedArcids
         let seamless = reader.seamlessNext
-        let _ = worker.submit(
+        let lang = language.value
+        let _ = worker.submitTagged(
             "next.resolve",
+            lang,
             {
                 =>
                     var candidate: ?(String, String, Int64) = None
-                    let tanks = a.listArchiveTankoubons(arcid)
+                    let tanks = a.listArchiveTankoubons(arcid, lang: lang)
                     if (tanks.size > 0) {
                         // 合集内按 tank_order 找当前档案的下一章（跳过已拼接的）。
                         let q = SearchQuery()
@@ -2131,6 +2167,7 @@ public class AppModel {
                         q.sortby = "tank_order"
                         q.order = "asc"
                         q.pageSize = 10000
+                        q.lang = lang
                         let members = a.search(q).items
                         var i: Int64 = 0
                         while (i < members.size) {
@@ -2150,7 +2187,7 @@ public class AppModel {
                         }
                     }
                     if (candidate.isNone()) {
-                        for (r in a.relatedArchives(arcid, 10)) {
+                        for (r in a.relatedArchives(arcid, 10, lang: lang)) {
                             if (!appended.contains(r.arcid)) {
                                 candidate = Some((r.arcid, r.title, r.coverAssetId))
                                 break
@@ -2241,7 +2278,18 @@ public class AppModel {
     // 重取详情元数据（收藏/未读切换成功后由 dispatch 触发刷新）。
     public func refreshMeta(arcid: String): Unit {
         let a = api ?? return
-        let _ = worker.submit("meta:${arcid}", {=> a.metadata(arcid)})
+        let lang = language.value
+        let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
+    }
+
+    private func refreshDetailLocalized(arcid: String): Unit {
+        let a = api ?? return
+        let lang = language.value
+        refreshMeta(arcid)
+        let _ = worker.submitTagged("ptanks:${arcid}", lang, {=> a.listArchiveTankoubons(arcid, lang: lang)})
+        let _ = worker.submitTagged("related:${arcid}", lang, {
+            => a.relatedArchives(arcid, 12, lang: lang)
+        })
     }
 
     public func toggleFavorite(arcid: String, fav: Bool): Unit {
@@ -2652,7 +2700,52 @@ public class AppModel {
     public func setFontPath(path: String): Unit {
         settings.fontPath = path
         persistSettings(settings)
-        toaster.show("字体将在下次启动时生效", kind: ToastKind.Info)
+        toaster.show(t("appearance.fontRestart"), kind: ToastKind.Info)
+    }
+
+    /** Translates one application message using the current effective language. */
+    public func t(key: String, params!: Array<(String, String)> = []): String {
+        localizer.text(language.value, key, params: params)
+    }
+
+    public func effectiveLanguageName(): String {
+        t("language.name.${language.value}")
+    }
+
+    /** Applies and persists a display-language preference without restarting the application. */
+    public func setLanguagePreference(preference: String): Unit {
+        let normalized = normalizeLanguagePreference(preference)
+        let next = resolveLanguage(normalized)
+        if (settings.languagePreference == normalized && language.value == next) {
+            return
+        }
+        settings.languagePreference = normalized
+        language.value = next
+        persistSettings(settings)
+        autocompleteSuggestions.value = ArrayList<TagSuggestion>()
+        autocompleteVisible.value = false
+        autocompleteRequestId++
+        for (row in browseRows.value) {
+            if (row.key == "resume") {
+                row.title = t("library.resume")
+            } else if (row.key == "random") {
+                row.title = t("library.random")
+            }
+        }
+        browseRows.value = browseRows.value
+        refreshLocalizedData()
+        toaster.show(t("language.changed", params: [("language", effectiveLanguageName())]),
+            kind: ToastKind.Success)
+    }
+
+    private func refreshLocalizedData(): Unit {
+        match (page.value) {
+            case Page.Library => refreshLibrary()
+            case Page.Detail(arcid) => refreshDetailLocalized(arcid)
+            case Page.Tank(tankid) => refreshTankDetail(tankid)
+            case Page.Reader(arcid, _) => refreshMeta(arcid)
+            case _ => ()
+        }
     }
 
     // ---- 设置页 ----
@@ -2666,7 +2759,7 @@ public class AppModel {
     // 同步读磁盘缓存总量刷新展示（设置页进场与清理后调用）。
     public func refreshCacheInfo(): Unit {
         let bytes = cache().totalBytes()
-        cacheInfo.value = "图片缓存 ${bytes / 1048576} MB"
+        cacheInfo.value = t("cache.size", params: [("size", "${bytes / 1048576}")])
     }
 
     // 清图片缓存：磁盘目录 + cui 纹理缓存（路径纹理 + 像素纹理）+ imageStates 三处一起复位。
@@ -2679,7 +2772,7 @@ public class AppModel {
             imageStates.clear()
         }
         refreshCacheInfo()
-        toaster.show("缓存已清理", kind: ToastKind.Success)
+        toaster.show(t("cache.cleared"), kind: ToastKind.Success)
     }
 
     // 封面圆角（asset: key 专用）：框架渲染器只有矩形裁剪，纹理无法在绘制期切圆角；
@@ -2825,6 +2918,12 @@ public class AppModel {
         }
         let results = worker.drain()
         for (r in results) {
+            if (r.tag.size > 0 && r.tag != language.value) {
+                if (r.name.startsWith("row:")) {
+                    onRowTaskFinished()
+                }
+                continue
+            }
             if (r.error.size > 0) {
                 handleError(r);
                 continue
@@ -3697,8 +3796,10 @@ public class AppModel {
     // 概览 dashboard：统计 + 30 天趋势 + 最近阅读/收藏（最近活动用 search 聚合，对齐 frontend）。
     public func loadOverviewExtras(): Unit {
         let a = api ?? return
-        let _ = worker.submit(
+        let lang = language.value
+        let _ = worker.submitTagged(
             "set.overview",
+            lang,
             {
                 =>
                     let stats = a.userStats()
@@ -3707,12 +3808,14 @@ public class AppModel {
                     qr.sortby = "lastread"
                     qr.order = "desc"
                     qr.pageSize = 3
+                    qr.lang = lang
                     let read = a.search(qr).items
                     let qf = SearchQuery()
                     qf.sortby = "lastread"
                     qf.order = "desc"
                     qf.favoriteonly = true
                     qf.pageSize = 3
+                    qf.lang = lang
                     let fav = a.search(qf).items
                     (stats, trend, read, fav)
             }
@@ -3721,7 +3824,8 @@ public class AppModel {
 
     public func loadTagCloud(): Unit {
         let a = api ?? return
-        let _ = worker.submit("set.cloud", {=> a.tagCloud(200)})
+        let lang = language.value
+        let _ = worker.submitTagged("set.cloud", lang, {=> a.tagCloud(200, lang: lang)})
     }
 
     public func loadAdminUsers(): Unit {

@@ -234,10 +234,11 @@ public class LanluApi {
     // 随机能力由 /api/search?sortby=RANDOM() 提供——archive_dao.cj 对 sortby=="RANDOM()"
     // 特判为 ORDER BY RANDOM() DESC（括号字面量经 query 解码后还原）。响应形态与
     // /api/search 完全一致，复用 SearchQuery 构造与 parseSearchPage 解析。
-    public func randomSearch(count: Int64): SearchPage {
+    public func randomSearch(count: Int64, lang!: String = ""): SearchPage {
         let q = SearchQuery()
         q.sortby = "RANDOM()"
         q.pageSize = count
+        q.lang = lang
         let resp = client.get("/api/search${buildSearchQuery(q)}")
         if (resp.status == 401) {
             throw ApiException(401, "登录状态已失效，请重新登录")
@@ -252,8 +253,9 @@ public class LanluApi {
         parseCategoryList(checkedBody(client.get("/api/categories")))
     }
 
-    public func metadata(arcid: String): ArchiveMeta {
-        parseArchiveMeta(checkedBody(client.get("/api/archives/${arcid}/metadata")))
+    public func metadata(arcid: String, lang!: String = ""): ArchiveMeta {
+        let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
+        parseArchiveMeta(checkedBody(client.get("/api/archives/${arcid}/metadata${suffix}")))
     }
 
     public func updateArchiveMetadata(arcid: String, body: String): Unit {
@@ -269,13 +271,15 @@ public class LanluApi {
     }
 
     // 合集列表：GET /api/tankoubons 返回裸 {"filtered":N,"result":[...],"total":N}（无包络）。
-    public func listTankoubons(): ArrayList<TankoubonInfo> {
-        parseTankoubonList(checkedBody(client.get("/api/tankoubons")))
+    public func listTankoubons(lang!: String = ""): ArrayList<TankoubonInfo> {
+        let path = if (lang.size > 0) { "/api/tankoubons?lang=${percentEncode(lang)}" } else { "/api/tankoubons" }
+        parseTankoubonList(checkedBody(client.get(path)))
     }
 
     // 单个合集：GET /api/tankoubons/:id/metadata 返回裸对象（children 为 member 对象数组）。
-    public func getTankoubon(id: String): TankoubonInfo {
-        parseTankoubon(checkedBody(client.get("/api/tankoubons/${id}/metadata")))
+    public func getTankoubon(id: String, lang!: String = ""): TankoubonInfo {
+        let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
+        parseTankoubon(checkedBody(client.get("/api/tankoubons/${id}/metadata${suffix}")))
     }
 
     public func updateTankoubonMetadata(id: String, body: String): Unit {
@@ -306,16 +310,19 @@ public class LanluApi {
     }
 
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。
-    public func listArchiveTankoubons(arcid: String): ArrayList<TankoubonInfo> {
-        parseTankoubonList(checkedBody(client.get("/api/archives/${arcid}/tankoubons")))
+    public func listArchiveTankoubons(arcid: String, lang!: String = ""): ArrayList<TankoubonInfo> {
+        let base = "/api/archives/${arcid}/tankoubons"
+        let path = if (lang.size > 0) { "${base}?lang=${percentEncode(lang)}" } else { base }
+        parseTankoubonList(checkedBody(client.get(path)))
     }
 
     // 相关推荐（档案详情）：GET /api/recommendations?scene=archive_related&archive_id=X
     // 返回裸 {"scene":...,"data":[...]}，data 数组元素与 search 条目同构，复用 parseSearchPage；
     // 混进的合集项没有 arcid，过滤丢弃（对齐 frontend getArchiveRelated 的 isArchiveItem 过滤）。
-    public func relatedArchives(arcid: String, count: Int64): ArrayList<SearchItem> {
+    public func relatedArchives(arcid: String, count: Int64, lang!: String = ""): ArrayList<SearchItem> {
+        let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
         let body = checkedBody(
-            client.get("/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}"))
+            client.get("/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}${languageQuery}"))
         let page = parseSearchPage(body)
         let list = ArrayList<SearchItem>()
         for (it in page.items) {
@@ -328,10 +335,11 @@ public class LanluApi {
 
     // 相关推荐（合集详情）：scene=tankoubon_related，元素为合集对象（recommendations 形态，
     // assets 为对象），复用 parseTankoubonList；过滤掉无 id 的档案项。
-    public func relatedTankoubons(tankid: String, count: Int64): ArrayList<TankoubonInfo> {
+    public func relatedTankoubons(tankid: String, count: Int64, lang!: String = ""): ArrayList<TankoubonInfo> {
+        let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
         let body = checkedBody(
             client.get(
-                "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}"))
+                "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}${languageQuery}"))
         let all = parseTankoubonList(body)
         let list = ArrayList<TankoubonInfo>()
         for (t in all) {
@@ -605,12 +613,15 @@ public class LanluApi {
         parseTrendList(checkedBody(client.get("/api/user/trend?days=${days}")))
     }
 
-    public func tagCloud(limit: Int64): ArrayList<CloudTag> {
-        parseCloudTags(checkedBody(client.get("/api/tags/cloud?limit=${limit}")))
+    public func tagCloud(limit: Int64, lang!: String = ""): ArrayList<CloudTag> {
+        let langPart = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
+        parseCloudTags(checkedBody(client.get("/api/tags/cloud?limit=${limit}${langPart}")))
     }
 
-    public func tagAutocomplete(query: String, limit: Int64): ArrayList<TagSuggestion> {
-        let url = "/api/tags/autocomplete?q=${percentEncode(query.trimAscii())}&lang=zh&limit=${limit}" +
+    public func tagAutocomplete(query: String, limit: Int64, lang!: String = ""): ArrayList<TagSuggestion> {
+        let effectiveLang = if (lang.size > 0) { lang } else { "zh" }
+        let url = "/api/tags/autocomplete?q=${percentEncode(query.trimAscii())}" +
+            "&lang=${percentEncode(effectiveLang)}&limit=${limit}" +
             "&require_bound=1"
         parseTagSuggestions(checkedBody(client.get(url)))
     }

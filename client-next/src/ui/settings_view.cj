@@ -47,6 +47,7 @@ public func settingsView(model: AppModel): Unit {
                     case 0 => overviewPage(model, logoutOpen)
                     case 1 => authPage(model)
                     case 2 => appearancePage(model)
+                    case 3 => languagePage(model)
                     case 4 => cachePage(model)
                     case 6 => categoriesPage(model)
                     case 7 => tagsPage(model)
@@ -58,8 +59,8 @@ public func settingsView(model: AppModel): Unit {
                     case 13 => pluginsPage(model)
                     case 14 => statsPage(model)
                     case 15 => aboutPage(model)
-                    // 3 语言 / 5 诊断：客户端暂无对应能力，占位页。
-                    case _ => placeholderPage(model, sectionName(section.value))
+                    // 诊断仍为占位页。
+                    case _ => placeholderPage(model, sectionName(model, section.value))
                 }
             }.spacing(16.vp).crossAxisAlignment(CrossAxisAlignment.Start)
             content.fillWidth().padding(22.vp, 26.vp, 22.vp, 48.vp)
@@ -69,10 +70,10 @@ public func settingsView(model: AppModel): Unit {
     logoutConfirmModal(model, logoutOpen)
 }
 
-private func sectionName(i: Int64): String {
+private func sectionName(model: AppModel, i: Int64): String {
     match (i) {
-        case 3 => "语言"
-        case 5 => "诊断"
+        case 3 => model.t("settings.language")
+        case 5 => model.t("settings.diagnostics")
         case _ => ""
     }
 }
@@ -91,55 +92,71 @@ private func settingsNav(model: AppModel, section: State<Int64>): Unit {
     VStack {
         ScrollView(key: "settings-nav") {
             VStack {
-                Label("设置").fontSize(15.fp).padding(16.vp, 12.vp, 16.vp, 10.vp)
+                Label(model.t("common.settings")).fontSize(15.fp).padding(16.vp, 12.vp, 16.vp, 10.vp)
                 // 导航前置图标对齐原型 #set-nav .side-item .ico（书库侧栏无图标，仅设置导航有）。
                 VStack {
-                    NavItem("概览", active: section.value == 0, glyph: GhostGlyph.Named(IconName.User)) {
+                    NavItem(model.t("common.overview"), active: section.value == 0,
+                        glyph: GhostGlyph.Named(IconName.User)) {
                         => section.value = 0
                     }
-                    NavItem("账户安全", active: section.value == 1, glyph: GhostGlyph.Named(IconName.Lock)) {
+                    NavItem(model.t("settings.accountSecurity"), active: section.value == 1,
+                        glyph: GhostGlyph.Named(IconName.Lock)) {
                         => section.value = 1
                     }
-                    navHeader("客户端")
-                    NavItem("外观", active: section.value == 2, glyph: GhostGlyph.Theme) {=> section.value = 2}
-                    NavItem("语言", active: section.value == 3, glyph: GhostGlyph.Globe) {=> section.value = 3}
-                    NavItem("缓存", active: section.value == 4, glyph: GhostGlyph.Disk) {=> section.value = 4}
-                    NavItem("诊断", active: section.value == 5, glyph: GhostGlyph.Named(IconName.NewDocument)) {
+                    navHeader(model.t("settings.client"))
+                    NavItem(model.t("settings.appearance"), active: section.value == 2, glyph: GhostGlyph.Theme) {
+                        => section.value = 2
+                    }
+                    NavItem(model.t("settings.language"), active: section.value == 3, glyph: GhostGlyph.Globe) {
+                        => section.value = 3
+                    }
+                    NavItem(model.t("settings.cache"), active: section.value == 4, glyph: GhostGlyph.Disk) {
+                        => section.value = 4
+                    }
+                    NavItem(model.t("settings.diagnostics"), active: section.value == 5,
+                        glyph: GhostGlyph.Named(IconName.NewDocument)) {
                         => section.value = 5
                     }
                     if (model.isAdmin.value) {
-                        navHeader("服务器")
-                        NavItem("分类管理", active: section.value == 6, glyph: GhostGlyph.Named(IconName.OpenFolder)) {
+                        navHeader(model.t("settings.server"))
+                        NavItem(model.t("settings.categoryManagement"), active: section.value == 6,
+                            glyph: GhostGlyph.Named(IconName.OpenFolder)) {
                             => section.value = 6
                         }
-                        NavItem("标签管理", active: section.value == 7, glyph: GhostGlyph.Tag) {
+                        NavItem(model.t("settings.tagManagement"), active: section.value == 7, glyph: GhostGlyph.Tag) {
                             => section.value = 7
                         }
-                        NavItem("智能分类", active: section.value == 8, glyph: GhostGlyph.Sparkle) {
+                        NavItem(model.t("settings.smartCategories"), active: section.value == 8,
+                            glyph: GhostGlyph.Sparkle) {
                             => section.value = 8
                         }
-                        navHeader("系统管理")
-                        NavItem("用户管理", active: section.value == 9, glyph: GhostGlyph.Named(IconName.User)) {
+                        navHeader(model.t("settings.systemManagement"))
+                        NavItem(model.t("settings.userManagement"), active: section.value == 9,
+                            glyph: GhostGlyph.Named(IconName.User)) {
                             => section.value = 9
                         }
-                        NavItem("系统设置", active: section.value == 10, glyph: GhostGlyph.Monitor) {
+                        NavItem(model.t("settings.systemSettings"), active: section.value == 10,
+                            glyph: GhostGlyph.Monitor) {
                             => section.value = 10
                         }
-                        NavItem("任务记录", active: section.value == 11, glyph: GhostGlyph.Menu) {
+                        NavItem(model.t("settings.taskHistory"), active: section.value == 11, glyph: GhostGlyph.Menu) {
                             => section.value = 11
                         }
-                        NavItem("定时任务", active: section.value == 12, glyph: GhostGlyph.Named(IconName.Clock)) {
+                        NavItem(model.t("settings.scheduledTasks"), active: section.value == 12,
+                            glyph: GhostGlyph.Named(IconName.Clock)) {
                             => section.value = 12
                         }
-                        NavItem("插件管理", active: section.value == 13, glyph: GhostGlyph.Box) {
+                        NavItem(model.t("settings.pluginManagement"), active: section.value == 13, glyph: GhostGlyph.Box) {
                             => section.value = 13
                         }
-                        NavItem("统计信息", active: section.value == 14, glyph: GhostGlyph.Chart) {
+                        NavItem(model.t("settings.statistics"), active: section.value == 14, glyph: GhostGlyph.Chart) {
                             => section.value = 14
                         }
                     }
-                    navHeader("其他")
-                    NavItem("关于", active: section.value == 15, glyph: GhostGlyph.Info) {=> section.value = 15}
+                    navHeader(model.t("settings.other"))
+                    NavItem(model.t("settings.about"), active: section.value == 15, glyph: GhostGlyph.Info) {
+                        => section.value = 15
+                    }
                 }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(10.vp, 0.vp)
                 Divider()
                 // 返回入口在顶栏返回钮（同详情页），菜单内不再放「返回书库」。
@@ -236,10 +253,10 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
         loaded.value = true
         model.loadOverviewExtras()
     }
-    pageHeader("概览", "当前账号、服务器连接与阅读统计")
+    pageHeader(model.t("common.overview"), model.t("overview.subtitle"))
 
     // ---- 账号卡（原型 .acct-card，沿用旧实现） ----
-    detailCard(model, "账号") {
+    detailCard(model, model.t("overview.account")) {
         HStack {
             // 头像为正圆（半径=边长一半），与顶栏用户芯片一致。
             VStack {
@@ -255,18 +272,22 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
                 Label(model.settings.username).fontSize(15.fp)
                 Label(model.settings.serverUrl).fontSize(11.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            Button("切换服务器", {=> model.page.value = Page.Login}).role(ButtonRole.Primary)
-            Button("退出登录", {=> logoutOpen.value = true}).role(ButtonRole.Danger)
+            Button(model.t("overview.switchServer"), {=> model.page.value = Page.Login})
+                .key("overview.switchServer")
+                .role(ButtonRole.Primary)
+            Button(model.t("overview.logout"), {=> logoutOpen.value = true})
+                .key("overview.logout")
+                .role(ButtonRole.Danger)
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
     }
 
     // ---- 统计卡片（原型 .stat-grid：4 等宽） ----
     match (model.userStats.value) {
         case Some(s) => HStack {
-            statCard(model, GhostGlyph.Heart, "${s.favoriteCount}", "收藏数量")
-            statCard(model, GhostGlyph.Book, "${s.readCount}", "已读档案")
-            statCard(model, GhostGlyph.Pages, "${s.totalPagesRead}", "总阅读页数")
-            statCard(model, GhostGlyph.Disk, "${s.totalArchives}", "档案总数")
+            statCard(model, GhostGlyph.Heart, "${s.favoriteCount}", model.t("overview.favorites"))
+            statCard(model, GhostGlyph.Book, "${s.readCount}", model.t("overview.readArchives"))
+            statCard(model, GhostGlyph.Pages, "${s.totalPagesRead}", model.t("overview.pagesRead"))
+            statCard(model, GhostGlyph.Disk, "${s.totalArchives}", model.t("overview.totalArchives"))
         }.spacing(12.vp).flexible(false).fillWidth() // 卡内数字列是 flex 子项，hug 会压窄截断（T20 目检发现）；fillWidth 撑满内容列。
 
         // flexible(false) 关键：HStack 默认弹性，fillWidth 不改变弹性，若保持弹性会被页列
@@ -275,35 +296,35 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
     }
 
     // ---- 阅读趋势（原型 ReadingTrendChart：30 天柱状图，纯布局实现） ----
-    detailCard(model, "阅读趋势") {
+    detailCard(model, model.t("overview.readingTrend")) {
         trendBars(model, model.userTrend.value)
     }
 
     // ---- 最近活动（原型 RecentActivity：左右两卡 1:1；fillWidth 卡片须包 flex 单元格才能均分） ----
     HStack {
         VStack {
-            detailCard(model, "最近阅读") {
-                recentList(model, model.recentRead.value, "暂无阅读记录")
+            detailCard(model, model.t("overview.recentRead")) {
+                recentList(model, model.recentRead.value, model.t("overview.noRead"))
             }
         }.flex()
         VStack {
-            detailCard(model, "最近收藏") {
-                recentList(model, model.recentFav.value, "暂无收藏记录")
+            detailCard(model, model.t("overview.recentFavorites")) {
+                recentList(model, model.recentFav.value, model.t("overview.noFavorites"))
             }
         }.flex()
     }.spacing(14.vp).crossAxisAlignment(CrossAxisAlignment.Start).flexible(false).fillWidth()
 
     // ---- 服务器信息卡（沿用旧实现） ----
-    detailCard(model, "服务器") {
+    detailCard(model, model.t("settings.server")) {
         match (model.serverInfo.value) {
             case Some(info) => infoList(
                 model,
                 [
-                    ("状态", "已连接"),
-                    ("名称", info.name),
-                    ("版本", "${info.versionName} ${info.version}"),
+                    (model.t("overview.status"), model.t("overview.connected")),
+                    (model.t("overview.name"), info.name),
+                    (model.t("overview.version"), "${info.versionName} ${info.version}"),
                     ("档案数", "${info.totalArchives} 个档案"),
-                    ("地址", model.settings.serverUrl)
+                    (model.t("overview.address"), model.settings.serverUrl)
                 ]
             )
             case None => Label("服务器信息加载中…").fontSize(12.fp).muted()
@@ -496,16 +517,20 @@ private func appearancePage(model: AppModel): Unit {
 private func fontCard(model: AppModel): Unit {
     let fonts = rememberState<ArrayList<FontItem>>("settings.fonts", {=> scanSystemFonts()}).value
     // 初始化选中索引：按当前 fontPath 匹配字体列表
-    let selected = rememberState<Int64>("settings.fontIdx", {=>
-        var idx: Int64 = 0
-        for (i in 0..fonts.size) {
-            if (fonts[i].path == model.settings.fontPath) {
-                idx = i
-                break
-            }
+    let selected = rememberState<Int64>(
+        "settings.fontIdx",
+        {
+            =>
+                var idx: Int64 = 0
+                for (i in 0..fonts.size) {
+                    if (fonts[i].path == model.settings.fontPath) {
+                        idx = i
+                        break
+                    }
+                }
+                idx
         }
-        idx
-    })
+    )
     // 下拉控件会对长列表滚动并只绘制可见项，因此传入全部字体。
     let labels = ArrayList<String>()
     for (i in 0..fonts.size) {
@@ -523,36 +548,64 @@ private func fontCard(model: AppModel): Unit {
     }
 }
 
+private func languagePage(model: AppModel): Unit {
+    pageHeader(model.t("language.title"), model.t("language.description"))
+    let selected = rememberState<Int64>("settings.languageIdx",
+        {=> languagePreferenceToIndex(model.settings.languagePreference)})
+    detailCard(model, model.t("language.title")) {
+        settingRowIcon(model, model.t("language.title"),
+            model.t("language.systemDetail", params: [("language", model.effectiveLanguageName())]), GhostGlyph.Globe) {
+            Dropdown(
+                [model.t("language.system"), model.t("language.chinese"), model.t("language.english")],
+                selected.project(
+                    get: {index => index},
+                    set: {
+                        _, index =>
+                            model.setLanguagePreference(indexToLanguagePreference(index))
+                            return index
+                    }
+                ),
+                key: "languageSelect"
+            )
+        }
+    }
+}
+
 private func cachePage(model: AppModel): Unit {
-    pageHeader("缓存", "封面与页面图片的本地缓存，按服务器隔离存放")
-    detailCard(model, "图片缓存") {
+    pageHeader(model.t("settings.cache"), model.t("cache.subtitle"))
+    detailCard(model, model.t("cache.images")) {
         Label(model.cacheInfo.value).fontSize(12.fp).muted()
         HStack {
             // 清理成功由 model.clearCache 内部 toast（磁盘 + 两级纹理缓存一并复位）。
-            Button("清理图片缓存", {=> model.clearCache()}).role(ButtonRole.Danger)
-            Label("仅清除当前服务器的缓存").fontSize(11.fp).muted()
+            Button(model.t("cache.clear"), {=> model.clearCache()}).key("cache.clear").role(ButtonRole.Danger)
+            Label(model.t("cache.currentServerOnly")).fontSize(11.fp).muted()
         }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
     }
 }
 
 private func aboutPage(model: AppModel): Unit {
-    let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
-    pageHeader("关于", "版本信息与项目链接")
-    detailCard(model, "Lanlu 桌面客户端") {
+    let muted = if (model.isLight()) {
+        LANLU_L_MUTED
+    } else {
+        LANLU_MUTED
+    }
+    pageHeader(model.t("settings.about"), model.t("about.subtitle"))
+    detailCard(model, model.t("about.client")) {
         Label("v0.1.0 · CangjieGUI").fontSize(12.fp).muted()
         // 链接类入口暂无对应能力，点击走统一「暂未实现」toast（同书库惯例）。
-        ClickArea(onClick: {=> model.todoToast("项目主页")}) {
-            settingRowIcon(model, "项目主页", "", GhostGlyph.Home) {
+        ClickArea(onClick: {=> model.todoToast(model.t("about.project"))}) {
+            settingRowIcon(model, model.t("about.project"), "", GhostGlyph.Home) {
                 Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
-        ClickArea(onClick: {=> model.todoToast("开源许可")}) {
-            settingRowIcon(model, "开源许可", "", GhostGlyph.Pages) {
+        ClickArea(onClick: {=> model.todoToast(model.t("about.licenses"))}) {
+            settingRowIcon(model, model.t("about.licenses"), "", GhostGlyph.Pages) {
                 Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
-        ClickArea(onClick: {=> model.todoToast("检查更新")}) {
-            settingRowIcon(model, "检查更新", "当前已是最新版本", GhostGlyph.Named(IconName.Refresh)) {
+        ClickArea(onClick: {=> model.todoToast(model.t("about.checkUpdates"))}) {
+            settingRowIcon(model, model.t("about.checkUpdates"), model.t("about.latest"),
+                GhostGlyph.Named(IconName.Refresh)) {
                 Icon(IconName.ChevronRight, size: 13.vp, color: muted)
             }
         }
@@ -678,8 +731,8 @@ func switchBindKeyed(key: String, v0: Bool, onSet: (Bool) -> Unit): Bindable<Boo
         get: {v => v},
         set: {
             _, v =>
-            onSet(v);
-            return v
+                onSet(v);
+                return v
         }
     )
 }

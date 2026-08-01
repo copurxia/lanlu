@@ -4,8 +4,6 @@ name = "lanlu_client_next"
 version = "0.1.0"
 description = "lanlu desktop client built on CangjieGUI"
 output-type = "executable"
-# vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
-link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s"
 
 [dependencies]
 cui = { path = "../packages/cangjie-gui" }
@@ -16,10 +14,18 @@ fontkit_ffi = { path = "../packages/fontkit_ffi" }
 ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx" }
 
 [target.x86_64-unknown-linux-gnu]
+# vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
+link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s"
 # 仅当出现 undefined reference to ...@PCRE2_10.47 时取消注释：
 # link-option = "/usr/lib/x86_64-linux-gnu/libpcre2-8.so"
   [target.x86_64-unknown-linux-gnu.bin-dependencies]
     # stdx（encoding.json.stream 等）以二进制依赖方式引入，与服务端 cjpm.toml 同款。
+    path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+[target.x86_64-w64-mingw32]
+# MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 MINGW64 的 import libraries。
+link-option = "-L \"${MINGW_LIBRARY_PATH}\" -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++ -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lws2_32 -lntdll"
+  [target.x86_64-w64-mingw32.bin-dependencies]
     path-option = [ "${CANGJIE_STDX_PATH}" ]
 
 [ffi.c]

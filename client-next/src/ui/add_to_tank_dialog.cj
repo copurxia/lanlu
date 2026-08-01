@@ -31,7 +31,7 @@ public func loadTankPickerList(model: AppModel, list: State<ArrayList<TankoubonI
                 {
                     =>
                         try {
-                            list.value = a.listTankoubons()
+                            list.value = a.listTankoubons(lang: model.language.value)
                         } catch (_: Exception) {
                             failed.value = true
                         }
@@ -64,21 +64,23 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
     Modal(open, body: {
         =>
             VStack {
-                Label("加入合集").fontSize(15.fp)
-                Label("将 ${arcids.value.size} 个选中档案加入合集").fontSize(12.fp).muted()
+                Label(model.t("dialog.addToCollection")).fontSize(15.fp)
+                Label(model.t("dialog.addSelected", params: [("count", "${arcids.value.size}")]))
+                    .fontSize(12.fp).muted()
                 // 名称过滤： cui TextField 无 placeholder 参数，沿用 formField 的叠层占位做法。
                 ZStack {
                     TextField(filter)
                     if (filter.value.size == 0) {
-                        Label("搜索合集…").fontSize(13.fp).muted().padding(8.vp, 10.vp, 0.vp, 0.vp)
+                        Label(model.t("dialog.searchCollections")).fontSize(13.fp).muted()
+                            .padding(8.vp, 10.vp, 0.vp, 0.vp)
                     }
                 }.alignment(Alignment.TopLeading)
                 if (loading.value) {
-                    Label("加载合集列表…").fontSize(12.fp).muted().padding(0.vp, 40.vp)
+                    Label(model.t("dialog.loadingCollections")).fontSize(12.fp).muted().padding(0.vp, 40.vp)
                 } else if (failed.value) {
                     HStack {
-                        Label("合集列表加载失败").fontSize(12.fp).muted()
-                        Button("重试", {=> loadTankPickerList(model, list, loading, failed)})
+                        Label(model.t("dialog.collectionLoadFailed")).fontSize(12.fp).muted()
+                        Button(model.t("dialog.retry"), {=> loadTankPickerList(model, list, loading, failed)})
                             .style(ghostStyleOf(model))
                     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
                 } else {
@@ -92,13 +94,14 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                     ScrollView(key: "addtank-list") {
                         VStack {
                             for (t in shown) {
-                                tankPickRow(t, {=>
+                                tankPickRow(model, t, {=>
                                     open.value = false
                                     model.addArchivesToTank(t.id, arcids.value)
                                 })
                             }
                             if (shown.size == 0) {
-                                Label("无匹配合集").fontSize(12.fp).muted().padding(0.vp, 24.vp)
+                                Label(model.t("dialog.noMatchingCollections")).fontSize(12.fp).muted()
+                                    .padding(0.vp, 24.vp)
                             }
                         }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
                     }.height(240.vp)
@@ -109,10 +112,11 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                     ZStack {
                         TextField(newName)
                         if (newName.value.size == 0) {
-                            Label("新合集名称…").fontSize(13.fp).muted().padding(8.vp, 10.vp, 0.vp, 0.vp)
+                            Label(model.t("dialog.newCollectionName")).fontSize(13.fp).muted()
+                                .padding(8.vp, 10.vp, 0.vp, 0.vp)
                         }
                     }.alignment(Alignment.TopLeading).flex()
-                    Button("新建并加入", {
+                    Button(model.t("dialog.createAndAdd"), {
                         =>
                             let name = newName.value.trimAscii()
                             if (name.size > 0) {
@@ -123,7 +127,7 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                 }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center)
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
+                    Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
                 }
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(380.vp)
     })
@@ -131,12 +135,12 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
 
 // 合集选择行：名称 + 档案计数，整行可点（NavItem 同款交互，hover 由 ClickArea 的
 // 交互光标表达；计数 muted 右对齐）。
-private func tankPickRow(t: TankoubonInfo, onClick: () -> Unit): Unit {
+private func tankPickRow(model: AppModel, t: TankoubonInfo, onClick: () -> Unit): Unit {
     ClickArea(onClick: onClick) {
         HStack {
             Label(t.name).fontSize(13.fp).maxLines(1)
             Spacer()
-            Label("${t.archiveCount} 个档案").fontSize(11.fp).muted()
+            Label(model.t("dialog.archiveCount", params: [("count", "${t.archiveCount}")])).fontSize(11.fp).muted()
         }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(8.vp, 7.vp)
     }
 }

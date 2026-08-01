@@ -160,10 +160,10 @@ private class ReaderModeButton <: Widget {
     // 标签文案与原型 modes 表一致。
     private func label(): String {
         match (model.reader.mode) {
-            case ReadingMode.SingleLtr => "单页 · 左到右"
-            case ReadingMode.SingleRtl => "单页 · 右到左"
-            case ReadingMode.SingleTtb => "单页 · 纵向"
-            case ReadingMode.Webtoon => "条漫滚动"
+            case ReadingMode.SingleLtr => model.t("reader.modeLtr")
+            case ReadingMode.SingleRtl => model.t("reader.modeRtl")
+            case ReadingMode.SingleTtb => model.t("reader.modeTtb")
+            case ReadingMode.Webtoon => model.t("reader.modeWebtoon")
         }
     }
 
@@ -213,7 +213,7 @@ private func pagePill(model: AppModel): Unit {
     if (model.reader.onVirtualEnd) {
         let elev0 = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
         ZStack {
-            Label("完").fontSize(12.5.fp).muted()
+            Label(model.t("reader.finishedShort")).fontSize(12.5.fp).muted()
                 .padding(10.vp, 4.vp).background(elev0, 999.vp)
             StaticBorder(999.0)
         }

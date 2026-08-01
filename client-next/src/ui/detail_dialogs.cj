@@ -121,26 +121,26 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
                 let _ = model.worker.submit("dlg.addtank:${arcid}", {
                     =>
                         try {
-                            cell.store(a.listTankoubons())
+                            cell.store(a.listTankoubons(lang: model.language.value))
                         } catch (e: Exception) {
                             cell.storeError(e.message)
                         }
                         return true
                 })
-            case None => cell.storeError("未登录")
+            case None => cell.storeError(model.t("dialog.notLoggedIn"))
         }
     }
     Modal(open, body: {
         =>
             VStack {
-                Label("加入合集").fontSize(15.fp)
+                Label(model.t("dialog.addToCollection")).fontSize(15.fp)
                 if (cell.error().size > 0) {
-                    Label("加载失败：${cell.error()}").fontSize(12.fp).muted()
+                    Label(model.t("dialog.loadFailed", params: [("error", cell.error())])).fontSize(12.fp).muted()
                 } else {
                     match (cell.fetch()) {
                         case Some(tanks) =>
                             if (tanks.size == 0) {
-                                Label("暂无合集，可在下方新建。").fontSize(12.fp).muted()
+                                Label(model.t("dialog.noCollectionsCreate")).fontSize(12.fp).muted()
                             }
                             VStack {
                                 for (t in tanks) {
@@ -154,19 +154,20 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
                                             HoverFill("dlg.tankrow:${t.id}", 8.0)
                                             HStack {
                                                 Label(t.name).fontSize(13.fp).maxLines(1).flex()
-                                                Label("${t.archiveCount} 个档案").fontSize(11.fp).muted()
+                                                Label(model.t("dialog.archiveCount",
+                                                    params: [("count", "${t.archiveCount}")])).fontSize(11.fp).muted()
                                             }.spacing(8.vp).hug().padding(8.vp, 6.vp)
                                         }.alignment(Alignment.TopLeading)
                                     }
                                 }
                             }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start)
-                        case None => Label("加载中…").fontSize(12.fp).muted()
+                        case None => Label(model.t("common.loading")).fontSize(12.fp).muted()
                     }
                 }
-                Label("新建合集").fontSize(11.fp).muted()
+                Label(model.t("dialog.newCollection")).fontSize(11.fp).muted()
                 HStack {
                     TextField(newName, key: "dlg.addtank.field:${arcid}").flex()
-                    Button("新建并加入", {
+                    Button(model.t("dialog.createAndAdd"), {
                         =>
                             let name = newName.value.trimAscii()
                             if (name.size > 0) {
@@ -177,7 +178,7 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
                 }.spacing(8.vp)
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
+                    Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
                 }
             }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(360.vp)
             LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})
@@ -212,14 +213,16 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                 memberIds.add(it.arcid)
             }
             VStack {
-                Label("添加档案到合集").fontSize(15.fp)
+                Label(model.t("dialog.addArchives")).fontSize(15.fp)
                 HStack {
                     TextField(query, key: "dlg.tankadd.field:${tankId}").flex()
-                    Button("搜索", {=> submitTankAddSearch(model, cell, tankId, query.value.trimAscii()) })
+                    Button(model.t("dialog.search"), {
+                        => submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
+                    })
                         .style(ghostStyleOf(model))
                 }.spacing(8.vp)
                 if (cell.error().size > 0) {
-                    Label("搜索失败：${cell.error()}").fontSize(12.fp).muted()
+                    Label(model.t("dialog.searchFailed", params: [("error", cell.error())])).fontSize(12.fp).muted()
                 } else {
                     match (cell.fetch()) {
                         case Some(items) =>
@@ -230,7 +233,7 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                                 }
                             }
                             if (shown.size == 0) {
-                                Label("无可用档案").fontSize(12.fp).muted()
+                                Label(model.t("dialog.noArchives")).fontSize(12.fp).muted()
                             } else {
                                 ScrollView {
                                     VStack {
@@ -253,7 +256,8 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                                                     }.crossAxisAlignment(CrossAxisAlignment.Center)
                                                         .width(18.vp)
                                                     Label(it.title).fontSize(13.fp).maxLines(1).flex()
-                                                    Label("${it.pagecount} 页").fontSize(11.fp).muted()
+                                                    Label(model.t("detail.pages",
+                                                        params: [("count", "${it.pagecount}")])).fontSize(11.fp).muted()
                                                 }.spacing(8.vp).hug().padding(8.vp, 6.vp)
                                                     .background(if (on) { accentSoft } else {
                                                         Color.rgba(0, 0, 0, 0)
@@ -264,13 +268,13 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                                         .fillWidth()
                                 }.height(300.vp)
                             }
-                        case None => Label("搜索中…").fontSize(12.fp).muted()
+                        case None => Label(model.t("dialog.searching")).fontSize(12.fp).muted()
                     }
                 }
                 HStack {
                     Spacer()
-                    Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
-                    Button("添加 ${picked.value.size} 个", {
+                    Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
+                    Button(model.t("dialog.addCount", params: [("count", "${picked.value.size}")]), {
                         =>
                             if (picked.value.size > 0) {
                                 open.value = false
@@ -293,18 +297,20 @@ private func submitTankAddSearch(model: AppModel, cell: DialogCell<ArrayList<Sea
     cell.begin()
     match (model.api) {
         case Some(a) =>
+            let lang = model.language.value
             let _ = model.worker.submit("dlg.tankadd:${tankId}", {
                 =>
                     try {
                         let q = SearchQuery()
                         q.filter = filter
                         q.pageSize = 100
+                        q.lang = lang
                         cell.store(a.search(q).items)
                     } catch (e: Exception) {
                         cell.storeError(e.message)
                     }
                     return true
             })
-        case None => cell.storeError("未登录")
+        case None => cell.storeError(model.t("dialog.notLoggedIn"))
     }
 }

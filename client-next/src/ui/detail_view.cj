@@ -77,7 +77,7 @@ class DangerIconButton <: Widget {
 
 public func detailView(model: AppModel): Unit {
     match (model.meta.value) {
-        case None => Panel {Label("加载中…").muted()}
+        case None => Panel {Label(model.t("common.loading")).muted()}
         case Some(m) => archiveDetailBody(model, m)
     }
 }
@@ -95,7 +95,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     // 徽标行（原型：金「档案 · 图像」+ 灰「2024」「同人志」；蓝色「已完结」无数据字段不做）。
     // 年份自 release_at 推导；分类取首个 category: 前缀标签（无则不显示，不 mock）。NEW 红 pill 保留。
     let badgeList = ArrayList<String>()
-    badgeList.add("档案 · ${m.archivetype}")
+    badgeList.add(model.t("detail.archiveBadge", params: [("type", m.archivetype)]))
     if (m.release_at > 0) {
         badgeList.add(formatTimestamp(m.release_at)[0..4])
     }
@@ -108,12 +108,12 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     hero.badges = badgeList.toArray()
     hero.isNew = m.isnew
     hero.title = m.title
-    hero.metaLine = archiveMetaLine(m)
+    hero.metaLine = archiveMetaLine(model, m)
     hero.progressPct = pct
-    hero.progressText = "已读 ${pct}%"
+    hero.progressText = model.t("detail.readPercent", params: [("percent", "${pct}")])
     hero.summary = oneLineSummary(m.description)
     hero.tags = m.tags
-    hero.primaryLabel = readButtonLabel(m)
+    hero.primaryLabel = readButtonLabel(model, m)
     hero.primaryEnabled = m.pagecount > 0
     hero.onPrimary = {
         =>
@@ -133,7 +133,9 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
             GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
                 => model.toggleFavorite(m.arcid, !m.isfavorite)
             }
-            GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {=> model.todoToast("下载")}
+            GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {
+                => model.todoToast(model.t("detail.download"))
+            }
             GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> addTankOpen.value = true }
             GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
                 => model.openArchiveMetadataEditor(m.arcid)
@@ -141,15 +143,19 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
             DangerIconButton(GhostGlyph.Named(IconName.Trash), "detail:delete", size: 28.0) {
                 => delOpen.value = true
             }
-            GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {=> model.todoToast("更多操作")}
+            GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {
+                => model.todoToast(model.t("detail.moreActions"))
+            }
     }
 
     // 主列：页面预览（到货才显示）→ 所属合集（无数据隐藏）→ 相关推荐（无数据隐藏）
     let mainCards = ArrayList<() -> Unit>()
     if (model.detailPages.value.size > 0) {
         mainCards.add({
-            => detailCard(model, "页面预览", count: "${model.detailPages.value.size} 页", tools: {
-                => MiniSeg(["缩略图", "列表", "树"], model.pageViewIndex, key: "pv-seg")
+            => detailCard(model, model.t("detail.pagePreview"), count: model.t("detail.pages",
+                params: [("count", "${model.detailPages.value.size}")]), tools: {
+                => MiniSeg([model.t("detail.thumbnails"), model.t("detail.list"), model.t("detail.tree")],
+                    model.pageViewIndex, key: "pv-seg")
             }) {
                 => pagePreview(model, model.detailPages.value, m.progress) {
                     no => model.openReader(m.arcid, no)
@@ -159,14 +165,14 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     }
     if (model.parentTanks.value.size > 0) {
         mainCards.add({
-            => detailCard(model, "所属合集", count: "${model.parentTanks.value.size}") {
+            => detailCard(model, model.t("detail.parentCollections"), count: "${model.parentTanks.value.size}") {
                 => tankCardRow(model, model.parentTanks.value, "parent-tanks")
             }
         })
     }
     if (model.relatedItems.value.size > 0) {
         mainCards.add({
-            => detailCard(model, "相关推荐") {
+            => detailCard(model, model.t("detail.related")) {
                 => cardRow(model, "related", model.relatedItems.value, 132.0, 238.0)
             }
         })
@@ -175,19 +181,19 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     // 侧栏：进度大卡 → 基础信息（含 statPages 混合统计行）→ 标签分组
     let sideCards = ArrayList<() -> Unit>()
     let ofText = if (m.progress > 0) {
-        "已读 ${m.progress} / ${m.pagecount} 页 · 上次读到 P.${m.progress}"
+        model.t("detail.readProgress", params: [("read", "${m.progress}"), ("total", "${m.pagecount}")])
     } else {
-        "${m.pagecount} 页 · 尚未开始阅读"
+        model.t("detail.notStarted", params: [("count", "${m.pagecount}")])
     }
     sideCards.add({=> progressCard(model, "${pct}%", ofText, pct)})
     sideCards.add({
-        => detailCard(model, "基础信息") {
-            => infoList(model, archiveInfoRows(m, model.detailPages.value))
+        => detailCard(model, model.t("detail.basicInfo")) {
+            => infoList(model, archiveInfoRows(model, m, model.detailPages.value))
         }
     })
     if (m.tags.size > 0) {
         sideCards.add({
-            => detailCard(model, "标签") {=> tagGroups(model, m.tags)}
+            => detailCard(model, model.t("detail.tags")) {=> tagGroups(model, m.tags)}
         })
     }
 
@@ -200,7 +206,8 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
         tank: false)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局，同 settings_view 惯例）。
     addToTankDialog(model, addTankOpen, m.arcid)
-    confirmModal(model, delOpen, "删除档案？", "「${m.title}」将被删除，此操作不可恢复。", "删除", {
+    confirmModal(model, delOpen, model.t("detail.deleteArchiveTitle"), model.t("detail.deleteArchiveDetail",
+        params: [("title", m.title)]), model.t("detail.delete"), {
         => model.deleteArchive(m.arcid)
     })
 }
@@ -209,7 +216,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
 
 public func tankView(model: AppModel): Unit {
     match (model.tank.value) {
-        case None => Panel {Label("加载中…").muted()}
+        case None => Panel {Label(model.t("common.loading")).muted()}
         case Some(t) => tankDetailBody(model, t)
     }
 }
@@ -228,14 +235,14 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     let members = model.tankMembers.value
     let pct = tankReadPct(t)
     let hero = DetailHeroData()
-    hero.badges = ["合集"]
+    hero.badges = [model.t("detail.collectionBadge")]
     hero.title = t.name
-    hero.metaLine = tankMetaLine(t)
+    hero.metaLine = tankMetaLine(model, t)
     hero.progressPct = pct
-    hero.progressText = "已读 ${pct}%"
+    hero.progressText = model.t("detail.readPercent", params: [("percent", "${pct}")])
     hero.summary = oneLineSummary(t.description)
     hero.tags = t.tags
-    hero.primaryLabel = "从头开始阅读"
+    hero.primaryLabel = model.t("detail.readFromStart")
     hero.primaryEnabled = members.size > 0
     hero.onPrimary = {=> model.startTankReading()}
 
@@ -253,7 +260,9 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
             DangerIconButton(GhostGlyph.Named(IconName.Trash), "tank:delete", size: 28.0) {
                 => delOpen.value = true
             }
-            GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {=> model.todoToast("更多操作")}
+            GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {
+                => model.todoToast(model.t("detail.moreActions"))
+            }
     }
 
     // 成员筛选 memo（#9）：仅在 (筛选词, tankMembers 代次) 变化时重算全量小写化匹配，
@@ -271,16 +280,17 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     let mainCards = ArrayList<() -> Unit>()
     if (members.size > 0) {
         mainCards.add({
-            => detailCard(model, "收录档案", count: "${members.size}", tools: {
+            => detailCard(model, model.t("detail.includedArchives"), count: "${members.size}", tools: {
                 => HStack {
                     TextField(model.tankFilter, key: "tank-filter").width(130.vp)
-                    MiniSeg(["网格", "列表"], model.tankMemberViewIndex, key: "mb-seg")
+                    MiniSeg([model.t("detail.grid"), model.t("detail.list")], model.tankMemberViewIndex,
+                        key: "mb-seg")
                 }.spacing(8.vp).hug()
             }) {
                 =>
                     let shown = filteredMembers(model, filterMemo)
                     if (shown.size == 0) {
-                        Label("无匹配档案").fontSize(12.fp).muted()
+                        Label(model.t("detail.noMatch")).fontSize(12.fp).muted()
                     } else if (model.tankMemberViewIndex.value == 1) {
                         memberListContent(model, shown, onEnterMemberSelection)
                     } else {
@@ -295,7 +305,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     }
     if (model.tankRelated.value.size > 0) {
         mainCards.add({
-            => detailCard(model, "相关推荐") {
+            => detailCard(model, model.t("detail.related")) {
                 => tankCardRow(model, model.tankRelated.value, "tank-related")
             }
         })
@@ -304,13 +314,14 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     // 侧栏：进度大卡（大数字 + 已读完 N 个）→ 基础信息 → 标签分组
     let done = countFinishedMembers(members)
     let sideCards = ArrayList<() -> Unit>()
-    sideCards.add({=> progressCard(model, "${pct}%", "${t.archiveCount} 个档案 · 已读完 ${done} 个", pct)})
+    sideCards.add({=> progressCard(model, "${pct}%", model.t("detail.collectionProgress",
+        params: [("count", "${t.archiveCount}"), ("done", "${done}")]), pct)})
     sideCards.add({
-        => detailCard(model, "基础信息") {=> infoList(model, tankInfoRows(t))}
+        => detailCard(model, model.t("detail.basicInfo")) {=> infoList(model, tankInfoRows(model, t))}
     })
     if (t.tags.size > 0) {
         sideCards.add({
-            => detailCard(model, "标签") {=> tagGroups(model, t.tags)}
+            => detailCard(model, model.t("detail.tags")) {=> tagGroups(model, t.tags)}
         })
     }
 
@@ -323,16 +334,19 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
         tank: true)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局）。
     tankAddArchivesDialog(model, addOpen, t.id)
-    confirmModal(model, delOpen, "删除合集？", "合集「${t.name}」将被删除，成员档案保留在书库中。", "删除", {
+    confirmModal(model, delOpen, model.t("detail.deleteCollectionTitle"), model.t("detail.deleteCollectionDetail",
+        params: [("title", t.name)]), model.t("detail.delete"), {
         => model.deleteCurrentTank(t.id)
     })
-    confirmModal(model, removeOpen, "从合集移除？", "将 ${model.selectedCount()} 个档案移出合集（档案保留在书库中）。", "移除", {
+    confirmModal(model, removeOpen, model.t("detail.removeTitle"), model.t("detail.removeDetail",
+        params: [("count", "${model.selectedCount()}")]), model.t("detail.remove"), {
         =>
             model.removeTankMembers(t.id, selectedArcidList(model))
             model.exitSelection()
             detailSelectionOwner = ""
     })
-    confirmModal(model, batchDelOpen, "删除选中档案？", "将删除 ${model.selectedCount()} 个档案，此操作不可恢复。", "删除", {
+    confirmModal(model, batchDelOpen, model.t("detail.deleteSelectedTitle"), model.t("detail.deleteSelectedDetail",
+        params: [("count", "${model.selectedCount()}")]), model.t("detail.delete"), {
         =>
             model.batchDelete(selectedArcidList(model), ArrayList<String>())
             detailSelectionOwner = ""
@@ -356,15 +370,15 @@ private func tankMemberBatchBar(model: AppModel, removeOpen: State<Bool>,
     batchDelOpen: State<Bool>): Unit {
     let elev = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
     HStack {
-        Label("已选 ${model.selectedCount()} 项").fontSize(12.fp)
+        Label(model.t("detail.selected", params: [("count", "${model.selectedCount()}")])).fontSize(12.fp)
         Spacer()
-        Button("收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), true) })
+        Button(model.t("detail.favorite"), {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), true) })
             .style(ghostStyleOf(model))
-        Button("取消收藏", {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), false) })
+        Button(model.t("detail.unfavorite"), {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), false) })
             .style(ghostStyleOf(model))
-        Button("从合集移除", {=> removeOpen.value = true }).style(ghostStyleOf(model))
-        Button("删除", {=> batchDelOpen.value = true }).role(ButtonRole.Danger)
-        Button("退出", {
+        Button(model.t("detail.removeFromCollection"), {=> removeOpen.value = true }).style(ghostStyleOf(model))
+        Button(model.t("detail.delete"), {=> batchDelOpen.value = true }).role(ButtonRole.Danger)
+        Button(model.t("detail.exit"), {
             =>
                 model.exitSelection()
                 detailSelectionOwner = ""
@@ -444,39 +458,40 @@ private func oneLineSummary(s: String): String {
     sb.toString()
 }
 
-private func readButtonLabel(m: ArchiveMeta): String {
+private func readButtonLabel(model: AppModel, m: ArchiveMeta): String {
     if (m.progress <= 0) {
-        return "开始阅读"
+        return model.t("detail.startReading")
     }
     if (m.progress >= m.pagecount) {
-        return "重新阅读"
+        return model.t("detail.readAgain")
     }
-    "继续阅读 · P.${m.progress + 1}"
+    model.t("detail.continueReading", params: [("page", "${m.progress + 1}")])
 }
 
 // 档案 meta 行（原型：48 页 · 96.2 MB · 发布于 … · 更新于 …）。
-private func archiveMetaLine(m: ArchiveMeta): String {
+private func archiveMetaLine(model: AppModel, m: ArchiveMeta): String {
     var s = ""
     if (m.pagecount > 0) {
-        s = "${m.pagecount} 页"
+        s = model.t("detail.pages", params: [("count", "${m.pagecount}")])
     }
     if (m.size > 0) {
         s = joinMeta(s, formatSize(m.size))
     }
     if (m.release_at > 0) {
-        s = joinMeta(s, "发布于 ${formatTimestamp(m.release_at)}")
+        s = joinMeta(s, model.t("detail.releasedAt", params: [("date", formatTimestamp(m.release_at))]))
     }
     if (m.updated_at > 0) {
-        s = joinMeta(s, "更新于 ${formatTimestamp(m.updated_at)}")
+        s = joinMeta(s, model.t("detail.updatedAt", params: [("date", formatTimestamp(m.updated_at))]))
     }
     s
 }
 
 // 合集 meta 行（原型：12 个档案 · 共 486 页 · 更新于 …）。
-private func tankMetaLine(t: TankoubonInfo): String {
-    var s = "${t.archiveCount} 个档案 · 共 ${t.totalPages} 页"
+private func tankMetaLine(model: AppModel, t: TankoubonInfo): String {
+    var s = model.t("detail.collectionMeta", params: [("archives", "${t.archiveCount}"),
+        ("pages", "${t.totalPages}")])
     if (t.updatedAt.size > 0) {
-        s = joinMeta(s, "更新于 ${tankDate(t.updatedAt)}")
+        s = joinMeta(s, model.t("detail.updatedAt", params: [("date", tankDate(t.updatedAt))]))
     }
     s
 }
@@ -490,47 +505,48 @@ private func joinMeta(a: String, b: String): String {
 
 // 档案基础信息行（原型 info-list：文件名/大小/页数/路径/来源/发布日期/添加时间/最近阅读；
 // 「更新时间」「状态」「文件类型」为保留的额外行，置尾）。路径/来源无数据即隐藏。
-private func archiveInfoRows(m: ArchiveMeta, pages: ArrayList<PageInfo>): Array<(String, String)> {
+private func archiveInfoRows(model: AppModel, m: ArchiveMeta,
+    pages: ArrayList<PageInfo>): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
     if (m.filename.size > 0) {
-        rows.add(("文件名", m.filename))
+        rows.add((model.t("detail.filename"), m.filename))
     }
     if (m.size > 0) {
-        rows.add(("大小", formatSize(m.size)))
+        rows.add((model.t("detail.size"), formatSize(m.size)))
     }
-    rows.add(("页数", pageStatText(m.pagecount, pages)))
+    rows.add((model.t("detail.pageCount"), pageStatText(model, m.pagecount, pages)))
     if (m.relativePath.size > 0) {
-        rows.add(("路径", m.relativePath))
+        rows.add((model.t("detail.path"), m.relativePath))
     }
     let ns = sourceNamespace(m.arcid)
     if (ns.size > 0) {
-        rows.add(("来源", "${ns} 插件"))
+        rows.add((model.t("detail.source"), model.t("detail.pluginSource", params: [("name", ns)])))
     }
     if (m.release_at > 0) {
-        rows.add(("发布日期", formatTimestamp(m.release_at)))
+        rows.add((model.t("detail.releaseDate"), formatTimestamp(m.release_at)))
     }
     if (m.created_at > 0) {
-        rows.add(("添加时间", formatTimestamp(m.created_at)))
+        rows.add((model.t("detail.addedAt"), formatTimestamp(m.created_at)))
     }
     if (m.lastreadtime > 0) {
-        rows.add(("最近阅读", formatTimestamp(m.lastreadtime)))
+        rows.add((model.t("detail.lastRead"), formatTimestamp(m.lastreadtime)))
     }
     if (m.updated_at > 0) {
-        rows.add(("更新时间", formatTimestamp(m.updated_at)))
+        rows.add((model.t("detail.updatedTime"), formatTimestamp(m.updated_at)))
     }
-    rows.add(("状态", if (m.isnew) {
-            "未读"
+    rows.add((model.t("detail.status"), if (m.isnew) {
+            model.t("detail.unread")
         } else {
-            "已读"
+            model.t("detail.read")
         }))
     if (m.archivetype.size > 0) {
-        rows.add(("文件类型", m.archivetype))
+        rows.add((model.t("detail.fileType"), m.archivetype))
     }
     rows.toArray()
 }
 
 // 页数行：「48（图像 44 · 视频 2 · 音频 1 · 文本 1）」；无页表或无统计时仅总页数。
-private func pageStatText(pagecount: Int64, pages: ArrayList<PageInfo>): String {
+private func pageStatText(model: AppModel, pagecount: Int64, pages: ArrayList<PageInfo>): String {
     if (pages.size == 0) {
         return "${pagecount}"
     }
@@ -551,16 +567,16 @@ private func pageStatText(pagecount: Int64, pages: ArrayList<PageInfo>): String 
     }
     let parts = ArrayList<String>()
     if (image > 0) {
-        parts.add("图像 ${image}")
+        parts.add(model.t("detail.imageCount", params: [("count", "${image}")]))
     }
     if (video > 0) {
-        parts.add("视频 ${video}")
+        parts.add(model.t("detail.videoCount", params: [("count", "${video}")]))
     }
     if (audio > 0) {
-        parts.add("音频 ${audio}")
+        parts.add(model.t("detail.audioCount", params: [("count", "${audio}")]))
     }
     if (html > 0) {
-        parts.add("文本 ${html}")
+        parts.add(model.t("detail.textCount", params: [("count", "${html}")]))
     }
     if (parts.size == 0) {
         return "${pagecount}"
@@ -569,25 +585,25 @@ private func pageStatText(pagecount: Int64, pages: ArrayList<PageInfo>): String 
     for (i in 1..parts.size) {
         inner = "${inner} · ${parts[i]}"
     }
-    "${pagecount}（${inner}）"
+    model.t("detail.pageBreakdown", params: [("total", "${pagecount}"), ("details", inner)])
 }
 
 // 合集基础信息行（原型 infoTank：名称/档案数/总页数/创建/更新）。
-private func tankInfoRows(t: TankoubonInfo): Array<(String, String)> {
+private func tankInfoRows(model: AppModel, t: TankoubonInfo): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
-    rows.add(("名称", t.name))
-    rows.add(("档案数", "${t.archiveCount}"))
-    rows.add(("总页数", "${t.totalPages}"))
-    rows.add(("封面", if (t.coverAssetId > 0) {
-            "自定义"
+    rows.add((model.t("detail.name"), t.name))
+    rows.add((model.t("detail.archiveCount"), "${t.archiveCount}"))
+    rows.add((model.t("detail.totalPages"), "${t.totalPages}"))
+    rows.add((model.t("detail.cover"), if (t.coverAssetId > 0) {
+            model.t("detail.custom")
         } else {
-            "自动"
+            model.t("detail.automatic")
         }))
     if (t.createdAt.size > 0) {
-        rows.add(("创建时间", tankDate(t.createdAt)))
+        rows.add((model.t("detail.createdAt"), tankDate(t.createdAt)))
     }
     if (t.updatedAt.size > 0) {
-        rows.add(("更新时间", tankDate(t.updatedAt)))
+        rows.add((model.t("detail.updatedTime"), tankDate(t.updatedAt)))
     }
     rows.toArray()
 }

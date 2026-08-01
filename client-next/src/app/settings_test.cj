@@ -1,5 +1,6 @@
 package lanlu_client_next.app
 
+import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM}
 import std.fs.{Directory, Path}
 
 private var testStoreReady = false
@@ -23,6 +24,7 @@ func settingsDefaultsComeFromMmkv(): Unit {
     resetTestStore()
     let s = loadSettings()
     @Expect(s.theme, "dark")
+    @Expect(s.languagePreference, LANGUAGE_SYSTEM)
     @Expect(s.readerMode, "single-ltr")
     @Expect(s.readerLongPage, true)
     @Expect(s.readerAutoPlayInterval, 3)
@@ -36,6 +38,7 @@ func settingsRoundTripThroughMmkv(): Unit {
     resetTestStore()
     let s = AppSettings()
     s.theme = "light"
+    s.languagePreference = LANGUAGE_EN
     s.readerMode = "single-rtl"
     s.readerDoublePage = true
     s.readerSplitCover = true
@@ -56,6 +59,7 @@ func settingsRoundTripThroughMmkv(): Unit {
 
     let back = loadSettings()
     @Expect(back.theme, "light")
+    @Expect(back.languagePreference, LANGUAGE_EN)
     @Expect(back.readerMode, "single-rtl")
     @Expect(back.readerDoublePage, true)
     @Expect(back.readerSplitCover, true)
@@ -114,6 +118,14 @@ func settingsHelpersAreStable(): Unit {
     @Expect(themeToIndex("light"), 1)
     @Expect(indexToTheme(1), "light")
     @Expect(indexToTheme(2), "dark")
+    @Expect(languagePreferenceToIndex(LANGUAGE_SYSTEM), 0)
+    @Expect(languagePreferenceToIndex("zh"), 1)
+    @Expect(languagePreferenceToIndex(LANGUAGE_EN), 2)
+    @Expect(languagePreferenceToIndex("unsupported"), 0)
+    @Expect(indexToLanguagePreference(0), LANGUAGE_SYSTEM)
+    @Expect(indexToLanguagePreference(1), "zh")
+    @Expect(indexToLanguagePreference(2), LANGUAGE_EN)
+    @Expect(indexToLanguagePreference(9), LANGUAGE_SYSTEM)
 }
 
 @Test

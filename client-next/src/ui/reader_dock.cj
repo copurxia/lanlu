@@ -302,10 +302,21 @@ class ReaderDock <: Widget {
 
     private func drawBookBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
         let r = model.reader
-        let _ = drawBodyButton(ctx, prevRect, dy, "reader:dock:prev", a)
-        drawChevronGlyph(ctx.renderer, prevRect.centerX(), prevRect.centerY() + dy, false, dimColor(ctx, a))
-        let _ = drawBodyButton(ctx, nextRect, dy, "reader:dock:next", a)
-        drawChevronGlyph(ctx.renderer, nextRect.centerX(), nextRect.centerY() + dy, true, dimColor(ctx, a))
+        let pageButtonsEnabled = match (r.mode) {
+            case ReadingMode.Webtoon => false
+            case _ => true
+        }
+        if (pageButtonsEnabled) {
+            let _ = drawBodyButton(ctx, prevRect, dy, "reader:dock:prev", a)
+            let _ = drawBodyButton(ctx, nextRect, dy, "reader:dock:next", a)
+        }
+        let pageButtonColor = if (pageButtonsEnabled) {
+            dimColor(ctx, a)
+        } else {
+            ctx.theme.mutedText.withAlpha(min(a, 90))
+        }
+        drawChevronGlyph(ctx.renderer, prevRect.centerX(), prevRect.centerY() + dy, false, pageButtonColor)
+        drawChevronGlyph(ctx.renderer, nextRect.centerX(), nextRect.centerY() + dy, true, pageButtonColor)
         // 页码滑条（原型 .lane-slider）：轨道 overlayTrack + accent 填充 + 圆头。
         // 显示语义：seamless 开 = segment 内页码/页数（frontend slider 语义），关 = 全局；
         // 虚拟结束页满格 + 「完」。
@@ -325,7 +336,7 @@ class ReaderDock <: Widget {
         ctx.renderer.fillCircle(sr.x + sr.w * amount, sr.centerY(), 5.0, ctx.theme.accent.withAlpha(a))
         // cur / total（tabular 语义即可，cui 无 font-variant-numeric 原语）。
         let num = if (r.onVirtualEnd) {
-            "完"
+            model.t("reader.finishedShort")
         } else {
             "${r.displayPage} / ${total}"
         }
@@ -454,13 +465,17 @@ class ReaderDock <: Widget {
                     }
                 }
                 if (active.equals(LaneId.Book)) {
-                    if (prevRect.contains(x, y)) {
-                        model.readerTurnPage(false)
-                        return true
-                    }
-                    if (nextRect.contains(x, y)) {
-                        model.readerTurnPage(true)
-                        return true
+                    match (model.reader.mode) {
+                        case ReadingMode.Webtoon => ()
+                        case _ =>
+                            if (prevRect.contains(x, y)) {
+                                model.readerTurnPage(false)
+                                return true
+                            }
+                            if (nextRect.contains(x, y)) {
+                                model.readerTurnPage(true)
+                                return true
+                            }
                     }
                 }
                 if (isMediaActive()) {
@@ -507,8 +522,18 @@ class ReaderDock <: Widget {
                 ctx.claimHover("reader:dock:tab:${lanes[Int64(i)].toString()}", CursorShape.Interactive)
             }
         }
-        let spots = [("reader:dock:prev", prevRect), ("reader:dock:next", nextRect), ("reader:dock:back", backRect),
-            ("reader:dock:play", playRect), ("reader:dock:fwd", fwdRect), ("reader:dock:mute", muteRect),
+        match (model.reader.mode) {
+            case ReadingMode.Webtoon => ()
+            case _ =>
+                if (prevRect.contains(x, y)) {
+                    ctx.claimHover("reader:dock:prev", CursorShape.Interactive)
+                }
+                if (nextRect.contains(x, y)) {
+                    ctx.claimHover("reader:dock:next", CursorShape.Interactive)
+                }
+        }
+        let spots = [("reader:dock:back", backRect), ("reader:dock:play", playRect),
+            ("reader:dock:fwd", fwdRect), ("reader:dock:mute", muteRect),
             ("reader:dock:subtitle", subtitleRect), ("reader:dock:bookSeek", bookSeekRect),
             ("reader:dock:audioSeek", audioSeekRect)]
         for ((id, rect) in spots) {

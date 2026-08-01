@@ -42,6 +42,14 @@ func duplicateNameRejectedWhileInflight(): Unit {
 }
 
 @Test
+func taggedTasksCanSupersedeAnotherTag(): Unit {
+    let w = ApiWorker()
+    @Expect(w.submitTagged("localized", "zh", {=> sleep(Duration.millisecond * 100); 1}), true)
+    @Expect(w.submitTagged("localized", "en", {=> 2}), true)
+    @Expect(w.submitTagged("localized", "en", {=> 3}), false)
+}
+
+@Test
 func imagePoolDoesNotBlockApiPool(): Unit {
     // 图片池 4 线程全部被慢任务占满时，API 池任务仍应先行完成（两池互不阻塞）。
     let w = ApiWorker()

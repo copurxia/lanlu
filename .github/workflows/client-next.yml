@@ -104,7 +104,7 @@ jobs:
     timeout-minutes: 45
     env:
       CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
-      KV4CJ_COMMIT: 46c27f92e44b1665325f00802e6e730c7bdfcf04
+      KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
       MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
     steps:
       - name: Check out repository
@@ -176,18 +176,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ref
-          git clone --depth 1 --branch V1.0.3 https://gitcode.com/Cangjie-TPC/kv4cj.git ref/kv4cj
+          git clone https://gitcode.com/copur/kv4cj.git ref/kv4cj
+          git -C ref/kv4cj checkout --detach "${KV4CJ_COMMIT}"
           actual_commit="$(git -C ref/kv4cj rev-parse HEAD)"
           if [ "${actual_commit}" != "${KV4CJ_COMMIT}" ]; then
             echo "::error::Unexpected kv4cj commit ${actual_commit}."
             exit 1
           fi
-
-          # V1.0.3 points at an obsolete stdx directory layout. The application already
-          # supplies the current stdx binary dependency, so remove the duplicate entry.
-          sed -i \
-            '/^\[target.x86_64-unknown-linux-gnu\]/,/^[[:space:]]*path-option[[:space:]]*=/d' \
-            ref/kv4cj/cjpm.toml
 
       - name: Build pinned MMKV native libraries
         run: |
@@ -278,4 +273,180 @@ jobs:
             client-next/test-results/
             client-next/client-next.bmp
           if-no-files-found: ignore
+          retention-days: 14
+
+  windows-build:
+    name: Build on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
+      MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
+    steps:
+      - name: Configure Git line endings
+        run: git config --global core.autocrlf input
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify in-repository dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $requiredFiles = @(
+            "packages/cangjie-gui/cjpm.toml",
+            "packages/cangjie-gui/sdl/.sdl3/libSDL3.dll",
+            "packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.dll",
+            "packages/vips_ffi/cjpm.toml",
+            "packages/libvlc_ffi/cjpm.toml",
+            "packages/fontkit_ffi/native/Cargo.lock"
+          )
+          foreach ($requiredFile in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              Write-Error "Required client-next dependency is missing: $requiredFile"
+            }
+          }
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v2
+        with:
+          channel: sts
+          version: 1.1.3
+
+      - name: Set up MSYS2 native dependencies
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libvips
+            mingw-w64-x86_64-vlc
+            mingw-w64-x86_64-dlfcn
+
+      - name: Cache Cangjie and Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cjpm/git
+            ~/.cjpm/repository
+            ~/.cargo/git
+            ~/.cargo/registry
+            packages/fontkit_ffi/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+
+      - name: Download Windows stdx
+        env:
+          STDX_WINDOWS_URL: ${{ vars.STDX_WINDOWS_URL }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:STDX_WINDOWS_URL)) {
+            throw "Missing repository variable STDX_WINDOWS_URL"
+          }
+          $archive = Join-Path $env:RUNNER_TEMP "stdx-windows.zip"
+          $destination = Join-Path $env:GITHUB_WORKSPACE "stdx-windows"
+          Invoke-WebRequest -Uri $env:STDX_WINDOWS_URL -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $stdx = Get-ChildItem -LiteralPath $destination -Directory -Recurse |
+            Where-Object { $_.Name -eq "stdx" -and $_.Parent.Name -eq "static" } |
+            Select-Object -First 1
+          if ($null -eq $stdx) {
+            throw "The Windows stdx archive does not contain a static/stdx directory"
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "CANGJIE_STDX_PATH=$($stdx.FullName)"
+
+      - name: Fetch pinned kv4cj source
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path ref -Force | Out-Null
+          git clone https://gitcode.com/copur/kv4cj.git ref/kv4cj
+          git -C ref/kv4cj checkout --detach $env:KV4CJ_COMMIT
+          $actualCommit = (git -C ref/kv4cj rev-parse HEAD).Trim()
+          if ($actualCommit -ne $env:KV4CJ_COMMIT) {
+            throw "Unexpected kv4cj commit $actualCommit"
+          }
+
+      - name: Build pinned MMKV native libraries
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p build-script-cache
+          git clone https://github.com/Tencent/MMKV.git build-script-cache/MMKV
+          git -C build-script-cache/MMKV checkout --detach "${MMKV_COMMIT}"
+          actual_commit="$(git -C build-script-cache/MMKV rev-parse HEAD)"
+          if [ "${actual_commit}" != "${MMKV_COMMIT}" ]; then
+            echo "Unexpected MMKV commit ${actual_commit}" >&2
+            exit 1
+          fi
+
+          sed -i '/add_library(core/,/STATIC/ s/STATIC/SHARED/' build-script-cache/MMKV/Core/CMakeLists.txt
+          sed -i '/#include <string>/i #include <cstdint>' build-script-cache/MMKV/Core/MMKVPredef.h
+          cmake \
+            -S build-script-cache/MMKV/Core \
+            -B build-script-cache/MMKV-build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-script-cache/MMKV-build --parallel
+
+          mkdir -p ref/kv4cj/lib
+          core_dll="$(find build-script-cache/MMKV-build -type f -iname 'libcore.dll' -print -quit)"
+          core_import="$(find build-script-cache/MMKV-build -type f -iname 'libcore.dll.a' -print -quit)"
+          test -n "${core_dll}"
+          test -n "${core_import}"
+          cp "${core_dll}" "${core_import}" ref/kv4cj/lib/
+
+          (
+            cd ref/kv4cj/mmkv_cpp
+            ./configure
+            make -j"$(nproc)"
+          )
+          test -s ref/kv4cj/lib/libmymmkv.dll
+
+      - name: Configure Windows native paths
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mingwBin = Join-Path $env:MSYS2_LOCATION "mingw64/bin"
+          $mingwLib = Join-Path $env:MSYS2_LOCATION "mingw64/lib"
+          $kv4cjLib = Join-Path $env:GITHUB_WORKSPACE "ref/kv4cj/lib"
+          $sdlLib = Join-Path $env:GITHUB_WORKSPACE "packages/cangjie-gui/sdl/.sdl3"
+          @($mingwBin, $kv4cjLib, $sdlLib) |
+            ForEach-Object { Add-Content -LiteralPath $env:GITHUB_PATH -Value $_ }
+          $mingwLibraryPath = $mingwLib.Replace("\", "/")
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MINGW_LIBRARY_PATH=$mingwLibraryPath"
+
+      - name: Show tool versions
+        run: |
+          cjc -v
+          rustc --version
+          cargo --version
+
+      - name: Build client-next on Windows
+        working-directory: client-next
+        run: cjpm build -V
+
+      - name: Verify Windows executable
+        run: |
+          $executable = "client-next/target/release/bin/main.exe"
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "Windows executable was not produced: $executable"
+          }
+          Get-Item -LiteralPath $executable | Format-List Name, Length, LastWriteTime
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-windows-${{ github.sha }}
+          path: |
+            client-next/target/release/bin/main.exe
+            client-next/target/release/bin/lanlu_logo_gold.png
+          if-no-files-found: error
           retention-days: 14

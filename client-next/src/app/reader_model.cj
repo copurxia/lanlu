@@ -182,6 +182,22 @@ public class ReaderModel {
         }
     }
 
+    // 条漫视图消费完整流（真实页 + virtual-end），而不是当前 spread。只暴露只读
+    // 映射，避免 UI 复制 segment/无缝续读规则后与状态机产生两套索引语义。
+    public prop streamItemCount: Int64 {
+        get() {
+            streamLength()
+        }
+    }
+
+    // 0 基流索引 -> 真实页索引；virtual-end 返回 None。
+    public func realPageAtStream(s: Int64): ?Int64 {
+        if (s < 0 || s >= streamLength()) {
+            return None
+        }
+        realOfStream(s)
+    }
+
     // ---- 流/segment 只读 API（视图层不直接摸流索引，经 display* 系列取值）----
 
     // 全部 segment（侧边栏分组用；返回快照数组）。
@@ -447,6 +463,9 @@ public class ReaderModel {
     // webtoon 由滚动驱动，不响应按键翻页。虚拟页上「上一页」回本 segment 最后真实页
     //（moveTo 内按双页/拆分封面规则吸附，对齐 frontend computeCollectionEndReturnRealPage）。
     public func turnPage(forward: Bool): Unit {
+        if (isWebtoon()) {
+            return
+        }
         let total = streamLength()
         if (total == 0) {
             return

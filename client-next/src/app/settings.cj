@@ -1,6 +1,7 @@
 package lanlu_client_next.app
 
 import kv4cj.*
+import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM, LANGUAGE_ZH, normalizeLanguagePreference}
 import std.collection.ArrayList
 import std.env.getVariable
 import std.fs.{exists, Directory, Path}
@@ -48,6 +49,8 @@ public class AppSettings {
     public var theme: String = "dark"
     // 界面字体：TTF/TTC/OTF 文件路径。空串 = 使用系统默认字体。需重启生效。
     public var fontPath: String = ""
+    // 显示语言偏好：system（跟随系统）| zh | en。
+    public var languagePreference: String = LANGUAGE_SYSTEM
     // 阅读器设置默认值对齐 frontend use-reader-settings；ReaderModel 读初值并写回。
     public var readerMode: String = "single-ltr" // single-ltr | single-rtl | single-ttb | webtoon
     public var readerDoublePage: Bool = false
@@ -60,6 +63,7 @@ public class AppSettings {
     public var readerShowInfo: Bool = false // 媒体信息浮层开关（文件名/时长/位置等）
     public var readerAutoPlay: Bool = false // 自动播放（按间隔自动翻页，到底自动停）
     public var readerAutoPlayInterval: Int64 = 3 // 自动播放间隔（秒，1-10）
+
     // 服务器在线探测（probe）连接硬超时（秒）：不可达服务器的 TCP connect 走 OS 默认重传
     // 可达分钟级，探测必须短超时快速判离线。LanluApi(connectTimeout:) 的消费方。
     public var probeConnectTimeoutSec: Int64 = 5
@@ -171,6 +175,8 @@ public func loadSettings(): AppSettings {
         s.theme = "dark"
     }
     s.fontPath = kv.getString("appearance.font_path")
+    s.languagePreference = normalizeLanguagePreference(
+        kv.getString("appearance.language", defaultValue: LANGUAGE_SYSTEM))
     s.readerMode = kv.getString("reader.mode", defaultValue: "single-ltr")
     if (s.readerMode != "single-ltr" && s.readerMode != "single-rtl" && s.readerMode != "single-ttb" && s.readerMode !=
         "webtoon") {
@@ -221,7 +227,7 @@ public func loadSettings(): AppSettings {
 // 以下变量不 private 以便同包测试注入窗口/复位状态；saveClock 默认单调时钟毫秒。
 private let saveClockEpoch = MonoTime.now()
 var saveDebounceMs: Int64 = 300
-var saveClock: () -> Int64 = {=> (MonoTime.now() - saveClockEpoch).toMilliseconds() }
+var saveClock: () -> Int64 = {=> (MonoTime.now() - saveClockEpoch).toMilliseconds()}
 private let saveStateMutex = Mutex()
 private let saveWriteMutex = Mutex()
 var lastSaveAtMs: Int64 = -86400000
@@ -319,6 +325,7 @@ private func writeSettingsLocked(s: AppSettings): Unit {
     let _ = kv.set("schema.version", Int64(1))
     let _ = kv.set("appearance.theme", s.theme)
     let _ = kv.set("appearance.font_path", s.fontPath)
+    let _ = kv.set("appearance.language", normalizeLanguagePreference(s.languagePreference))
     let _ = kv.set("reader.mode", s.readerMode)
     let _ = kv.set("reader.double_page", s.readerDoublePage)
     let _ = kv.set("reader.split_cover", s.readerSplitCover)
@@ -405,5 +412,26 @@ public func indexToTheme(i: Int64): String {
         "light"
     } else {
         "dark"
+    }
+}
+
+// 语言偏好值 ↔ 语言页 Dropdown 索引（0=跟随系统 1=简体中文 2=English）。
+// 非法设置值和越界索引都回落到跟随系统，与设置加载时的归一化规则一致。
+public func languagePreferenceToIndex(preference: String): Int64 {
+    let normalized = normalizeLanguagePreference(preference)
+    if (normalized == LANGUAGE_ZH) {
+        1
+    } else if (normalized == LANGUAGE_EN) {
+        2
+    } else {
+        0
+    }
+}
+
+public func indexToLanguagePreference(index: Int64): String {
+    match (index) {
+        case 1 => LANGUAGE_ZH
+        case 2 => LANGUAGE_EN
+        case _ => LANGUAGE_SYSTEM
     }
 }

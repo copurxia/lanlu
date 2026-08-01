@@ -288,7 +288,7 @@ private class SearchPlaceholder <: Widget {
         if (model.searchText.value.size > 0) {
             return
         }
-        let ph = "搜索标题 / 标签 / 艺术家…"
+        let ph = model.t("nav.search")
         let th = ctx.renderer.textHeight(pointSize: 13.0)
         ctx
             .renderer
@@ -409,11 +409,12 @@ private class SearchKeys <: Widget {
 // hover 不给手型——比假跳转诚实）。
 private class NavPill <: Widget {
     private let model: AppModel
-    private let labels = ["首页", "书架", "在线源"]
+    private let labels: Array<String>
     private var frame = Rect.zero()
 
     public init(model: AppModel) {
         this.model = model
+        this.labels = [model.t("nav.home"), model.t("nav.shelf"), model.t("nav.sources")]
         emit(this)
     }
 

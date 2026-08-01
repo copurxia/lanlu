@@ -168,7 +168,8 @@ private class ReaderModeSeg <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let labels = ["左到右", "右到左", "纵向", "条漫"]
+        let labels = [model.t("reader.ltr"), model.t("reader.rtl"), model.t("reader.vertical"),
+            model.t("reader.webtoon")]
         let current = readerModeIndex(model.reader.mode)
         ctx.renderer.fillRoundedRect(frame, SEG_RADIUS, segTrackColor(model.isLight()))
         let pos = spring.animate(ctx, target: Float32(current))
@@ -233,7 +234,8 @@ private func autoPlayIntervalRow(model: AppModel): Unit {
     }
     HStack {
         Slider(model.autoPlayIntervalSlider, key: "reader:autoPlayInterval", lower: 1.0, upper: 10.0, step: 1.0).flex()
-        Label("${model.reader.autoPlayIntervalSec}秒").fontSize(12.fp).muted().padding(8.0, 0.0, 0.0, 0.0)
+        Label(model.t("reader.seconds", params: [("count", "${model.reader.autoPlayIntervalSec}")]))
+            .fontSize(12.fp).muted().padding(8.0, 0.0, 0.0, 0.0)
     }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(2.0, 0.0, 10.0, 9.0)
 }
 
@@ -260,42 +262,43 @@ private func readerSettingsBody(model: AppModel): Unit {
     // 排版对齐原型：面板 padding 18；h3 14 底距 4；sub 12 dim 底距 16；
     // 之后各节由 panelSection 自带 18/8 外边距。
     VStack {
-        Label("阅读设置").fontSize(14.fp).padding(0.0, 0.0, 0.0, 4.0)
-        ReaderSettingsSubtitle(archiveTitle, model.reader.pageCount, mediaSummary).padding(0.0, 0.0, 0.0, 16.0)
-        panelSection("阅读模式")
+        Label(model.t("reader.settings")).fontSize(14.fp).padding(0.0, 0.0, 0.0, 4.0)
+        ReaderSettingsSubtitle(model, archiveTitle, model.reader.pageCount, mediaSummary)
+            .padding(0.0, 0.0, 0.0, 16.0)
+        panelSection(model.t("reader.readingMode"))
         ReaderModeSeg(model)
-        panelSection("页面布局")
-        panelSwitchRow(model, "reader.doublePage", "双页模式", model.reader.doublePage) {
+        panelSection(model.t("reader.pageLayout"))
+        panelSwitchRow(model, "reader.doublePage", model.t("reader.doublePage"), model.reader.doublePage) {
             => model.toggleReaderDoublePage()
         }
-        panelSwitchRow(model, "reader.splitCover", "拆分封面", model.reader.splitCover) {
+        panelSwitchRow(model, "reader.splitCover", model.t("reader.splitCover"), model.reader.splitCover) {
             => model.toggleReaderSplitCover()
         }
-        panelSwitchRow(model, "reader.longPage", "长图滚动", model.reader.longPage) {
+        panelSwitchRow(model, "reader.longPage", model.t("reader.longPage"), model.reader.longPage) {
             => model.toggleReaderLongPage()
         }
-        panelSection("行为")
-        panelSwitchRow(model, "reader.tapTurnPage", "点击翻页", model.reader.tapTurnPage) {
+        panelSection(model.t("reader.behavior"))
+        panelSwitchRow(model, "reader.tapTurnPage", model.t("reader.tapTurn"), model.reader.tapTurnPage) {
             => model.toggleReaderTapTurnPage()
         }
-        panelSwitchRow(model, "reader.doubleTapZoom", "双击缩放", model.reader.doubleTapZoom) {
+        panelSwitchRow(model, "reader.doubleTapZoom", model.t("reader.doubleTapZoom"), model.reader.doubleTapZoom) {
             => model.toggleReaderDoubleTapZoom()
         }
         // 自动播放：顺序和标签严格跟设计稿；打开后在本行下方露出间隔滑条。
-        panelSwitchRow(model, "reader.autoPlay", "自动播放（1–10s 间隔）", model.reader.autoPlay) {
+        panelSwitchRow(model, "reader.autoPlay", model.t("reader.autoPlay"), model.reader.autoPlay) {
             => model.toggleReaderAutoPlay()
         }
         if (model.reader.autoPlay) {
             autoPlayIntervalRow(model)
         }
-        panelSwitchRow(model, "reader.autoHide", "工具栏自动隐藏", model.reader.autoHide) {
+        panelSwitchRow(model, "reader.autoHide", model.t("reader.autoHide"), model.reader.autoHide) {
             => model.toggleReaderAutoHide()
         }
-        panelSwitchRow(model, "reader.seamlessNext", "无缝续读下一档案", model.reader.seamlessNext) {
+        panelSwitchRow(model, "reader.seamlessNext", model.t("reader.seamlessNext"), model.reader.seamlessNext) {
             => model.toggleReaderSeamlessNext()
         }
-        panelSection("调试")
-        panelSwitchRow(model, "reader.showInfo", "媒体信息浮层", model.readerShowInfo.value) {
+        panelSection(model.t("reader.debug"))
+        panelSwitchRow(model, "reader.showInfo", model.t("reader.mediaInfo"), model.readerShowInfo.value) {
             => model.toggleReaderShowInfo()
         }
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).padding(18.0)
@@ -328,7 +331,7 @@ private func readerMediaSummary(model: AppModel): String {
     }
     let joined = String.join(kinds.toArray(), delimiter: "/")
     if (kinds.size > 1) {
-        "${joined} 混合"
+        model.t("reader.mixed", params: [("types", joined)])
     } else {
         joined
     }
@@ -422,7 +425,7 @@ private func sidebarTreeRows(model: AppModel): ArrayList<SidebarRow> {
 private func readerSidebarBody(model: AppModel): Unit {
     let tab = rememberState<Int64>("reader:sidebar:tab", {=> 0})
     VStack {
-        ReaderSidebarTabs(tab)
+        ReaderSidebarTabs(model, tab)
         if (tab.value == 0) {
             readerThumbnailPane(model)
         } else if (tab.value == 1) {
@@ -434,10 +437,12 @@ private func readerSidebarBody(model: AppModel): Unit {
 }
 
 private class ReaderSidebarTabs <: Widget {
+    private let model: AppModel
     private let selected: State<Int64>
     private var frame = Rect.zero()
 
-    public init(selected: State<Int64>) {
+    public init(model: AppModel, selected: State<Int64>) {
+        this.model = model
         this.selected = selected
         emit(this)
     }
@@ -451,7 +456,7 @@ private class ReaderSidebarTabs <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let labels = ["缩略图", "列表", "文件树"]
+        let labels = [model.t("reader.thumbnails"), model.t("reader.list"), model.t("reader.fileTree")]
         let inner = Rect(frame.x + 10.0, frame.y + 10.0, frame.w - 20.0, 34.0)
         let gap: Float32 = 2.0
         let w = (inner.w - gap * 2.0) / 3.0
@@ -730,11 +735,11 @@ private class ReaderPageRow <: Widget {
     // 页类型字标：emoji 🎬🎵📄 在随仓字体（NotoSansCJK/msyh）无字形，用单汉字代替。
     private func typeTag(pageType: String): String {
         if (pageType == "video") {
-            "视"
+            model.t("reader.typeVideo")
         } else if (pageType == "audio") {
-            "音"
+            model.t("reader.typeAudio")
         } else if (pageType == "html") {
-            "文"
+            model.t("reader.typeText")
         } else {
             "" // image/未知：图片是常态，不占位
         }
@@ -789,7 +794,7 @@ private class ReaderPageRow <: Widget {
         } else {
             0.0
         }
-        var title = "第 ${index + 1} 页"
+        var title = model.t("reader.page", params: [("page", "${index + 1}")])
         var subtitle = ""
         var pageType = ""
         match (model.reader.pageAt(index)) {
@@ -837,7 +842,7 @@ private class ReaderPageRow <: Widget {
         ctx.renderer.text(if (tag.size > 0) {
             tag
         } else {
-            "图"
+            model.t("reader.typeImage")
         }, x, ty, ctx.theme.mutedText, pointSize: 10.5)
         x += 20.0
         let num = "${index + 1}"
@@ -877,12 +882,14 @@ private class ReaderPageRow <: Widget {
 // 页数后缀恒定保留，档案名按剩余宽度二分截断（Label.maxLines 整体截断会把
 // 「· N 页」一起挤没）。截断复用本文件 sidebarEllipsize。
 private class ReaderSettingsSubtitle <: Widget {
+    private let model: AppModel
     private let title: String
     private let pageCount: Int64
     private let mediaSummary: String
     private var frame = Rect.zero()
 
-    public init(title: String, pageCount: Int64, mediaSummary: String) {
+    public init(model: AppModel, title: String, pageCount: Int64, mediaSummary: String) {
+        this.model = model
         this.title = title
         this.pageCount = pageCount
         this.mediaSummary = mediaSummary
@@ -904,11 +911,12 @@ private class ReaderSettingsSubtitle <: Widget {
         } else {
             ""
         }
+        let pageTotal = model.t("reader.pageTotal", params: [("count", "${pageCount}")])
         if (title.size == 0) {
-            ctx.renderer.text("${pageCount} 页${typeSuffix}", frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)
+            ctx.renderer.text("${pageTotal}${typeSuffix}", frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)
             return
         }
-        let suffix = " · ${pageCount} 页${typeSuffix}"
+        let suffix = " · ${pageTotal}${typeSuffix}"
         let suffixW = ctx.renderer.textWidth(suffix, pointSize: ps)
         let fitted = sidebarEllipsize(ctx, title, frame.w - suffixW, ps)
         ctx.renderer.text(fitted, frame.x, frame.y, ctx.theme.mutedText, pointSize: ps)

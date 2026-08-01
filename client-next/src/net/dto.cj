@@ -1533,6 +1533,7 @@ public class SysSetting {
     public var valueType: String = ""
     public var category: String = ""
     public var descriptionZh: String = ""
+    public var descriptionEn: String = ""
 }
 
 public func parseSysSettings(body: String): ArrayList<SysSetting> {
@@ -1557,7 +1558,10 @@ public func parseSysSettings(body: String): ArrayList<SysSetting> {
                             case "valueType" => it.valueType = decodeRaw<String>(r.readValueBytes(), "")
                             case "value_type" => it.valueType = decodeRaw<String>(r.readValueBytes(), "")
                             case "category" => it.category = decodeRaw<String>(r.readValueBytes(), "")
-                            case "description" => it.descriptionZh = parseDescriptionZh(rawText(r.readValueBytes()))
+                            case "description" =>
+                                let description = rawText(r.readValueBytes())
+                                it.descriptionZh = parseDescription(description, "zh")
+                                it.descriptionEn = parseDescription(description, "en")
                             case _ => r.skip()
                         }
                     }
@@ -1572,8 +1576,8 @@ public func parseSysSettings(body: String): ArrayList<SysSetting> {
     return list
 }
 
-// description 是多语言对象 {"zh":"…","en":"…"}，设置页只取中文。
-private func parseDescriptionZh(raw: String): String {
+// description 是多语言对象 {"zh":"…","en":"…"}。
+private func parseDescription(raw: String, language: String): String {
     if (raw.size == 0) {
         return ""
     }
@@ -1583,7 +1587,7 @@ private func parseDescriptionZh(raw: String): String {
             case BeginObject =>
                 r.startObject()
                 while (r.peek() != EndObject) {
-                    if (r.readName() == "zh") {
+                    if (r.readName() == language) {
                         return decodeRaw<String>(r.readValueBytes(), "")
                     } else {
                         r.skip()

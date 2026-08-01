@@ -2093,6 +2093,13 @@ public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId:
 
 // ── 页面预览（原型 .pv-*：缩略图/列表/树三态；已读页半透明，媒体页带类型图标）──
 
+private let PAGE_PREVIEW_MAX_H: Float32 = 500.0
+private let PAGE_PREVIEW_ROW_H: Float32 = 32.0
+
+func pagePreviewViewportHeight(contentHeight: Float32): Float32 {
+    min(max(contentHeight, 0.0), PAGE_PREVIEW_MAX_H)
+}
+
 // 媒体页类型图标统一走 CUI 矢量图标，不依赖应用字体的符号/emoji 覆盖范围。
 public func pageTypeIcon(pageType: String): ?IconName {
     match (pageType) {
@@ -2134,7 +2141,7 @@ private func pvGrid(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
         id: "pv-grid", itemAt: {i => (i + 1, pages[i])}) { item =>
         let (no, p) = item
         pvThumb(model, no, p.pageType, no <= readUpTo, cellH) {=> onOpenPage(no) }
-    }.height(gridH)
+    }.height(pagePreviewViewportHeight(gridH))
 }
 
 private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
@@ -2175,18 +2182,23 @@ private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
 // 列表态（原型 .pv-list .pv-row）：页码右对齐定宽 + 文件名截断 + 类型图标，已读半透明。
 private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
-    VStack {
-        for (i in 0..pages.size) {
-            let no = i + 1
-            let p = pages[i]
-            pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo, 0.0) {=>
-                onOpenPage(no)
-            }
+    let contentH = Float32(pages.size) * PAGE_PREVIEW_ROW_H
+    LazyList(pages.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-list", key: {i => "page:${i}"}) { i =>
+        let no = i + 1
+        let p = pages[i]
+        pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo, 0.0) {=>
+            onOpenPage(no)
         }
-    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+    }.height(pagePreviewViewportHeight(contentH))
 }
 
 // 树态（原型 #pv-tree）：按目录分组（首次出现序），目录行用向下矢量图标 + 成员行缩进。
+private class PagePreviewTreeRow {
+    var isHeader: Bool = false
+    var title: String = ""
+    var pageIndex: Int64 = 0
+}
+
 private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     // 预分组：目录 → 页码列表（保持原顺序）。
@@ -2203,25 +2215,42 @@ private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
             case None => ()
         }
     }
-    VStack {
-        for (d in dirs) {
-            match (grouped.get(d)) {
-                case Some(list) =>
-                    let dirName = if (d.size > 0) { d } else { "（根目录）" }
-                    HStack {
-                        Icon(IconName.ChevronDown, size: 12.vp)
-                        Label("${dirName}（${list.size}）").fontSize(12.fp)
-                    }.spacing(5.vp).hug().padding(8.vp, 8.vp, 8.vp, 4.vp)
-                    for (i in list) {
-                        let no = i + 1
-                        let p = pages[i]
-                        pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo,
-                            20.0) {=> onOpenPage(no) }
-                    }
-                case None => ()
-            }
+    // 先把目录标题与页行压平为轻量索引，再由 LazyList 只构建可见 widget。
+    // 分组仍是 O(n)，但不再为每页分配 ClickArea/ZStack/Label 整棵视图树。
+    let rows = ArrayList<PagePreviewTreeRow>()
+    for (d in dirs) {
+        match (grouped.get(d)) {
+            case Some(list) =>
+                let header = PagePreviewTreeRow()
+                header.isHeader = true
+                let dirName = if (d.size > 0) { d } else { "（根目录）" }
+                header.title = "${dirName}（${list.size}）"
+                rows.add(header)
+                for (i in list) {
+                    let row = PagePreviewTreeRow()
+                    row.pageIndex = i
+                    rows.add(row)
+                }
+            case None => ()
         }
-    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+    }
+    let contentH = Float32(rows.size) * PAGE_PREVIEW_ROW_H
+    LazyList(rows.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-tree", key: { i =>
+        if (rows[i].isHeader) { "dir:${rows[i].title}" } else { "page:${rows[i].pageIndex}" }
+    }) { i =>
+        let row = rows[i]
+        if (row.isHeader) {
+            let _ = HStack {
+                Icon(IconName.ChevronDown, size: 12.vp)
+                Label(row.title).fontSize(12.fp)
+            }.spacing(5.vp).hug().padding(8.vp, 4.vp)
+        } else {
+            let no = row.pageIndex + 1
+            let p = pages[row.pageIndex]
+            pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo,
+                20.0) {=> onOpenPage(no) }
+        }
+    }.height(pagePreviewViewportHeight(contentH))
 }
 
 // 列表/树共用行：indent 为左侧额外缩进（树态成员行用）；点击进阅读器对应页。

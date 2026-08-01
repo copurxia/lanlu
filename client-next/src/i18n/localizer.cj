@@ -1,0 +1,691 @@
+package lanlu_client_next.i18n
+
+import cui.{LocalePreference, SystemLocales}
+import std.collection.HashMap
+import std.env.getVariable
+
+public let LANGUAGE_SYSTEM = "system"
+public let LANGUAGE_ZH = "zh"
+public let LANGUAGE_EN = "en"
+
+/** Returns a persisted language preference or `system` for unsupported values. */
+public func normalizeLanguagePreference(value: String): String {
+    if (value == LANGUAGE_ZH || value == LANGUAGE_EN) {
+        value
+    } else {
+        LANGUAGE_SYSTEM
+    }
+}
+
+/** Maps a locale tag to one of the languages currently shipped by the desktop client. */
+public func supportedLanguageForTag(tag: String): String {
+    let normalized = tag.trimAscii().replace("_", "-").toAsciiLower()
+    if (normalized.startsWith("zh")) {
+        LANGUAGE_ZH
+    } else {
+        LANGUAGE_EN
+    }
+}
+
+/** Resolves `system` through SDL, with environment and Chinese compatibility fallbacks. */
+public func resolveLanguage(preference: String): String {
+    let normalized = normalizeLanguagePreference(preference)
+    if (normalized != LANGUAGE_SYSTEM) {
+        return normalized
+    }
+    try {
+        let locales = SystemLocales.preferred()
+        if (!locales.isEmpty()) {
+            return supportedLanguageForTag(locales[0].tag())
+        }
+    } catch (_: Exception) {
+        ()
+    }
+    let lcAll = getVariable("LC_ALL") ?? ""
+    if (!lcAll.isEmpty()) {
+        return supportedLanguageForTag(lcAll)
+    }
+    let lcMessages = getVariable("LC_MESSAGES") ?? ""
+    if (!lcMessages.isEmpty()) {
+        return supportedLanguageForTag(lcMessages)
+    }
+    match (getVariable("LANG")) {
+        case Some(value) => supportedLanguageForTag(value)
+        case None => LANGUAGE_ZH
+    }
+}
+
+/** Resolves a testable locale list without calling the operating system. */
+public func resolveLanguage(preference: String, locales: Array<LocalePreference>): String {
+    let normalized = normalizeLanguagePreference(preference)
+    if (normalized != LANGUAGE_SYSTEM) {
+        return normalized
+    }
+    if (locales.isEmpty()) {
+        LANGUAGE_ZH
+    } else {
+        supportedLanguageForTag(locales[0].tag())
+    }
+}
+
+/** Application message lookup with English-to-Chinese fallback and named interpolation. */
+public class Localizer {
+    private let zh = chineseMessages()
+    private let en = englishMessages()
+
+    public func text(language: String, key: String, params!: Array<(String, String)> = []): String {
+        let primary = if (language == LANGUAGE_EN) {
+            en
+        } else {
+            zh
+        }
+        let template = match (primary.get(key)) {
+            case Some(value) => value
+            case None => match (zh.get(key)) {
+                case Some(value) => value
+                case None => key
+            }
+        }
+        var result = template
+        for ((name, value) in params) {
+            result = result.replace("{${name}}", value)
+        }
+        result
+    }
+
+    public func hasKey(language: String, key: String): Bool {
+        if (language == LANGUAGE_EN) {
+            en.contains(key)
+        } else {
+            zh.contains(key)
+        }
+    }
+
+    public func chineseKeyCount(): Int64 {
+        zh.size
+    }
+
+    public func englishKeyCount(): Int64 {
+        en.size
+    }
+
+    /** Returns true only when both shipped catalogs contain exactly the same keys. */
+    public func catalogsMatch(): Bool {
+        if (zh.size != en.size) {
+            return false
+        }
+        for ((key, _) in zh) {
+            if (!en.contains(key)) {
+                return false
+            }
+        }
+        true
+    }
+}
+
+private func messageMap(entries: Array<(String, String)>): HashMap<String, String> {
+    HashMap<String, String>(entries)
+}
+
+private func chineseMessages(): HashMap<String, String> {
+    messageMap(
+        [
+            ("common.settings", "设置"),
+            ("common.overview", "概览"),
+            ("common.cancel", "取消"),
+            ("common.save", "保存"),
+            ("common.refresh", "刷新"),
+            ("common.select", "选择"),
+            ("common.selected", "已选择"),
+            ("common.loading", "加载中…"),
+            ("settings.accountSecurity", "账户安全"),
+            ("settings.client", "客户端"),
+            ("settings.appearance", "外观"),
+            ("settings.language", "语言"),
+            ("settings.cache", "缓存"),
+            ("settings.diagnostics", "诊断"),
+            ("settings.server", "服务器"),
+            ("settings.categoryManagement", "分类管理"),
+            ("settings.tagManagement", "标签管理"),
+            ("settings.smartCategories", "智能分类"),
+            ("settings.systemManagement", "系统管理"),
+            ("settings.userManagement", "用户管理"),
+            ("settings.systemSettings", "系统设置"),
+            ("settings.taskHistory", "任务记录"),
+            ("settings.scheduledTasks", "定时任务"),
+            ("settings.pluginManagement", "插件管理"),
+            ("settings.statistics", "统计信息"),
+            ("settings.other", "其他"),
+            ("settings.about", "关于"),
+            ("language.title", "语言"),
+            ("language.description", "选择桌面客户端和服务器翻译内容使用的显示语言。"),
+            ("language.system", "跟随系统"),
+            ("language.systemDetail", "当前使用：{language}"),
+            ("language.chinese", "简体中文"),
+            ("language.english", "English"),
+            ("language.changed", "显示语言已切换为{language}"),
+            ("language.name.zh", "简体中文"),
+            ("language.name.en", "English"),
+            ("overview.subtitle", "当前账号、服务器连接与阅读统计"),
+            ("overview.account", "账号"),
+            ("overview.switchServer", "切换服务器"),
+            ("overview.logout", "退出登录"),
+            ("overview.favorites", "收藏数量"),
+            ("overview.readArchives", "已读档案"),
+            ("overview.pagesRead", "总阅读页数"),
+            ("overview.totalArchives", "档案总数"),
+            ("overview.readingTrend", "阅读趋势"),
+            ("overview.recentRead", "最近阅读"),
+            ("overview.recentFavorites", "最近收藏"),
+            ("overview.noRead", "暂无阅读记录"),
+            ("overview.noFavorites", "暂无收藏记录"),
+            ("overview.status", "状态"),
+            ("overview.connected", "已连接"),
+            ("overview.name", "名称"),
+            ("overview.version", "版本"),
+            ("overview.address", "地址"),
+            ("cache.subtitle", "封面与页面图片的本地缓存，按服务器隔离存放"),
+            ("cache.images", "图片缓存"),
+            ("cache.clear", "清理图片缓存"),
+            ("cache.currentServerOnly", "仅清除当前服务器的缓存"),
+            ("cache.cleared", "缓存已清理"),
+            ("about.subtitle", "版本信息与项目链接"),
+            ("about.client", "Lanlu 桌面客户端"),
+            ("about.project", "项目主页"),
+            ("about.licenses", "开源许可"),
+            ("about.checkUpdates", "检查更新"),
+            ("about.latest", "当前已是最新版本"),
+            ("appearance.fontRestart", "字体将在下次启动时生效"),
+            ("cache.size", "图片缓存 {size} MB"),
+            ("login.server", "服务器"),
+            ("login.noServers", "还没有服务器"),
+            ("login.noServersDetail",
+                "添加一个 Lanlu 服务器开始使用；支持保存多个服务器，随时切换"),
+            ("login.addServer", "添加服务器"),
+            ("login.confirmDelete", "确认删除"),
+            ("login.lastUsed", "上次使用 {time}"),
+            ("login.neverUsed", "从未使用"),
+            ("login.noServerQuestion", "还没有服务器？"),
+            ("login.selfHost", "了解自建 Lanlu 服务"),
+            ("login.connecting", "正在连接…"),
+            ("login.addFirst", "先在左侧添加一个服务器"),
+            ("login.username", "用户名"),
+            ("login.password", "密码"),
+            ("login.signIn", "登 录"),
+            ("login.totpHint", "该账号已开启两步验证，请输入身份验证器中的验证码"),
+            ("login.code", "验证码"),
+            ("login.recovery", "恢复码（可选，二选一）"),
+            ("login.verify", "验 证"),
+            ("login.backPassword", "返回密码登录"),
+            ("login.editServer", "编辑服务器"),
+            ("login.serverNameHint", "名称（可选，留空用地址代替）"),
+            ("login.serverAddress", "服务器地址"),
+            ("login.testConnection", "测试连接"),
+            ("login.testing", "正在测试…"),
+            ("login.connected", "连接成功"),
+            ("nav.search", "搜索标题 / 标签 / 艺术家…"),
+            ("nav.home", "首页"),
+            ("nav.shelf", "书架"),
+            ("nav.sources", "在线源"),
+            ("library.sort.title", "标题"),
+            ("library.sort.created", "创建时间"),
+            ("library.sort.updated", "更新时间"),
+            ("library.sort.lastRead", "最近阅读"),
+            ("library.sort.pages", "页数"),
+            ("library.sort.release", "发布日期"),
+            ("library.order.asc", "升序"),
+            ("library.order.desc", "降序"),
+            ("library.group.on", "合集聚合： 开"),
+            ("library.group.off", "合集聚合： 关"),
+            ("library.browse", "浏览"),
+            ("library.all", "全部档案"),
+            ("library.favorites", "仅收藏"),
+            ("library.unread", "仅未读"),
+            ("library.untagged", "无标签"),
+            ("library.categories", "分类"),
+            ("library.noCategories", "暂无分类"),
+            ("library.count", "共 {count} 项"),
+            ("library.loading", "加载中…"),
+            ("library.loadFailed", "加载失败，点击重试"),
+            ("library.more", "查看更多"),
+            ("library.reshuffle", "换一批"),
+            ("library.loadingTitle", "正在加载书库…"),
+            ("library.loadingDetail", "首次加载或网络较慢时需要稍作等待"),
+            ("library.empty", "没有匹配的档案"),
+            ("library.emptyDetail", "试试更换搜索词，或在左侧调整过滤条件"),
+            ("library.reload", "重新加载"),
+            ("library.previous", "上一页"),
+            ("library.next", "下一页"),
+            ("library.page", "第 {current} / {total} 页"),
+            ("library.resume", "继续阅读"),
+            ("library.random", "随机推荐"),
+            ("library.deleteTitle", "删除所选内容？"),
+            ("library.deleteDetail", "将删除当前选中的档案/合集，此操作不可撤销。"),
+            ("library.delete", "删除"),
+            ("detail.archiveBadge", "档案 · {type}"),
+            ("detail.collectionBadge", "合集"),
+            ("detail.readPercent", "已读 {percent}%"),
+            ("detail.download", "下载"),
+            ("detail.moreActions", "更多操作"),
+            ("detail.pagePreview", "页面预览"),
+            ("detail.pages", "{count} 页"),
+            ("detail.thumbnails", "缩略图"),
+            ("detail.list", "列表"),
+            ("detail.tree", "树"),
+            ("detail.grid", "网格"),
+            ("detail.parentCollections", "所属合集"),
+            ("detail.related", "相关推荐"),
+            ("detail.readProgress", "已读 {read} / {total} 页 · 上次读到 P.{read}"),
+            ("detail.notStarted", "{count} 页 · 尚未开始阅读"),
+            ("detail.basicInfo", "基础信息"),
+            ("detail.tags", "标签"),
+            ("detail.deleteArchiveTitle", "删除档案？"),
+            ("detail.deleteArchiveDetail", "「{title}」将被删除，此操作不可恢复。"),
+            ("detail.delete", "删除"),
+            ("detail.readFromStart", "从头开始阅读"),
+            ("detail.includedArchives", "收录档案"),
+            ("detail.noMatch", "无匹配档案"),
+            ("detail.collectionProgress", "{count} 个档案 · 已读完 {done} 个"),
+            ("detail.deleteCollectionTitle", "删除合集？"),
+            ("detail.deleteCollectionDetail", "合集「{title}」将被删除，成员档案保留在书库中。"),
+            ("detail.removeTitle", "从合集移除？"),
+            ("detail.removeDetail", "将 {count} 个档案移出合集（档案保留在书库中）。"),
+            ("detail.remove", "移除"),
+            ("detail.deleteSelectedTitle", "删除选中档案？"),
+            ("detail.deleteSelectedDetail", "将删除 {count} 个档案，此操作不可恢复。"),
+            ("detail.selected", "已选 {count} 项"),
+            ("detail.favorite", "收藏"),
+            ("detail.unfavorite", "取消收藏"),
+            ("detail.removeFromCollection", "从合集移除"),
+            ("detail.exit", "退出"),
+            ("detail.startReading", "开始阅读"),
+            ("detail.readAgain", "重新阅读"),
+            ("detail.continueReading", "继续阅读 · P.{page}"),
+            ("detail.releasedAt", "发布于 {date}"),
+            ("detail.updatedAt", "更新于 {date}"),
+            ("detail.collectionMeta", "{archives} 个档案 · 共 {pages} 页"),
+            ("detail.filename", "文件名"),
+            ("detail.size", "大小"),
+            ("detail.pageCount", "页数"),
+            ("detail.path", "路径"),
+            ("detail.source", "来源"),
+            ("detail.pluginSource", "{name} 插件"),
+            ("detail.releaseDate", "发布日期"),
+            ("detail.addedAt", "添加时间"),
+            ("detail.lastRead", "最近阅读"),
+            ("detail.status", "状态"),
+            ("detail.unread", "未读"),
+            ("detail.read", "已读"),
+            ("detail.fileType", "文件类型"),
+            ("detail.imageCount", "图像 {count}"),
+            ("detail.videoCount", "视频 {count}"),
+            ("detail.audioCount", "音频 {count}"),
+            ("detail.textCount", "文本 {count}"),
+            ("detail.name", "名称"),
+            ("detail.archiveCount", "档案数"),
+            ("detail.totalPages", "总页数"),
+            ("detail.cover", "封面"),
+            ("detail.custom", "自定义"),
+            ("detail.automatic", "自动"),
+            ("detail.createdAt", "创建时间"),
+            ("detail.updatedTime", "更新时间"),
+            ("detail.pageBreakdown", "{total}（{details}）"),
+            ("reader.modeLtr", "单页 · 左到右"),
+            ("reader.modeRtl", "单页 · 右到左"),
+            ("reader.modeTtb", "单页 · 纵向"),
+            ("reader.modeWebtoon", "条漫滚动"),
+            ("reader.ltr", "左到右"),
+            ("reader.rtl", "右到左"),
+            ("reader.vertical", "纵向"),
+            ("reader.webtoon", "条漫"),
+            ("reader.finishedShort", "完"),
+            ("reader.settings", "阅读设置"),
+            ("reader.readingMode", "阅读模式"),
+            ("reader.pageLayout", "页面布局"),
+            ("reader.doublePage", "双页模式"),
+            ("reader.splitCover", "拆分封面"),
+            ("reader.longPage", "长图滚动"),
+            ("reader.behavior", "行为"),
+            ("reader.tapTurn", "点击翻页"),
+            ("reader.doubleTapZoom", "双击缩放"),
+            ("reader.autoPlay", "自动播放（1–10s 间隔）"),
+            ("reader.seconds", "{count}秒"),
+            ("reader.autoHide", "工具栏自动隐藏"),
+            ("reader.seamlessNext", "无缝续读下一档案"),
+            ("reader.debug", "调试"),
+            ("reader.mediaInfo", "媒体信息浮层"),
+            ("reader.mixed", "{types} 混合"),
+            ("reader.thumbnails", "缩略图"),
+            ("reader.list", "列表"),
+            ("reader.fileTree", "文件树"),
+            ("reader.page", "第 {page} 页"),
+            ("reader.pageTotal", "{count} 页"),
+            ("reader.loadingPages", "加载页列表…"),
+            ("reader.loadFailedRetry", "加载失败，点击重试"),
+            ("reader.unsupported", "该页类型（{type}）不支持阅读，请翻页"),
+            ("reader.video", "视频"),
+            ("reader.loadFailed", "加载失败：{error}"),
+            ("reader.loadFailedShort", "加载失败"),
+            ("reader.downloading", "正在下载 {title}…"),
+            ("reader.clickPlay", "点击底部播放按钮"),
+            ("reader.preparingVideo", "准备视频…"),
+            ("reader.notLoaded", "未加载"),
+            ("reader.noLyrics", "暂无歌词"),
+            ("reader.finished", "已读完"),
+            ("reader.nextArchive", "下一档案：{title}"),
+            ("reader.loadingNext", "正在加载下一档案…"),
+            ("reader.resolvingNext", "正在解析下一档案…"),
+            ("reader.openNext", "打开下一档案"),
+            ("reader.viewDetails", "查看详情"),
+            ("reader.decoded", "已解码"),
+            ("reader.downloadInProgress", "下载中"),
+            ("reader.queued", "排队中"),
+            ("reader.typeVideo", "视"),
+            ("reader.typeAudio", "音"),
+            ("reader.typeText", "文"),
+            ("reader.typeImage", "图"),
+            ("dialog.notLoggedIn", "未登录"),
+            ("dialog.addToCollection", "加入合集"),
+            ("dialog.loadFailed", "加载失败：{error}"),
+            ("dialog.noCollectionsCreate", "暂无合集，可在下方新建。"),
+            ("dialog.archiveCount", "{count} 个档案"),
+            ("dialog.newCollection", "新建合集"),
+            ("dialog.createAndAdd", "新建并加入"),
+            ("dialog.addArchives", "添加档案到合集"),
+            ("dialog.search", "搜索"),
+            ("dialog.searchFailed", "搜索失败：{error}"),
+            ("dialog.noArchives", "无可用档案"),
+            ("dialog.searching", "搜索中…"),
+            ("dialog.addCount", "添加 {count} 个"),
+            ("dialog.addSelected", "将 {count} 个选中档案加入合集"),
+            ("dialog.searchCollections", "搜索合集…"),
+            ("dialog.loadingCollections", "加载合集列表…"),
+            ("dialog.collectionLoadFailed", "合集列表加载失败"),
+            ("dialog.retry", "重试"),
+            ("dialog.noMatchingCollections", "无匹配合集"),
+            ("dialog.newCollectionName", "新合集名称…")
+        ]
+    )
+}
+
+private func englishMessages(): HashMap<String, String> {
+    messageMap(
+        [
+            ("common.settings", "Settings"),
+            ("common.overview", "Overview"),
+            ("common.cancel", "Cancel"),
+            ("common.save", "Save"),
+            ("common.refresh", "Refresh"),
+            ("common.select", "Select"),
+            ("common.selected", "Selected"),
+            ("common.loading", "Loading…"),
+            ("settings.accountSecurity", "Account security"),
+            ("settings.client", "Client"),
+            ("settings.appearance", "Appearance"),
+            ("settings.language", "Language"),
+            ("settings.cache", "Cache"),
+            ("settings.diagnostics", "Diagnostics"),
+            ("settings.server", "Server"),
+            ("settings.categoryManagement", "Categories"),
+            ("settings.tagManagement", "Tags"),
+            ("settings.smartCategories", "Smart categories"),
+            ("settings.systemManagement", "System management"),
+            ("settings.userManagement", "Users"),
+            ("settings.systemSettings", "System settings"),
+            ("settings.taskHistory", "Task history"),
+            ("settings.scheduledTasks", "Scheduled tasks"),
+            ("settings.pluginManagement", "Plugins"),
+            ("settings.statistics", "Statistics"),
+            ("settings.other", "Other"),
+            ("settings.about", "About"),
+            ("language.title", "Language"),
+            ("language.description",
+                "Choose the display language used by the desktop client and translated server content."),
+            ("language.system", "Follow system"),
+            ("language.systemDetail", "Currently using: {language}"),
+            ("language.chinese", "简体中文"),
+            ("language.english", "English"),
+            ("language.changed", "Display language changed to {language}"),
+            ("language.name.zh", "Simplified Chinese"),
+            ("language.name.en", "English"),
+            ("overview.subtitle", "Account, server connection, and reading statistics"),
+            ("overview.account", "Account"),
+            ("overview.switchServer", "Switch server"),
+            ("overview.logout", "Sign out"),
+            ("overview.favorites", "Favorites"),
+            ("overview.readArchives", "Archives read"),
+            ("overview.pagesRead", "Pages read"),
+            ("overview.totalArchives", "Total archives"),
+            ("overview.readingTrend", "Reading trend"),
+            ("overview.recentRead", "Recently read"),
+            ("overview.recentFavorites", "Recent favorites"),
+            ("overview.noRead", "No reading history"),
+            ("overview.noFavorites", "No favorites yet"),
+            ("overview.status", "Status"),
+            ("overview.connected", "Connected"),
+            ("overview.name", "Name"),
+            ("overview.version", "Version"),
+            ("overview.address", "Address"),
+            ("cache.subtitle", "Local cover and page image cache, isolated by server"),
+            ("cache.images", "Image cache"),
+            ("cache.clear", "Clear image cache"),
+            ("cache.currentServerOnly", "Only clears the current server's cache"),
+            ("cache.cleared", "Cache cleared"),
+            ("about.subtitle", "Version information and project links"),
+            ("about.client", "Lanlu desktop client"),
+            ("about.project", "Project homepage"),
+            ("about.licenses", "Open-source licenses"),
+            ("about.checkUpdates", "Check for updates"),
+            ("about.latest", "You're on the latest version"),
+            ("appearance.fontRestart", "The font will be applied after restarting"),
+            ("cache.size", "Image cache {size} MB"),
+            ("login.server", "Servers"),
+            ("login.noServers", "No servers yet"),
+            ("login.noServersDetail",
+                "Add a Lanlu server to get started. You can save and switch between multiple servers."),
+            ("login.addServer", "Add server"),
+            ("login.confirmDelete", "Confirm delete"),
+            ("login.lastUsed", "Last used {time}"),
+            ("login.neverUsed", "Never used"),
+            ("login.noServerQuestion", "Don't have a server?"),
+            ("login.selfHost", "Learn how to self-host Lanlu"),
+            ("login.connecting", "Connecting…"),
+            ("login.addFirst", "Add a server from the left panel first"),
+            ("login.username", "Username"),
+            ("login.password", "Password"),
+            ("login.signIn", "Sign in"),
+            ("login.totpHint", "Two-step verification is enabled. Enter the code from your authenticator."),
+            ("login.code", "Verification code"),
+            ("login.recovery", "Recovery code (optional alternative)"),
+            ("login.verify", "Verify"),
+            ("login.backPassword", "Back to password sign-in"),
+            ("login.editServer", "Edit server"),
+            ("login.serverNameHint", "Name (optional; the address is used when empty)"),
+            ("login.serverAddress", "Server address"),
+            ("login.testConnection", "Test connection"),
+            ("login.testing", "Testing…"),
+            ("login.connected", "Connection successful"),
+            ("nav.search", "Search titles, tags, or artists…"),
+            ("nav.home", "Home"),
+            ("nav.shelf", "Shelf"),
+            ("nav.sources", "Online sources"),
+            ("library.sort.title", "Title"),
+            ("library.sort.created", "Created"),
+            ("library.sort.updated", "Updated"),
+            ("library.sort.lastRead", "Recently read"),
+            ("library.sort.pages", "Pages"),
+            ("library.sort.release", "Release date"),
+            ("library.order.asc", "Ascending"),
+            ("library.order.desc", "Descending"),
+            ("library.group.on", "Group series: On"),
+            ("library.group.off", "Group series: Off"),
+            ("library.browse", "Browse"),
+            ("library.all", "All archives"),
+            ("library.favorites", "Favorites only"),
+            ("library.unread", "Unread only"),
+            ("library.untagged", "Untagged"),
+            ("library.categories", "Categories"),
+            ("library.noCategories", "No categories"),
+            ("library.count", "{count} items"),
+            ("library.loading", "Loading…"),
+            ("library.loadFailed", "Couldn't load. Click to retry"),
+            ("library.more", "View more"),
+            ("library.reshuffle", "Shuffle"),
+            ("library.loadingTitle", "Loading library…"),
+            ("library.loadingDetail", "This may take a moment on the first load or a slower connection"),
+            ("library.empty", "No matching archives"),
+            ("library.emptyDetail", "Try another search or adjust the filters on the left"),
+            ("library.reload", "Reload"),
+            ("library.previous", "Previous"),
+            ("library.next", "Next"),
+            ("library.page", "Page {current} of {total}"),
+            ("library.resume", "Continue reading"),
+            ("library.random", "Recommended"),
+            ("library.deleteTitle", "Delete selected items?"),
+            ("library.deleteDetail", "The selected archives and series will be permanently deleted."),
+            ("library.delete", "Delete"),
+            ("detail.archiveBadge", "Archive · {type}"),
+            ("detail.collectionBadge", "Collection"),
+            ("detail.readPercent", "{percent}% read"),
+            ("detail.download", "Download"),
+            ("detail.moreActions", "More actions"),
+            ("detail.pagePreview", "Page preview"),
+            ("detail.pages", "{count} pages"),
+            ("detail.thumbnails", "Thumbnails"),
+            ("detail.list", "List"),
+            ("detail.tree", "Tree"),
+            ("detail.grid", "Grid"),
+            ("detail.parentCollections", "Collections"),
+            ("detail.related", "Related"),
+            ("detail.readProgress", "Read {read} of {total} pages · Last read P.{read}"),
+            ("detail.notStarted", "{count} pages · Not started"),
+            ("detail.basicInfo", "Basic information"),
+            ("detail.tags", "Tags"),
+            ("detail.deleteArchiveTitle", "Delete archive?"),
+            ("detail.deleteArchiveDetail", "“{title}” will be deleted. This cannot be undone."),
+            ("detail.delete", "Delete"),
+            ("detail.readFromStart", "Read from beginning"),
+            ("detail.includedArchives", "Included archives"),
+            ("detail.noMatch", "No matching archives"),
+            ("detail.collectionProgress", "{count} archives · {done} finished"),
+            ("detail.deleteCollectionTitle", "Delete collection?"),
+            ("detail.deleteCollectionDetail", "“{title}” will be deleted; its archives will remain in the library."),
+            ("detail.removeTitle", "Remove from collection?"),
+            ("detail.removeDetail", "Remove {count} archives from this collection? They will remain in the library."),
+            ("detail.remove", "Remove"),
+            ("detail.deleteSelectedTitle", "Delete selected archives?"),
+            ("detail.deleteSelectedDetail", "Delete {count} archives? This cannot be undone."),
+            ("detail.selected", "{count} selected"),
+            ("detail.favorite", "Favorite"),
+            ("detail.unfavorite", "Unfavorite"),
+            ("detail.removeFromCollection", "Remove from collection"),
+            ("detail.exit", "Exit"),
+            ("detail.startReading", "Start reading"),
+            ("detail.readAgain", "Read again"),
+            ("detail.continueReading", "Continue · P.{page}"),
+            ("detail.releasedAt", "Released {date}"),
+            ("detail.updatedAt", "Updated {date}"),
+            ("detail.collectionMeta", "{archives} archives · {pages} pages"),
+            ("detail.filename", "Filename"),
+            ("detail.size", "Size"),
+            ("detail.pageCount", "Pages"),
+            ("detail.path", "Path"),
+            ("detail.source", "Source"),
+            ("detail.pluginSource", "{name} plugin"),
+            ("detail.releaseDate", "Release date"),
+            ("detail.addedAt", "Added"),
+            ("detail.lastRead", "Last read"),
+            ("detail.status", "Status"),
+            ("detail.unread", "Unread"),
+            ("detail.read", "Read"),
+            ("detail.fileType", "File type"),
+            ("detail.imageCount", "Images {count}"),
+            ("detail.videoCount", "Videos {count}"),
+            ("detail.audioCount", "Audio {count}"),
+            ("detail.textCount", "Text {count}"),
+            ("detail.name", "Name"),
+            ("detail.archiveCount", "Archives"),
+            ("detail.totalPages", "Total pages"),
+            ("detail.cover", "Cover"),
+            ("detail.custom", "Custom"),
+            ("detail.automatic", "Automatic"),
+            ("detail.createdAt", "Created"),
+            ("detail.updatedTime", "Updated"),
+            ("detail.pageBreakdown", "{total} ({details})"),
+            ("reader.modeLtr", "Single page · Left to right"),
+            ("reader.modeRtl", "Single page · Right to left"),
+            ("reader.modeTtb", "Single page · Vertical"),
+            ("reader.modeWebtoon", "Webtoon scroll"),
+            ("reader.ltr", "Left to right"),
+            ("reader.rtl", "Right to left"),
+            ("reader.vertical", "Vertical"),
+            ("reader.webtoon", "Webtoon"),
+            ("reader.finishedShort", "End"),
+            ("reader.settings", "Reader settings"),
+            ("reader.readingMode", "Reading mode"),
+            ("reader.pageLayout", "Page layout"),
+            ("reader.doublePage", "Two-page spread"),
+            ("reader.splitCover", "Split cover"),
+            ("reader.longPage", "Scroll long images"),
+            ("reader.behavior", "Behavior"),
+            ("reader.tapTurn", "Tap to turn page"),
+            ("reader.doubleTapZoom", "Double-tap to zoom"),
+            ("reader.autoPlay", "Auto-play (1–10s interval)"),
+            ("reader.seconds", "{count}s"),
+            ("reader.autoHide", "Auto-hide toolbars"),
+            ("reader.seamlessNext", "Continue to next archive"),
+            ("reader.debug", "Debug"),
+            ("reader.mediaInfo", "Media information overlay"),
+            ("reader.mixed", "Mixed {types}"),
+            ("reader.thumbnails", "Thumbnails"),
+            ("reader.list", "List"),
+            ("reader.fileTree", "File tree"),
+            ("reader.page", "Page {page}"),
+            ("reader.pageTotal", "{count} pages"),
+            ("reader.loadingPages", "Loading page list…"),
+            ("reader.loadFailedRetry", "Load failed; click to retry"),
+            ("reader.unsupported", "Page type “{type}” is not supported; turn the page to continue"),
+            ("reader.video", "Video"),
+            ("reader.loadFailed", "Load failed: {error}"),
+            ("reader.loadFailedShort", "Load failed"),
+            ("reader.downloading", "Downloading {title}…"),
+            ("reader.clickPlay", "Click the play button below"),
+            ("reader.preparingVideo", "Preparing video…"),
+            ("reader.notLoaded", "Not loaded"),
+            ("reader.noLyrics", "No lyrics"),
+            ("reader.finished", "Finished"),
+            ("reader.nextArchive", "Next archive: {title}"),
+            ("reader.loadingNext", "Loading the next archive…"),
+            ("reader.resolvingNext", "Finding the next archive…"),
+            ("reader.openNext", "Open next archive"),
+            ("reader.viewDetails", "View details"),
+            ("reader.decoded", "Decoded"),
+            ("reader.downloadInProgress", "Downloading"),
+            ("reader.queued", "Queued"),
+            ("reader.typeVideo", "V"),
+            ("reader.typeAudio", "A"),
+            ("reader.typeText", "T"),
+            ("reader.typeImage", "I"),
+            ("dialog.notLoggedIn", "Not signed in"),
+            ("dialog.addToCollection", "Add to collection"),
+            ("dialog.loadFailed", "Load failed: {error}"),
+            ("dialog.noCollectionsCreate", "No collections yet. Create one below."),
+            ("dialog.archiveCount", "{count} archives"),
+            ("dialog.newCollection", "New collection"),
+            ("dialog.createAndAdd", "Create and add"),
+            ("dialog.addArchives", "Add archives to collection"),
+            ("dialog.search", "Search"),
+            ("dialog.searchFailed", "Search failed: {error}"),
+            ("dialog.noArchives", "No archives available"),
+            ("dialog.searching", "Searching…"),
+            ("dialog.addCount", "Add {count}"),
+            ("dialog.addSelected", "Add {count} selected archives to a collection"),
+            ("dialog.searchCollections", "Search collections…"),
+            ("dialog.loadingCollections", "Loading collections…"),
+            ("dialog.collectionLoadFailed", "Failed to load collections"),
+            ("dialog.retry", "Retry"),
+            ("dialog.noMatchingCollections", "No matching collections"),
+            ("dialog.newCollectionName", "New collection name…")
+        ]
+    )
+}

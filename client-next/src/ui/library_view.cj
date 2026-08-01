@@ -5,11 +5,19 @@ import lanlu_client_next.app.*
 import std.collection.ArrayList
 
 // 与 app 包 SEARCH_SORT_FIELDS 按下标一一对应（改动须两边同步）。
-private let SORT_LABELS = ["标题", "创建时间", "更新时间", "最近阅读", "页数", "发布日期"]
-private let ORDER_LABELS = ["升序", "降序"]
+private func sortLabels(model: AppModel): Array<String> {
+    [model.t("library.sort.title"), model.t("library.sort.created"), model.t("library.sort.updated"),
+        model.t("library.sort.lastRead"), model.t("library.sort.pages"), model.t("library.sort.release")]
+}
+
+private func orderLabels(model: AppModel): Array<String> {
+    [model.t("library.order.asc"), model.t("library.order.desc")]
+}
 // 合集聚合开关（原型 home-tools 第二个下拉；消费为查询参数 groupby_tanks，
 // 变更即按新规格重取，见 model.applyTankGroupChange）。
-private let TANK_GROUP_LABELS = ["合集聚合： 开", "合集聚合： 关"]
+private func tankGroupLabels(model: AppModel): Array<String> {
+    [model.t("library.group.on"), model.t("library.group.off")]
+}
 
 // 浏览模式行规格（原型 §首页 .card{width:168px}：封面宽 168vp、3:4；卡片间距 14vp）；行高 = 封面 + 标题/meta 文本区。
 private let BROWSE_COVER_W: Float32 = 168.0
@@ -66,7 +74,8 @@ public func libraryView(model: AppModel): Unit {
         }
     }.spacing(0.0)
     // 批量删除二次确认（Modal 不占布局，挂根级即可）。
-    confirmModal(model, deleteOpen, "删除所选内容？", "将删除当前选中的档案/合集，此操作不可撤销。", "删除", {
+    confirmModal(model, deleteOpen, model.t("library.deleteTitle"), model.t("library.deleteDetail"),
+        model.t("library.delete"), {
         =>
             let (arcids, tankIds) = splitSelection(model)
             model.batchDelete(arcids, tankIds)
@@ -85,16 +94,16 @@ private func sidebar(model: AppModel): Unit {
         // 计数接口（recordsTotal 是当前查询结果总数，不是档案库总量，语义不符），
         // 按「不留假数据」原则四项都不带计数；分类计数来自 CategoryItem.archiveCount。
         VStack {
-            navGroupHeader("浏览")
-            NavItem("全部档案", active: allFilterInactive(model)) {=> model.selectBrowseFilter(0) }
-            NavItem("仅收藏", active: model.favOnly.value) {=> model.selectBrowseFilter(1) }
-            NavItem("仅未读", active: model.newOnly.value) {=> model.selectBrowseFilter(2) }
-            NavItem("无标签", active: model.untaggedOnly.value) {=> model.selectBrowseFilter(3) }
+            navGroupHeader(model.t("library.browse"))
+            NavItem(model.t("library.all"), active: allFilterInactive(model)) {=> model.selectBrowseFilter(0) }
+            NavItem(model.t("library.favorites"), active: model.favOnly.value) {=> model.selectBrowseFilter(1) }
+            NavItem(model.t("library.unread"), active: model.newOnly.value) {=> model.selectBrowseFilter(2) }
+            NavItem(model.t("library.untagged"), active: model.untaggedOnly.value) {=> model.selectBrowseFilter(3) }
         }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(10.vp, 8.vp)
         // 「分类」分组：占满侧栏剩余高度，列表内部滚动；计数来自 CategoryItem.archiveCount。
         // 组间不画分割线：原型侧栏只靠 .side-sec 小标题分组，无分隔线。
         VStack {
-            navGroupHeader("分类")
+            navGroupHeader(model.t("library.categories"))
             ScrollView(key: "sidebar-categories") {
                 VStack {
                     ForEachIndexed(model.categories.value) { i, c =>
@@ -102,7 +111,7 @@ private func sidebar(model: AppModel): Unit {
                             count: "${c.archiveCount}") {=> model.selectCategory(i + 1) }
                     }
                     if (model.categories.value.size == 0) {
-                        Label("暂无分类").fontSize(12.fp).muted().padding(12.vp, 0.vp)
+                        Label(model.t("library.noCategories")).fontSize(12.fp).muted().padding(12.vp, 0.vp)
                     }
                 }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
             }
@@ -132,14 +141,14 @@ private func toolbar(model: AppModel): Unit {
         // 排序/方向变更即时生效：project 绑定的 set 里写回索引并收束查询；
         // 选中未变（重复点同一项）时不发请求。下拉限宽（默认 190 太占工具条），
         // 标签最长 4 字（更新时间）在 150/110vp 下完整可见。
-        Dropdown(SORT_LABELS, model.sortIndex.project(get: {v => v}, set: {_, v =>
+        Dropdown(sortLabels(model), model.sortIndex.project(get: {v => v}, set: {_, v =>
             if (model.sortIndex.value != v) {
                 model.sortIndex.value = v
                 model.applyFilters()
             }
             return v
         })).width(150.vp)
-        Dropdown(ORDER_LABELS, model.orderIndex.project(get: {v => v}, set: {_, v =>
+        Dropdown(orderLabels(model), model.orderIndex.project(get: {v => v}, set: {_, v =>
             if (model.orderIndex.value != v) {
                 model.orderIndex.value = v
                 model.applyFilters()
@@ -147,7 +156,7 @@ private func toolbar(model: AppModel): Unit {
             return v
         })).width(110.vp)
         // 合集聚合开关：接入查询（groupby_tanks）；变更即按新规格重取（见 model）。
-        Dropdown(TANK_GROUP_LABELS, model.tankGroupIndex.project(get: {v => v}, set: {_, v =>
+        Dropdown(tankGroupLabels(model), model.tankGroupIndex.project(get: {v => v}, set: {_, v =>
             if (model.tankGroupIndex.value != v) {
                 model.tankGroupIndex.value = v
                 model.applyTankGroupChange()
@@ -157,7 +166,7 @@ private func toolbar(model: AppModel): Unit {
         Spacer()
         // 原型 .result-cnt：右对齐 muted 12fp；浏览模式无查询总数，只在搜索/过滤模式展示。
         if (!model.isBrowseMode() && !narrow) {
-            Label("共 ${model.recordsTotal.value} 项").fontSize(12.fp).muted()
+            Label(model.t("library.count", params: [("count", "${model.recordsTotal.value}")])).fontSize(12.fp).muted()
         }
         // 多选入口对齐 frontend：无显式开关，由卡片 hover 浮层的勾选按钮进入
         // （CardHoverActions → model.enterSelection），退出由批量栏承担。
@@ -187,10 +196,10 @@ private func browseRowSection(model: AppModel, row: BrowseRow): Unit {
     VStack {
         sectionHeader(row.title) {=> rowTrailing(model, row) }
         if (row.loading) {
-            rowStripPlaceholder("加载中…")
+            rowStripPlaceholder(model.t("library.loading"))
         } else if (row.failed) {
             ClickArea(onClick: {=> model.retryRow(row.key) }) {
-                rowStripPlaceholder("加载失败，点击重试")
+                rowStripPlaceholder(model.t("library.loadFailed"))
             }
         } else {
             cardRow(model, row.key, row.items, BROWSE_COVER_W, BROWSE_STRIP_H)
@@ -203,9 +212,9 @@ private func rowTrailing(model: AppModel, row: BrowseRow): Unit {
     if (row.key == "random") {
         reshuffleLink(model) {=> model.refreshRandomRow() }
     } else if (row.key == "resume") {
-        moreLink(model, "查看更多") {=> model.viewAllRow(row.key) }
+        moreLink(model, model.t("library.more")) {=> model.viewAllRow(row.key) }
     } else {
-        moreLink(model, "查看更多") {=> model.openCategory(row.catid) }
+        moreLink(model, model.t("library.more")) {=> model.openCategory(row.catid) }
     }
 }
 
@@ -216,7 +225,7 @@ private func reshuffleLink(model: AppModel, onClick: () -> Unit): Unit {
     ClickArea(onClick: onClick) {
         HStack {
             Icon(IconName.Refresh, size: 13.vp, color: muted)
-            Label("换一批").fontSize(12.fp).foregroundColor(muted)
+            Label(model.t("library.reshuffle")).fontSize(12.fp).foregroundColor(muted)
         }.spacing(5.vp).crossAxisAlignment(CrossAxisAlignment.Center)
     }
 }
@@ -247,7 +256,7 @@ private func searchContent(model: AppModel): Unit {
     // SizeProbe 已上移到根布局包住整个内容区（工具条也要读宽度），这里直接用。
     VStack {
         if (model.loading.value && model.items.value.size == 0) {
-            loadingState()
+            loadingState(model)
         } else if (model.items.value.size == 0) {
             emptyState(model)
         } else {
@@ -290,10 +299,10 @@ private func gridCellWidth(w: Float32, cols: Int64): Float32 {
 }
 
 // 加载态：在内容区居中放大留白呈现。
-private func loadingState(): Unit {
+private func loadingState(model: AppModel): Unit {
     VStack {
-        Label("正在加载书库…").fontSize(16.fp)
-        Label("首次加载或网络较慢时需要稍作等待").fontSize(12.fp).muted()
+        Label(model.t("library.loadingTitle")).fontSize(16.fp)
+        Label(model.t("library.loadingDetail")).fontSize(12.fp).muted()
     }.spacing(10.vp).mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
 }
 
@@ -302,9 +311,9 @@ private func emptyState(model: AppModel): Unit {
     let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
     VStack {
         Icon(IconName.OpenFolder, size: 40.vp, color: muted)
-        Label("没有匹配的档案").fontSize(16.fp)
-        Label("试试更换搜索词，或在左侧调整过滤条件").fontSize(12.fp).muted()
-        IconButton(IconName.Refresh, label: Some("重新加载"), role: ButtonRole.Primary) {=>
+        Label(model.t("library.empty")).fontSize(16.fp)
+        Label(model.t("library.emptyDetail")).fontSize(12.fp).muted()
+        IconButton(IconName.Refresh, label: Some(model.t("library.reload")), role: ButtonRole.Primary) {=>
             model.submitSearch(1)
         }
     }.spacing(12.vp).mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
@@ -314,11 +323,12 @@ private func emptyState(model: AppModel): Unit {
 
 private func pager(model: AppModel): Unit {
     HStack {
-        IconButton(IconName.ChevronLeft, label: Some("上一页"), style: Some(ghostStyleOf(model))) {=>
+        IconButton(IconName.ChevronLeft, label: Some(model.t("library.previous")), style: Some(ghostStyleOf(model))) {=>
             if (model.currentPage.value > 1) { model.submitSearch(model.currentPage.value - 1) }
         }.enabled(model.currentPage.value > 1)
-        Label("第 ${model.currentPage.value} / ${model.maxPage()} 页").fontSize(12.fp).muted()
-        IconButton(IconName.ChevronRight, label: Some("下一页"), style: Some(ghostStyleOf(model))) {=>
+        Label(model.t("library.page", params: [("current", "${model.currentPage.value}"),
+            ("total", "${model.maxPage()}")])).fontSize(12.fp).muted()
+        IconButton(IconName.ChevronRight, label: Some(model.t("library.next")), style: Some(ghostStyleOf(model))) {=>
             if (model.currentPage.value < model.maxPage()) { model.submitSearch(model.currentPage.value + 1) }
         }.enabled(model.currentPage.value < model.maxPage())
     }.spacing(12.vp).mainAxisAlignment(MainAxisAlignment.Center).hug().padding(10.vp)

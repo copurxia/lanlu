@@ -8,19 +8,25 @@ public class ApiResult {
     public let name: String
     public let payload: ?Any
     public let error: String
-    public init(name: String, payload: ?Any, error: String) {
+    public let tag: String
+    public init(name: String, payload: ?Any, error: String, tag!: String = "") {
         this.name = name
         this.payload = payload
         this.error = error
+        this.tag = tag
     }
 }
 
 // 线程池任务项（阻塞队列元素）。
 private class WorkItem {
     let name: String
+    let inflightKey: String
+    let tag: String
     let job: () -> Any
-    init(name: String, job: () -> Any) {
+    init(name: String, inflightKey: String, tag: String, job: () -> Any) {
         this.name = name
+        this.inflightKey = inflightKey
+        this.tag = tag
         this.job = job
     }
 }
@@ -64,13 +70,13 @@ public class ApiWorker {
         while (true) {
             let item = queue.remove()
             let r = try {
-                ApiResult(item.name, Some(item.job()), "")
+                ApiResult(item.name, Some(item.job()), "", tag: item.tag)
             } catch (e: Exception) {
-                ApiResult(item.name, None, e.message)
+                ApiResult(item.name, None, e.message, tag: item.tag)
             }
             synchronized(mutex) {
                 results.add(r)
-                inflight.remove(item.name)
+                inflight.remove(item.inflightKey)
             }
             onResult()
         }
@@ -78,11 +84,20 @@ public class ApiWorker {
 
     // 通用/API 任务：2 线程池。同名在途去重（返回 false 表示被拒）。
     public func submit(name: String, job: () -> Any): Bool {
+        submitInternal(name, name, "", job)
+    }
+
+    /** Submits a logical task with a tag-specific in-flight identity. */
+    public func submitTagged(name: String, tag: String, job: () -> Any): Bool {
+        submitInternal(name, "${name}@${tag}", tag, job)
+    }
+
+    private func submitInternal(name: String, inflightKey: String, tag: String, job: () -> Any): Bool {
         synchronized(mutex) {
-            if (inflight.contains(name)) { return false }
-            inflight[name] = true
+            if (inflight.contains(inflightKey)) { return false }
+            inflight[inflightKey] = true
         }
-        apiQueue.add(WorkItem(name, job))
+        apiQueue.add(WorkItem(name, inflightKey, tag, job))
         return true
     }
 
@@ -92,7 +107,7 @@ public class ApiWorker {
             if (inflight.contains(name)) { return false }
             inflight[name] = true
         }
-        imageQueue.add(WorkItem(name, job))
+        imageQueue.add(WorkItem(name, name, "", job))
         return true
     }
 

@@ -69,3 +69,10 @@ func groupbyTanksParamIsOptIn(): Unit {
     q.groupbyTanks = true
     @Expect(buildSearchQuery(q).contains("groupby_tanks=true"))
 }
+
+@Test
+func languageParamIsEncodedWhenPresent(): Unit {
+    let q = SearchQuery()
+    q.lang = "zh-CN"
+    @Expect(buildSearchQuery(q).contains("lang=zh-CN"))
+}

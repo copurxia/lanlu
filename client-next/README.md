@@ -15,7 +15,8 @@ lanlu-client-next 是 lanlu 服务器的原生桌面客户端，使用仓颉语�
 - **档案详情** - 元数据展示、收藏/已读切换
 - **内置阅读器** - 翻页导航、阅读进度回传、前后页预取
 - **图片管线** - 磁盘缓存（按服务器分目录、2GB LRU 清理）、4 线程并发上限、纹理缓存
-- **设置页** - 左分类导航（个人区/客户端/服务器/其他）；概览含账号卡、服务器信息与阅读统计 dashboard；账户安全（凭据/TOTP 状态/Passkey/登录设备/API Token）；外观明暗主题即切即生效；缓存查看与清理；管理板块（分类/标签/智能分类/用户/系统设置/任务记录/定时任务/插件/统计信息），非管理员自动隐藏；语言/诊断为占位板块
+- **多语言** - 支持跟随系统、简体中文和 English，切换后即时生效；搜索、标签建议和元数据请求同步携带语言参数
+- **设置页** - 左分类导航（个人区/客户端/服务器/其他）；概览含账号卡、服务器信息与阅读统计 dashboard；账户安全（凭据/TOTP 状态/Passkey/登录设备/API Token）；外观明暗主题即切即生效；缓存查看与清理；管理板块（分类/标签/智能分类/用户/系统设置/任务记录/定时任务/插件/统计信息），非管理员自动隐藏；诊断为占位板块
 
 ## 环境要求
 
@@ -81,15 +82,21 @@ cd client-next
 LD_LIBRARY_PATH=../ref/kv4cj/lib:$LD_LIBRARY_PATH cjpm test
 ```
 
+## 多语言开发
+
+语言偏好保存在 MMKV 的 `appearance.language`，可取 `system`、`zh` 或 `en`。界面词条集中在
+`src/i18n/localizer.cj`；新增词条时必须同时补齐中英文目录，`localizer_test.cj` 会校验目录键集合一致。
+界面通过 `AppModel.t` 取词条并使用命名参数插值，避免按语序拼接句子。
+
 ## GitHub CI
 
 GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client-next` 或其仓库内依赖变更时运行，
-也支持手动触发。CI 固定使用仓颉 STS 1.1.3，依次执行生产构建、全量测试和
-`SDL_VIDEODRIVER=dummy` 无头快照冒烟测试。
+也支持手动触发。CI 固定使用仓颉 STS 1.1.3：Linux 执行生产构建、全量测试和
+`SDL_VIDEODRIVER=dummy` 无头快照冒烟测试；Windows 执行生产构建并检查 `main.exe`，暂不运行测试。
 
 运行前需在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置
-`STDX_URL`，值为 Linux x86_64 cjnative static stdx 压缩包的下载地址。CI 会在 runner 中按固定提交构建
-kv4cj V1.0.3 与 MMKV 1.2.15，不依赖开发机 `ref/kv4cj` 目录中的预编译文件。
+`STDX_URL` 和 `STDX_WINDOWS_URL`，分别指向 Linux 与 Windows x86_64 cjnative static stdx 压缩包。
+CI 会在 runner 中按固定提交构建 kv4cj 与 MMKV 1.2.15，不依赖开发机 `ref/kv4cj` 目录中的预编译文件。
 
 `cjlint` 报告和 `cjfmt` 差异会作为 artifact 保留 14 天。当前格式检查为建议项；完成现有代码格式化
 基线清理后，可移除工作流中该步骤的 `continue-on-error`，将其升级为合并门槛。

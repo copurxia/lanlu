@@ -415,6 +415,7 @@ func parseSettingsDtos(): Unit {
         "{\"success\":true,\"data\":[{\"key\":\"SERVER_NAME\",\"value\":\"兰鹿\",\"valueType\":\"string\",\"category\":\"server\",\"description\":{\"zh\":\"服务器名称\",\"en\":\"Server name\"}},{\"key\":\"MAX_CONCURRENT_JOBS\",\"value\":\"8\",\"value_type\":\"integer\",\"category\":\"performance\"}]}")
     @Expect(settings.size, 2)
     @Expect(settings[0].descriptionZh, "服务器名称")
+    @Expect(settings[0].descriptionEn, "Server name")
     @Expect(settings[1].valueType, "integer")
 
     // 创建用户返回的生成密码

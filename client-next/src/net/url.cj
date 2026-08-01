@@ -27,6 +27,7 @@ private func hexUpper(n: UInt8): Rune {
 
 public class SearchQuery {
     public var filter: String = ""
+    public var lang: String = ""
     public var categoryId: String = ""
     // 合集成员过滤（tankoubon_id）：服务端 search_controller 支持，配合 sortby=tank_order 按合集内序。
     public var tankoubonId: String = ""
@@ -45,6 +46,7 @@ public class SearchQuery {
 public func buildSearchQuery(q: SearchQuery): String {
     let parts = ArrayList<String>()
     if (q.filter.size > 0) { parts.add("filter=${percentEncode(q.filter)}") }
+    if (q.lang.size > 0) { parts.add("lang=${percentEncode(q.lang)}") }
     if (q.categoryId.size > 0) { parts.add("category_id=${percentEncode(q.categoryId)}") }
     if (q.tankoubonId.size > 0) { parts.add("tankoubon_id=${percentEncode(q.tankoubonId)}") }
     parts.add("page=${q.page}")

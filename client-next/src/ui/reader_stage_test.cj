@@ -22,3 +22,38 @@ func longPageMaxOffsetCases(): Unit {
     @Expect(longPageMaxOffset(600.0, 700.0), 0.0)
     @Expect(longPageMaxOffset(700.0, 700.0), 0.0)
 }
+
+@Test
+func webtoonGeometryMatchesContinuousColumn(): Unit {
+    @Expect(webtoonContentWidth(1200.0), 800.0)
+    @Expect(webtoonContentWidth(400.0), 368.0)
+    @Expect(webtoonEstimatedHeight(800.0, 1000.0), 700.0)
+    @Expect(webtoonImageHeight(400.0, 800.0, 800.0, 700.0), 1600.0)
+    @Expect(webtoonImageHeight(0.0, 800.0, 800.0, 700.0), 700.0)
+}
+
+@Test
+func webtoonIndexUsesThirtyPercentThresholdOffset(): Unit {
+    let heights: Array<Float32> = [300.0, 500.0, 200.0]
+    @Expect(webtoonContentHeight(heights), 1000.0)
+    @Expect(webtoonOffsetBefore(heights, 0), 0.0)
+    @Expect(webtoonOffsetBefore(heights, 2), 800.0)
+    @Expect(webtoonIndexAtOffset(heights, 0.0), 0)
+    @Expect(webtoonIndexAtOffset(heights, 299.0), 0)
+    @Expect(webtoonIndexAtOffset(heights, 300.0), 1)
+    @Expect(webtoonIndexAtOffset(heights, 999.0), 2)
+    @Expect(webtoonIndexAtOffset(heights, 1200.0), 2)
+}
+
+@Test
+func webtoonLazyRangeDoesNotLoadWholeArchive(): Unit {
+    let heights = Array<Float32>(100, {_ => 100.0})
+    let (firstAtTop, lastAtTop) = webtoonLazyRange(heights, 0.0, 500.0)
+    @Expect(firstAtTop, 0)
+    @Expect(lastAtTop, 24)
+
+    let (firstAtMiddle, lastAtMiddle) = webtoonLazyRange(heights, 4000.0, 500.0)
+    @Expect(firstAtMiddle, 21)
+    @Expect(lastAtMiddle, 64)
+    @Expect(lastAtMiddle - firstAtMiddle + 1 < heights.size, true)
+}
