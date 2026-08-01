@@ -1,6 +1,6 @@
 version = 0
 
 [requires]
-  ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "6f6e351517a214b8eb03289af17301154f623675", branch = "lanlu-streaming"}
+  ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "99eb8979d8cab76a11d9a42d2405c6b310f18cb9", branch = "lanlu-streaming"}
   jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "4d7875db5cd2ee1030aa973bf62a10bf8de5d05b", branch = "jg062"}
   lisi = {git = "https://gitcode.com/copur/lisi.git", commitId = "421bf86379ab5b80511d53a703dcf89cb4138eb5"}
