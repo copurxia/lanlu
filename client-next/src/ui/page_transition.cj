@@ -27,16 +27,6 @@ public class PageTransition <: Widget {
     public init(model: AppModel) {
         this.model = model
         st = rememberState<PageTransitionState>("page:transition", {=> PageTransitionState()}).value
-
-        // navigate() 已推迟实际切页；在此检测待处理请求并进入过渡态。
-        if (model.pageTransitionPending) {
-            st.active = true
-            closeSnapshot(st.oldSnapshot)
-            st.oldSnapshot = None
-            st.fadeTween.reset(0.0)
-            model.pageTransitionPending = false
-        }
-
         emit(this)
     }
 
@@ -44,11 +34,25 @@ public class PageTransition <: Widget {
         Size(available.w, available.h)
     }
 
-    public func layout(_: UiContext, rect: Rect): Unit {
+    public func layout(_: UiContext, _: Rect): Unit {
         // 全屏占位，实际绘制坐标从 ctx.viewportWidth/Height 读取。
     }
 
     public func draw(ctx: UiContext): Unit {
+        // pending 检测必须在 draw 阶段而非 init：主循环先重建后分发事件
+        // （buildRoot 在 dispatchCollectedEvents 之前，见 desktop_app.cj run），
+        // init 看不到事件阶段（点击 handler）置位的标志；draw 阶段检测才能
+        // 当帧捕获旧页并提交切页，把切页提前到点击当帧。否则切页被拖到
+        // 下一帧 draw，而 meta/tankmeta/dfiles/related/files 等结果最早在
+        // 下一帧 onTick 就被 drain——此时 page 尚未切换，结果被 page 匹配
+        // 静默丢弃，详情页/阅读器永久停在加载中（快速网络下必现）。
+        if (model.pageTransitionPending) {
+            st.active = true
+            closeSnapshot(st.oldSnapshot)
+            st.oldSnapshot = None
+            st.fadeTween.reset(0.0)
+            model.pageTransitionPending = false
+        }
         if (!st.active) {
             return
         }
@@ -87,7 +91,7 @@ public class PageTransition <: Widget {
         }
     }
 
-    public func handle(ctx: UiContext, event: UiEvent): Bool {
+    public func handle(_: UiContext, _: UiEvent): Bool {
         // 纯视觉遮罩，不消费事件；点击/滚轮穿透到下层的新页面。
         false
     }
