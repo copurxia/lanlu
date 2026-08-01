@@ -1207,10 +1207,15 @@ public class AppModel {
         }
     }
 
-    // 即时应用收束：浏览模式下网格不可见、无需查询（行数据各自加载，且再次进入搜索
-    // 模式时 submitSearch 会同步全部状态）；搜索/过滤模式立即回第 1 页查询。
+    // 即时应用收束：浏览模式下排序/方向对分类行同样生效——复位所有行并按新规格重取
+    // （resume 行仍按最近阅读倒序、random 行仍随机，见 submitRowTask）；搜索/过滤模式
+    // 立即回第 1 页查询。
     public func applyFilters(): Unit {
         if (isBrowseMode()) {
+            for (r in browseRows.value) {
+                r.requested = false
+            }
+            loadBrowseRows()
             return
         }
         submitSearch(1)
@@ -1761,8 +1766,8 @@ public class AppModel {
         if (r.key == "random") {
             let _ = worker.submitTagged("row:random", lang, {=> a.randomSearch(BROWSE_ROW_SIZE, lang: lang)})
         } else {
-            // 继续阅读 = 最近阅读倒序；分类行 = 该分类默认序。两者都随「合集聚合」开关
-            // 带 groupby_tanks（随机行走 randomSearch 独立接口，不参与聚合）。
+            // 继续阅读 = 最近阅读倒序（固定）；分类行跟随工具条排序/方向。两者都随
+            // 「合集聚合」开关带 groupby_tanks（随机行走 randomSearch 独立接口，不参与聚合）。
             let q = SearchQuery()
             q.pageSize = BROWSE_ROW_SIZE
             q.groupbyTanks = tankGroupOn()
@@ -1772,6 +1777,12 @@ public class AppModel {
                 q.order = "desc"
             } else {
                 q.categoryId = r.catid
+                q.sortby = SEARCH_SORT_FIELDS[sortIndex.value]
+                q.order = if (orderIndex.value == 0) {
+                    "asc"
+                } else {
+                    "desc"
+                }
             }
             let _ = worker.submitTagged("row:${r.key}", lang, {=> a.search(q)})
         }
