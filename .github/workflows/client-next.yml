@@ -32,7 +32,7 @@ defaults:
 
 env:
   # copur/CangjieGUI 的 lanlu-client-next 分支 HEAD
-  CANGJIE_GUI_COMMIT: 80444c327adb3a578a685bd3e99d3e4f48ad2772
+  CANGJIE_GUI_COMMIT: 2f0a621ebc1dfef3471b6507f67f595361b81030
 
 jobs:
   quality:
