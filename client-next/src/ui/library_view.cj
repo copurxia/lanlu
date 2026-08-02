@@ -45,8 +45,13 @@ public func libraryView(model: AppModel): Unit {
         sidebar(model)
         Divider(axis: Axis.Vertical)
         // SizeProbe 包住整个内容区：搜索网格（自适应列数）与工具条（窄宽适配）都读它。
-        SizeProbe(width: model.contentWidth) {
-            ZStack {
+        // Flexible 包裹：SizeProbe 透传 ZStack 的 isFlexible=false，若不包 Flexible，
+        // 根 HStack 会按 measure 宽度（被 available 卡住=窗口宽）给它分配，导致内容区
+        // 叠上侧栏宽度、工具条右缘超出窗口（刷新钮被推出可视区）。Flexible 让它按
+        // 「窗口 - 侧栏 - Divider」的剩余宽度分配。
+        Flexible {
+            SizeProbe(width: model.contentWidth) {
+                ZStack {
                 VStack {
                     toolbar(model)
                     // 工具条下不画分割线：原型 .home-tools 无底边线，主区唯一的横向分界是顶栏底线。
@@ -71,6 +76,7 @@ public func libraryView(model: AppModel): Unit {
                     }.fillWidth().padding(0.vp, 0.vp, 0.vp, 14.vp)
                 }
             }.alignment(Alignment.TopLeading)
+            }
         }
     }.spacing(0.0)
     // 批量删除二次确认（Modal 不占布局，挂根级即可）。
