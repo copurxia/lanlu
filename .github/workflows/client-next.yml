@@ -31,8 +31,8 @@ defaults:
     shell: bash
 
 env:
-  # copur/CangjieGUI 的 lanlu-client-next 分支 HEAD
-  CANGJIE_GUI_COMMIT: 2f0a621ebc1dfef3471b6507f67f595361b81030
+  KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
+  MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
 
 jobs:
   quality:
@@ -111,16 +111,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Fetch pinned CangjieGUI source
+      - name: Fetch CangjieGUI source
         run: |
           set -euo pipefail
           git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
-          git -C packages/cangjie-gui checkout --detach "${CANGJIE_GUI_COMMIT}"
-          actual_commit="$(git -C packages/cangjie-gui rev-parse HEAD)"
-          if [ "${actual_commit}" != "${CANGJIE_GUI_COMMIT}" ]; then
-            echo "::error::Unexpected CangjieGUI commit ${actual_commit}."
-            exit 1
-          fi
 
       - name: Verify in-repository dependencies
         run: |
@@ -177,7 +171,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ env.CANGJIE_GUI_COMMIT }}-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
       - name: Fetch pinned kv4cj source
         run: |
@@ -299,15 +293,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Fetch pinned CangjieGUI source
+      - name: Fetch CangjieGUI source
         run: |
           $ErrorActionPreference = "Stop"
           git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
-          git -C packages/cangjie-gui checkout --detach $env:CANGJIE_GUI_COMMIT
-          $actualCommit = (git -C packages/cangjie-gui rev-parse HEAD).Trim()
-          if ($actualCommit -ne $env:CANGJIE_GUI_COMMIT) {
-            throw "Unexpected CangjieGUI commit $actualCommit"
-          }
 
       - name: Verify in-repository dependencies
         run: |
@@ -362,7 +351,7 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ env.CANGJIE_GUI_COMMIT }}-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
       - name: Fetch pinned kv4cj source
         run: |
