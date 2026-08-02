@@ -11,7 +11,7 @@ vips_ffi = { path = "../packages/vips_ffi" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
 kv4cj = { path = "../ref/kv4cj" }
 fontkit_ffi = { path = "../packages/fontkit_ffi" }
-ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "lanlu-streaming" }
+qwest = { path = "../packages/qwest" }
 
 [target.x86_64-unknown-linux-gnu]
 # vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。

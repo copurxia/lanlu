@@ -745,9 +745,9 @@ public class AppModel {
 
     // 探测全部服务器在线状态（登录页进场/列表变更后调用）。
     // 探测用 LanluApi 是即用即弃的短生命周期实例（各含一个连接池），用完必须 close，
-    // 否则每次探测泄漏一个 RestClient 池（#31）。connect 超时用设置项
-    // probeConnectTimeoutSec（任务E持久化，默认 5s 保守值，#21）：失效地址的 TCP
-    // connect 挂死不再拖满 worker 池。
+    // 否则每次探测泄漏一个连接池（#31）。connect 超时用设置项
+    // probeConnectTimeoutSec（任务E持久化，默认 5s 保守值，#21）：qwest 原生支持
+    // TCP connect 超时，失效地址不再拖满 worker 池。
     public func probeServers(): Unit {
         for (p in settings.servers) {
             let id = p.id

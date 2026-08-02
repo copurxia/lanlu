@@ -180,7 +180,8 @@ public class Response <: Resource {
 }
 
 // stream() 返回的守卫流：把读转发给 Response.readBody，保证读尽/异常时的连接结算逻辑
-// 只有一份（无论调用方拿 stream 还是走 bytes/copyTo）。
+// 只有一份（无论调用方拿 stream 还是走 bytes/copyTo）。注意 InputStream 接口没有
+// close 成员，连接收尾（读尽自动结算 / 未读完丢弃）统一走 Response.close()。
 private class GuardedBody <: InputStream {
     private let resp: Response
 
