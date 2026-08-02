@@ -31,6 +31,7 @@ defaults:
     shell: bash
 
 env:
+  # copur/CangjieGUI 的 lanlu-client-next 分支 HEAD
   CANGJIE_GUI_COMMIT: 80444c327adb3a578a685bd3e99d3e4f48ad2772
 
 jobs:
@@ -113,7 +114,7 @@ jobs:
       - name: Fetch pinned CangjieGUI source
         run: |
           set -euo pipefail
-          git clone https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
           git -C packages/cangjie-gui checkout --detach "${CANGJIE_GUI_COMMIT}"
           actual_commit="$(git -C packages/cangjie-gui rev-parse HEAD)"
           if [ "${actual_commit}" != "${CANGJIE_GUI_COMMIT}" ]; then
@@ -301,7 +302,7 @@ jobs:
       - name: Fetch pinned CangjieGUI source
         run: |
           $ErrorActionPreference = "Stop"
-          git clone https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
           git -C packages/cangjie-gui checkout --detach $env:CANGJIE_GUI_COMMIT
           $actualCommit = (git -C packages/cangjie-gui rev-parse HEAD).Trim()
           if ($actualCommit -ne $env:CANGJIE_GUI_COMMIT) {
