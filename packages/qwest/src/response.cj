@@ -62,8 +62,25 @@ public class Response <: Resource {
     }
 
     public func bytes(limit!: Int64): Array<UInt8> {
-        let out = ByteBuffer()
-        let buf = Array<UInt8>(16 * 1024, repeat: 0u8)
+        // 容器选 ByteBuffer 而非预分配 Array：Array(size, repeat:) 要零填充
+        //（19MB 实测 240ms），ByteBuffer(cap) 构造 0ms，且 bytes() 返回内部
+        // 数组的等长视图不拷贝（局部缓冲用完即弃，共享无副作用）。
+        // Content-Length 已知时用作精确容量，免增长重分配；并提前拒绝超限。
+        let cap = match (body.knownRemaining) {
+            case Some(n) =>
+                if (n > limit) {
+                    close()
+                    throw BodyTooLargeException("响应体超过 ${limit} 字节上限，请改用 stream()")
+                }
+                if (n > 0) {
+                    n
+                } else {
+                    64
+                }
+            case None => 64 * 1024
+        }
+        let out = ByteBuffer(cap)
+        let buf = Array<UInt8>(64 * 1024, repeat: 0u8)
         var total: Int64 = 0
         while (true) {
             let n = readBody(buf)
@@ -77,16 +94,7 @@ public class Response <: Resource {
             }
             out.write(buf[0..n])
         }
-        let result = Array<UInt8>(total, repeat: 0u8)
-        var off = 0
-        while (off < total) {
-            let n = out.read(result[off..total])
-            if (n <= 0) {
-                break
-            }
-            off += n
-        }
-        result
+        out.bytes()
     }
 
     public func text(): String {
@@ -134,6 +142,9 @@ public class Response <: Resource {
     }
 
     // body 读取的唯一入口：读尽自动结算；异常标记连接损坏并丢弃。
+    // 消费掉最后一字节即结算（不等下次读返回 0）：bytes() 的精确预分配直读
+    // 路径读满即止、不会多读一次，若只在 n<=0 时结算则连接永不回池；
+    // chunked 需消费完 trailer 才 exhausted，仍走 n<=0 分支。
     func readBody(buf: Array<Byte>): Int64 {
         if (finished) {
             return 0
@@ -148,6 +159,9 @@ public class Response <: Resource {
         if (n <= 0) {
             finish()
             return 0
+        }
+        if (body.exhausted) {
+            finish()
         }
         n
     }

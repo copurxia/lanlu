@@ -110,7 +110,10 @@ func singleFlightPropagatesLeaderFailure(): Unit {
     let dir = Directory.createTemp(Path("."))
     let cache = ImageCache("${dir}/cache")
     let counter = FetchCounter()
-    let writer = TestWriter(counter, Array<UInt8>(0, repeat: 0), failMsg: "网络中断")
+    // 失败同样要拉大并发窗口：与 singleFlightDeduplicatesConcurrentMiss 同理，确保第二个
+    // 调用者在 leader 定稿（这里是失败）前到达门闩；否则它会成为新的 leader 重试下载，
+    // 违背“等待者不重复下载”的断言（CI 并行下已观测到间歇失败）。
+    let writer = TestWriter(counter, Array<UInt8>(0, repeat: 0), delayMs: 80, failMsg: "网络中断")
     let done = SyncCounter(2)
     let failures = FailureBox()
     let _ = spawn {

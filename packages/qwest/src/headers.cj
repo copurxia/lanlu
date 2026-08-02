@@ -22,9 +22,8 @@ public class Headers <: ToString {
 
     // 第一个同名头的值。
     public func get(name: String): ?String {
-        let lower = lowerAscii(name)
         for ((k, v) in entries) {
-            if (lowerAscii(k) == lower) {
+            if (equalsIgnoreAsciiCase(k, name)) {
                 return Some(v)
             }
         }
@@ -32,10 +31,9 @@ public class Headers <: ToString {
     }
 
     public func getAll(name: String): ArrayList<String> {
-        let lower = lowerAscii(name)
         let out = ArrayList<String>()
         for ((k, v) in entries) {
-            if (lowerAscii(k) == lower) {
+            if (equalsIgnoreAsciiCase(k, name)) {
                 out.add(v)
             }
         }
@@ -47,11 +45,10 @@ public class Headers <: ToString {
     }
 
     public func remove(name: String): Unit {
-        let lower = lowerAscii(name)
         var i = entries.size - 1
         while (i >= 0) {
             let (k, _) = entries[i]
-            if (lowerAscii(k) == lower) {
+            if (equalsIgnoreAsciiCase(k, name)) {
                 entries.remove(at: i)
             }
             i--
@@ -75,6 +72,30 @@ public class Headers <: ToString {
             sb.append("${k}: ${v}\r\n")
         }
         sb.toString()
+    }
+
+    // 头名比较的零分配路径：逐字节 ASCII 折叠比较，不为每次查找生成小写副本
+    //（get/remove 在每响应路径上对每个头名调用，原 lowerAscii 每次分配新串）。
+    static func equalsIgnoreAsciiCase(a: String, b: String): Bool {
+        if (a.size != b.size) {
+            return false
+        }
+        let ab = a.toArray()
+        let bb = b.toArray()
+        for (i in 0..ab.size) {
+            var x = ab[i]
+            var y = bb[i]
+            if (x >= 0x41u8 && x <= 0x5Au8) {
+                x += 0x20u8
+            }
+            if (y >= 0x41u8 && y <= 0x5Au8) {
+                y += 0x20u8
+            }
+            if (x != y) {
+                return false
+            }
+        }
+        true
     }
 
     // 仅折叠 ASCII 大写，头名是 token（ASCII），无需完整 Unicode 折叠。

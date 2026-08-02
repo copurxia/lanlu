@@ -1,6 +1,5 @@
 package qwest
 
-import std.collection.ArrayList
 import std.io.BufferedInputStream
 import std.net.StreamingSocket
 
@@ -64,13 +63,15 @@ func encodeRequestHead(method: Method, target: HttpTarget, headers: Headers, con
 
 // 读一行（以 \n 结尾，剥掉 \r\n）。atStart 为 true 时首字节即 EOF 抛
 // ConnectionClosedException（触发透明重试），否则视为响应被截断。
-func readHeadLine(reader: BufferedInputStream<StreamingSocket>, atStart: Bool): String {
-    let bytes = ArrayList<UInt8>()
+// 行字节写进调用方提供的复用缓冲（逐字节 ArrayList.add + toArray 每行两次分配，
+// 头区十几行×每请求可观；复用缓冲后每行只剩 String.fromUtf8 一次必要拷贝）。
+func readHeadLine(reader: BufferedInputStream<StreamingSocket>, atStart: Bool, lineBuf: Array<UInt8>): String {
+    var len = 0
     while (true) {
         let b = match (reader.readByte()) {
             case Some(v) => v
             case None =>
-                if (atStart && bytes.size == 0) {
+                if (atStart && len == 0) {
                     throw ConnectionClosedException("连接已被对端关闭")
                 }
                 throw ProtocolException("响应头被截断（对端提前关闭连接）")
@@ -79,20 +80,23 @@ func readHeadLine(reader: BufferedInputStream<StreamingSocket>, atStart: Bool): 
             break
         }
         if (b != 0x0Du8) { // 忽略 '\r'
-            bytes.add(b)
-        }
-        if (bytes.size > MAX_HEAD_LINE_BYTES) {
-            throw ProtocolException("响应头单行超过 ${MAX_HEAD_LINE_BYTES} 字节")
+            if (len >= lineBuf.size) {
+                throw ProtocolException("响应头单行超过 ${lineBuf.size} 字节")
+            }
+            lineBuf[len] = b
+            len++
         }
     }
-    String.fromUtf8(bytes.toArray())
+    String.fromUtf8(lineBuf[0..len])
 }
 
 // 读状态行 + 头，自动跳过 1xx 中间响应（100-continue 等）。
 func readResponseHead(reader: BufferedInputStream<StreamingSocket>): ResponseHead {
+    // 行缓冲按单行上限一次分配，整个头区（含 1xx 重读）共用。
+    let lineBuf = Array<UInt8>(MAX_HEAD_LINE_BYTES, repeat: 0u8)
     var firstRound = true
     while (true) {
-        let statusLine = readHeadLine(reader, firstRound)
+        let statusLine = readHeadLine(reader, firstRound, lineBuf)
         firstRound = false
         // "HTTP/1.1 200 OK" — 原因短语可缺省/含空格，只取前两段。
         if (!statusLine.startsWith("HTTP/")) {
@@ -113,7 +117,7 @@ func readResponseHead(reader: BufferedInputStream<StreamingSocket>): ResponseHea
         let headers = Headers()
         var total = statusLine.size
         while (true) {
-            let line = readHeadLine(reader, false)
+            let line = readHeadLine(reader, false, lineBuf)
             if (line.size == 0) {
                 break
             }
