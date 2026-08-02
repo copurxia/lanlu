@@ -224,8 +224,10 @@ public class AppModel {
     public var query = SearchQuery()
     public let categories = State<ArrayList<CategoryItem>>(ArrayList<CategoryItem>())
     public let categoryIndex = State<Int64>(0)
-    public let sortIndex = State<Int64>(0)
-    public let orderIndex = State<Int64>(0)
+    // 工具条排序/方向默认：创建时间、降序（新档在前；frontend 首页默认亦按创建时间倒序）。
+    // SEARCH_SORT_FIELDS[1]=created_at，orderIndex=1=desc。
+    public let sortIndex = State<Int64>(1)
+    public let orderIndex = State<Int64>(1)
     public let favOnly = State<Bool>(false)
     public let newOnly = State<Bool>(false)
     public let untaggedOnly = State<Bool>(false)
@@ -1163,10 +1165,11 @@ public class AppModel {
     }
 
     // 重置只清高级筛选条件，保留搜索词与当前分类；无搜索/分类时回到书库浏览视图。
+    // 排序/方向回默认（创建时间、降序）。
     public func resetAdvancedFilter(): Unit {
         let tankGroupingChanged = tankGroupIndex.value != 0
-        sortIndex.value = 0
-        orderIndex.value = 0
+        sortIndex.value = 1
+        orderIndex.value = 1
         favOnly.value = false
         newOnly.value = false
         untaggedOnly.value = false
