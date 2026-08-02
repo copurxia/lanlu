@@ -13,15 +13,42 @@ private func stageDesktopAssets(): Unit {
     }
 }
 
+// fontkit native 静态库需与 cjpm 目标链接器匹配：
+// - Linux：cargo 默认 target 与 cjpm 目标（x86_64-unknown-linux-gnu）一致，产物 libfontkit_native.a 可直接链接。
+// - Windows：cargo 默认 host 为 MSVC，产物是 fontkit_native.lib，而 cjpm 的 x86_64-w64-mingw32 目标用
+//   MinGW 链接器，需要以 GNU target 构建 libfontkit_native.a 并拷贝到 ffi.c 指向的 target/release 目录。
+@When[os == "Windows"]
+private func buildFontkitNative(): Int64 {
+    let exitCode = execute("cargo",
+        ["build", "--release", "--target", "x86_64-pc-windows-gnu",
+         "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
+        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+    if (exitCode != 0) {
+        return exitCode
+    }
+    let built = Path("../packages/fontkit_ffi/native/target/x86_64-pc-windows-gnu/release/libfontkit_native.a")
+    let stagedDir = Path("../packages/fontkit_ffi/native/target/release")
+    if (!exists(stagedDir)) {
+        Directory.create(stagedDir, recursive: true)
+    }
+    copy(built, to: stagedDir.join("libfontkit_native.a"), overwrite: true)
+    0
+}
+
+@When[os != "Windows"]
+private func buildFontkitNative(): Int64 {
+    execute("cargo",
+        ["build", "--release", "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
+        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+}
+
 main(args: Array<String>): Int64 {
     if (args.size == 0) {
         return 0
     }
     match (args[0]) {
         case "pre-build" | "pre-test" | "pre-run" =>
-            let exitCode = execute("cargo",
-                ["build", "--release", "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
-                stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+            let exitCode = buildFontkitNative()
             if (exitCode != 0) {
                 return exitCode
             }

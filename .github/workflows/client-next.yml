@@ -420,6 +420,11 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Add GNU Rust target for fontkit native
+        # build.cj 的 pre-build 在 Windows 上用 x86_64-pc-windows-gnu 构建 fontkit_native
+        # （cjpm 的 x86_64-w64-mingw32 目标用 MinGW 链接器，需 GNU 格式的 libfontkit_native.a）。
+        run: rustup target add x86_64-pc-windows-gnu
+
       - name: Build client-next on Windows
         working-directory: client-next
         run: cjpm build -V
