@@ -153,7 +153,8 @@ jobs:
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH
-        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}" >> "${GITHUB_ENV}"
+        # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
+        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
 
       - name: Install native build dependencies
         run: |
@@ -332,7 +333,8 @@ jobs:
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH
-        run: Add-Content -LiteralPath $env:GITHUB_ENV -Value "CANGJIE_STDX_PATH=$env:CANGJIE_STDX_PATH_STATIC"
+        # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
+        run: Add-Content -LiteralPath $env:GITHUB_ENV -Value "CANGJIE_STDX_PATH=${env:CANGJIE_STDX_PATH_STATIC}\stdx"
 
       - name: Set up MSYS2 native dependencies
         id: msys2
