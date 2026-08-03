@@ -529,11 +529,23 @@ jobs:
 
           search_dirs=(
             "$PWD/client-next/target/release/kv4cj"
+            "$PWD/client-next/target/release/bin"
             "$PWD/ref/kv4cj/lib"
             "$PWD/packages/cangjie-gui/sdl/.sdl3"
             "${MINGW_LIBRARY_PATH%/lib}/bin"
             "${runtime_dir}"
           )
+          echo "sdl dir listing:"; ls "$PWD/packages/cangjie-gui/sdl/.sdl3" || true
+
+          # PE 的 import 表记录的名字可能与磁盘文件名不一致（SDL3 同时存在
+          # libSDL3.dll / SDL3.dll 两种形态）；精确名找不到时尝试变体，命中后
+          # 两种名字都落盘，保证 PE 记录的那个名字一定存在。
+          variant_of() {
+            case "$1" in
+              lib*) printf '%s' "${1#lib}" ;;
+              *) printf 'lib%s' "$1" ;;
+            esac
+          }
 
           needed() { objdump -p "$1" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'; }
 
@@ -548,6 +560,7 @@ jobs:
               [ -z "${seen[$key]:-}" ] || continue
               seen[$key]=1
               found=""
+              alias_src=""
               for dir in "${search_dirs[@]}"; do
                 [ -n "$dir" ] || continue
                 cand="$(find "$dir" -maxdepth 1 -iname "$dll" -print -quit)"
@@ -555,7 +568,19 @@ jobs:
                   found="$cand"
                   break
                 fi
+                if [ -z "$alias_src" ]; then
+                  acand="$(find "$dir" -maxdepth 1 -iname "$(variant_of "$dll")" -print -quit)"
+                  if [ -n "$acand" ]; then
+                    alias_src="$acand"
+                  fi
+                fi
               done
+              if [ -z "$found" ] && [ -n "$alias_src" ]; then
+                # PE 只加载它 import 表里记录的名字，按该名字落盘即可。
+                cp -L "$alias_src" "${stage}/${dll}"
+                found="${stage}/${dll}"
+                echo "collect (alias): ${dll} <- ${alias_src}"
+              fi
               if [ -n "$found" ]; then
                 echo "collect: ${dll} <- ${found}"
                 cp -L "$found" "${stage}/"
@@ -567,9 +592,24 @@ jobs:
           done
 
           # 关键库校验：任一缺失直接失败，避免打出跑不起来的 zip。
-          for required in libcangjie-runtime.dll libkv4cj.dll libSDL3.dll libSDL3_ttf.dll; do
+          # SDL3/SDL3_ttf 磁盘与 PE import 表的名字可能是带/不带 lib 前缀的任一形态，
+          # 收集时已按 PE 记录名落盘（必要时经变体别名），这里按"对内任一存在"判定。
+          for required in libcangjie-runtime.dll libkv4cj.dll; do
             if ! ls "${stage}"/"${required}" >/dev/null 2>&1; then
               echo "::error::Required runtime DLL ${required} was not collected."
+              exit 1
+            fi
+          done
+          for pair in "libSDL3.dll SDL3.dll" "libSDL3_ttf.dll SDL3_ttf.dll"; do
+            present=0
+            for name in $pair; do
+              if ls "${stage}"/"${name}" >/dev/null 2>&1; then
+                present=1
+                break
+              fi
+            done
+            if [ "$present" -eq 0 ]; then
+              echo "::error::Required runtime DLL (${pair}) was not collected."
               exit 1
             fi
           done
