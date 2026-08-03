@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb \
+            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb libvulkan1 \
             libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev \
             libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
@@ -260,8 +260,9 @@ jobs:
       - name: Run headless snapshot smoke test
         working-directory: client-next
         env:
-          # dummy 驱动无法创建渲染器（SDL_CreateWindowAndRenderer 失败），
-          # 改用 Xvfb 虚拟 X 服务器 + software 渲染（main.cj 里显式 SDL_RENDER_DRIVER 优先）。
+          # cangjie-gui 建窗硬带 SDL_WINDOW_VULKAN flag，X11 下 SDL 需 dlopen libvulkan.so.1
+          # （apt 已装 libvulkan1 loader，无 ICD 也只需 loader 符号）；窗口建成后渲染器
+          # 走 software（无 GPU）。dummy 驱动无 Vulkan_LoadLibrary 实现，故用 Xvfb。
           SDL_VIDEODRIVER: x11
           SDL_RENDER_DRIVER: software
         run: |
@@ -502,8 +503,10 @@ jobs:
           Get-Item -LiteralPath $executable | Format-List Name, Length, LastWriteTime
 
       - name: Collect Windows runtime DLLs
-        # 用 mingw ldd 解析 main.exe 的全部依赖 DLL，剔除 Windows 系统库，
-        # 连同 logo 一起暂存到 dist/windows/lanlu-client-next/。
+        # 从 main.exe 出发用 objdump 递归解析 DLL Name，在候选目录里查找并
+        # 逐个展开（传递依赖如 libarchive-13/libffi-8/SDL3_ttf 都会收录）；
+        # 候选目录找不到的才视为 Windows 系统库跳过。不依赖 ldd/PATH，
+        # 仓颉 runtime 目录（libcangjie-runtime.dll）直接列入候选。
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -512,21 +515,57 @@ jobs:
           cp client-next/target/release/bin/main.exe "${stage}/"
           cp client-next/target/release/bin/lanlu_logo_gold.png "${stage}/"
 
-          PATH="$PWD/client-next/target/release/kv4cj:${PATH}" \
-            ldd "${stage}/main.exe" | awk '$3 ~ /^\// {print $3}' | sort -u > client-next/dist/dlls.txt
-          while IFS= read -r dll; do
-            lower="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
-            case "$lower" in
-              */windows/*|*/system32/*|*/syswow64/*|*/winsxs/*) continue ;;
-            esac
-            cp -L "$dll" "${stage}/"
-          done < client-next/dist/dlls.txt
-          # 兜底：如果 ldd 未能解析到仓颉 runtime，以 cjc 所在工具链目录为根查找。
-          # （setup-cangjie 不导出 CJV_HOME，只能从 PATH 上的 cjc 反推。）
-          if [ ! -e "${stage}/libcangjie-runtime.dll" ]; then
-            toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
-            find "${toolchain_root}" -name 'libcangjie-runtime.dll' -exec cp -L {} "${stage}/" \; -quit
-          fi
+          # 仓颉 runtime 目录：从 cjc 所在工具链目录反推（setup-cangjie 不导出 CJV_HOME）。
+          toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
+          runtime_dir="$(find "${toolchain_root}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
+
+          search_dirs=(
+            "$PWD/client-next/target/release/kv4cj"
+            "$PWD/ref/kv4cj/lib"
+            "$PWD/packages/cangjie-gui/sdl/.sdl3"
+            "${MINGW_LIBRARY_PATH%/lib}/bin"
+            "${runtime_dir}"
+          )
+
+          needed() { objdump -p "$1" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'; }
+
+          declare -A seen=()
+          queue=("main.exe")
+          while ((${#queue[@]} > 0)); do
+            current="${queue[0]}"
+            queue=("${queue[@]:1}")
+            while IFS= read -r dll; do
+              [ -n "$dll" ] || continue
+              key="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+              [ -z "${seen[$key]:-}" ] || continue
+              seen[$key]=1
+              found=""
+              for dir in "${search_dirs[@]}"; do
+                [ -n "$dir" ] || continue
+                cand="$(find "$dir" -maxdepth 1 -iname "$dll" -print -quit)"
+                if [ -n "$cand" ]; then
+                  found="$cand"
+                  break
+                fi
+              done
+              if [ -n "$found" ]; then
+                echo "collect: ${dll} <- ${found}"
+                cp -L "$found" "${stage}/"
+                queue+=("${dll}")
+              else
+                echo "skip (system): ${dll}"
+              fi
+            done < <(needed "${stage}/${current}")
+          done
+
+          # 关键库校验：任一缺失直接失败，避免打出跑不起来的 zip。
+          for required in libcangjie-runtime.dll libkv4cj.dll libSDL3.dll libSDL3_ttf.dll; do
+            if ! ls "${stage}"/"${required}" >/dev/null 2>&1; then
+              echo "::error::Required runtime DLL ${required} was not collected."
+              exit 1
+            fi
+          done
+          ls -l "${stage}"
 
       - name: Package Windows zip
         run: |
