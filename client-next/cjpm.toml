@@ -24,7 +24,9 @@ link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -
 
 [target.x86_64-w64-mingw32]
 # MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 MINGW64 的 import libraries。
-link-option = "-L \"${MINGW_LIBRARY_PATH}\" -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++ -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lws2_32 -lntdll"
+# -lgcc_s：fontkit_native 以 x86_64-pc-windows-gnu 构建，Rust std/panic_unwind 需要 libgcc_s 提供 _Unwind_* / _GCC_specific_handler。
+# -lcrypt32：stdx.crypto.x509 通过 CryptoAPI 读取系统根证书（CertOpenSystemStoreA 等）。
+link-option = "-L \"${MINGW_LIBRARY_PATH}\" -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lcore -lmymmkv -lstdc++ -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s"
   [target.x86_64-w64-mingw32.bin-dependencies]
     path-option = [ "${CANGJIE_STDX_PATH}" ]
 
