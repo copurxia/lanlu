@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev \
+            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb \
             libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev \
             libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
@@ -260,10 +260,13 @@ jobs:
       - name: Run headless snapshot smoke test
         working-directory: client-next
         env:
-          SDL_VIDEODRIVER: dummy
+          # dummy 驱动无法创建渲染器（SDL_CreateWindowAndRenderer 失败），
+          # 改用 Xvfb 虚拟 X 服务器 + software 渲染（main.cj 里显式 SDL_RENDER_DRIVER 优先）。
+          SDL_VIDEODRIVER: x11
+          SDL_RENDER_DRIVER: software
         run: |
           set -euo pipefail
-          timeout 30s ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
+          timeout 60s xvfb-run -a ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
           test -s client-next.bmp
 
       - name: Package Linux deb
