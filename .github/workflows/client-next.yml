@@ -293,9 +293,11 @@ jobs:
               *) cp -L "$lib" "${appdir}/" ;;
             esac
           done < dist/ldd.txt
-          # 兜底：如果 ldd 未能解析到仓颉 runtime，从 CJV_HOME 直接查找。
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，以 cjc 所在工具链目录为根查找。
+          # （setup-cangjie 不导出 CJV_HOME，只能从 PATH 上的 cjc 反推。）
           if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
-            find "${CJV_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
+            toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
+            find "${toolchain_root}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
           fi
 
           # 用 printf 生成包装脚本，避免 heredoc 顶格内容破坏 YAML block scalar。
@@ -519,9 +521,11 @@ jobs:
             esac
             cp -L "$dll" "${stage}/"
           done < client-next/dist/dlls.txt
-          # 兜底：如果 ldd 未能解析到仓颉 runtime，从 CJV_HOME 直接查找。
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，以 cjc 所在工具链目录为根查找。
+          # （setup-cangjie 不导出 CJV_HOME，只能从 PATH 上的 cjc 反推。）
           if [ ! -e "${stage}/libcangjie-runtime.dll" ]; then
-            find "${CJV_HOME}" -name 'libcangjie-runtime.dll' -exec cp -L {} "${stage}/" \; -quit
+            toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
+            find "${toolchain_root}" -name 'libcangjie-runtime.dll' -exec cp -L {} "${stage}/" \; -quit
           fi
 
       - name: Package Windows zip
