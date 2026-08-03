@@ -265,6 +265,64 @@ jobs:
           timeout 30s ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
           test -s client-next.bmp
 
+      - name: Package Linux deb
+        working-directory: client-next
+        run: |
+          set -euo pipefail
+          pkgname="lanlu-client-next"
+          version="0.1.0+nightly.$(date -u +%Y%m%d.%H%M)"
+          arch="amd64"
+          staging="dist/${pkgname}_${version}_${arch}"
+          appdir="${staging}/opt/${pkgname}"
+          mkdir -p "${staging}/DEBIAN" "${appdir}" "${staging}/usr/bin" dist
+
+          cp target/release/bin/main "${appdir}/${pkgname}"
+          cp target/release/bin/lanlu_logo_gold.png "${appdir}/"
+
+          # 捆绑非系统私有库（MMKV、kv4cj、SDL3、仓颉 runtime 等）；
+          # apt 系统库（vips、vlc 等）通过 control 的 Depends 声明。
+          LD_LIBRARY_PATH="$PWD/target/release/kv4cj:${LD_LIBRARY_PATH:-}" \
+            ldd "${appdir}/${pkgname}" | awk '$3 ~ /^\// {print $3}' | sort -u > dist/ldd.txt
+          while IFS= read -r lib; do
+            case "$lib" in
+              /usr/*|/lib/*|/lib64/*) ;;
+              *) cp -L "$lib" "${appdir}/" ;;
+            esac
+          done < dist/ldd.txt
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，从 CJV_HOME 直接查找。
+          if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
+            find "${CJV_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
+          fi
+
+          # 用 printf 生成包装脚本，避免 heredoc 顶格内容破坏 YAML block scalar。
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec env LD_LIBRARY_PATH="/opt/lanlu-client-next${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /opt/lanlu-client-next/lanlu-client-next "$@"' \
+            > "${staging}/usr/bin/${pkgname}"
+          chmod 755 "${staging}/usr/bin/${pkgname}"
+
+          installed_size="$(du -sk "${staging}" | cut -f1)"
+          printf '%s\n' \
+            "Package: ${pkgname}" \
+            "Version: ${version}" \
+            "Architecture: ${arch}" \
+            "Maintainer: lanlu <lanlu@localhost>" \
+            "Installed-Size: ${installed_size}" \
+            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6" \
+            "Section: graphics" \
+            "Priority: optional" \
+            "Description: Lanlu desktop client built on CangjieGUI" \
+            > "${staging}/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "${staging}" "dist/${pkgname}_${version}_${arch}.deb"
+
+      - name: Upload Linux deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-linux-deb-${{ github.sha }}
+          path: client-next/dist/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -437,6 +495,45 @@ jobs:
           }
           Get-Item -LiteralPath $executable | Format-List Name, Length, LastWriteTime
 
+      - name: Collect Windows runtime DLLs
+        # 用 mingw ldd 解析 main.exe 的全部依赖 DLL，剔除 Windows 系统库，
+        # 连同 logo 一起暂存到 dist/windows/lanlu-client-next/。
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          stage="client-next/dist/windows/lanlu-client-next"
+          mkdir -p "${stage}"
+          cp client-next/target/release/bin/main.exe "${stage}/"
+          cp client-next/target/release/bin/lanlu_logo_gold.png "${stage}/"
+
+          PATH="$PWD/client-next/target/release/kv4cj:${PATH}" \
+            ldd "${stage}/main.exe" | awk '$3 ~ /^\// {print $3}' | sort -u > client-next/dist/dlls.txt
+          while IFS= read -r dll; do
+            lower="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+            case "$lower" in
+              */windows/*|*/system32/*|*/syswow64/*|*/winsxs/*) continue ;;
+            esac
+            cp -L "$dll" "${stage}/"
+          done < client-next/dist/dlls.txt
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，从 CJV_HOME 直接查找。
+          if [ ! -e "${stage}/libcangjie-runtime.dll" ]; then
+            find "${CJV_HOME}" -name 'libcangjie-runtime.dll' -exec cp -L {} "${stage}/" \; -quit
+          fi
+
+      - name: Package Windows zip
+        run: |
+          $ErrorActionPreference = "Stop"
+          Compress-Archive -Path "client-next/dist/windows/lanlu-client-next" `
+            -DestinationPath "client-next/dist/lanlu-client-next-windows-x86_64.zip" -Force
+
+      - name: Upload Windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-windows-zip-${{ github.sha }}
+          path: client-next/dist/lanlu-client-next-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
@@ -446,3 +543,40 @@ jobs:
             client-next/target/release/bin/lanlu_logo_gold.png
           if-no-files-found: error
           retention-days: 14
+
+  nightly-release:
+    name: Publish nightly release
+    needs: [build-test, windows-build]
+    # push/手动触发时发布；PR 没有写权限，只构建不发布。
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux deb
+        uses: actions/download-artifact@v4
+        with:
+          name: client-next-linux-deb-${{ github.sha }}
+          path: release-assets
+
+      - name: Download Windows zip
+        uses: actions/download-artifact@v4
+        with:
+          name: client-next-windows-zip-${{ github.sha }}
+          path: release-assets
+
+      - name: Publish to nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l release-assets
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly \
+              --title "Nightly" \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --notes "client-next 最新构建产物：Linux 为 .deb（amd64），Windows 为 zip。每次构建覆盖同名附件。"
+          fi
+          gh release upload nightly release-assets/* --clobber
+          gh release edit nightly --notes "构建于 $(date -u '+%Y-%m-%d %H:%M UTC')，commit ${GITHUB_SHA:0:12}。Linux 为 .deb（amd64），Windows 为 zip。"
