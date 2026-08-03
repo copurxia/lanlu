@@ -294,11 +294,10 @@ jobs:
               *) cp -L "$lib" "${appdir}/" ;;
             esac
           done < dist/ldd.txt
-          # 兜底：如果 ldd 未能解析到仓颉 runtime，以 cjc 所在工具链目录为根查找。
-          # （setup-cangjie 不导出 CJV_HOME，只能从 PATH 上的 cjc 反推。）
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，在 SDK 目录下查找。
+          # （setup-cangjie 会导出 CANGJIE_HOME，见 cjv envsetup 的 env.vars。）
           if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
-            toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
-            find "${toolchain_root}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
+            find "${CANGJIE_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
           fi
 
           # 用 printf 生成包装脚本，避免 heredoc 顶格内容破坏 YAML block scalar。
@@ -515,9 +514,10 @@ jobs:
           cp client-next/target/release/bin/main.exe "${stage}/"
           cp client-next/target/release/bin/lanlu_logo_gold.png "${stage}/"
 
-          # 仓颉 runtime 目录：从 cjc 所在工具链目录反推（setup-cangjie 不导出 CJV_HOME）。
-          toolchain_root="$(cd "$(dirname "$(command -v cjc)")/.." && pwd)"
-          runtime_dir="$(find "${toolchain_root}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
+          # 仓颉 runtime 目录：setup-cangjie 导出 CANGJIE_HOME（SDK 根目录），
+          # runtime 库位于 ${CANGJIE_HOME}/runtime/lib/windows_<arch>_<backend>/。
+          # 注意不能用 command -v cjc 反推：msys2 下可能查不到而静默返回空。
+          runtime_dir="$(find "${CANGJIE_HOME}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
 
           search_dirs=(
             "$PWD/client-next/target/release/kv4cj"
