@@ -215,7 +215,8 @@ jobs:
       - name: Configure native library path
         run: |
           set -euo pipefail
-          native_paths="${GITHUB_WORKSPACE}/ref/kv4cj/lib:${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
+          # client-next/target/release/kv4cj 存放 cjpm 编译期生成的 libkv4cj.so，运行时同样需要。
+          native_paths="${GITHUB_WORKSPACE}/ref/kv4cj/lib:${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3:${GITHUB_WORKSPACE}/client-next/target/release/kv4cj"
           printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Verify native libraries
