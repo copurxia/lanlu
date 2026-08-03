@@ -81,7 +81,11 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
 }
 
 main(): Int64 {
+    // 临时启动诊断（定位 Windows 启动即崩的访问违规，查到后可删）：
+    // 分段打印启动进度，崩溃前最后一条即崩溃所在阶段。
+    println("[boot] 0 settings-store root=${defaultSettingsRoot()}")
     initializeSettingsStore()
+    println("[boot] 1 settings-store initialized")
     // 启动后端策略（2026-07-19 Task E2 实测，详见 .superpowers/sdd/task-e2-report.md）：
     // 原生 Wayland 启动崩溃根因 = libdecor 的 GTK 插件在窗口创建时初始化 GTK3，
     // 触发 glycin（本体经 libvips→librsvg→gdk_pixbuf 常驻进程，无法移除）的
@@ -130,12 +134,14 @@ main(): Int64 {
     } else {
         loadSettings()
     }
+    println("[boot] 2 settings loaded, seedMode=${seedMode}")
     let model = AppModel(settings, persistSettings: {s => saveSettings(s)})
     if (seedMode.size > 0) {
         seedLibrarySnapshot(model, seedMode)
     } else {
         model.tryResumeSession()
     }
+    println("[boot] 3 model ready, creating DesktopApp")
     let app = DesktopApp(
         WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(),
             fontPath: if (settings.fontPath.size > 0) {
@@ -143,6 +149,7 @@ main(): Int64 {
             } else {
                 None
             }), theme: lanluThemeFor(settings.theme))
+    println("[boot] 4 DesktopApp created (window+renderer ok)")
     // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
     // SDL_WaitEventTimeout 的主循环立即唤醒；醒后那次迭代的 onTick/pump 正常 drain，
     // 图片到货/UI 更新不再等下一个输入事件。
@@ -154,6 +161,7 @@ main(): Int64 {
     // 阅读器页换用专用顶栏 ui/reader_bar.cj（T13）。
     app.sdlWindow.setBordered(false)
     syncTitleBarDragRegion(app.sdlWindow, model)
+    println("[boot] 5 entering main loop")
     // 空转零渲染：主循环每次迭代泵回工作线程结果（drain 为空时不写任何 State，
     // dirty-frame skipping 使该迭代不重建/不绘制）；不能用 FrameHandler 做这件事——
     // 它必须每帧 requestFrame 才能持续触发，会强制 60fps 全量重建+绘制。
