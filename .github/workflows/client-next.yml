@@ -297,6 +297,10 @@ jobs:
           # 兜底：如果 ldd 未能解析到仓颉 runtime，在 SDK 目录下查找。
           # （setup-cangjie 会导出 CANGJIE_HOME，见 cjv envsetup 的 env.vars。）
           if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
+            if [ -z "${CANGJIE_HOME:-}" ]; then
+              echo "error: libcangjie-runtime not found by ldd and CANGJIE_HOME is not set" >&2
+              exit 1
+            fi
             find "${CANGJIE_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
           fi
 
@@ -517,6 +521,10 @@ jobs:
           # 仓颉 runtime 目录：setup-cangjie 导出 CANGJIE_HOME（SDK 根目录），
           # runtime 库位于 ${CANGJIE_HOME}/runtime/lib/windows_<arch>_<backend>/。
           # 注意不能用 command -v cjc 反推：msys2 下可能查不到而静默返回空。
+          if [ -z "${CANGJIE_HOME:-}" ]; then
+            echo "error: CANGJIE_HOME not exported by setup-cangjie" >&2
+            exit 1
+          fi
           runtime_dir="$(find "${CANGJIE_HOME}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
 
           search_dirs=(
