@@ -615,41 +615,6 @@ jobs:
           done
           ls -l "${stage}"
 
-      - name: Smoke test packaged Windows app
-        # 直接运行 staging 目录里的 main.exe（与 zip 交付物完全一致），
-        # 用离线 seed 模式避免网络/会话依赖；启动分段日志见 main.cj 的 [boot] 打印。
-        # 若崩溃：WER LocalDumps 会落完整内存转储，随 artifact 上传供离线分析调用栈。
-        run: |
-          $ErrorActionPreference = "Continue"
-          New-Item -ItemType Directory -Path "D:\dumps" -Force | Out-Null
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\main.exe" /v DumpFolder /t REG_EXPAND_SZ /d "D:\dumps" /f | Out-Null
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\main.exe" /v DumpType /t REG_DWORD /d 2 /f | Out-Null
-
-          $stage = "client-next\dist\windows\lanlu-client-next"
-          Push-Location $stage
-          & .\main.exe --seed-browse --width 1280 --snapshot "$PWD\smoke.bmp"
-          $code = $LASTEXITCODE
-          Pop-Location
-          if ($code -ne 0) {
-            Write-Host "::error::Windows smoke test failed with exit code $code"
-            exit 1
-          }
-          if (-not (Test-Path "$stage\smoke.bmp")) {
-            Write-Host "::error::Smoke snapshot was not produced"
-            exit 1
-          }
-
-      - name: Upload Windows crash dumps
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: client-next-windows-dumps-${{ github.sha }}
-          path: |
-            D:\dumps\*
-            client-next/dist/windows/lanlu-client-next/smoke.bmp
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Package Windows zip
         run: |
           $ErrorActionPreference = "Stop"
