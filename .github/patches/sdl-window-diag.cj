@@ -3,10 +3,11 @@ package sdl
 import std.env.getVariable
 
 // 临时诊断（定位 Windows 启动即崩的运行时检查失败，查到后可删）：
-// LANLU_NO_VULKAN=1 时建窗不带 SDL_WINDOW_VULKAN flag，用于对照实验——
-// 若置 1 后不再崩，则根因在 Vulkan 建窗/渲染路径。
-private func vulkanDisabled(): Bool {
-    match (getVariable("LANLU_NO_VULKAN")) {
+// 根因已确认：默认强制 SDL_WINDOW_VULKAN 使 Windows 不走 D3D 而绑定 Vulkan，
+// 渲染器初始化阶段崩溃。改为默认不加该 flag（回到 SDL 默认选择，Windows 走 D3D），
+// LANLU_VULKAN=1 时才启用，保留对照回退能力。
+private func vulkanRequested(): Bool {
+    match (getVariable("LANLU_VULKAN")) {
         case Some(v) => v == "1" || v == "true"
         case None => false
     }
@@ -91,7 +92,7 @@ public class SdlWindow <: Resource {
         var flags = UInt64(0)
         // Allow SDL's auto-selected renderer to use Vulkan; without this flag the
         // Vulkan render driver is skipped and selection falls back to OpenGL.
-        if (!vulkanDisabled()) {
+        if (vulkanRequested()) {
             flags = flags | SDL_WINDOW_VULKAN
         }
         if (spec.resizable) {
@@ -100,7 +101,7 @@ public class SdlWindow <: Resource {
         if (spec.highDpi) {
             flags = flags | SDL_WINDOW_HIGH_PIXEL_DENSITY
         }
-        println("[win] 3.2 flags ready, vulkan=${!vulkanDisabled()}")
+        println("[win] 3.2 flags ready, vulkan=${vulkanRequested()}")
 
         var window = CPointer<Unit>()
         var createdRenderer = CPointer<Unit>()
@@ -118,7 +119,8 @@ public class SdlWindow <: Resource {
             }
             println("[win] 3.3 window+renderer created")
             configureRenderer(window, createdRenderer, spec.scale, spec.vsync)
-            println("[win] 3.4 renderer configured")
+            let backendName = unsafe { SDL_GetRendererName(createdRenderer) }
+            println("[win] 3.4 renderer configured, backend=${if (backendName.isNull()) { "unknown" } else { unsafe { backendName.toString() } }}")
             if (!unsafe { SDL_StartTextInput(window) }) {
                 destroyCreatedResources(window, createdRenderer)
                 throw CuiException("SDL_StartTextInput failed: ${lastSdlError()}")

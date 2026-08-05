@@ -117,9 +117,10 @@ jobs:
           git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
 
       - name: Patch CangjieGUI for boot diagnostics
-        # 临时诊断（定位 Windows 启动即崩的运行时检查失败，查到后删除本步与 patch 文件）：
-        # 覆盖 sdl/src/window.cj，在建窗链路注入分段 [win] 打印，并支持
-        # LANLU_NO_VULKAN=1 环境变量关闭 SDL_WINDOW_VULKAN flag 做对照实验。
+        # 临时修复+诊断（Windows 启动即崩根因已确认：框架强制 SDL_WINDOW_VULKAN，
+        # Windows 不走 D3D 而绑定 Vulkan 后渲染器初始化崩溃；查到后删除本步与 patch 文件）：
+        # 覆盖 sdl/src/window.cj，VULKAN flag 改为 LANLU_VULKAN=1 才启用（默认回到 SDL
+        # 默认渲染器选择，Windows 走 D3D），并保留分段 [win] 打印与实际后端名输出。
         run: |
           set -euo pipefail
           cp .github/patches/sdl-window-diag.cj packages/cangjie-gui/sdl/src/window.cj
@@ -375,9 +376,10 @@ jobs:
           git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
 
       - name: Patch CangjieGUI for boot diagnostics
-        # 临时诊断（定位 Windows 启动即崩的运行时检查失败，查到后删除本步与 patch 文件）：
-        # 覆盖 sdl/src/window.cj，在建窗链路注入分段 [win] 打印，并支持
-        # LANLU_NO_VULKAN=1 环境变量关闭 SDL_WINDOW_VULKAN flag 做对照实验。
+        # 临时修复+诊断（Windows 启动即崩根因已确认：框架强制 SDL_WINDOW_VULKAN，
+        # Windows 不走 D3D 而绑定 Vulkan 后渲染器初始化崩溃；查到后删除本步与 patch 文件）：
+        # 覆盖 sdl/src/window.cj，VULKAN flag 改为 LANLU_VULKAN=1 才启用（默认回到 SDL
+        # 默认渲染器选择，Windows 走 D3D），并保留分段 [win] 打印与实际后端名输出。
         run: |
           $ErrorActionPreference = "Stop"
           Copy-Item -LiteralPath ".github/patches/sdl-window-diag.cj" -Destination "packages/cangjie-gui/sdl/src/window.cj" -Force
