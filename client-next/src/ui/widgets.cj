@@ -870,6 +870,12 @@ func ghostStyleOf(model: AppModel): SurfaceStyle {
     SurfaceStyle(Color.rgba(0, 0, 0, 0), border: edgeOf(model), radius: 10.0, borderWidth: 1.0)
 }
 
+// 危险幽灵按钮样式（设计稿 .btn-danger：近透明红底 + 红色 1px 描边），destructive 次级动作；
+// 与 ghostStyleOf 同属「无背景描边」族，替代早期实心 Danger 填充。
+func dangerGhostStyleOf(): SurfaceStyle {
+    SurfaceStyle(LANLU_DANGER.withAlpha(20), border: LANLU_DANGER.withAlpha(89), radius: 10.0, borderWidth: 1.0)
+}
+
 // ── 首页卡片组件（Task 9；原型 home-detail-redesign.html「首页」视图 .card 族）──
 
 // hover 封面缩放幅度（frontend base-media-card 的 group-hover:scale-105 同款：
