@@ -3,7 +3,7 @@ package lanlu_client_next
 import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.ui.*
-import std.env.{getCommandLine, getVariable, setVariable}
+import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
@@ -80,21 +80,6 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     }
 }
 
-// 缩放救援通道：--ui-scale auto|100|125|150|200，命中即覆盖启动缩放并回写持久化
-// 设置（一次启动即永久复位）。专用于缩放设得过大后界面超出屏幕、够不到设置页
-// 改不回来的场景。非法值经 normalizeUiScale 回退 auto。
-private func uiScaleArgument(): ?String {
-    let args = getCommandLine()
-    var i = 0
-    while (i + 1 < args.size) {
-        if (args[i] == "--ui-scale") {
-            return Some(normalizeUiScale(args[i + 1]))
-        }
-        i++
-    }
-    None
-}
-
 main(): Int64 {
     // 临时启动诊断（定位 Windows 启动即崩的访问违规，查到后可删）：
     // 分段打印启动进度，崩溃前最后一条即崩溃所在阶段。
@@ -149,17 +134,6 @@ main(): Int64 {
     } else {
         loadSettings()
     }
-    // --ui-scale 救援覆盖：命中即回写落盘，后续按常规路径解析生效。
-    // seed 快照模式不碰磁盘配置，直接忽略。
-    match (uiScaleArgument()) {
-        case Some(v) =>
-            if (seedMode.size == 0) {
-                settings.uiScale = v
-                saveSettings(settings)
-                println("[boot] 1.5 uiScale override from --ui-scale=${v} (persisted)")
-            }
-        case None => ()
-    }
     println("[boot] 2 settings loaded, seedMode=${seedMode}")
     let model = AppModel(settings, persistSettings: {s => saveSettings(s)})
     if (seedMode.size > 0) {
@@ -168,16 +142,8 @@ main(): Int64 {
         model.tryResumeSession()
     }
     println("[boot] 3 model ready, creating DesktopApp")
-    // 界面缩放（仅启动时适配）：seed 快照模式钉死 1.0 保证 CI 快照确定性；
-    // 正常模式按设置解析（auto=主显示器 contentScale，固定百分比直接换算）。
-    let uiScale = if (seedMode.size > 0) {
-        1.0f32
-    } else {
-        resolveUiScale(settings.uiScale)
-    }
-    println("[boot] 3.5 uiScale=${uiScale} preference=${settings.uiScale}")
     let app = DesktopApp(
-        WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(), scale: uiScale,
+        WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(),
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
             } else {

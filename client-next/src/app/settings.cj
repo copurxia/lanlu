@@ -1,6 +1,5 @@
 package lanlu_client_next.app
 
-import cui.primaryDisplayInfo
 import kv4cj.*
 import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM, LANGUAGE_ZH, normalizeLanguagePreference}
 import std.collection.ArrayList
@@ -50,9 +49,6 @@ public class AppSettings {
     public var theme: String = "dark"
     // 界面字体：TTF/TTC/OTF 文件路径。空串 = 使用系统默认字体。需重启生效。
     public var fontPath: String = ""
-    // 界面缩放偏好：auto（跟随系统显示器缩放）| "100" | "125" | "150" | "200"（绝对百分比）。
-    // 启动时解析一次传入 WindowSpec.scale，需重启生效。
-    public var uiScale: String = "auto"
     // 显示语言偏好：system（跟随系统）| zh | en。
     public var languagePreference: String = LANGUAGE_SYSTEM
     // 阅读器设置默认值对齐 frontend use-reader-settings；ReaderModel 读初值并写回。
@@ -179,7 +175,6 @@ public func loadSettings(): AppSettings {
         s.theme = "dark"
     }
     s.fontPath = kv.getString("appearance.font_path")
-    s.uiScale = normalizeUiScale(kv.getString("appearance.ui_scale", defaultValue: "auto"))
     s.languagePreference = normalizeLanguagePreference(
         kv.getString("appearance.language", defaultValue: LANGUAGE_SYSTEM))
     s.readerMode = kv.getString("reader.mode", defaultValue: "single-ltr")
@@ -330,7 +325,6 @@ private func writeSettingsLocked(s: AppSettings): Unit {
     let _ = kv.set("schema.version", Int64(1))
     let _ = kv.set("appearance.theme", s.theme)
     let _ = kv.set("appearance.font_path", s.fontPath)
-    let _ = kv.set("appearance.ui_scale", normalizeUiScale(s.uiScale))
     let _ = kv.set("appearance.language", normalizeLanguagePreference(s.languagePreference))
     let _ = kv.set("reader.mode", s.readerMode)
     let _ = kv.set("reader.double_page", s.readerDoublePage)
@@ -439,54 +433,5 @@ public func indexToLanguagePreference(index: Int64): String {
         case 1 => LANGUAGE_ZH
         case 2 => LANGUAGE_EN
         case _ => LANGUAGE_SYSTEM
-    }
-}
-
-// ---- 界面缩放 ----
-
-// 缩放偏好白名单：auto（跟随系统）与四个固定百分比；非法值回退 auto。
-public func normalizeUiScale(v: String): String {
-    if (v == "auto" || v == "100" || v == "125" || v == "150" || v == "200") {
-        v
-    } else {
-        "auto"
-    }
-}
-
-// 缩放偏好值 ↔ 外观页 SegmentedControl 分段索引（0=跟随系统 1~4=100%~200%）。
-public func uiScaleToIndex(v: String): Int64 {
-    match (normalizeUiScale(v)) {
-        case "100" => 1
-        case "125" => 2
-        case "150" => 3
-        case "200" => 4
-        case _ => 0
-    }
-}
-
-public func indexToUiScale(i: Int64): String {
-    match (i) {
-        case 1 => "100"
-        case 2 => "125"
-        case 3 => "150"
-        case 4 => "200"
-        case _ => "auto"
-    }
-}
-
-// 启动时把缩放偏好解析为窗口缩放因子：归一化后只剩白名单五值，固定百分比直接换算；
-// auto 查主显示器 contentScale（SDL_Init 引用计数，可在建窗前调用），无显示环境/查询失败回退 1.0。
-public func resolveUiScale(preference: String): Float32 {
-    match (normalizeUiScale(preference)) {
-        case "100" => 1.0
-        case "125" => 1.25
-        case "150" => 1.5
-        case "200" => 2.0
-        case _ =>
-            try {
-                primaryDisplayInfo().geometry.contentScale
-            } catch (_: Exception) {
-                1.0
-            }
     }
 }
