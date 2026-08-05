@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu 上传与在线下载重设计 · 交互原型（抽屉 / 页面）</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-card: #131316;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;
+    --accent-soft: rgba(232,176,75,.16);
+    --danger: #e05d5d;
+    --success: #4caf7d;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+  button { font-family: inherit; color: var(--text); background: transparent; border: none; cursor: pointer; }
+  input, textarea, select { font-family: inherit; user-select: text; }
+
+  #window {
+    width: min(1320px, 96vw); height: min(860px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏（全局，与各 redesign 一致） ============ */
+  #topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-capsule); backdrop-filter: blur(18px); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; margin-right: 6px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .brand b { font-size: 15px; letter-spacing: .02em; }
+  .search-shell { flex: 0 1 460px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 12px; color: var(--text-dim); font-size: 13px; transition: .15s; }
+  .search-shell:hover { border-color: rgba(232,176,75,.4); }
+  .kbd { font-size: 10.5px; border: 1px solid var(--border); border-radius: 5px;
+      padding: 1px 6px; color: var(--text-dim); }
+  .nav-pill { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; gap: 2px; }
+  .nav-pill button { padding: 6px 14px; font-size: 12.5px; border-radius: 999px; color: var(--text-dim); }
+  .nav-pill button.on { background: var(--accent-soft); color: var(--accent); }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      color: var(--text-dim); transition: .15s; flex: none; }
+  .icon-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+  .user-chip { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+      font-size: 12px; color: var(--text-dim); }
+  .avatar { width: 24px; height: 24px; border-radius: 50%;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55);
+      display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; }
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 场景容器：抽屉形态 / 页面形态 ============ */
+  #stage { flex: 1; position: relative; overflow: hidden; }
+  .scene { position: absolute; inset: 0; display: none; }
+  .scene.on { display: flex; animation: fadeUp .3s ease both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } }
+
+  /* ---- 场景一背景：首页缩略（卡片网格示意，被抽屉遮罩压暗） ---- */
+  #home-mock { flex: 1; overflow: hidden; padding: 18px 22px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 18px 14px; align-content: start; }
+  .mock-card .mc { width: 100%; aspect-ratio: 3/4; border-radius: 12px;
+      border: 1px solid var(--border); display: flex; align-items: center;
+      justify-content: center; font-size: 30px; opacity: .85; }
+  .mock-card .mt { margin-top: 8px; height: 10px; border-radius: 5px;
+      background: var(--bg-elev); width: 82%; }
+  .mock-card .mm { margin-top: 6px; height: 8px; border-radius: 4px;
+      background: var(--bg-elev); width: 55%; opacity: .7; }
+  .reopen-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+      z-index: 15; display: none; flex-direction: column; align-items: center; gap: 12px;
+      color: var(--text-dim); font-size: 12.5px; letter-spacing: .06em; }
+  #scene-drawer.closed .reopen-hint { display: flex; }
+
+  /* ---- 右侧抽屉（与 reader 侧栏同一 translateX 模式） ---- */
+  #drawer-mask { position: absolute; inset: 0; z-index: 20;
+      background: rgba(0,0,0,.45); backdrop-filter: blur(3px);
+      opacity: 1; transition: opacity .25s; }
+  #scene-drawer.closed #drawer-mask { opacity: 0; pointer-events: none; }
+  #drawer { position: absolute; top: 0; bottom: 0; right: 0; width: 420px; z-index: 25;
+      background: var(--bg); border-left: 1px solid var(--border);
+      box-shadow: -24px 0 60px rgba(0,0,0,.45);
+      transform: translateX(0); transition: transform .3s ease;
+      display: flex; flex-direction: column; }
+  #scene-drawer.closed #drawer { transform: translateX(102%); }
+  .drawer-head { flex: none; display: flex; align-items: center; gap: 10px;
+      padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+  .drawer-head h2 { font-size: 16px; font-weight: 700; flex: 1; letter-spacing: .02em; }
+  .drawer-body { flex: 1; overflow-y: auto; padding: 14px 16px 20px; }
+  .drawer-body::-webkit-scrollbar { width: 5px; }
+  .drawer-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ---- 场景二：页面形态（左导航 + 右内容，与设置页骨架一致） ---- */
+  #page-nav { width: 224px; flex: none; border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .side-sec { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; padding: 12px 10px 6px; }
+  .side-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+      border-radius: 9px; font-size: 13px; color: var(--text-dim); cursor: pointer; transition: .13s; }
+  .side-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .side-item.on { background: var(--accent-soft); color: var(--accent); }
+  .side-item .cnt { margin-left: auto; font-size: 11px; opacity: .7; }
+  #page-main { flex: 1; overflow-y: auto; padding: 22px 26px 48px; scroll-behavior: smooth; }
+  #page-main::-webkit-scrollbar { width: 6px; }
+  #page-main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .page-wrap { max-width: 860px; }
+  .page-wrap h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .page-sub { font-size: 12.5px; color: var(--text-dim); margin-bottom: 20px; }
+
+  /* ============ seg Tab（上传档案 / 在线下载，与设置页一致） ============ */
+  .seg { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 9px; padding: 2px; gap: 2px; margin-bottom: 16px; }
+  .seg button { flex: 1; padding: 6px 13px; font-size: 12.5px; border-radius: 7px;
+      color: var(--text-dim); transition: .13s; }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
+  .tab-pane { display: none; }
+  .tab-pane.on { display: block; animation: fadeUp .3s ease both; }
+
+  /* ============ 表单件 ============ */
+  .fld { margin-bottom: 14px; }
+  .fld-label { font-size: 12px; color: var(--text-dim); margin-bottom: 7px;
+      display: flex; align-items: center; gap: 5px; }
+  .fld-label .req { color: var(--danger); }
+  .sel-wrap { position: relative; }
+  .sel-wrap::after { content: "▾"; position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%); color: var(--text-dim); font-size: 11px; pointer-events: none; }
+  .s-select { width: 100%; appearance: none; cursor: pointer; outline: none;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px;
+      padding: 8px 28px 8px 12px; font-size: 12.5px; color: var(--text); transition: .13s; }
+  .s-select:hover, .s-select:focus { border-color: rgba(232,176,75,.4); }
+  .s-select option { background: #1a1a1e; color: #e8e8ea; }
+  .url-input { width: 100%; resize: vertical; outline: none;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.7; color: var(--text);
+      font-family: "SF Mono", Consolas, monospace; transition: .13s; }
+  .url-input:focus { border-color: rgba(232,176,75,.4); }
+
+  /* ============ 拖拽区 ============ */
+  .dropzone { border: 1.5px dashed var(--border); border-radius: var(--radius);
+      padding: 30px 18px; text-align: center; cursor: pointer; transition: .18s;
+      margin-bottom: 16px; }
+  .dropzone:hover { border-color: rgba(232,176,75,.4); }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .dropzone .dz-ico { font-size: 30px; opacity: .7; margin-bottom: 8px; }
+  .dropzone .dz-main { font-size: 13px; font-weight: 600; }
+  .dropzone .dz-hint { font-size: 11.5px; color: var(--text-dim); margin-top: 5px; }
+  .dropzone .dz-demo { margin-top: 12px; }
+
+  /* ============ 按钮 ============ */
+  .btn-primary { background: var(--accent); color: #1a1206; font-weight: 600; font-size: 12.5px;
+      padding: 8px 18px; border-radius: 9px; transition: .15s;
+      display: inline-flex; align-items: center; gap: 7px; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { padding: 8px 16px; border-radius: 9px; font-size: 12.5px; font-weight: 600;
+      border: 1px solid var(--border); color: var(--text-dim);
+      display: inline-flex; align-items: center; gap: 7px; transition: .15s; }
+  .btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .btn-ghost.sm { padding: 5px 11px; font-size: 11.5px; border-radius: 8px; }
+  .btn-danger { padding: 5px 11px; border-radius: 8px; font-size: 11.5px; font-weight: 600;
+      border: 1px solid rgba(224,93,93,.35); color: var(--danger);
+      background: rgba(224,93,93,.08); transition: .15s;
+      display: inline-flex; align-items: center; gap: 5px; }
+  .btn-danger:hover { background: rgba(224,93,93,.16); }
+
+  /* ============ 徽章 ============ */
+  .badge { font-size: 11px; padding: 3px 10px; border-radius: 999px; flex: none;
+      background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim); }
+  .badge.gold { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .badge.green { background: rgba(76,175,125,.14); color: var(--success); border-color: transparent; }
+  .badge.red { background: rgba(224,93,93,.12); color: var(--danger); border-color: transparent; }
+
+  /* ============ 列表头（统计 + 清除） ============ */
+  .list-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .list-head .stats { font-size: 12px; color: var(--text-dim); flex: 1; }
+  .list-head .stats b { color: var(--text); font-weight: 600; }
+  .list-head .stats .ok { color: var(--success); }
+  .list-head .stats .bad { color: var(--danger); }
+
+  /* ============ 文件卡（上传） ============ */
+  .f-grid { display: flex; flex-direction: column; gap: 10px; }
+  .page-wrap .f-grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .f-card { background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px 15px; transition: .15s; }
+  .f-card.st-fail { border-color: rgba(224,93,93,.3); }
+  .f-card.st-exists { border-color: rgba(232,176,75,.3); }
+  .f-top { display: flex; align-items: center; gap: 11px; }
+  .f-ico { width: 34px; height: 34px; flex: none; border-radius: 9px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .f-main { flex: 1; min-width: 0; }
+  .f-name { font-size: 13px; font-weight: 600; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+  .f-meta { font-size: 11px; color: var(--text-dim); margin-top: 3px;
+      display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .f-meta .speed { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .f-side { flex: none; display: flex; align-items: center; gap: 7px; }
+  .f-bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.12);
+      margin-top: 11px; overflow: hidden; }
+  .f-bar i { display: block; height: 100%; border-radius: 2px;
+      background: var(--accent); width: 0; transition: width .4s ease; }
+  .f-card.st-ok .f-bar i { background: var(--success); }
+  .f-card.st-fail .f-bar i { background: var(--danger); }
+  .pct { font-variant-numeric: tabular-nums; }
+
+  /* ============ 任务卡（在线下载） ============ */
+  .t-list { display: flex; flex-direction: column; gap: 10px; }
+  .t-card { background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 13px 15px; transition: .15s; }
+  .t-card.st-fail { border-color: rgba(224,93,93,.3); }
+  .t-top { display: flex; align-items: center; gap: 11px; }
+  .t-url { flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: "SF Mono", Consolas, monospace; }
+  .t-meta { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+  .t-meta .ok { color: var(--success); }
+  .log-toggle { flex: none; width: 26px; height: 26px; border-radius: 7px; font-size: 11px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .log-toggle:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .log-box { display: none; margin-top: 11px; max-height: 180px; overflow-y: auto;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 11px 13px; font-family: "SF Mono", Consolas, monospace;
+      font-size: 11px; line-height: 1.7; color: var(--text-dim); user-select: text;
+      white-space: pre-wrap; }
+  .log-box::-webkit-scrollbar { width: 5px; }
+  .log-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .log-box .lv-ok { color: var(--success); }
+  .log-box .lv-warn { color: var(--accent); }
+  .log-box .lv-err { color: var(--danger); }
+  .t-card.open .log-box { display: block; animation: fadeUp .25s ease both; }
+
+  /* 处理中旋转图标 */
+  .proc { display: inline-block; color: var(--accent); animation: spin 1.1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ============ 底部说明 ============ */
+  .foot-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--text-dim); display: flex; align-items: center;
+      gap: 7px; line-height: 1.6; }
+
+  /* ============ Toast ============ */
+  #toast { position: absolute; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
+      z-index: 50; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 18px; font-size: 12.5px;
+      display: flex; align-items: center; gap: 8px;
+      opacity: 0; pointer-events: none; transition: .25s;
+      box-shadow: 0 12px 32px rgba(0,0,0,.4); }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast .ok { color: var(--success); }
+  #toast .warn { color: var(--accent); }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-card: #ffffff;
+    --bg-capsule: rgba(255,255,255,.88);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+  }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .side-item:hover { background: rgba(0,0,0,.05); }
+  #window.light .log-toggle:hover { background: rgba(0,0,0,.05); }
+  #window.light .f-bar { background: rgba(0,0,0,.1); }
+  #window.light .s-select option { background: #fff; color: #1d1d21; }
+  #window.light .win-btn:hover { background: rgba(0,0,0,.07); }
+  #window.light .win-btn.close:hover { background: #e81123; color: #fff; }
+  #window.light #toast { box-shadow: 0 12px 32px rgba(0,0,0,.15); }
+  #window.light #drawer { box-shadow: -24px 0 60px rgba(0,0,0,.18); }
+  #window.light .mock-card .mt, #window.light .mock-card .mm { background: rgba(0,0,0,.06); }
+</style>
+</head>
+<body>
+
+<div id="window">
+  <!-- 顶栏（与首页一致：品牌 + 搜索 + 场景切换 + 设置/主题 + 用户 + 窗口控制） -->
+  <div id="topbar">
+    <div class="brand"><div class="brand-mark">🦌</div><b>Lanlu</b></div>
+    <div class="search-shell"><span>⌕</span><span style="flex:1">搜索标题、标签、艺术家…</span><span class="kbd">⌘K</span></div>
+    <div class="nav-pill" id="scene-pill">
+      <button class="on" data-scene="drawer">抽屉形态</button>
+      <button data-scene="page">页面形态</button>
+    </div>
+    <button class="icon-btn" title="设置">⚙</button>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <div class="user-chip"><div class="avatar">A</div><span>admin</span></div>
+    <span class="win-sep"></span>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <div id="stage">
+
+    <!-- ==================== 场景一：抽屉形态（快速上传） ==================== -->
+    <section class="scene on" id="scene-drawer">
+      <!-- 首页缩略背景：被抽屉遮罩压暗 -->
+      <div id="home-mock"></div>
+      <div class="reopen-hint">
+        <div>抽屉已关闭（演示用，实际传输完成前不可关闭）</div>
+        <button class="btn-ghost" id="btn-reopen">↩ 重新打开抽屉</button>
+      </div>
+
+      <!-- 遮罩：传输中点击拦截 -->
+      <div id="drawer-mask"></div>
+
+      <!-- 右侧抽屉 -->
+      <aside id="drawer">
+        <div class="drawer-head">
+          <h2>上传</h2>
+          <button class="icon-btn" id="btn-drawer-close" title="关闭 (Esc)">✕</button>
+        </div>
+        <div class="drawer-body">
+          <div class="seg" data-tabs>
+            <button class="on" data-tab="up">上传档案</button>
+            <button data-tab="dl">在线下载</button>
+          </div>
+
+          <!-- 抽屉 · 上传档案 -->
+          <div class="tab-pane on" data-pane="up">
+            <div class="fld">
+              <div class="fld-label">分类<span class="req">*</span></div>
+              <div class="sel-wrap">
+                <select class="s-select">
+                  <option value="" selected disabled>请选择分类…</option>
+                  <option>📚 同人志</option><option>🎨 插画集</option>
+                  <option>📖 漫画</option><option>🎬 动画</option><option>🎮 游戏</option>
+                </select>
+              </div>
+            </div>
+            <div class="dropzone" data-dropzone>
+              <div class="dz-ico">⬆</div>
+              <div class="dz-main">拖拽文件到此处，或点击选择</div>
+              <div class="dz-hint">支持 .cbz .zip .epub .pdf · 可多选</div>
+              <div class="dz-demo"><button class="btn-ghost sm" data-sim-drag>🎯 模拟拖入</button></div>
+            </div>
+            <div class="list-head">
+              <span class="stats">成功 <b class="ok">1</b> · 失败 <b class="bad">1</b> · 共 <b>5</b></span>
+              <button class="btn-ghost sm" data-clear-done>清除已完成</button>
+              <button class="btn-ghost sm" data-clear-all>清除全部</button>
+            </div>
+            <div class="f-grid">
+              <div class="f-card st-uploading" data-uploading>
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">夏日彼方的约定 第3话.cbz</div>
+                    <div class="f-meta"><span class="pct" data-pct>42%</span> · <span class="speed" data-speed>6.8 MB/s</span><span class="badge gold">断点续传</span></div>
+                  </div>
+                  <div class="f-side"><span class="badge gold">上传中</span></div>
+                </div>
+                <div class="f-bar"><i data-bar style="width:42%"></i></div>
+              </div>
+              <div class="f-card st-queued">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">雾岛夜话 全一卷.zip</div>
+                    <div class="f-meta">86.2 MB · 等待前序任务</div>
+                  </div>
+                  <div class="f-side"><span class="badge">排队中</span></div>
+                </div>
+              </div>
+              <div class="f-card st-ok">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">薄荷色快门.epub</div>
+                    <div class="f-meta">24.5 MB · 12 秒前完成</div>
+                  </div>
+                  <div class="f-side"><span class="badge green">✓ 成功</span></div>
+                </div>
+              </div>
+              <div class="f-card st-fail">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">深海观测日记 第12话.cbz</div>
+                    <div class="f-meta">分片 7/18 校验失败 · 网络中断</div>
+                  </div>
+                  <div class="f-side">
+                    <span class="badge red">✕ 失败</span>
+                    <button class="btn-danger" data-toast="已重新加入上传队列">⟳ 重试</button>
+                  </div>
+                </div>
+                <div class="f-bar"><i style="width:38%"></i></div>
+              </div>
+              <div class="f-card st-exists">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">星尘收藏夹.zip</div>
+                    <div class="f-meta">档案已存在（ID 768）· 跳过或覆盖</div>
+                  </div>
+                  <div class="f-side">
+                    <span class="badge gold">⚠ 已存在</span>
+                    <button class="btn-ghost sm" data-toast="已强制覆盖原档案">⇪ 强制覆盖</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="foot-note">🧩 分片上传 · 10MB/片 · 支持断点续传</div>
+          </div>
+
+          <!-- 抽屉 · 在线下载 -->
+          <div class="tab-pane" data-pane="dl">
+            <div class="fld">
+              <div class="fld-label">分类<span class="req">*</span></div>
+              <div class="sel-wrap">
+                <select class="s-select">
+                  <option value="" selected disabled>请选择分类…</option>
+                  <option>📚 同人志</option><option>🎨 插画集</option>
+                  <option>📖 漫画</option><option>🎬 动画</option><option>🎮 游戏</option>
+                </select>
+              </div>
+            </div>
+            <div class="fld">
+              <div class="fld-label">下载链接（每行一个）</div>
+              <textarea class="url-input" rows="3" spellcheck="false">https://example.org/g/3141592/夏日彼方的约定/
+https://example.org/g/2718281/苍蓝回路 总集篇/</textarea>
+            </div>
+            <div class="fld"><button class="btn-primary" data-toast="已添加 2 个下载任务">＋ 添加下载任务</button></div>
+            <div class="t-list">
+              <div class="t-card st-downloading" data-uploading>
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/3141592/夏日彼方的约定/</div>
+                    <div class="t-meta pct"><span data-pct>63%</span> · 24/36 页 · <span class="speed" data-speed>3.2 MB/s</span></div>
+                  </div>
+                  <span class="badge gold">下载中</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="f-bar"><i data-bar style="width:63%"></i></div>
+                <div class="log-box">[13:41:02] 解析画廊元数据…
+[13:41:03] <span class="lv-ok">✓ 标题：夏日彼方的约定 第3话</span>
+[13:41:03] <span class="lv-ok">✓ 共 36 页，开始下载</span>
+[13:41:04] → page_001.avif (812 KB)
+[13:41:04] → page_002.avif (796 KB)
+[13:41:05] → page_003.avif (904 KB)
+[13:41:06] <span class="lv-warn">! page_004 重试 1/3（连接超时）</span>
+[13:41:08] → page_004.avif (861 KB)
+[13:41:09] → page_005.avif (778 KB)
+[13:41:10] → page_006.avif (845 KB)
+[13:41:11] → page_007.avif (902 KB)
+[13:41:12] 已下载 24/36 页，继续中…</div>
+              </div>
+              <div class="t-card st-proc">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/2718281/苍蓝回路 总集篇/</div>
+                    <div class="t-meta">下载完成 · 正在解析入库…</div>
+                  </div>
+                  <span class="badge"><span class="proc">⟳</span> 处理中</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:38:44] <span class="lv-ok">✓ 212 页全部下载完成</span>
+[13:38:45] 计算文件哈希…
+[13:38:47] 生成封面与缩略图…
+[13:38:49] 写入元数据（标题 / 艺术家 / 标签）…
+[13:38:50] 归档为档案实体…</div>
+              </div>
+              <div class="t-card st-fail">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/1618033/深海观测日记/</div>
+                    <div class="t-meta">第 5 页下载失败 · HTTP 403</div>
+                  </div>
+                  <span class="badge red">✕ 失败</span>
+                  <button class="btn-danger" data-toast="已重新加入下载队列">⟳ 重试</button>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:22:10] 解析画廊元数据…
+[13:22:11] <span class="lv-ok">✓ 共 28 页，开始下载</span>
+[13:22:12] → page_001.avif (803 KB)
+[13:22:13] → page_002.avif (791 KB)
+[13:22:14] → page_003.avif (877 KB)
+[13:22:15] → page_004.avif (812 KB)
+[13:22:16] <span class="lv-err">✕ page_005 HTTP 403（可能需要登录态）</span>
+[13:22:16] <span class="lv-err">✕ 重试 3/3 均失败，任务终止</span></div>
+              </div>
+              <div class="t-card st-ok">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/1414213/薄荷色快门/</div>
+                    <div class="t-meta"><span class="ok">✓ 已入库 · ID 1024</span> · 36 页 · 2 分钟前</div>
+                  </div>
+                  <span class="badge green">✓ 已完成</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:11:02] 解析画廊元数据…
+[13:11:03] <span class="lv-ok">✓ 共 36 页，开始下载</span>
+[13:11:38] <span class="lv-ok">✓ 36 页全部下载完成</span>
+[13:11:40] 生成封面与缩略图…
+[13:11:42] <span class="lv-ok">✓ 入库完成，档案 ID 1024</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ==================== 场景二：页面形态（批量管理） ==================== -->
+    <section class="scene" id="scene-page">
+      <!-- 左侧分类导航（复用首页侧栏语言，「上传」高亮） -->
+      <aside id="page-nav">
+        <div class="side-sec">档案库</div>
+        <div class="side-item">🏠 全部档案<span class="cnt">909</span></div>
+        <div class="side-item">⭐ 收藏<span class="cnt">56</span></div>
+        <div class="side-item">🕘 最近阅读</div>
+        <div class="side-sec">分类</div>
+        <div class="side-item">📚 同人志<span class="cnt">342</span></div>
+        <div class="side-item">🎨 插画集<span class="cnt">128</span></div>
+        <div class="side-item">📖 漫画<span class="cnt">256</span></div>
+        <div class="side-item">🎬 动画<span class="cnt">64</span></div>
+        <div class="side-sec">其他</div>
+        <div class="side-item">🗂 合集<span class="cnt">78</span></div>
+        <div class="side-item on"><span>⬆</span>上传</div>
+        <div class="side-item">🏷 标签</div>
+      </aside>
+
+      <!-- 右侧内容区 -->
+      <main id="page-main">
+        <div class="page-wrap">
+          <h1>上传</h1>
+          <div class="page-sub">批量上传本地档案，或从 URL 在线下载入库</div>
+
+          <div class="seg" data-tabs>
+            <button class="on" data-tab="up">上传档案</button>
+            <button data-tab="dl">在线下载</button>
+          </div>
+
+          <!-- 页面 · 上传档案 -->
+          <div class="tab-pane on" data-pane="up">
+            <div class="fld" style="max-width:340px">
+              <div class="fld-label">分类<span class="req">*</span></div>
+              <div class="sel-wrap">
+                <select class="s-select">
+                  <option value="" selected disabled>请选择分类…</option>
+                  <option>📚 同人志</option><option>🎨 插画集</option>
+                  <option>📖 漫画</option><option>🎬 动画</option><option>🎮 游戏</option>
+                </select>
+              </div>
+            </div>
+            <div class="dropzone" data-dropzone style="padding:44px 18px">
+              <div class="dz-ico">⬆</div>
+              <div class="dz-main">拖拽文件到此处，或点击选择</div>
+              <div class="dz-hint">支持 .cbz .zip .epub .pdf · 可多选 · 批量任务自动排队</div>
+              <div class="dz-demo"><button class="btn-ghost sm" data-sim-drag>🎯 模拟拖入</button></div>
+            </div>
+            <div class="list-head">
+              <span class="stats">成功 <b class="ok">1</b> · 失败 <b class="bad">1</b> · 共 <b>5</b></span>
+              <button class="btn-ghost sm" data-clear-done>清除已完成</button>
+              <button class="btn-ghost sm" data-clear-all>清除全部</button>
+            </div>
+            <div class="f-grid">
+              <div class="f-card st-uploading" data-uploading>
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">夏日彼方的约定 第3话.cbz</div>
+                    <div class="f-meta"><span class="pct" data-pct>42%</span> · <span class="speed" data-speed>6.8 MB/s</span><span class="badge gold">断点续传</span></div>
+                  </div>
+                  <div class="f-side"><span class="badge gold">上传中</span></div>
+                </div>
+                <div class="f-bar"><i data-bar style="width:42%"></i></div>
+              </div>
+              <div class="f-card st-queued">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">雾岛夜话 全一卷.zip</div>
+                    <div class="f-meta">86.2 MB · 等待前序任务</div>
+                  </div>
+                  <div class="f-side"><span class="badge">排队中</span></div>
+                </div>
+              </div>
+              <div class="f-card st-ok">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">薄荷色快门.epub</div>
+                    <div class="f-meta">24.5 MB · 12 秒前完成</div>
+                  </div>
+                  <div class="f-side"><span class="badge green">✓ 成功</span></div>
+                </div>
+              </div>
+              <div class="f-card st-fail">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">深海观测日记 第12话.cbz</div>
+                    <div class="f-meta">分片 7/18 校验失败 · 网络中断</div>
+                  </div>
+                  <div class="f-side">
+                    <span class="badge red">✕ 失败</span>
+                    <button class="btn-danger" data-toast="已重新加入上传队列">⟳ 重试</button>
+                  </div>
+                </div>
+                <div class="f-bar"><i style="width:38%"></i></div>
+              </div>
+              <div class="f-card st-exists">
+                <div class="f-top">
+                  <div class="f-ico">📦</div>
+                  <div class="f-main">
+                    <div class="f-name">星尘收藏夹.zip</div>
+                    <div class="f-meta">档案已存在（ID 768）· 跳过或覆盖</div>
+                  </div>
+                  <div class="f-side">
+                    <span class="badge gold">⚠ 已存在</span>
+                    <button class="btn-ghost sm" data-toast="已强制覆盖原档案">⇪ 强制覆盖</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="foot-note">🧩 分片上传 · 10MB/片 · 支持断点续传</div>
+          </div>
+
+          <!-- 页面 · 在线下载 -->
+          <div class="tab-pane" data-pane="dl">
+            <div class="fld" style="max-width:340px">
+              <div class="fld-label">分类<span class="req">*</span></div>
+              <div class="sel-wrap">
+                <select class="s-select">
+                  <option value="" selected disabled>请选择分类…</option>
+                  <option>📚 同人志</option><option>🎨 插画集</option>
+                  <option>📖 漫画</option><option>🎬 动画</option><option>🎮 游戏</option>
+                </select>
+              </div>
+            </div>
+            <div class="fld">
+              <div class="fld-label">下载链接（每行一个）</div>
+              <textarea class="url-input" rows="4" spellcheck="false">https://example.org/g/3141592/夏日彼方的约定/
+https://example.org/g/2718281/苍蓝回路 总集篇/</textarea>
+            </div>
+            <div class="fld"><button class="btn-primary" data-toast="已添加 2 个下载任务">＋ 添加下载任务</button></div>
+            <div class="t-list">
+              <div class="t-card st-downloading" data-uploading>
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/3141592/夏日彼方的约定/</div>
+                    <div class="t-meta pct"><span data-pct>63%</span> · 24/36 页 · <span class="speed" data-speed>3.2 MB/s</span></div>
+                  </div>
+                  <span class="badge gold">下载中</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="f-bar"><i data-bar style="width:63%"></i></div>
+                <div class="log-box">[13:41:02] 解析画廊元数据…
+[13:41:03] <span class="lv-ok">✓ 标题：夏日彼方的约定 第3话</span>
+[13:41:03] <span class="lv-ok">✓ 共 36 页，开始下载</span>
+[13:41:04] → page_001.avif (812 KB)
+[13:41:04] → page_002.avif (796 KB)
+[13:41:05] → page_003.avif (904 KB)
+[13:41:06] <span class="lv-warn">! page_004 重试 1/3（连接超时）</span>
+[13:41:08] → page_004.avif (861 KB)
+[13:41:09] → page_005.avif (778 KB)
+[13:41:10] → page_006.avif (845 KB)
+[13:41:11] → page_007.avif (902 KB)
+[13:41:12] 已下载 24/36 页，继续中…</div>
+              </div>
+              <div class="t-card st-proc">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/2718281/苍蓝回路 总集篇/</div>
+                    <div class="t-meta">下载完成 · 正在解析入库…</div>
+                  </div>
+                  <span class="badge"><span class="proc">⟳</span> 处理中</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:38:44] <span class="lv-ok">✓ 212 页全部下载完成</span>
+[13:38:45] 计算文件哈希…
+[13:38:47] 生成封面与缩略图…
+[13:38:49] 写入元数据（标题 / 艺术家 / 标签）…
+[13:38:50] 归档为档案实体…</div>
+              </div>
+              <div class="t-card st-fail">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/1618033/深海观测日记/</div>
+                    <div class="t-meta">第 5 页下载失败 · HTTP 403</div>
+                  </div>
+                  <span class="badge red">✕ 失败</span>
+                  <button class="btn-danger" data-toast="已重新加入下载队列">⟳ 重试</button>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:22:10] 解析画廊元数据…
+[13:22:11] <span class="lv-ok">✓ 共 28 页，开始下载</span>
+[13:22:12] → page_001.avif (803 KB)
+[13:22:13] → page_002.avif (791 KB)
+[13:22:14] → page_003.avif (877 KB)
+[13:22:15] → page_004.avif (812 KB)
+[13:22:16] <span class="lv-err">✕ page_005 HTTP 403（可能需要登录态）</span>
+[13:22:16] <span class="lv-err">✕ 重试 3/3 均失败，任务终止</span></div>
+              </div>
+              <div class="t-card st-ok">
+                <div class="t-top">
+                  <div class="f-ico">🌐</div>
+                  <div class="f-main">
+                    <div class="t-url">https://example.org/g/1414213/薄荷色快门/</div>
+                    <div class="t-meta"><span class="ok">✓ 已入库 · ID 1024</span> · 36 页 · 2 分钟前</div>
+                  </div>
+                  <span class="badge green">✓ 已完成</span>
+                  <button class="log-toggle" data-log-toggle title="展开日志">▾</button>
+                </div>
+                <div class="log-box">[13:11:02] 解析画廊元数据…
+[13:11:03] <span class="lv-ok">✓ 共 36 页，开始下载</span>
+[13:11:38] <span class="lv-ok">✓ 36 页全部下载完成</span>
+[13:11:40] 生成封面与缩略图…
+[13:11:42] <span class="lv-ok">✓ 入库完成，档案 ID 1024</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"><span class="ok">✓</span><span id="toast-text"></span></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const W = $('#window');
+
+/* ================= 顶栏明暗切换 ================= */
+$('#btn-theme').onclick = () => W.classList.toggle('light');
+
+/* ================= 首页缩略背景造样（场景一） ================= */
+const MOCK_EMOJIS = ['📕','📗','📘','📙','📔','🖼','🌸','🌙','🎴','📚','⭐','📒'];
+const mockGrid = $('#home-mock');
+for (let i = 0; i < 24; i++) {
+  const hue = (i * 37) % 360;
+  const d = document.createElement('div');
+  d.className = 'mock-card';
+  d.innerHTML = `<div class="mc" style="background:linear-gradient(160deg,hsl(${hue} 38% 30%),hsl(${hue} 46% 13%))">${MOCK_EMOJIS[i % MOCK_EMOJIS.length]}</div><div class="mt"></div><div class="mm"></div>`;
+  mockGrid.appendChild(d);
+}
+
+/* ================= Toast ================= */
+const toastEl = $('#toast'), toastText = $('#toast-text');
+let toastTimer = null;
+function toast(msg, warn) {
+  toastText.textContent = msg;
+  toastEl.querySelector('span').className = warn ? 'warn' : 'ok';
+  toastEl.querySelector('span').textContent = warn ? '⚠' : '✓';
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+}
+
+/* ================= 通用：data-toast 按钮 ================= */
+$$('[data-toast]').forEach(b =>
+  b.addEventListener('click', () => toast(b.dataset.toast)));
+
+/* ================= 场景切换（nav-pill） ================= */
+$$('#scene-pill button').forEach(b => {
+  b.onclick = () => {
+    $$('#scene-pill button').forEach(x => x.classList.toggle('on', x === b));
+    $$('.scene').forEach(s => s.classList.remove('on'));
+    $('#scene-' + b.dataset.scene).classList.add('on');
+  };
+});
+
+/* ================= seg Tab 切换（上传档案 / 在线下载） ================= */
+$$('[data-tabs]').forEach(seg => {
+  const scope = seg.parentElement;
+  seg.querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      scope.querySelectorAll('.tab-pane').forEach(p =>
+        p.classList.toggle('on', p.dataset.pane === b.dataset.tab));
+    };
+  });
+});
+
+/* ================= 传输中标记：存在未完成任务时拦截抽屉关闭 ================= */
+const sceneDrawer = $('#scene-drawer');
+function transferring() {
+  return !!sceneDrawer.querySelector('[data-uploading]');
+}
+function tryCloseDrawer() {
+  if (transferring()) { toast('传输进行中，完成后才能关闭', true); return; }
+  sceneDrawer.classList.add('closed');
+}
+$('#btn-drawer-close').onclick = tryCloseDrawer;
+$('#drawer-mask').onclick = tryCloseDrawer;
+$('#btn-reopen').onclick = () => sceneDrawer.classList.remove('closed');
+
+/* ================= 模拟拖入：高亮拖拽区 ================= */
+$$('[data-sim-drag]').forEach(b => {
+  b.onclick = e => {
+    e.stopPropagation();
+    const dz = b.closest('[data-dropzone]');
+    dz.classList.add('drag');
+    setTimeout(() => dz.classList.remove('drag'), 900);
+    toast('已模拟拖入 3 个文件');
+  };
+});
+$$('[data-dropzone]').forEach(dz =>
+  dz.addEventListener('click', () => toast('请先选择分类，再选择文件', true)));
+
+/* ================= 清除已完成 / 清除全部 ================= */
+$$('[data-clear-done]').forEach(b => {
+  b.onclick = () => {
+    const pane = b.closest('.tab-pane');
+    const done = pane.querySelectorAll('.f-card.st-ok');
+    done.forEach(c => c.style.display = 'none');
+    toast(done.length ? `已清除 ${done.length} 条已完成记录` : '没有已完成的记录');
+  };
+});
+$$('[data-clear-all]').forEach(b => {
+  b.onclick = () => {
+    const pane = b.closest('.tab-pane');
+    const all = pane.querySelectorAll('.f-card');
+    all.forEach(c => c.style.display = 'none');
+    toast('已清除全部上传记录');
+  };
+});
+
+/* ================= 日志展开 / 收起 ================= */
+$$('[data-log-toggle]').forEach(b => {
+  b.onclick = () => {
+    const card = b.closest('.t-card');
+    card.classList.toggle('open');
+    b.textContent = card.classList.contains('open') ? '▴' : '▾';
+  };
+});
+
+/* ================= 进度模拟：setInterval 推进，到 100% 翻状态 ================= */
+$$('[data-uploading]').forEach(card => {
+  const bar = card.querySelector('[data-bar]');
+  const pct = card.querySelector('[data-pct]');
+  const speed = card.querySelector('[data-speed]');
+  if (!bar || !pct) return;
+  let v = parseInt(pct.textContent, 10) || 0;
+  const timer = setInterval(() => {
+    v = Math.min(100, v + Math.floor(Math.random() * 3) + 1);
+    bar.style.width = v + '%';
+    pct.textContent = v + '%';
+    if (speed) speed.textContent = (2 + Math.random() * 6).toFixed(1) + ' MB/s';
+    if (v >= 100) {
+      clearInterval(timer);
+      card.removeAttribute('data-uploading');
+      card.classList.remove('st-uploading', 'st-downloading');
+      card.classList.add('st-ok');
+      const badge = card.querySelector('.f-side .badge, .t-top > .badge');
+      if (badge) { badge.className = 'badge green'; badge.textContent = '✓ 成功'; }
+      if (speed) speed.textContent = '已完成';
+    }
+  }, 600);
+});
+</script>
+</body>
+</html>

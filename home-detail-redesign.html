@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu client-next 首页 / 详情页重设计 · 交互原型</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-card: #131316;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;
+    --accent-soft: rgba(232,176,75,.16);
+    --danger: #e05d5d;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+  button { font-family: inherit; color: var(--text); background: transparent; border: none; cursor: pointer; }
+
+  #window {
+    width: min(1320px, 96vw); height: min(860px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏（全局） ============ */
+  #topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-capsule); backdrop-filter: blur(18px); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; margin-right: 6px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .brand b { font-size: 15px; letter-spacing: .02em; }
+  /* 搜索框固定宽度、在中间区域居中（左右 margin auto 吸收剩余空间） */
+  .search-shell { flex: 0 1 460px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 12px; color: var(--text-dim); font-size: 13px; cursor: text; transition: .15s; }
+  .search-shell:focus-within, .search-shell:hover { border-color: rgba(232,176,75,.4); }
+  .search-shell input { flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 13px; font-family: inherit; }
+  .kbd { font-size: 10.5px; border: 1px solid var(--border); border-radius: 5px;
+      padding: 1px 6px; color: var(--text-dim); }
+  .nav-pill { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; gap: 2px; }
+  .nav-pill button { padding: 6px 14px; font-size: 12.5px; border-radius: 999px; color: var(--text-dim); }
+  .nav-pill button.on { background: var(--accent-soft); color: var(--accent); }
+
+  /* ============ 筛选面板（顶栏 🎚 按钮弹出） ============ */
+  #filter-panel {
+    position: absolute; top: 62px; left: 50%; z-index: 35; width: 380px;
+    transform: translateX(-50%) translateY(-6px);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    opacity: 0; pointer-events: none; transition: .18s;
+  }
+  #filter-panel.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #window.light #filter-panel { box-shadow: 0 18px 50px rgba(0,0,0,.14); }
+  .fp-sec { margin-bottom: 14px; }
+  .fp-k { font-size: 11px; color: var(--text-dim); letter-spacing: .08em; margin-bottom: 8px; }
+  .fp-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .fp-chip { font-size: 12px; padding: 5px 12px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--text-dim); transition: .13s; }
+  .fp-chip:hover { color: var(--text); }
+  .fp-chip.on { background: var(--accent-soft); color: var(--accent); border-color: rgba(232,176,75,.4); }
+  .fp-row { display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 0; font-size: 12.5px; }
+  .fp-actions { display: flex; gap: 10px; margin-top: 4px; }
+  .fp-actions button { flex: 1; justify-content: center; }
+  .btn-ghost { padding: 10px 0; border-radius: 10px; font-size: 13px; font-weight: 600;
+      border: 1px solid var(--border); color: var(--text-dim);
+      display: inline-flex; align-items: center; gap: 7px; transition: .15s; }
+  .btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .switch { width: 38px; height: 22px; border-radius: 999px; flex: none;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      position: relative; transition: .15s; cursor: pointer; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%; background: var(--text-dim); transition: .15s; }
+  .switch.on { background: var(--accent-soft); border-color: rgba(232,176,75,.4); }
+  .switch.on::after { left: 18px; background: var(--accent); }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      color: var(--text-dim); transition: .15s; flex: none; }
+  .icon-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+  .user-chip { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+      font-size: 12px; color: var(--text-dim); }
+  .avatar { width: 24px; height: 24px; border-radius: 50%;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55);
+      display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; }
+
+  /* ============ 视图切换 ============ */
+  .view { flex: 1; overflow: hidden; display: none; }
+  .view.on { display: flex; }
+
+  /* ============ 首页 ============ */
+  /* 左侧栏 */
+  #home-side { width: 224px; flex: none; border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .side-sec { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; padding: 12px 10px 6px; }
+  .side-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+      border-radius: 9px; font-size: 13px; color: var(--text-dim); cursor: pointer; transition: .13s; }
+  .side-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .side-item.on { background: var(--accent-soft); color: var(--accent); }
+  .side-item .cnt { margin-left: auto; font-size: 11px; opacity: .7; }
+  /* 主区 */
+  #home-main { flex: 1; overflow-y: auto; padding: 18px 22px 40px; scroll-behavior: smooth; }
+  .home-tools { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .sel { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px;
+      padding: 7px 10px; font-size: 12.5px; color: var(--text-dim); display: flex; gap: 6px; align-items: center; }
+  .home-tools .sp { flex: 1; }
+  .result-cnt { font-size: 12px; color: var(--text-dim); }
+
+  /* 横排行 */
+  .row-sec { margin-bottom: 30px; animation: fadeUp .4s ease both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } }
+  .row-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .row-head h2 { font-size: 16px; font-weight: 600; }
+  .row-head .more { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+  .row-head .more:hover { color: var(--accent); }
+  .card-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
+      scrollbar-width: thin; }
+  .card-row::-webkit-scrollbar { height: 6px; }
+
+  /* 卡片（档案/合集通用） */
+  .card { width: 168px; flex: none; cursor: pointer; }
+  .card .cover { width: 100%; aspect-ratio: 3/4; border-radius: 12px; position: relative;
+      overflow: hidden; border: 1px solid var(--border);
+      background: linear-gradient(160deg,#2b3a55,#141b28);
+      transition: transform .18s ease, box-shadow .18s ease; }
+  .card:hover .cover { transform: translateY(-4px);
+      box-shadow: 0 14px 32px rgba(0,0,0,.5); outline: 1px solid rgba(232,176,75,.45); }
+  .cover .ph { position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; font-size: 34px; opacity: .4; }
+  .cover .badge-new { position: absolute; top: 8px; right: 8px; background: var(--danger);
+      color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+  .cover .badge-type { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.65);
+      backdrop-filter: blur(6px); font-size: 10.5px; padding: 3px 8px; border-radius: 6px;
+      color: #f2f2f4;  /* 叠层语义：封面上的 chip 不随主题翻转 */
+      display: flex; gap: 4px; align-items: center; }
+  .cover .badge-type.tank { color: var(--accent); }
+  .cover .fav { position: absolute; bottom: 8px; right: 8px; width: 28px; height: 28px;
+      border-radius: 50%; background: rgba(0,0,0,.6); backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center; font-size: 13px;
+      color: #fff; opacity: 0; transition: .15s; }
+  .card:hover .fav, .fav.on { opacity: 1; }
+  .fav.on { color: var(--accent); }
+  .cover .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+      background: rgba(255,255,255,.15); }
+  .cover .prog i { display: block; height: 100%; background: var(--accent); }
+  /* 合集叠层效果 */
+  .card.tank .cover::before { content: ""; position: absolute; inset: 0; z-index: 0; }
+  .card.tank .stack { position: absolute; inset: 0; }
+  .card.tank .stack::before, .card.tank .stack::after {
+      content: ""; position: absolute; inset: 0; border-radius: 12px;
+      background: linear-gradient(160deg,#22304a,#10151f); border: 1px solid var(--border); }
+  .card.tank .stack::before { transform: translate(5px,-5px) scale(.96); z-index: -1; }
+  .card .t { margin-top: 8px; font-size: 12.5px; line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .m { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  /* 搜索/筛选网格态 */
+  #home-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+      gap: 18px 14px; }
+  #home-main.searched .row-sec { display: none; }
+  #home-main.searched #home-grid { display: grid; }
+  #home-grid .card { width: auto; }
+  .pager { display: none; justify-content: center; align-items: center; gap: 14px; margin-top: 26px;
+      font-size: 12.5px; color: var(--text-dim); }
+  #home-main.searched .pager { display: flex; }
+  .pager button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  .pager button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ============ 详情页（档案 & 合集共用骨架） ============ */
+  #detail { flex-direction: column; overflow-y: auto; position: relative; }
+  .backdrop { height: 300px; flex: none; position: relative; overflow: hidden; margin-top: -56px; padding-top: 56px; }
+  .backdrop .bg { position: absolute; inset: -30px;
+      background: linear-gradient(140deg,#3a4a6b,#1a2333 50%,#0d1420);
+      filter: blur(36px) brightness(.8); }
+  .backdrop .scrim { position: absolute; inset: 0;
+      background: linear-gradient(transparent, var(--bg) 96%),
+                  linear-gradient(90deg, rgba(11,11,13,.5), transparent 40%); }
+  .hero { display: grid; grid-template-columns: 200px 1fr 176px; gap: 26px;
+      padding: 0 32px; margin-top: -128px; position: relative; z-index: 2; }
+  .hero .cover-big { width: 200px; aspect-ratio: 2/3; border-radius: 14px;
+      background: linear-gradient(160deg,#2b3a55,#101722); border: 1px solid var(--border);
+      box-shadow: 0 18px 48px rgba(0,0,0,.55); display: flex; align-items: center;
+      justify-content: center; font-size: 52px; position: relative; overflow: hidden; }
+  .hero .cover-big .stack-fx { position: absolute; inset: 0; }
+  .hero-mid { min-width: 0; padding-top: 96px; }
+  .badge-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .badge { font-size: 11px; padding: 3px 10px; border-radius: 999px;
+      background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim); }
+  .badge.gold { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .badge.blue { background: rgba(90,140,220,.16); color: #7ba7e8; border-color: transparent; }
+  .hero h1 { font-size: clamp(24px, 3vw, 36px); font-weight: 700; line-height: 1.25;
+      margin-bottom: 8px; }
+  .meta-line { font-size: 13px; color: var(--text-dim); display: flex; gap: 8px;
+      align-items: center; flex-wrap: wrap; }
+  .meta-line .dot::before { content: "·"; margin-right: 8px; opacity: .5; }
+  .hero-prog { display: flex; align-items: center; gap: 12px; margin-top: 12px; max-width: 480px; }
+  .hero-prog .bar { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,.12); }
+  .hero-prog .bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .hero-prog .pct { font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .summary { margin-top: 12px; font-size: 13px; line-height: 1.8; color: var(--text-dim);
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .tag-row { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 12px; }
+  .tag { font-size: 11.5px; padding: 4px 11px; border-radius: 999px;
+      background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text-dim);
+      cursor: pointer; transition: .13s; }
+  .tag:hover { color: var(--accent); border-color: rgba(232,176,75,.4); }
+  /* 右侧操作卡 */
+  .action-card { align-self: end; background: var(--bg-capsule); backdrop-filter: blur(18px);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 14px;
+      display: flex; flex-direction: column; gap: 9px; margin-bottom: 4px; }
+  .btn-primary { background: var(--accent); color: #1a1206; font-weight: 600; font-size: 13.5px;
+      padding: 11px 0; border-radius: 10px; transition: .15s; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .action-icons { display: flex; justify-content: space-between; }
+  .action-icons .icon-btn { width: 32px; height: 32px; font-size: 14px; }
+
+  /* 内容双列 */
+  .detail-grid { display: grid; grid-template-columns: 1fr 300px; gap: 22px;
+      padding: 26px 32px 48px; align-items: start; }
+  .d-card { background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px; margin-bottom: 20px; }
+  .d-card h3 { font-size: 14.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .d-card h3 .cnt-badge { font-size: 11px; background: var(--bg-elev); border: 1px solid var(--border);
+      padding: 2px 9px; border-radius: 999px; color: var(--text-dim); font-weight: 400; }
+  .d-card h3 .tools { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+  .mini-seg { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 8px; padding: 2px; gap: 2px; }
+  .mini-seg button { padding: 4px 9px; font-size: 11px; border-radius: 6px; color: var(--text-dim); }
+  .mini-seg button.on { background: var(--accent-soft); color: var(--accent); }
+  .inline-filter { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px;
+      padding: 5px 10px; font-size: 11.5px; color: var(--text); outline: none; width: 130px;
+      font-family: inherit; }
+
+  /* 页面预览：缩略图 */
+  .pv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 10px; margin-top: 14px; }
+  .pv-thumb { aspect-ratio: 16/10; border-radius: 9px; border: 1px solid var(--border);
+      background: linear-gradient(160deg,#253247,#141b28); position: relative;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--text-dim); cursor: pointer; transition: .13s; }
+  .pv-thumb:hover { outline: 1px solid var(--accent); }
+  .pv-thumb .no { position: absolute; top: 5px; left: 5px; background: rgba(0,0,0,.6);
+      font-size: 9.5px; padding: 1px 6px; border-radius: 5px; }
+  .pv-thumb .ty { position: absolute; top: 5px; right: 5px; font-size: 10px; }
+  .pv-thumb.read { opacity: .45; }
+  /* 页面预览：列表/树 */
+  .pv-list { margin-top: 10px; }
+  .pv-row { display: flex; align-items: center; gap: 10px; padding: 7px 8px;
+      border-radius: 8px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
+  .pv-row:hover { background: rgba(255,255,255,.04); color: var(--text); }
+  .pv-row .n { width: 30px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+  .pv-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pv-row.read { opacity: .45; }
+  .pv-row.dir { color: var(--text); font-weight: 600; margin-top: 4px; }
+
+  /* 合集成员卡 */
+  .member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 16px 12px; margin-top: 14px; }
+  .member-grid .card { width: auto; }
+  .member-grid .card .cover { border-radius: 10px; }
+  .member-list { margin-top: 10px; display: none; }
+  .member-row { display: flex; align-items: center; gap: 12px; padding: 8px;
+      border-radius: 10px; cursor: pointer; }
+  .member-row:hover { background: rgba(255,255,255,.04); }
+  .member-row .mc { width: 40px; height: 56px; border-radius: 7px; flex: none;
+      background: linear-gradient(160deg,#2b3a55,#141b28); border: 1px solid var(--border); }
+  .member-row .mt { flex: 1; min-width: 0; }
+  .member-row .mt b { font-size: 13px; display: block; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+  .member-row .mt span { font-size: 11.5px; color: var(--text-dim); }
+  .member-row .ord { font-size: 11px; color: var(--text-dim); width: 30px; text-align: right; }
+  #detail.tank-view .member-grid { display: none; }
+  #detail.tank-view .member-list.on { display: block; }
+  #detail.tank-view .member-grid.on { display: grid; }
+  .member-row .prog-mini { width: 90px; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,.1); flex: none; }
+  .member-row .prog-mini i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+
+  /* 相关推荐横排 */
+  .rel-row { display: flex; gap: 14px; overflow-x: auto; margin-top: 14px; padding-bottom: 4px; }
+  .rel-row .card { width: 132px; }
+
+  /* 侧栏卡 */
+  .side-col { position: sticky; top: 0; }
+  .prog-card { text-align: center; padding: 22px 18px; }
+  .prog-card .big { font-size: 38px; font-weight: 700; color: var(--accent);
+      font-variant-numeric: tabular-nums; }
+  .prog-card .of { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .prog-card .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1);
+      margin-top: 14px; }
+  .prog-card .bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .info-list { margin-top: 12px; }
+  .info-row { display: flex; font-size: 12.5px; padding: 7px 0;
+      border-bottom: 1px solid rgba(255,255,255,.04); }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .k { width: 76px; flex: none; color: var(--text-dim); }
+  .info-row .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; }
+  .tag-group { margin-top: 12px; }
+  .tag-group .gk { font-size: 11px; color: var(--text-dim); letter-spacing: .08em; margin: 10px 0 7px; }
+
+  /* 详情页专属显隐：archive vs tankoubon */
+  #detail .only-archive, #detail .only-tank { display: none; }
+  #detail.archive-view .only-archive { display: block; }
+  #detail.tank-view .only-tank { display: block; }
+  #detail.archive-view .only-archive.flex, #detail.tank-view .only-tank.flex { display: flex; }
+
+  /* demo 工具条 */
+  #demo-bar { position: fixed; top: 8px; left: 8px; z-index: 99; display: flex; gap: 6px;
+      background: rgba(0,0,0,.7); border: 1px solid #444; border-radius: 10px; padding: 6px; }
+  #demo-bar button { font-size: 11px; color: #ccc; padding: 5px 9px; border-radius: 7px;
+      border: 1px solid #444; }
+  #demo-bar button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* ============ 窗口控制（最小化/最大化/关闭） ============ */
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+  #window.light .win-btn:hover { background: rgba(0,0,0,.07); }
+  #window.light .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-card: #ffffff;
+    --bg-capsule: rgba(255,255,255,.88);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+  }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .side-item:hover { background: rgba(0,0,0,.05); }
+  #window.light .card .cover, #window.light .hero .cover-big,
+  #window.light .member-row .mc { background: linear-gradient(160deg,#dde4f0,#c3cddd); }
+  #window.light .card.tank .stack::before, #window.light .card.tank .stack::after {
+      background: linear-gradient(160deg,#d5dcea,#c0c9d9); }
+  #window.light .pv-thumb { background: linear-gradient(160deg,#dde4f0,#c9d2e2); color: #6d6d76; }
+  #window.light .pv-thumb .no { background: rgba(255,255,255,.7); }
+  #window.light .pv-row:hover, #window.light .member-row:hover { background: rgba(0,0,0,.04); }
+  #window.light .tag { background: rgba(0,0,0,.05); }
+  #window.light .cover .prog, #window.light .hero-prog .bar,
+  #window.light .prog-card .bar, #window.light .member-row .prog-mini {
+      background: rgba(0,0,0,.12); }
+  #window.light .info-row { border-bottom-color: rgba(0,0,0,.06); }
+  #window.light .cover .fav { color: #fff; }
+  #window.light .avatar { color: #fff; }
+  #window.light .backdrop .bg { filter: blur(36px) brightness(1.3) saturate(.8); }
+  #window.light .backdrop .scrim {
+      background: linear-gradient(rgba(244,244,246,.45), var(--bg) 92%),
+                  linear-gradient(90deg, rgba(244,244,246,.55), transparent 40%); }
+  #window.light .pager button:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div id="demo-bar">
+  <span style="font-size:11px;color:#888;padding:5px 4px">视图:</span>
+  <button data-view="home" class="on">首页</button>
+  <button data-view="archive">档案详情</button>
+  <button data-view="tank">合集详情</button>
+</div>
+
+<div id="window">
+  <!-- 全局顶栏 -->
+  <div id="topbar">
+    <button class="icon-btn" id="btn-back" title="返回" style="display:none">←</button>
+    <div class="brand"><div class="brand-mark">🦌</div><b>Lanlu</b></div>
+    <div class="search-shell">
+      <span>⌕</span>
+      <input id="search-input" placeholder="搜索标题 / 标签 / 艺术家…">
+    </div>
+    <button class="icon-btn" id="btn-filter" title="筛选">🎚</button>
+    <div class="nav-pill">
+      <button class="on">首页</button><button>随机</button><button>来源</button>
+    </div>
+    <button class="icon-btn" title="设置">⚙</button>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <div class="user-chip"><div class="avatar">U</div>user</div>
+    <span class="win-sep"></span>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <!-- 筛选面板（顶栏 🎚 按钮弹出，对齐 web 端 FILTER_OPEN 抽屉） -->
+  <div id="filter-panel">
+    <div class="fp-sec">
+      <div class="fp-k">排序</div>
+      <div class="fp-chips" id="fp-sort">
+        <button class="fp-chip on">最近添加</button>
+        <button class="fp-chip">标题</button>
+        <button class="fp-chip">评分</button>
+        <button class="fp-chip">阅读进度</button>
+      </div>
+    </div>
+    <div class="fp-sec">
+      <div class="fp-k">分类（可多选）</div>
+      <div class="fp-chips" id="fp-cats">
+        <button class="fp-chip">同人志</button>
+        <button class="fp-chip">商业志</button>
+        <button class="fp-chip">画集</button>
+        <button class="fp-chip">COSPLAY</button>
+        <button class="fp-chip">视频</button>
+        <button class="fp-chip">音声</button>
+        <button class="fp-chip">小说</button>
+      </div>
+    </div>
+    <div class="fp-sec">
+      <div class="fp-row">仅收藏<div class="switch" data-fp-sw></div></div>
+      <div class="fp-row">仅未读<div class="switch" data-fp-sw></div></div>
+    </div>
+    <div class="fp-actions">
+      <button class="btn-ghost" id="fp-reset">重 置</button>
+      <button class="btn-primary" id="fp-apply" style="padding:10px 0;border-radius:10px">应用筛选</button>
+    </div>
+  </div>
+
+  <!-- ================= 首页 ================= -->
+  <div class="view on" id="home">
+    <aside id="home-side">
+      <div class="side-sec">浏览</div>
+      <div class="side-item on">📚 全部档案<span class="cnt">1,286</span></div>
+      <div class="side-item">♥ 仅收藏<span class="cnt">87</span></div>
+      <div class="side-item">✦ 仅未读<span class="cnt">642</span></div>
+      <div class="side-item">🏷 无标签<span class="cnt">23</span></div>
+      <div class="side-sec">分类</div>
+      <div class="side-item">同人志<span class="cnt">512</span></div>
+      <div class="side-item">商业志<span class="cnt">301</span></div>
+      <div class="side-item">画集<span class="cnt">96</span></div>
+      <div class="side-item">COSPLAY<span class="cnt">144</span></div>
+      <div class="side-item">视频<span class="cnt">58</span></div>
+      <div class="side-item">音声<span class="cnt">75</span></div>
+      <div class="side-item">小说<span class="cnt">100</span></div>
+    </aside>
+    <main id="home-main">
+      <div class="home-tools">
+        <div class="sel">⇅ 最近添加 ▾</div>
+        <div class="sel">合集聚合 开 ▾</div>
+        <span class="sp"></span>
+        <span class="result-cnt">共 1,286 项</span>
+        <button class="icon-btn" title="刷新">⟳</button>
+      </div>
+
+      <!-- 继续阅读行 -->
+      <section class="row-sec">
+        <div class="row-head"><h2>继续阅读</h2><button class="more">查看更多 ›</button></div>
+        <div class="card-row" id="row-resume"></div>
+      </section>
+      <!-- 随机推荐行 -->
+      <section class="row-sec">
+        <div class="row-head"><h2>随机推荐</h2><button class="more">⟳ 换一批</button></div>
+        <div class="card-row" id="row-random"></div>
+      </section>
+      <!-- 新到行 -->
+      <section class="row-sec">
+        <div class="row-head"><h2>新到档案</h2><button class="more">查看更多 ›</button></div>
+        <div class="card-row" id="row-new"></div>
+      </section>
+      <!-- 分类行 -->
+      <section class="row-sec">
+        <div class="row-head"><h2>同人志</h2><button class="more">查看更多 ›</button></div>
+        <div class="card-row" id="row-cat"></div>
+      </section>
+
+      <!-- 搜索/筛选态网格 -->
+      <div id="home-grid"></div>
+      <div class="pager">
+        <button>‹ 上一页</button><span>第 2 / 54 页</span><button>下一页 ›</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= 详情页 ================= -->
+  <div class="view archive-view" id="detail">
+    <div class="backdrop"><div class="bg"></div><div class="scrim"></div></div>
+
+    <div class="hero">
+      <div class="cover-big">🖼<div class="stack-fx"></div></div>
+      <div class="hero-mid">
+        <div class="badge-row">
+          <span class="badge gold only-archive">档案 · 图像</span>
+          <span class="badge gold only-tank">合集</span>
+          <span class="badge blue">已完结</span>
+          <span class="badge">2024</span>
+          <span class="badge">同人志</span>
+        </div>
+        <h1 id="d-title">某个超长标题的档案名称 第3话</h1>
+        <div class="meta-line" id="d-meta">
+          <span class="only-archive">48 页 · 96.2 MB</span>
+          <span class="only-tank">12 个档案 · 共 486 页</span>
+          <span class="dot">发布于 2024-08-17</span>
+          <span class="dot">更新于 2024-11-02</span>
+        </div>
+        <div class="hero-prog">
+          <div class="bar"><i style="width:64%"></i></div>
+          <span class="pct">已读 64%</span>
+        </div>
+        <p class="summary">这里是档案简介，三到四行截断。讲述主角在命运的岔路口做出的抉择，以及那场改变一切的雪夜之战。简介内容由元数据插件抓取，可编辑。</p>
+        <div class="tag-row">
+          <span class="tag">artist:某某</span><span class="tag">group:某社团</span>
+          <span class="tag">parody:原作名</span><span class="tag">full color</span>
+          <span class="tag">language:chinese</span><span class="tag">+12</span>
+        </div>
+      </div>
+      <div class="action-card">
+        <button class="btn-primary only-archive" id="d-primary-archive">▶ 继续阅读 · P.31</button>
+        <button class="btn-primary only-tank">▶ 从头开始阅读</button>
+        <div class="action-icons">
+          <button class="icon-btn" title="收藏">♡</button>
+          <button class="icon-btn only-archive" title="下载">⤓</button>
+          <button class="icon-btn only-archive" title="加入合集">⧉</button>
+          <button class="icon-btn" title="编辑">✎</button>
+          <button class="icon-btn" title="更多">⋯</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <!-- 主列 -->
+      <div>
+        <!-- 档案：页面预览 -->
+        <div class="d-card only-archive">
+          <h3>页面预览 <span class="cnt-badge">48 页</span>
+            <span class="tools">
+              <span class="mini-seg" id="pv-seg">
+                <button data-pv="grid" class="on">缩略图</button>
+                <button data-pv="list">列表</button>
+                <button data-pv="tree">树</button>
+              </span>
+            </span>
+          </h3>
+          <div class="pv-grid" id="pv-grid"></div>
+          <div class="pv-list" id="pv-list" style="display:none"></div>
+          <div class="pv-list" id="pv-tree" style="display:none"></div>
+        </div>
+
+        <!-- 合集：成员档案 -->
+        <div class="d-card only-tank">
+          <h3>收录档案 <span class="cnt-badge">12</span>
+            <span class="tools">
+              <input class="inline-filter" placeholder="筛选…" id="member-filter">
+              <span class="mini-seg" id="mb-seg">
+                <button data-mb="grid" class="on">网格</button>
+                <button data-mb="list">列表</button>
+              </span>
+            </span>
+          </h3>
+          <div class="member-grid on" id="member-grid"></div>
+          <div class="member-list" id="member-list"></div>
+        </div>
+
+        <!-- 档案：所属合集 -->
+        <div class="d-card only-archive">
+          <h3>所属合集 <span class="cnt-badge">2</span></h3>
+          <div class="rel-row" id="parent-tanks"></div>
+        </div>
+
+        <!-- 相关推荐 -->
+        <div class="d-card">
+          <h3>相关推荐</h3>
+          <div class="rel-row" id="rel-row"></div>
+        </div>
+      </div>
+
+      <!-- 侧栏 -->
+      <div class="side-col">
+        <div class="d-card prog-card">
+          <div class="big">64%</div>
+          <div class="of only-archive">已读 31 / 48 页 · 上次读到 P.31</div>
+          <div class="of only-tank">12 个档案 · 已读完 7 个</div>
+          <div class="bar"><i style="width:64%"></i></div>
+        </div>
+        <div class="d-card">
+          <h3>基础信息</h3>
+          <div class="info-list" id="info-list"></div>
+        </div>
+        <div class="d-card">
+          <h3>标签</h3>
+          <div class="tag-group">
+            <div class="gk">艺术家</div>
+            <div class="tag-row"><span class="tag">某某</span><span class="tag">另一位</span></div>
+            <div class="gk">社团</div>
+            <div class="tag-row"><span class="tag">某社团</span></div>
+            <div class="gk">原作</div>
+            <div class="tag-row"><span class="tag">原作名</span></div>
+            <div class="gk">属性</div>
+            <div class="tag-row"><span class="tag">full color</span><span class="tag">无修正</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const W = $('#window');
+
+/* ---------- 数据造样 ---------- */
+const rand = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const icons = ['🖼','🎬','🎵','📄'];
+function card({ tank = false, isNew = false, prog = 0, title, type = 0 }) {
+  const c = document.createElement('div');
+  c.className = 'card' + (tank ? ' tank' : '');
+  c.innerHTML = `
+    <div class="cover">
+      ${tank ? '<div class="stack"></div>' : ''}
+      <div class="ph">${icons[type]}</div>
+      ${tank ? '<span class="badge-type tank">⧉ 合集</span>'
+             : isNew ? '<span class="badge-new">NEW</span>' : ''}
+      <button class="fav${Math.random() < .2 ? ' on' : ''}">♥</button>
+      ${prog ? `<div class="prog"><i style="width:${prog}%"></i></div>` : ''}
+    </div>
+    <div class="t">${title}</div>
+    <div class="m">${tank ? `${rand(4, 18)} 个档案 · ${rand(10, 90)}%` : `${rand(12, 240)} 页 · 已读 ${prog}%`}</div>`;
+  return c;
+}
+const names = ['雪夜の約束', '夏色メモリー', '月下幻想曲', '深海の唄', '風立ちぬ丘',
+  '星屑パレード', '白銀の旅路', '茜色の空', '雨上がりの庭', '月光カーニバル'];
+const pick = () => names[rand(0, names.length - 1)] + ' 第' + rand(1, 9) + '話';
+
+/* ---------- 首页四行 ---------- */
+$('#row-resume')  .append(...Array.from({ length: 8 }, (_, i) =>
+  card({ prog: rand(15, 92), title: pick(), tank: i === 2, type: i === 5 ? 2 : 0 })));
+$('#row-random')  .append(...Array.from({ length: 8 }, () =>
+  card({ title: pick(), type: rand(0, 3) })));
+$('#row-new')     .append(...Array.from({ length: 8 }, (_, i) =>
+  card({ isNew: i < 5, title: pick(), tank: i === 6 })));
+$('#row-cat')     .append(...Array.from({ length: 8 }, () => card({ title: pick() })));
+/* 搜索态网格 */
+const hg = $('#home-grid');
+for (let i = 0; i < 18; i++)
+  hg.appendChild(card({ title: pick(), tank: i % 7 === 3, isNew: i % 5 === 0 }));
+
+/* ---------- 详情：页面预览 ---------- */
+const pvTypes = { 5: '🎬', 20: '🎵', 31: '📄' };
+for (let i = 1; i <= 24; i++) {
+  const th = document.createElement('div');
+  th.className = 'pv-thumb' + (i <= 14 ? ' read' : '');
+  th.innerHTML = `<span class="no">${i}</span>${pvTypes[i] ? `<span class="ty">${pvTypes[i]}</span>` : ''}`;
+  $('#pv-grid').appendChild(th);
+  const r = document.createElement('div');
+  r.className = 'pv-row' + (i <= 14 ? ' read' : '');
+  r.innerHTML = `<span class="n">${i}</span><span class="nm">${pvTypes[i] ? { '🎬': 'PV1.mp4', '🎵': 'theme.flac', '📄': 'ch14.xhtml' }[pvTypes[i]] : `page_${String(i).padStart(3, '0')}.avif`}</span><span>${pvTypes[i] || ''}</span>`;
+  $('#pv-list').appendChild(r);
+}
+$('#pv-tree').innerHTML = `
+  <div class="pv-row dir">▾ 第14章（20）</div>
+  <div class="pv-row"><span class="n"></span><span class="nm">page_001…019.avif</span></div>
+  <div class="pv-row dir">▾ media/（3）</div>
+  <div class="pv-row"><span class="n"></span><span class="nm">🎬 PV1.mp4</span></div>
+  <div class="pv-row"><span class="n"></span><span class="nm">🎵 theme.flac</span></div>
+  <div class="pv-row"><span class="n"></span><span class="nm">💬 PV1.chs.srt</span></div>
+  <div class="pv-row dir">▾ text/（1）</div>
+  <div class="pv-row"><span class="n"></span><span class="nm">📄 ch14.xhtml</span></div>`;
+$$('#pv-seg button').forEach(b => b.onclick = () => {
+  $$('#pv-seg button').forEach(x => x.classList.toggle('on', x === b));
+  $('#pv-grid').style.display = b.dataset.pv === 'grid' ? '' : 'none';
+  $('#pv-list').style.display = b.dataset.pv === 'list' ? '' : 'none';
+  $('#pv-tree').style.display = b.dataset.pv === 'tree' ? '' : 'none';
+});
+
+/* ---------- 详情：合集成员 ---------- */
+const memberTitles = ['第1话 相遇', '第2话 暗流', '第3话 转折之时', '第4话 远雷',
+  '第5话 归乡', '第6话 雪解', '第7话 灯火', '第8话 决断',
+  '第9话 夜航', '第10话 黎明前', '番外篇 祭典', '最终话 新的旅程'];
+memberTitles.forEach((t, i) => {
+  const prog = i < 7 ? 100 : i === 7 ? 40 : 0;
+  const g = card({ title: t, prog, isNew: i === 11 });
+  g.dataset.name = t;
+  $('#member-grid').appendChild(g);
+  const r = document.createElement('div');
+  r.className = 'member-row'; r.dataset.name = t;
+  r.innerHTML = `<span class="ord">${i + 1}</span><div class="mc"></div>
+    <div class="mt"><b>${t}</b><span>${rand(24, 64)} 页 · ${rand(20, 120)} MB</span></div>
+    <div class="prog-mini"><i style="width:${prog}%"></i></div>`;
+  $('#member-list').appendChild(r);
+});
+$$('#mb-seg button').forEach(b => b.onclick = () => {
+  $$('#mb-seg button').forEach(x => x.classList.toggle('on', x === b));
+  $('#member-grid').classList.toggle('on', b.dataset.mb === 'grid');
+  $('#member-list').classList.toggle('on', b.dataset.mb === 'list');
+});
+$('#member-filter').oninput = e => {
+  const q = e.target.value.trim();
+  $$('#member-grid .card, #member-list .member-row').forEach(el =>
+    el.style.display = !q || el.dataset.name.includes(q) ? '' : 'none');
+};
+
+/* ---------- 所属合集 / 相关推荐 ---------- */
+for (let i = 0; i < 2; i++)
+  $('#parent-tanks').appendChild(card({ tank: true, title: i ? '某系列 总集篇' : '某个合集', prog: i ? 0 : 64 }));
+for (let i = 0; i < 6; i++)
+  $('#rel-row').appendChild(card({ title: pick(), prog: i === 1 ? 30 : 0 }));
+
+/* ---------- 基础信息（两种类型切换） ---------- */
+const infoArchive = [
+  ['文件名', 'page_pack_vol3.cbz'], ['大小', '96.2 MB'], ['页数', '48（图像 44 · 视频 2 · 音频 1 · 文本 1）'],
+  ['路径', '/archives/doujin/2024/'], ['来源', 'nhentai 插件'], ['发布日期', '2024-08-17'],
+  ['添加时间', '2024-09-01'], ['最近阅读', '2024-11-02 22:14'],
+];
+const infoTank = [
+  ['名称', '某个合集'], ['档案数', '12'], ['总页数', '486'],
+  ['封面', '自定义'], ['创建时间', '2024-06-12'], ['更新时间', '2024-11-02'],
+];
+function renderInfo(rows) {
+  $('#info-list').innerHTML = rows.map(([k, v]) =>
+    `<div class="info-row"><span class="k">${k}</span><span class="v" title="${v}">${v}</span></div>`).join('');
+}
+
+/* ---------- 视图切换 ---------- */
+function setView(v) {
+  $$('#demo-bar [data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  $('#home').classList.toggle('on', v === 'home');
+  const d = $('#detail');
+  const isDetail = v !== 'home';
+  d.classList.toggle('on', isDetail);
+  $('#btn-back').style.display = isDetail ? '' : 'none';
+  if (isDetail) {
+    d.classList.toggle('archive-view', v === 'archive');
+    d.classList.toggle('tank-view', v === 'tank');
+    $('#d-title').textContent = v === 'tank' ? '某个合集' : '某个超长标题的档案名称 第3话';
+    $('.cover-big').firstChild.textContent = v === 'tank' ? '⧉' : '🖼';
+    renderInfo(v === 'tank' ? infoTank : infoArchive);
+  }
+}
+$$('#demo-bar [data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+$('#btn-back').onclick = () => setView('home');
+renderInfo(infoArchive);
+
+/* ---------- 首页搜索态切换 ---------- */
+$('#search-input').addEventListener('input', e =>
+  $('#home-main').classList.toggle('searched', !!e.target.value.trim()));
+
+/* ---------- 侧栏互斥 ---------- */
+$$('#home-side .side-item').forEach(it => it.onclick = () => {
+  const sec = it.previousElementSibling;
+  $$('#home-side .side-item').forEach(x => x.classList.remove('on'));
+  it.classList.add('on');
+});
+
+/* ---------- 收藏按钮 ---------- */
+document.addEventListener('click', e => {
+  const f = e.target.closest('.fav');
+  if (f) { f.classList.toggle('on'); e.stopPropagation(); }
+});
+
+/* ---------- 明暗主题切换 ---------- */
+const themeBtn = $('#btn-theme');
+function applyTheme(t) {
+  W.classList.toggle('light', t === 'light');
+  themeBtn.textContent = t === 'light' ? '☀' : '◐';
+  localStorage.setItem('lanlu-mockup-theme', t);
+}
+themeBtn.onclick = () => applyTheme(W.classList.contains('light') ? 'dark' : 'light');
+applyTheme(localStorage.getItem('lanlu-mockup-theme') || 'dark');
+
+/* ---------- 筛选面板 ---------- */
+const fp = $('#filter-panel');
+const fpBtn = $('#btn-filter');
+fpBtn.onclick = e => {
+  e.stopPropagation();
+  fp.classList.toggle('show');
+  fpBtn.classList.toggle('active', fp.classList.contains('show'));
+};
+// 排序：单选
+$$('#fp-sort .fp-chip').forEach(c => c.onclick = () => {
+  $$('#fp-sort .fp-chip').forEach(x => x.classList.remove('on'));
+  c.classList.add('on');
+});
+// 分类：多选
+$$('#fp-cats .fp-chip').forEach(c => c.onclick = () => c.classList.toggle('on'));
+// 开关
+$$('[data-fp-sw]').forEach(sw => sw.onclick = () => sw.classList.toggle('on'));
+// 重置 / 应用
+$('#fp-reset').onclick = () => {
+  $$('#fp-cats .fp-chip').forEach(x => x.classList.remove('on'));
+  $$('[data-fp-sw]').forEach(x => x.classList.remove('on'));
+  $$('#fp-sort .fp-chip').forEach((x, i) => x.classList.toggle('on', i === 0));
+};
+$('#fp-apply').onclick = () => { fp.classList.remove('show'); fpBtn.classList.remove('active'); };
+// 点面板外收起
+document.addEventListener('click', e => {
+  if (!fp.contains(e.target) && e.target !== fpBtn) {
+    fp.classList.remove('show'); fpBtn.classList.remove('active');
+  }
+});
+
+/* ---------- 快捷键 / ---------- */
+window.onkeydown = e => {
+  if (e.key === '/' && document.activeElement !== $('#search-input')) {
+    e.preventDefault(); $('#search-input').focus();
+  }
+  if (e.key === 'Escape') $('#search-input').blur();
+};
+</script>
+</body>
+</html>
