@@ -274,10 +274,10 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
             Button(model.t("overview.switchServer"), {=> model.navigate(Page.Login)})
                 .key("overview.switchServer")
-                .role(ButtonRole.Primary)
+                .style(ghostStyleOf(model))
             Button(model.t("overview.logout"), {=> logoutOpen.value = true})
                 .key("overview.logout")
-                .role(ButtonRole.Danger)
+                .style(dangerGhostStyleOf())
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
     }
 
@@ -295,9 +295,9 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
         case None => pageLoading(model, "统计数据加载中…")
     }
 
-    // ---- 阅读趋势（原型 ReadingTrendChart：30 天柱状图，纯布局实现） ----
+    // ---- 阅读趋势（原型 #trend-svg：30 天折线图） ----
     detailCard(model, model.t("overview.readingTrend")) {
-        trendBars(model, model.userTrend.value)
+        trendLine(model, model.userTrend.value)
     }
 
     // ---- 最近活动（原型 RecentActivity：左右两卡 1:1；fillWidth 卡片须包 flex 单元格才能均分） ----
@@ -365,48 +365,152 @@ private func statCard(model: AppModel, ico: GhostGlyph, num: String, label: Stri
             Label(num).fontSize(18.fp)
             Label(label).fontSize(10.fp).muted()
         }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start)
-    // 卡片底色（原型 .stat-card 有 --bg-card 白卡）：缺背景时内容像浮在页面上。
-    }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).flex().padding(12.vp, 14.vp).background(cardBg, 14.vp)
+    // 卡片底色 + 1px 描边（原型 .stat-card：--bg-card 白卡 + border 1px var(--border)）；
+    // 缺背景/描边时内容像浮在页面上，层次不清。
+    }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).flex().padding(12.vp, 14.vp)
+        .surface(SurfaceStyle(cardBg, border: edgeOf(model), radius: 14.0, borderWidth: 1.0))
 }
 
-// 趋势柱状图（原型折线图简化为柱图：框架无折线绘制件，柱图用纯布局可达）。
-private func trendBars(model: AppModel, data: ArrayList<TrendPoint>): Unit {
+// 趋势折线图（原型 settings-redesign.html #trend-svg：金色折线 + 向下渐变面积 + 网格线）。
+// 早期因「框架无折线绘制件」降级为纯布局柱图；现直接用 Renderer 的 strokeLine /
+// 纵向渐变 / 圆点等绘制件自定义 Widget 直绘，还原原型折线效果。
+private func trendLine(model: AppModel, data: ArrayList<TrendPoint>): Unit {
     if (data.size == 0) {
         Label("暂无趋势数据").fontSize(12.fp).muted()
         return
-    }
-    var maxV = 1
-    for (p in data) {
-        if (p.count > maxV) {
-            maxV = p.count
-        }
     }
     var total = 0
     for (p in data) {
         total += p.count
     }
-    // 不可变副本：可变变量无法被 HStack 构建 lambda 捕获。
-    let maxBar = maxV
     let accent = if (model.isLight()) {
         LANLU_L_ACCENT
     } else {
         LANLU_ACCENT
     }
     Label("最近 30 天 · 总阅读: ${total}").fontSize(11.fp).muted()
-    HStack {
-        ForEachIndexed(data) {
-            _, p =>
-                // 柱高 4..96vp，保底 4vp 让 0 值可见（.vp 后缀仅 Int64/Float64 有，故用 Float64）。
-                let h = 4.0 + 92.0 * Float64(p.count) / Float64(maxBar)
-                VStack {}.width(0.vp).height(h.vp).flex().background(if (p.count > 0) {
-                    accent
-                } else {
-                    Color.rgba(128, 128, 128, 40)
-                }, 2.vp)
+    // fillWidth 撑满卡片内容区（同柱图容器须显式占宽的原因）。
+    TrendLineChart(accent, data).fillWidth()
+}
+
+// 折线图直绘件：网格线 + 折线 + 渐变面积 + 最高点圆点（对齐原型 #trend-svg 视觉）。
+class TrendLineChart <: Widget {
+    private let accent: Color
+    private let data: ArrayList<TrendPoint>
+    private var frame = Rect.zero()
+
+    public init(accent: Color, data: ArrayList<TrendPoint>) {
+        this.accent = accent
+        this.data = data
+        emit(this)
+    }
+
+    public func measure(_: UiContext, available: Size): Size {
+        Size(available.w, 120.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        // 绘图区四边留白（原型 pl/pr/pt/pb 收窄，左侧不留刻度文字，给折线更宽空间）。
+        let left = frame.x + 4.0
+        let top = frame.y + 6.0
+        let right = frame.x + frame.w - 4.0
+        let bottom = frame.y + frame.h - 4.0
+        let plotW = right - left
+        let plotH = bottom - top
+        let n = data.size
+        if (plotW <= 0.0 || plotH <= 0.0 || n < 2) {
+            return
         }
-    // 容器必须显式占宽：柱条是 width(0)+flex 的弹性子项，hug/自适应都会把整排
-    // 收成 0 宽不可见（T20 目检发现）；fillWidth 撑满卡片内容区。
-    }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.End).fillWidth().height(100.vp)
+        // 纵轴上限：最大值向上取整到 10 的倍数（保底 10），网格落整数档。
+        var maxV: Int64 = 1
+        for (p in data) {
+            if (p.count > maxV) {
+                maxV = p.count
+            }
+        }
+        var axisMaxVal = ((maxV + 9) / 10) * 10
+        if (axisMaxVal < 10) {
+            axisMaxVal = 10
+        }
+        let axisMax = Float64(axisMaxVal)
+        // 数据点屏幕坐标 + 最高点下标。
+        let px = ArrayList<Float32>()
+        let py = ArrayList<Float32>()
+        var maxIdx: Int64 = 0
+        var i: Int64 = 0
+        while (i < n) {
+            let fx = Float64(i) / Float64(n - 1)
+            px.add(Float32(Float64(left) + Float64(plotW) * fx))
+            let v = Float64(data[i].count)
+            py.add(Float32(Float64(top) + Float64(plotH) * (1.0 - v / axisMax)))
+            if (data[i].count > data[maxIdx].count) {
+                maxIdx = i
+            }
+            i += 1
+        }
+        // 水平网格线（原型 rgba(128,128,128,.15)）：0、1/3、2/3、1 四档。
+        let gridColor = Color.rgba(128, 128, 128, 38)
+        var g: Int64 = 0
+        while (g <= 3) {
+            let gy = top + plotH * Float32(g) / 3.0
+            ctx.renderer.line(left, gy, right, gy, gridColor)
+            g += 1
+        }
+        // 折线下方面积（原型纵向渐变 金 35% → 透明）：按 ~4vp 细条用纵向渐变逼近，
+        // 顶端跟随折线插值高度，alpha 随高度按原型全局渐变换算。
+        let sliceW: Float32 = 4.0
+        var x = left
+        while (x < right) {
+            let yLine = trendYAt(px, py, left, plotW, x)
+            let hArea = bottom - yLine
+            if (hArea > 0.5) {
+                let topAlpha = Int64(89.0 * Float64(bottom - yLine) / Float64(plotH))
+                var w = sliceW
+                if (right - x < w) {
+                    w = right - x
+                }
+                ctx.renderer.fillVerticalGradient(Rect(x, yLine, w, hArea), accent
+                    .withAlpha(topAlpha), accent.withAlpha(0))
+            }
+            x += sliceW
+        }
+        // 折线（原型 stroke 2px、圆角连接）：相邻点 strokeLine 圆帽拼接平滑。
+        let pen = Pen(width: 2.0, color: accent)
+        var j: Int64 = 1
+        while (j < n) {
+            ctx.renderer.strokeLine(px[j - 1], py[j - 1], px[j], py[j], pen)
+            j += 1
+        }
+        // 最高点圆点（原型 circle r=3）。
+        ctx.renderer.fillCircle(px[maxIdx], py[maxIdx], 3.0, accent)
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+
+    // 折线在横坐标 x 处的插值高度（分段线性）。
+    private func trendYAt(px: ArrayList<Float32>, py: ArrayList<Float32>, left: Float32,
+        plotW: Float32, x: Float32): Float32 {
+        let n = px.size
+        if (x <= left) {
+            return py[0]
+        }
+        if (x >= left + plotW) {
+            return py[n - 1]
+        }
+        let t = Float64(x - left) / Float64(plotW) * Float64(n - 1)
+        var idx = Int64(t)
+        if (idx >= n - 1) {
+            idx = n - 2
+        }
+        let frac = Float32(t - Float64(idx))
+        py[idx] + (py[idx + 1] - py[idx]) * frac
+    }
 }
 
 // 最近活动列表（原型 .s-row：封面 + 标题 + 页数进度）。
@@ -503,6 +607,22 @@ private func appearancePage(model: AppModel): Unit {
                     set: {
                         _, v =>
                             model.setTheme(indexToTheme(v))
+                            return v
+                    }
+                )
+            )
+        }
+    }
+    detailCard(model, "界面缩放") {
+        settingRowIcon(model, "缩放", "跟随系统显示器缩放或固定百分比；需重启生效", GhostGlyph.Monitor) {
+            // 与主题卡同款：初值取自持久化设置，set 写回 model.setUiScale（落盘 + Toast 提示重启）。
+            SegmentedControl(
+                ["跟随系统", "100%", "125%", "150%", "200%"],
+                rememberState<Int64>("settings.scaleIdx", {=> uiScaleToIndex(model.settings.uiScale)}).project(
+                    get: {v => v},
+                    set: {
+                        _, v =>
+                            model.setUiScale(indexToUiScale(v))
                             return v
                     }
                 )

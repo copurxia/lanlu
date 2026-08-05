@@ -3085,6 +3085,13 @@ public class AppModel {
         toaster.show(t("appearance.fontRestart"), kind: ToastKind.Info)
     }
 
+    // 设置界面缩放偏好（启动时解析，需重启生效）。
+    public func setUiScale(v: String): Unit {
+        settings.uiScale = normalizeUiScale(v)
+        persistSettings(settings)
+        toaster.show(t("appearance.scaleRestart"), kind: ToastKind.Info)
+    }
+
     /** Translates one application message using the current effective language. */
     public func t(key: String, params!: Array<(String, String)> = []): String {
         localizer.text(language.value, key, params: params)

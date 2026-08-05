@@ -24,6 +24,7 @@ func settingsDefaultsComeFromMmkv(): Unit {
     resetTestStore()
     let s = loadSettings()
     @Expect(s.theme, "dark")
+    @Expect(s.uiScale, "auto")
     @Expect(s.languagePreference, LANGUAGE_SYSTEM)
     @Expect(s.readerMode, "single-ltr")
     @Expect(s.readerLongPage, true)
@@ -38,6 +39,7 @@ func settingsRoundTripThroughMmkv(): Unit {
     resetTestStore()
     let s = AppSettings()
     s.theme = "light"
+    s.uiScale = "150"
     s.languagePreference = LANGUAGE_EN
     s.readerMode = "single-rtl"
     s.readerDoublePage = true
@@ -59,6 +61,7 @@ func settingsRoundTripThroughMmkv(): Unit {
 
     let back = loadSettings()
     @Expect(back.theme, "light")
+    @Expect(back.uiScale, "150")
     @Expect(back.languagePreference, LANGUAGE_EN)
     @Expect(back.readerMode, "single-rtl")
     @Expect(back.readerDoublePage, true)
@@ -126,6 +129,34 @@ func settingsHelpersAreStable(): Unit {
     @Expect(indexToLanguagePreference(1), "zh")
     @Expect(indexToLanguagePreference(2), LANGUAGE_EN)
     @Expect(indexToLanguagePreference(9), LANGUAGE_SYSTEM)
+    @Expect(normalizeUiScale("auto"), "auto")
+    @Expect(normalizeUiScale("150"), "150")
+    @Expect(normalizeUiScale("999"), "auto")
+    @Expect(uiScaleToIndex("auto"), 0)
+    @Expect(uiScaleToIndex("200"), 4)
+    @Expect(uiScaleToIndex("bogus"), 0)
+    @Expect(indexToUiScale(0), "auto")
+    @Expect(indexToUiScale(2), "125")
+    @Expect(indexToUiScale(9), "auto")
+}
+
+@Test
+func uiScaleInvalidValueFallsBackToAuto(): Unit {
+    resetTestStore()
+    let s = AppSettings()
+    s.uiScale = "999"
+    saveSettings(s)
+    let back = loadSettings()
+    @Expect(back.uiScale, "auto") // 落盘/加载两道归一化都回退 auto
+}
+
+@Test
+func resolveUiScaleFixedPercentages(): Unit {
+    @Expect(Float64(resolveUiScale("100")), 1.0)
+    @Expect(Float64(resolveUiScale("125")), 1.25)
+    @Expect(Float64(resolveUiScale("200")), 2.0)
+    // auto 走主显示器查询；CI 无显示时 catch 回退 1.0，只断言不抛且为正。
+    @Expect(resolveUiScale("auto") > 0.0, true)
 }
 
 @Test
