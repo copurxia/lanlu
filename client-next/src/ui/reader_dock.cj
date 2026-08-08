@@ -17,6 +17,8 @@ import std.collection.{ArrayList, HashMap}
 private let DOCK_BOOK_BODY_W: Float32 = 356.0
 private let DOCK_AUDIO_BODY_W: Float32 = 390.0
 private let DOCK_VIDEO_BODY_W: Float32 = 426.0
+// html lane body：页内滚动进度条 200 + 页码数字区 70（无翻页钮，Book 兜底提供）。
+private let DOCK_HTML_BODY_W: Float32 = 280.0
 private let DOCK_TAB: Float32 = 36.0
 private let DOCK_PAD: Float32 = 6.0
 private let DOCK_GAP: Float32 = 4.0
@@ -83,6 +85,7 @@ class ReaderDock <: Widget {
     private var audioSeekRect = Rect.zero()
     private var muteRect = Rect.zero()
     private var subtitleRect = Rect.zero()
+    private var htmlSeekRect = Rect.zero()
 
     public init(model: AppModel) {
         this.model = model
@@ -122,6 +125,7 @@ class ReaderDock <: Widget {
             case LaneId.Book => DOCK_BOOK_BODY_W
             case LaneId.Audio(_) => DOCK_AUDIO_BODY_W
             case LaneId.Video(_) => DOCK_VIDEO_BODY_W
+            case LaneId.Html(_) => DOCK_HTML_BODY_W
         }
     }
 
@@ -205,6 +209,9 @@ class ReaderDock <: Widget {
                 audioSeekRect = Rect(bx + 108.0, cy - 10.0, 140.0, 20.0)
                 muteRect = Rect(bx + 108.0 + 140.0 + 94.0, cy - 15.0, 30.0, 30.0)
                 subtitleRect = Rect(bx + 376.0, cy - 15.0, 38.0, 30.0)
+            case LaneId.Html(_) =>
+                // 页内滚动进度条（200）+ 页码数字区（70），无翻页钮（Book 兜底）。
+                htmlSeekRect = Rect(bx, cy - 10.0, 200.0, 20.0)
         }
     }
 
@@ -285,6 +292,7 @@ class ReaderDock <: Widget {
             case LaneId.Book => drawBookBody(ctx, dy, a)
             case LaneId.Audio(_) => drawAudioBody(ctx, dy, a)
             case LaneId.Video(_) => drawVideoBody(ctx, dy, a)
+            case LaneId.Html(_) => drawHtmlBody(ctx, dy, a)
         }
     }
 
@@ -339,6 +347,32 @@ class ReaderDock <: Widget {
             model.t("reader.finishedShort")
         } else {
             "${r.displayPage} / ${total}"
+        }
+        let nw = ctx.renderer.textWidth(num, pointSize: 12.0)
+        let nh = ctx.renderer.textHeight(pointSize: 12.0)
+        ctx.renderer.text(num, sr.right() + 6.0 + (70.0 - nw) / 2.0, sr.centerY() - nh / 2.0, dimColor(ctx, a),
+            pointSize: 12.0)
+    }
+
+    // html lane body：页内滚动进度条（电子书式，页内粒度而非页码粒度）。
+    // 值 = HtmlPageModel.htmlPageProgress01（scrollY/(contentHeight-viewportH)）；
+    // 未就绪（loading/error）显示 0 格，页码照常（拖动由 handle 的 htmlSeek 消费）。
+    private func drawHtmlBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
+        let hp = model.htmlPage
+        let sr = htmlSeekRect.shift(0.0, dy)
+        let amount = if (hp.state == "ready") { hp.htmlPageProgress01() } else { 0.0f32 }
+        ctx
+            .renderer
+            .fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w, 4.0), 2.0,
+            fadeColor(ctx.theme.overlayTrack, Float32(a) / 255.0))
+        ctx.renderer.fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w * amount, 4.0), 2.0,
+            ctx.theme.accent.withAlpha(a))
+        ctx.renderer.fillCircle(sr.x + sr.w * amount, sr.centerY(), 5.0, ctx.theme.accent.withAlpha(a))
+        // 页码数字区（对齐 Book body 的 cur/total 排布）。
+        let num = if (model.reader.onVirtualEnd) {
+            model.t("reader.finishedShort")
+        } else {
+            "${model.reader.displayPage} / ${model.reader.displayTotal}"
         }
         let nw = ctx.renderer.textWidth(num, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
@@ -428,6 +462,10 @@ class ReaderDock <: Widget {
                     audioSeekFromX(x)
                     return true
                 }
+                if (ctx.isDragging("reader:dock:htmlSeek") && ctx.leftMouseDown) {
+                    htmlSeekFromX(x)
+                    return true
+                }
                 return true // 胶囊范围内的移动不穿透（避免误刷 chrome 计时之外的语义）
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
                 if (!frame.contains(x, y)) {
@@ -444,6 +482,11 @@ class ReaderDock <: Widget {
                     audioSeekFromX(x)
                     return true
                 }
+                if (htmlSeekRect.contains(x, y) && isHtmlActive()) {
+                    ctx.beginDrag("reader:dock:htmlSeek")
+                    htmlSeekFromX(x)
+                    return true
+                }
                 return true
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (ctx.isDragging("reader:dock:bookSeek")) {
@@ -452,6 +495,10 @@ class ReaderDock <: Widget {
                 }
                 if (ctx.isDragging("reader:dock:audioSeek")) {
                     audioSeekFromX(x)
+                    return true
+                }
+                if (ctx.isDragging("reader:dock:htmlSeek")) {
+                    htmlSeekFromX(x)
                     return true
                 }
                 if (!frame.contains(x, y)) {
@@ -516,11 +563,21 @@ class ReaderDock <: Widget {
         }
     }
 
+    private func isHtmlActive(): Bool {
+        match (active) {
+            case LaneId.Html(_) => true
+            case _ => false
+        }
+    }
+
     private func claimHovers(ctx: UiContext, x: Float32, y: Float32): Unit {
         for (i in 0..lanes.size) {
             if (tabRects[Int64(i)].contains(x, y)) {
                 ctx.claimHover("reader:dock:tab:${lanes[Int64(i)].toString()}", CursorShape.Interactive)
             }
+        }
+        if (htmlSeekRect.contains(x, y) && isHtmlActive()) {
+            ctx.claimHover("reader:dock:htmlSeek", CursorShape.Interactive)
         }
         match (model.reader.mode) {
             case ReadingMode.Webtoon => ()
@@ -561,6 +618,20 @@ class ReaderDock <: Widget {
         }
         let amount = Float64(max(0.0, min(1.0, (x - audioSeekRect.x) / audioSeekRect.w)))
         model.playback.seekTo(amount * dur)
+    }
+
+    // html 页内进度条：x 比例 → 可滚范围偏移经 scrollTo 落地（native 侧 clamp）。
+    private func htmlSeekFromX(x: Float32): Unit {
+        let hp = model.htmlPage
+        if (hp.state != "ready" || htmlSeekRect.w <= 0.0) {
+            return
+        }
+        let maxScroll = max(0.0f32, hp.contentHeight - Float32(hp.viewportHeight()))
+        if (maxScroll <= 1.0) {
+            return
+        }
+        let amount = Float64(max(0.0, min(1.0, (x - htmlSeekRect.x) / htmlSeekRect.w)))
+        hp.scrollTo(Float32(amount) * maxScroll)
     }
 }
 

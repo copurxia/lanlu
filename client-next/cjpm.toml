@@ -9,6 +9,7 @@ output-type = "executable"
 cui = { path = "../packages/cangjie-gui" }
 vips_ffi = { path = "../packages/vips_ffi" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
+webview = { path = "../packages/webview" }
 kv4cj = { path = "../ref/kv4cj" }
 fontkit_ffi = { path = "../packages/fontkit_ffi" }
 qwest = { path = "../packages/qwest" }

@@ -220,7 +220,7 @@ class HoverSensor <: Widget {
 // Tag/Globe/Sparkle/Monitor/Chart/Info 为设置导航图标增补（原型 #set-nav .side-item .ico）。
 public enum GhostGlyph {
     | Named(IconName) | Gear | Theme | Search | Filter | Back | Menu | Swap | Heart | Download | AddTank | Ellipsis
-    | Book | Pages | Disk | Box | Tag | Globe | Sparkle | Monitor | Chart | Info | Home
+    | Book | Pages | Disk | Box | Tag | Globe | Sparkle | Monitor | Chart | Info | Home | LogOut
 }
 
 // 绘制 GhostGlyph 图形（16×16 视觉格，中心 cx/cy）：GhostIconButton 与阅读器模式钮共用。
@@ -287,6 +287,15 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
             renderer.strokeLine(cx - 6.5, cy + 3.5, cx + 6.5, cy + 3.5, pen)
             renderer.strokeLine(cx - 6.5, cy + 3.5, cx - 3.0, cy + 0.5, pen)
             renderer.strokeLine(cx - 6.5, cy + 3.5, cx - 3.0, cy + 6.5, pen)
+        case GhostGlyph.LogOut =>
+            // lucide log-out：右侧开口的门框 + 穿门而出的箭头。
+            let pen = Pen(width: 1.5, color: color)
+            renderer.strokeLine(cx - 0.5, cy - 6.5, cx - 6.5, cy - 6.5, pen)
+            renderer.strokeLine(cx - 6.5, cy - 6.5, cx - 6.5, cy + 6.5, pen)
+            renderer.strokeLine(cx - 6.5, cy + 6.5, cx - 0.5, cy + 6.5, pen)
+            renderer.strokeLine(cx - 2.0, cy, cx + 6.5, cy, pen)
+            renderer.strokeLine(cx + 3.5, cy - 3.0, cx + 6.5, cy, pen)
+            renderer.strokeLine(cx + 6.5, cy, cx + 3.5, cy + 3.0, pen)
         case GhostGlyph.Heart =>
             // 心形使用矢量折线近似 lucide heart，避免 Linux 字体缺少 ♥ 时只剩按钮底板。
             let pen = Pen(width: 1.7, color: color)
@@ -459,16 +468,19 @@ public class GhostIconButton <: Widget {
     private let onClick: () -> Unit
     private let active: Bool
     private let size: Float32
+    // 固定图标色（如退出登录用 danger 红，对齐 client LogOut 图标）；None 走默认态色。
+    private let tint: ?Color
     private var frame = Rect.zero()
 
     // size：默认 34（顶栏/阅读器）；详情操作卡用 28（原型 .action-icons .icon-btn 32px 的紧凑近似）。
     public init(glyph: GhostGlyph, hoverId: String, size!: Float32 = 34.0, active!: Bool = false,
-        onClick!: () -> Unit) {
+        color!: ?Color = None, onClick!: () -> Unit) {
         this.glyph = glyph
         this.hoverId = hoverId
         this.onClick = onClick
         this.active = active
         this.size = size
+        this.tint = color
         emit(this)
     }
 
@@ -488,9 +500,12 @@ public class GhostIconButton <: Widget {
         } else if (hovered) {
             ctx.renderer.fillRoundedRect(frame, radius, ctx.theme.overlayHover)
         }
-        let color = if (active) { ctx.theme.accent }
-                    else if (hovered) { ctx.theme.text }
-                    else { ctx.theme.mutedText }
+        let color = match (tint) {
+            case Some(c) => c
+            case None => if (active) { ctx.theme.accent }
+                         else if (hovered) { ctx.theme.text }
+                         else { ctx.theme.mutedText }
+        }
         drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(), color)
     }
 
@@ -868,12 +883,6 @@ func edgeOf(model: AppModel): Color {
 // cui Button 默认 buttonSurface 填充色在卡片里显得过重。
 func ghostStyleOf(model: AppModel): SurfaceStyle {
     SurfaceStyle(Color.rgba(0, 0, 0, 0), border: edgeOf(model), radius: 10.0, borderWidth: 1.0)
-}
-
-// 危险幽灵按钮样式（设计稿 .btn-danger：近透明红底 + 红色 1px 描边），destructive 次级动作；
-// 与 ghostStyleOf 同属「无背景描边」族，替代早期实心 Danger 填充。
-func dangerGhostStyleOf(): SurfaceStyle {
-    SurfaceStyle(LANLU_DANGER.withAlpha(20), border: LANLU_DANGER.withAlpha(89), radius: 10.0, borderWidth: 1.0)
 }
 
 // ── 首页卡片组件（Task 9；原型 home-detail-redesign.html「首页」视图 .card 族）──

@@ -57,3 +57,13 @@ func webtoonLazyRangeDoesNotLoadWholeArchive(): Unit {
     @Expect(lastAtMiddle, 64)
     @Expect(lastAtMiddle - firstAtMiddle + 1 < heights.size, true)
 }
+
+@Test
+func htmlOverflowCooldownAllowsAfterWindow(): Unit {
+    // 距上次外溢 149ms：吞掉；150ms（含）：放行（150ms 冷却窗，防连续滚轮误翻）。
+    @Expect(htmlOverflowTurnAllowed(0, 149, 150), false)
+    @Expect(htmlOverflowTurnAllowed(0, 150, 150), true)
+    @Expect(htmlOverflowTurnAllowed(0, 500, 150), true)
+    // 从未外溢（lastMs 远负）：直接放行。
+    @Expect(htmlOverflowTurnAllowed(-10000, 0, 150), true)
+}

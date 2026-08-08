@@ -292,6 +292,25 @@ func laneSpecsMixedArchive(): Unit {
 }
 
 @Test
+func laneSpecsHtmlGetsOwnLane(): Unit {
+    // html 页独立成 lane（Html(i) 排在 Book 兜底前）；spreadMediaLane 同媒体独占语义。
+    let pages = mkReaderPages(["image", "image", "html", "image"])
+    let r = newReader(pages)
+    r.gotoPage(2)
+    @Expect(lanesLabel(r.laneSpecs()), "[Html(2),Book]")
+    @Expect(r.spreadMediaLane().toString(), "Html(2)")
+    // 双页 spread 混合 html + 图片：html 仍单独成 lane。
+    let r2 = newReader(mkReaderPages(["html", "image", "image", "image"]))
+    r2.setDoublePage(true)
+    r2.gotoPage(0)
+    @Expect(lanesLabel(r2.laneSpecs()), "[Html(0),Book]")
+    // 纯图片页：只有 Book 兜底。
+    let r3 = newReader(mkReaderPages(["image", "image"]))
+    r3.gotoPage(1)
+    @Expect(lanesLabel(r3.laneSpecs()), "[Book]")
+}
+
+@Test
 func laneAutoActivateOnSpreadChange(): Unit {
     let r = newReader(mkMixedPages())
     r.gotoPage(4)
@@ -793,4 +812,31 @@ func doublePagePairsWithinSegment(): Unit {
     // 虚拟页「上一页」回 seg1 最后真实页并吸附其 spread 首页（局部 2 → [2,3] 首页）
     r.turnPage(false)
     @Expect(spreadLabel(r.spreadPages()), "[5,6]")
+}
+
+@Test
+func doublePageHtmlOwnsSpread(): Unit {
+    // html 页独占 spread（对齐 frontend isHtmlSpreadView）：双页模式下 html
+    // 不与其他页配双页，且 turnPage 步进按单页走。
+    let s = AppSettings()
+    s.readerDoublePage = true
+    let r = ReaderModel(s)
+    r.open("arc1", 0)
+    r.setPages(mkReaderPages(["image", "html", "image", "image"]))
+    r.gotoPage(1) // html 页
+    @Expect(spreadLabel(r.spreadPages()), "[1]")
+    // html 在右页位置也不配对（[0] 图 + [1] html → 独占）。
+    r.gotoPage(0)
+    @Expect(spreadLabel(r.spreadPages()), "[0]")
+    // html 之后恢复双页配对。
+    r.turnPage(true)
+    r.turnPage(true)
+    @Expect(spreadLabel(r.spreadPages()), "[2,3]")
+    // 纯图片双页不受影响。
+    let r2 = ReaderModel(AppSettings())
+    r2.open("arc1", 0)
+    r2.setPages(mkImagePages(4))
+    r2.setDoublePage(true)
+    r2.gotoPage(0)
+    @Expect(spreadLabel(r2.spreadPages()), "[0,1]")
 }

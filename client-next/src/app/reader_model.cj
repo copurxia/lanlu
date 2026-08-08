@@ -62,19 +62,22 @@ public enum KeyCode {
     | KeyLeft | KeyRight | KeyUp | KeyDown
 }
 
-// 当前 spread 的内容 lane：媒体页（视频/音频）各一条 + Book 兜底（恒在，对齐
+// 当前 spread 的内容 lane：媒体页（视频/音频/html）各一条 + Book 兜底（恒在，对齐
 // client ReaderScreen :1629-1669——即使整页都是媒体也保留「书」入口）。
-// Int64 = 0 基页索引。
+// Int64 = 0 基页索引。html 页独立成 lane：dock 上可展开页内滚动进度条
+//（电子书式，见 reader_dock drawHtmlBody），与媒体 lane 同独占语义。
 public enum LaneId <: ToString {
     | Book
     | Video(Int64)
     | Audio(Int64)
+    | Html(Int64)
 
     public func toString(): String {
         match (this) {
             case Book => "Book"
             case Video(i) => "Video(${i})"
             case Audio(i) => "Audio(${i})"
+            case Html(i) => "Html(${i})"
         }
     }
 
@@ -83,6 +86,7 @@ public enum LaneId <: ToString {
             case (Book, Book) => true
             case (Video(a), Video(b)) => a == b
             case (Audio(a), Audio(b)) => a == b
+            case (Html(a), Html(b)) => a == b
             case _ => false
         }
     }
@@ -140,6 +144,9 @@ public class ReaderModel {
     private var _seamlessNext: Bool = false
     private var _autoPlay: Bool = false
     private var _autoPlayIntervalSec: Int64 = 3
+    // html 页排版（Blitz）：字号/页边距 px，就近取档（见 settings.clampHtml*）。
+    private var _htmlFontSize: Int64 = 16
+    private var _htmlMargin: Int64 = 48
 
     // ---- lane / chrome ----
     private var _activeLane: LaneId = Book
@@ -164,6 +171,8 @@ public class ReaderModel {
         _seamlessNext = s.readerSeamlessNext
         _autoPlay = s.readerAutoPlay
         _autoPlayIntervalSec = clampAutoPlayInterval(s.readerAutoPlayInterval)
+        _htmlFontSize = clampHtmlFontSize(s.readerHtmlFontSize)
+        _htmlMargin = clampHtmlMargin(s.readerHtmlMargin)
     }
 
     public prop arcid: String {
@@ -330,6 +339,16 @@ public class ReaderModel {
     public prop autoPlayIntervalSec: Int64 {
         get() {
             _autoPlayIntervalSec
+        }
+    }
+    public prop htmlFontSize: Int64 {
+        get() {
+            _htmlFontSize
+        }
+    }
+    public prop htmlMargin: Int64 {
+        get() {
+            _htmlMargin
         }
     }
     public prop activeLane: LaneId {
@@ -560,6 +579,8 @@ public class ReaderModel {
                             lanes.add(Video(i))
                         } else if (t == "audio") {
                             lanes.add(Audio(i))
+                        } else if (t == "html") {
+                            lanes.add(Html(i))
                         }
                         i++
                     }
@@ -579,6 +600,22 @@ public class ReaderModel {
             }
         }
         Book
+    }
+
+    // 当前 spread 内第一个 html 页索引（Blitz 离屏渲染舞台的生命周期目标）；
+    // 无 html 页返回 None。双页 spread 混合 html+图片时取 html 页单独成舞台
+    //（与 video/audio 舞台的独占语义一致）。
+    public func spreadHtmlPage(): ?Int64 {
+        for (i in spreadPages()) {
+            match (pageAt(i)) {
+                case Some(p) =>
+                    if (p.pageType == "html") {
+                        return Some(i)
+                    }
+                case None => ()
+            }
+        }
+        None
     }
 
     // 手动切 lane：不翻页；不在当前 lanes 里的 lane 忽略（参考实现 activeLane 落回 lanes[0]，
@@ -680,6 +717,20 @@ public class ReaderModel {
     public func setLongPage(v: Bool): Unit {
         _longPage = v
         settings.readerLongPage = v
+        persist()
+    }
+
+    // html 页排版变更：就近取档 + 落盘（UA CSS 的实际重建在 AppModel 侧，
+    // setter 只管模型一致性与持久化）。
+    public func setHtmlFontSize(v: Int64): Unit {
+        _htmlFontSize = clampHtmlFontSize(v)
+        settings.readerHtmlFontSize = _htmlFontSize
+        persist()
+    }
+
+    public func setHtmlMargin(v: Int64): Unit {
+        _htmlMargin = clampHtmlMargin(v)
+        settings.readerHtmlMargin = _htmlMargin
         persist()
     }
 
@@ -879,6 +930,11 @@ public class ReaderModel {
         if (!doublePageEffective()) {
             return local
         }
+        // html 页独占 spread：不参与奇偶配对，以自身为 spread 首页
+        //（对齐 frontend isHtmlSpreadView：html 页就是当前页，不吸附到邻页）。
+        if (pageList[seg.start + local].pageType == "html") {
+            return local
+        }
         if (_splitCover) {
             if (local == 0) {
                 return 0
@@ -910,6 +966,12 @@ public class ReaderModel {
                     return 1
                 }
                 if (local + 1 > seg.count - 1) {
+                    return 1
+                }
+                // html 页独占 spread（对齐 frontend isHtmlSpreadView：双页模式下
+                // html 不与其他页配双页——frontend 用 CSS 双栏横向分页承载，
+                // 原生端首版以独占单页 + 纵向滚动承载，双栏留二期）。
+                if (pageList[p].pageType == "html" || pageList[p + 1].pageType == "html") {
                     return 1
                 }
                 2
@@ -955,6 +1017,15 @@ public class ReaderModel {
                     pendingReport = true
                 }
             case None => fireProgress()
+        }
+    }
+
+    // html 页滚到底视为读完（M3.5）：当前真实页并入现有进度上报。防抖语义与
+    // 翻页一致（maybeReport：最近一次上报未过防抖窗则记 pending，tick 补发），
+    // 不翻页也落进度；虚拟页不上报。
+    public func markCurrentPageRead(): Unit {
+        if (realOfStream(_index).isSome()) {
+            maybeReport()
         }
     }
 

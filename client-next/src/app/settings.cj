@@ -31,6 +31,30 @@ public func normalizeServerUrl(input: String): String {
 // 服务器 id：地址哈希前缀 + 单调计数（同地址可重复添加，进程内唯一即可，落盘后不再生成）。
 private var serverIdCounter: Int64 = 0
 
+// html 阅读字号档位（px）：13/16/19/22，就近取档（默认 16）。
+public func clampHtmlFontSize(v: Int64): Int64 {
+    if (v <= 14) {
+        13
+    } else if (v <= 17) {
+        16
+    } else if (v <= 20) {
+        19
+    } else {
+        22
+    }
+}
+
+// html 阅读页边距档位（px）：24/48/72，就近取档（默认 48）。
+public func clampHtmlMargin(v: Int64): Int64 {
+    if (v <= 36) {
+        24
+    } else if (v <= 60) {
+        48
+    } else {
+        72
+    }
+}
+
 private func newServerId(baseUrl: String): String {
     serverIdCounter++
     "srv-${fnv1a64Hex(baseUrl)[0..8]}-${serverIdCounter}"
@@ -63,6 +87,10 @@ public class AppSettings {
     public var readerShowInfo: Bool = false // 媒体信息浮层开关（文件名/时长/位置等）
     public var readerAutoPlay: Bool = false // 自动播放（按间隔自动翻页，到底自动停）
     public var readerAutoPlayInterval: Int64 = 3 // 自动播放间隔（秒，1-10）
+    // html 阅读排版（Blitz 离屏页）：字号档位 px（13/16/19/22，默认 16）、
+    // 页边距档位 px（24/48/72，默认 48），经 htmlThemeCss 的 UA CSS 生效。
+    public var readerHtmlFontSize: Int64 = 16
+    public var readerHtmlMargin: Int64 = 48
 
     // 服务器在线探测（probe）连接硬超时（秒）：不可达服务器的 TCP connect 走 OS 默认重传
     // 可达分钟级，探测必须短超时快速判离线。LanluApi(connectTimeout:) 的消费方。
@@ -195,6 +223,8 @@ public func loadSettings(): AppSettings {
     if (s.readerAutoPlayInterval < 1 || s.readerAutoPlayInterval > 10) {
         s.readerAutoPlayInterval = 3
     }
+    s.readerHtmlFontSize = clampHtmlFontSize(kv.getInt64("reader.html_font_size", defaultValue: 16))
+    s.readerHtmlMargin = clampHtmlMargin(kv.getInt64("reader.html_margin", defaultValue: 48))
     s.probeConnectTimeoutSec = kv.getInt64("network.probe_connect_timeout_sec", defaultValue: 5)
     if (s.probeConnectTimeoutSec < 1 || s.probeConnectTimeoutSec > 60) {
         s.probeConnectTimeoutSec = 5
@@ -337,6 +367,8 @@ private func writeSettingsLocked(s: AppSettings): Unit {
     let _ = kv.set("reader.show_info", s.readerShowInfo)
     let _ = kv.set("reader.auto_play", s.readerAutoPlay)
     let _ = kv.set("reader.auto_play_interval", s.readerAutoPlayInterval)
+    let _ = kv.set("reader.html_font_size", clampHtmlFontSize(s.readerHtmlFontSize))
+    let _ = kv.set("reader.html_margin", clampHtmlMargin(s.readerHtmlMargin))
     let _ = kv.set("network.probe_connect_timeout_sec", s.probeConnectTimeoutSec)
     let _ = kv.set("servers.active_id", s.activeServerId)
     let _ = kv.set("servers.count", s.servers.size)

@@ -28,6 +28,8 @@ func settingsDefaultsComeFromMmkv(): Unit {
     @Expect(s.readerMode, "single-ltr")
     @Expect(s.readerLongPage, true)
     @Expect(s.readerAutoPlayInterval, 3)
+    @Expect(s.readerHtmlFontSize, 16)
+    @Expect(s.readerHtmlMargin, 48)
     @Expect(s.probeConnectTimeoutSec, 5)
     @Expect(s.servers.size, 0)
     @Expect(s.serverUrl, "")
@@ -50,6 +52,8 @@ func settingsRoundTripThroughMmkv(): Unit {
     s.readerShowInfo = true
     s.readerAutoPlay = true
     s.readerAutoPlayInterval = 7
+    s.readerHtmlFontSize = 19
+    s.readerHtmlMargin = 72
     let srv = s.upsertServer("", "家里", "http://a:8082/")
     srv.token = "tok"
     srv.username = "alice"
@@ -71,6 +75,8 @@ func settingsRoundTripThroughMmkv(): Unit {
     @Expect(back.readerShowInfo, true)
     @Expect(back.readerAutoPlay, true)
     @Expect(back.readerAutoPlayInterval, 7)
+    @Expect(back.readerHtmlFontSize, 19)
+    @Expect(back.readerHtmlMargin, 72)
     @Expect(back.servers.size, 1)
     @Expect(back.servers[0].baseUrl, "http://a:8082")
     @Expect(back.serverUrl, "http://a:8082")
@@ -136,6 +142,28 @@ func probeConnectTimeoutRoundTrip(): Unit {
     saveSettings(s)
     let back = loadSettings()
     @Expect(back.probeConnectTimeoutSec, 9)
+}
+
+@Test
+func htmlTiersClampToNearestTier(): Unit {
+    // 就近取档：非档位值落到最近档。
+    @Expect(clampHtmlFontSize(13), 13)
+    @Expect(clampHtmlFontSize(15), 16)
+    @Expect(clampHtmlFontSize(21), 22)
+    @Expect(clampHtmlFontSize(40), 22)
+    @Expect(clampHtmlMargin(24), 24)
+    @Expect(clampHtmlMargin(36), 24)
+    @Expect(clampHtmlMargin(37), 48)
+    @Expect(clampHtmlMargin(120), 72)
+    // 坏值落盘后加载自动归一。
+    resetTestStore()
+    let s = AppSettings()
+    s.readerHtmlFontSize = 99
+    s.readerHtmlMargin = -5
+    saveSettings(s)
+    let back = loadSettings()
+    @Expect(back.readerHtmlFontSize, 22)
+    @Expect(back.readerHtmlMargin, 24)
 }
 
 @Test

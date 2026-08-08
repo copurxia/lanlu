@@ -4,6 +4,7 @@ import cui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.percentEncode
 import std.collection.ArrayList
+import std.math.abs
 
 // ── 阅读页舞台（reader-redesign #stage，T2）──
 // 自绘而非 PixelImageView 组合：方向性翻页动画（旧页滑出+淡出 / 新页反向滑入，原型
@@ -133,6 +134,18 @@ private let TURN_OFFSET: Float32 = 60.0
 // 双击缩放倍率（原型 #stage.zoomed scale(2)）：1×/2× 切换，翻页复位。
 private let STAGE_ZOOM: Float32 = 2.0
 
+// ── html 页拖动滚动（M3.2）──
+// 拖动直接 scrollTo（跟手）；松手时速度达阈值才起惯性：目标位移 = 速度 × 时间窗，
+// ease-out 曲线追踪（与 SmoothScroll/CUI 滚动条同一手感）。
+private let HTML_FLING_MS: Int64 = 220
+private let HTML_FLING_VELOCITY_THRESHOLD: Float32 = 0.4 // px/ms（400px/s）
+
+// 滚轮在 html 页边界外溢翻页的冷却判定（纯函数，可单测）：距上次外溢不足冷却窗
+// 则吞掉本次（防连续滚轮在边界误翻多页）。
+func htmlOverflowTurnAllowed(lastMs: Int64, now: Int64, cooldownMs: Int64): Bool {
+    now - lastMs >= cooldownMs
+}
+
 // 舞台动画/交互状态：rememberState 跨帧保留。Tween 在翻页触发时 reset(0) 重新起腿，
 // 动画期间连续翻页直接以当前位置为新起点（reset 打断在飞腿，不卡死）。
 class ReaderStageState {
@@ -161,6 +174,20 @@ class ReaderStageState {
     var webtoonZoomOriginY: Float32 = 0.5
     var lastLyricIndex: Int64 = -2
     var lastVideoGeneration: UInt64 = 0 // 视频舞台已见的帧代际（新帧驱动续帧用）
+    var lastHtmlGeneration: UInt64 = 0 // html 舞台已见的帧代际（新帧驱动续帧用）
+    var lastHtmlOverflowMs: Int64 = -10000 // html 滚动边界外溢翻页的冷却基准
+    // html 页拖动/惯性状态（M3.2）：拖动记录起点与速度；松手后 ease-out 续滚。
+    var htmlDragActive = false
+    var htmlDragStartY: Float32 = 0.0
+    var htmlDragStartScroll: Float32 = 0.0
+    var htmlDragLastY: Float32 = 0.0
+    var htmlDragLastMs: Int64 = 0
+    var htmlDragVelocity: Float32 = 0.0
+    var htmlDragMoved = false
+    var htmlFlingActive = false
+    var htmlFlingStart: Float32 = 0.0
+    var htmlFlingDelta: Float32 = 0.0
+    let htmlFlingTween = Tween(HTML_FLING_MS, {t: Float32 => Easing.easeOutCubic(t)})
     let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
     let outTween = Tween(TURN_OUT_MS, {t: Float32 => Easing.easeInOutCubic(t)})
     let inTween = Tween(TURN_IN_MS, {t: Float32 => Easing.easeOutCubic(t)})
@@ -295,6 +322,12 @@ func drawLaneGlyph(renderer: Renderer, lane: LaneId, cx: Float32, cy: Float32, c
             renderer.fillCircle(cx - 2.5, cy + 4.0, 2.6, color)
             renderer.strokeLine(cx + 0.1, cy + 4.0, cx + 0.1, cy - 6.0, pen)
             renderer.strokeLine(cx + 0.1, cy - 6.0, cx + 5.0, cy - 3.5, pen)
+        case LaneId.Html(_) =>
+            // HTML 文档：H 形（左竖 + 中横 + 右竖），与书/胶片/音符同规格视觉格。
+            let pen = Pen(width: 1.4, color: color)
+            renderer.strokeLine(cx - 5.0, cy - 5.5, cx - 5.0, cy + 5.5, pen)
+            renderer.strokeLine(cx - 5.0, cy, cx + 5.0, cy, pen)
+            renderer.strokeLine(cx + 5.0, cy - 5.5, cx + 5.0, cy + 5.5, pen)
     }
 }
 
@@ -352,6 +385,7 @@ class ReaderStage <: Widget {
     private var audioCoverKey: String = ""
     private var audioBackdropKey: String = ""
     private let videoPage: ?Int64
+    private let htmlPage: ?Int64
     // 音频舞台交互热区（layout 时算）
     private let audioLayout = AudioStageLayout()
     private var playRect = Rect.zero()
@@ -423,6 +457,14 @@ class ReaderStage <: Widget {
             case _ => ()
         }
         videoPage = vp
+        // html 页与媒体舞台共享独占语义：spread 有媒体 lane 时让位，
+        // 仅 Html lane 时 html 单独成舞台。
+        var hp: ?Int64 = None
+        match (mediaLane) {
+            case LaneId.Html(_) => hp = r.spreadHtmlPage()
+            case _ => ()
+        }
+        htmlPage = hp
         // 翻页检测：index（恒为 spread 首页）变化即一次翻页。方向 = 阅读顺序
         //（index 增大 = forward），物理位移向量由模式换算（pageTurnVector）。
         if (!st.inited) {
@@ -592,9 +634,14 @@ class ReaderStage <: Widget {
                 drawVideoStage(ctx, i)
             case None => match (audioPage) {
                 case Some(i) => drawAudioStage(ctx, i)
-                case None =>
-                    ctx.renderer.fill(frame, ctx.theme.stageBg)
-                    drawImageStage(ctx)
+                case None => match (htmlPage) {
+                    case Some(i) =>
+                        ctx.renderer.fill(frame, ctx.theme.stageBg)
+                        drawHtmlStage(ctx, i)
+                    case None =>
+                        ctx.renderer.fill(frame, ctx.theme.stageBg)
+                        drawImageStage(ctx)
+                }
             }
         }
         if (model.readerShowInfo.value) {
@@ -762,9 +809,26 @@ class ReaderStage <: Widget {
             let cell = pageCell(Int64(i))
             let key = ks[i]
             if (key.size == 0) {
-                // 非图片页：不参与滑动，静止时静态占位（video/html 等）；
-                // 页型按 cell 对应的页索引取（混合 spread 第二格不能拿 spread 首页的）。
-                if (curPages && ox == 0.0 && oy == 0.0) {
+                // 非图片页：不参与图片滑动。html 页已有渲染纹理时作为普通
+                // 纹理随翻页动画走（静止帧，M5 才考虑预热）；其余类型静止时
+                // 静态占位（video/html 等），页型按 cell 对应的页索引取
+                //（混合 spread 第二格不能拿 spread 首页的）。
+                var drawn = false
+                if (model.htmlPage.state != "idle") {
+                    match (model.reader.pageAt(spreadIdx[Int64(i)])) {
+                        case Some(p) =>
+                            if (p.pageType == "html") {
+                                match (pixelTexture(ctx.renderer, "html:${model.htmlPage.pageKey}")) {
+                                    case Some(tex) =>
+                                        drawTextureAlpha(ctx, tex, cell.shift(ox, oy), alpha)
+                                        drawn = true
+                                    case None => ()
+                                }
+                            }
+                        case None => ()
+                    }
+                }
+                if (!drawn && curPages && ox == 0.0 && oy == 0.0) {
                     drawUnsupported(ctx, cell, spreadIdx[Int64(i)])
                 }
                 continue
@@ -866,6 +930,47 @@ class ReaderStage <: Widget {
             } else {
                 ctx.requestFrameAfter(33)
             }
+        }
+    }
+
+    // html 离屏渲染舞台（Blitz）：会话视口跟随舞台物理像素，帧经
+    // registerPixelImage 进 streaming 纹理（与视频舞台同构）。静止时零重绘：
+    // 仅 generation 前进才续帧；子资源在途时 100ms 轮询兜底等回填。
+    private func drawHtmlStage(ctx: UiContext, pageIdx: Int64): Unit {
+        let hp = model.htmlPage
+        let scale = max(1.0, ctx.displayScale)
+        hp.ensureViewport(Int32(frame.w * scale), Int32(frame.h * scale), scale)
+        // 拖动松手惯性：ease-out 追踪释放时速度推算的目标位移。scrollTo 驱动
+        // native 滚动（dirty → 新帧 → generation 前进 → 本分支续帧）；曲线落定后
+        // scrollTo 无变化不再出帧，静止零重绘。
+        if (st.htmlFlingActive && hp.state == "ready") {
+            let t = st.htmlFlingTween.animate(ctx, target: 1.0)
+            hp.scrollTo(st.htmlFlingStart + st.htmlFlingDelta * t)
+            if (t >= 1.0) {
+                st.htmlFlingActive = false
+            }
+        }
+        hp.pumpResources()
+        let key = "html:${hp.pageKey}"
+        match (hp.takeHtmlFrame()) {
+            case Some(fr) => registerPixelImage(ctx.renderer, key, fr.width, fr.height, fr.rgba)
+            case None => ()
+        }
+        match (pixelTexture(ctx.renderer, key)) {
+            case Some(texture) => ctx.renderer.texture(texture, frame)
+            case None =>
+                let text = if (hp.state == "error") {
+                    model.t("reader.htmlError")
+                } else {
+                    model.t("common.loading")
+                }
+                drawPagePlaceholder(ctx, frame, text)
+        }
+        if (hp.htmlGeneration != st.lastHtmlGeneration) {
+            st.lastHtmlGeneration = hp.htmlGeneration
+            ctx.requestFrame()
+        } else if (hp.resourcesInFlight > 0) {
+            ctx.requestFrameAfter(100)
         }
     }
 
@@ -1364,6 +1469,20 @@ class ReaderStage <: Widget {
                     return false
                 }
                 model.noteReaderActivity()
+                // html 页滚动：先滚页内（滚轮一档≈ 3 行高）；到边界外溢给现有
+                // 翻页导航，150ms 冷却防连续滚轮在边界误翻。
+                if (htmlPage.isSome() && model.htmlPage.state == "ready" && dy != 0.0) {
+                    let moved = model.htmlPage.scrollBy(dy * 60.0)
+                    if (!moved) {
+                        let now = model.reader.clock()
+                        if (htmlOverflowTurnAllowed(st.lastHtmlOverflowMs, now, 150)) {
+                            st.lastHtmlOverflowMs = now
+                            wheelTurn(dy > 0.0)
+                        }
+                    }
+                    ctx.requestFrame()
+                    return true
+                }
                 // 长图滚动：滚轮先滚图；滚到顶再向上 → 上一页、滚到底再向下 → 下一页
                 //（frontend 边缘倒计时 toast 省略：直接翻页）。滚动跟手无惯性。
                 match (longPageMax(ctx)) {
@@ -1382,11 +1501,25 @@ class ReaderStage <: Widget {
                 }
                 return true
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                // html 页拖动滚动（M3.2）：按下记录起点与速度基线；MouseMove 跟手
+                // 滚动，MouseUp 按是否真拖决定消费与否——简单点击仍落到底层翻页区。
+                if (htmlPage.isSome() && model.htmlPage.state == "ready" && frame.contains(x, y)) {
+                    st.htmlDragActive = true
+                    st.htmlDragMoved = false
+                    st.htmlDragStartY = y
+                    st.htmlDragStartScroll = model.htmlPage.scrollY()
+                    st.htmlDragLastY = y
+                    st.htmlDragLastMs = model.reader.clock()
+                    st.htmlDragVelocity = 0.0
+                    st.htmlFlingActive = false
+                    ctx.beginDrag("reader:stage:html-scroll")
+                    return true
+                }
                 // 双击缩放（cui 自带 clickCount：2=双击，见 UiContext）：
                 // 仅图片舞台且设置开启时 1×/2× 切换。消费 MouseDown 不阻断配套
                 // MouseUp——中央区双击=chrome 两次翻转（净零）+缩放切换，可接受。
-                if (audioPage.isNone() && videoPage.isNone() && model.reader.doubleTapZoom && ctx.clickCount >= 2 &&
-                    frame.contains(x, y)) {
+                if (audioPage.isNone() && videoPage.isNone() && htmlPage.isNone() && model.reader.doubleTapZoom &&
+                    ctx.clickCount >= 2 && frame.contains(x, y)) {
                     st.zoomed = !st.zoomed
                     return true
                 }
@@ -1420,6 +1553,23 @@ class ReaderStage <: Widget {
                     }
                 }
             case UiEvent.MouseMove(x, y) =>
+                // html 页拖动滚动：拖动中（按下起点在舞台内）跟手滚动并累计速度。
+                if (st.htmlDragActive && ctx.isDragging("reader:stage:html-scroll") && ctx.leftMouseDown) {
+                    let hp = model.htmlPage
+                    let dy = y - st.htmlDragLastY
+                    let now = model.reader.clock()
+                    let dt = max(1, now - st.htmlDragLastMs)
+                    // 速度平滑（px/ms）：拖动方向与滚动方向相反（往下拖 = 内容上移）。
+                    st.htmlDragVelocity = st.htmlDragVelocity * 0.7 + (dy / Float32(dt)) * 0.3
+                    st.htmlDragLastY = y
+                    st.htmlDragLastMs = now
+                    if (abs(y - st.htmlDragStartY) > 4.0) {
+                        st.htmlDragMoved = true
+                    }
+                    hp.scrollTo(st.htmlDragStartScroll - (y - st.htmlDragStartY))
+                    ctx.requestFrame()
+                    return true
+                }
                 if (model.reader.onVirtualEnd && !model.reader.seamlessNext) {
                     if (endOpenRect.contains(x, y) && model.hasNextCandidate()) {
                         ctx.claimHover("reader:end:open", CursorShape.Interactive)
@@ -1457,6 +1607,22 @@ class ReaderStage <: Widget {
                     }
                 }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                // html 页拖动结束：真拖（移动超 4px）才消费——消费即吞掉底层翻页区
+                // 的点击；简单点击不消费放行。速度达阈值起 ease-out 惯性续滚。
+                if (st.htmlDragActive && ctx.isDragging("reader:stage:html-scroll")) {
+                    st.htmlDragActive = false
+                    ctx.clearDrag()
+                    if (st.htmlDragMoved) {
+                        let v = st.htmlDragVelocity
+                        if (abs(v) >= HTML_FLING_VELOCITY_THRESHOLD) {
+                            st.htmlFlingStart = model.htmlPage.scrollY()
+                            st.htmlFlingDelta = -v * Float32(HTML_FLING_MS)
+                            st.htmlFlingActive = true
+                            st.htmlFlingTween.reset(0.0)
+                        }
+                        return true
+                    }
+                }
                 // 结束页卡片按钮（seamless 开时按钮未绘制，热区不响应）。
                 if (model.reader.onVirtualEnd && !model.reader.seamlessNext) {
                     if (endOpenRect.contains(x, y) && model.hasNextCandidate()) {
@@ -1474,6 +1640,11 @@ class ReaderStage <: Widget {
                 }
                 if (ctx.isDragging("reader:stage:volume")) {
                     volumeFromX(x)
+                    return true
+                }
+                // html 页错误态点击重试（整舞台都是热区）。
+                if (htmlPage.isSome() && model.htmlPage.state == "error" && frame.contains(x, y)) {
+                    model.htmlPage.retry()
                     return true
                 }
                 // 失败页点击重试：命中当前 spread 内 error 页 cell 才消费，

@@ -214,6 +214,125 @@ private func panelSection(text: String): Unit {
     }.crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(0.0, 18.0, 0.0, 8.0)
 }
 
+// ── html 排版档位选择器（M4.3：字号/页边距分档）──
+// 几何与交互照抄 ReaderModeSeg（选胶囊滑动 + 文字直读模型），只是段数与标签
+// 可配：current 为每帧直读的当前档索引（外部变更经 readerVersion 重建即时同步），
+// onSelect 经 AppModel 持久化并立即重建 UA CSS。
+
+// 字号档位 px ⇔ 索引（13/16/19/22，见 settings.clampHtmlFontSize）。
+func htmlFontTierIndex(px: Int64): Int64 {
+    if (px <= 14) {
+        0
+    } else if (px <= 17) {
+        1
+    } else if (px <= 20) {
+        2
+    } else {
+        3
+    }
+}
+func htmlFontTierPx(i: Int64): Int64 {
+    let tiers: Array<Int64> = [13, 16, 19, 22]
+    tiers[Int64(max(0, min(3, i)))]
+}
+
+// 页边距档位 px ⇔ 索引（24/48/72，见 settings.clampHtmlMargin）。
+func htmlMarginTierIndex(px: Int64): Int64 {
+    if (px <= 36) {
+        0
+    } else if (px <= 60) {
+        1
+    } else {
+        2
+    }
+}
+func htmlMarginTierPx(i: Int64): Int64 {
+    let tiers: Array<Int64> = [24, 48, 72]
+    tiers[Int64(max(0, min(2, i)))]
+}
+
+private class HtmlTierSeg <: Widget {
+    private let model: AppModel
+    private let spring: Spring
+    private let key: String
+    private let labels: Array<String>
+    private let current: () -> Int64
+    private let onSelect: (Int64) -> Unit
+    private var frame = Rect.zero()
+    private var segW: Float32 = 0.0
+
+    public init(model: AppModel, key: String, labels: Array<String>, current: () -> Int64,
+        onSelect: (Int64) -> Unit) {
+        this.model = model
+        this.key = key
+        this.labels = labels
+        this.current = current
+        this.onSelect = onSelect
+        this.spring = rememberState<Spring>("readerpanel:${key}:pill",
+            {=> Spring(Float32(current()), stiffness: 260.0, damping: 26.0)}).value
+        emit(this)
+    }
+
+    public func measure(ctx: UiContext, available: Size): Size {
+        Size(available.w, ctx.renderer.textHeight(pointSize: SEG_PS) + SEG_BTN_VPAD * 2.0 + SEG_PAD * 2.0)
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+        let count = max(1, labels.size)
+        segW = (rect.w - SEG_PAD * 2.0 - SEG_GAP * Float32(count - 1)) / Float32(count)
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let idx = current()
+        ctx.renderer.fillRoundedRect(frame, SEG_RADIUS, segTrackColor(model.isLight()))
+        let pos = spring.animate(ctx, target: Float32(idx))
+        let count = max(1, labels.size)
+        let pill = Rect(frame.x + SEG_PAD + pos * (segW + SEG_GAP), frame.y + SEG_PAD, segW, frame.h - SEG_PAD * 2.0)
+        ctx.renderer.fillRoundedRect(pill, SEG_BTN_RADIUS, ctx.theme.accentSoft)
+        for (i in 0..count) {
+            let r = Rect(frame.x + SEG_PAD + Float32(i) * (segW + SEG_GAP), frame.y + SEG_PAD, segW,
+                frame.h - SEG_PAD * 2.0)
+            let color = if (Int64(i) == idx) {
+                ctx.theme.accent
+            } else {
+                ctx.theme.mutedText
+            }
+            ctx.renderer.textCenter(labels[Int64(i)], r, color, pointSize: SEG_PS)
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover("readerpanel:${key}", CursorShape.Interactive)
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y) && segW > 0.0) {
+                    let count = max(1, labels.size)
+                    var i = Int64((x - frame.x - SEG_PAD) / (segW + SEG_GAP))
+                    i = max(0, min(count - 1, i))
+                    if (i != current()) {
+                        onSelect(i)
+                    }
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
+}
+
+// 档位行：标签上 + 满宽分档选择器下（与 ReaderModeSeg 独立成行同款布局）。
+private func panelTierBlock(model: AppModel, key: String, label: String, labels: Array<String>,
+    current: () -> Int64, onSelect: (Int64) -> Unit): Unit {
+    VStack {
+        Label(label).fontSize(13.fp)
+        HtmlTierSeg(model, key, labels, current, onSelect)
+    }.crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth().padding(2.0, 9.0)
+}
+
 // 开关行（原型 .set-row：13px、padding 9px 2px、label flex:1 居左、开关居右）。
 // 真值直读模型（见 ReaderSwitch 注释），onToggle 走 AppModel 的 toggle 入口
 //（持久化 + bump readerVersion 已在模型内完成）。
@@ -297,6 +416,17 @@ private func readerSettingsBody(model: AppModel): Unit {
         panelSwitchRow(model, "reader.seamlessNext", model.t("reader.seamlessNext"), model.reader.seamlessNext) {
             => model.toggleReaderSeamlessNext()
         }
+        // html 页排版档位：字号/页边距，变更即重建 UA CSS 并落盘（M4.3）。
+        panelSection(model.t("reader.htmlReading"))
+        panelTierBlock(model, "htmlfont", model.t("reader.htmlFontSize"),
+            [model.t("reader.htmlFontSmall"), model.t("reader.htmlFontMedium"), model.t("reader.htmlFontLarge"),
+                model.t("reader.htmlFontXLarge")],
+            {=> htmlFontTierIndex(model.reader.htmlFontSize)},
+            {i => model.setReaderHtmlFontSize(htmlFontTierPx(i))})
+        panelTierBlock(model, "htmlmargin", model.t("reader.htmlMargin"),
+            [model.t("reader.htmlMarginNarrow"), model.t("reader.htmlMarginStandard"), model.t("reader.htmlMarginWide")],
+            {=> htmlMarginTierIndex(model.reader.htmlMargin)},
+            {i => model.setReaderHtmlMargin(htmlMarginTierPx(i))})
         panelSection(model.t("reader.debug"))
         panelSwitchRow(model, "reader.showInfo", model.t("reader.mediaInfo"), model.readerShowInfo.value) {
             => model.toggleReaderShowInfo()

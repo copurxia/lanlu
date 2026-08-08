@@ -670,6 +670,39 @@ private func seedSettings(model: AppModel): Unit {
     model.tagCloud.value = cloud
 }
 
+// --reader-html 种子正文：离线直灌的章节文字（无外部子资源），
+// 覆盖标题/段落/链接/引用/列表/代码等常见 EPUB 元素。
+private let READER_HTML_SEED = """
+<html>
+<head><title>第14章 转折之时</title></head>
+<body>
+<h1>第14章　转折之时</h1>
+<p>雪落在无人的街道上，像是谁把一整本旧信笺撕碎后抛向天空。主角站在十字路口，手里攘着那张已经被汗水浸软的地图，久久没有迈出下一步。</p>
+<p>「你真的要去吗？」身后传来声音。他没有回头，也知道是谁。这个声音跟了他十三年，从南边的渔村到北边的雪原，从未缺席。</p>
+<blockquote>有些路，走下去才知道是不是归途；有些门，推开后就不允许再关上。</blockquote>
+<p>他把地图折好放进怀里，指了指前方被雪幕吞没的山口：「去。不是为了证明什么，只是因为——</p>
+<ul>
+<li>那里有我们当年弄丢的东西；</li>
+<li>那里有人在等一个答复；</li>
+<li>而且，再不去，雪就要把路封死了。」</li>
+</ul>
+<p>风把最后半句话吹散了。两人一前一后踩进积雪，咯吱声在空旷的山谷里显得格外清晰。走了约莫半个时辰，山口的轮廓才从白茫茫里浮现出来，像一道没愈合的伤疤。</p>
+<h2>山口的灯火</h2>
+<p>意外的是，废驿站的窗口竟透着光。他停下脚步，伸手按住腰间——那里空空如也，刀早在三年前就当掉了。同伴压低声音：「有人在里面，不止一个。」</p>
+<pre><code>if (light.isLit() &amp;&amp; traveler.armed == false) {
+    traveler.knock();   // 除了敲门，别无选择
+}</code></pre>
+<p>门开的时候，热气裹着松脂和烤豆的气味涌出来。屋里的人抬头，两张陌生的脸，一双警惕的眼睛，还有一只趴在炉边打盹的老猎犬。猎犬先认出了他——尾巴在地板上拍了三下。</p>
+<p>「好久不见，老伙计。」他蹲下身，声音哑得连自己都吓了一跳。十三年前离开的时候，它还是一只走不稳路的小犬。</p>
+<h2>迟到的答复</h2>
+<p>炉火很旺，把每个人的影子拉得很长。他从怀里取出那半块磨得发亮的木牌，放在桌中央。屋里安静得只剩柴火的哔剥声。</p>
+<p>「当年我说过，等我回来，就把另一半也带回来。」他顿了顿，「我食言了十三年。今天来，不是来辩解的，是来把欠下的话说完。」</p>
+<p>窗外，雪渐渐小了。山口之上，云层裂开一道缝，露出几点冷冽的星光。他想，这条路走到这里，才终于算是<strong>走上了</strong>。至于尽头是什么，明天再说吧。</p>
+<p><em>（本章完。下一章：<a href="ch15.xhtml">雪霁</a>）</em></p>
+</body>
+</html>
+"""
+
 // 阅读器（T13）：专用顶栏（档案标题 · 页标题、页码胶囊、模式标签、收藏态）+ 页面区。
 // 种 24 页页表（当前第 12 页）、元数据（长标题 + 已收藏）与当前页合成像素。
 // 页表同 seedArchiveDetail 的目录形态；open/setPages 直接驱动状态机（api 离线为空，
@@ -701,6 +734,12 @@ private func seedReader(model: AppModel): Unit {
         }
         pages.add(p)
     }
+    // 第 25 页 html（文字章）：验证 Blitz 离屏渲染舞台。
+    let hp = PageInfo()
+    hp.id = "text/ch14.xhtml"
+    hp.pageType = "html"
+    hp.title = "第14章 转折之时（文字）"
+    pages.add(hp)
     model.pages.value = pages
     model.readerArcid = "ARC_R1"
     model.reader.open("ARC_R1", 11) // 0 基 → 第 12 页
@@ -728,6 +767,14 @@ private func seedReader(model: AppModel): Unit {
         model.reader.gotoPage(5) // 0 基 → 第 6 页
         model.readerIndex.value = model.reader.index + 1
         model.page.value = Page.Reader("ARC_R1", 6)
+    }
+    // html 页起始开关（--reader-html）：从第 25 页（html）起，种子正文离线直灌，
+    // 验证 Blitz 离屏渲染/主题 CSS/页内翻滚。
+    if (harnessHasArg("--reader-html")) {
+        model.htmlSeed = Some(READER_HTML_SEED)
+        model.reader.gotoPage(24) // 0 基 → 第 25 页
+        model.readerIndex.value = model.reader.index + 1
+        model.page.value = Page.Reader("ARC_R1", 25)
     }
     // 双页/RTL 态开关（--reader-double / --reader-rtl）：验证 spread 布局与方向动画。
     if (harnessHasArg("--reader-double")) {

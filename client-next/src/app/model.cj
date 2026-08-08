@@ -305,6 +305,11 @@ public class AppModel {
     // 媒体 lane 播放引擎（libVLC 音视频统一方案，纯逻辑可单测；与 reader 一样是普通类，
     // 状态变更经 readerVersion 广播视图重建）。
     public let playback = PlaybackModel()
+    // html 页离屏渲染引擎（Blitz：webview 包，纯逻辑类同 playback；
+    // 状态变更经 readerVersion 广播视图重建）。
+    public let htmlPage = HtmlPageModel()
+    // 快照场景注入：种子 html 页正文（离线，不走网络）；非空时 html 页 open 直接灌入。
+    public var htmlSeed: ?String = None
     private var mediaProxy: ?MediaProxy = None
 
     // 详情页（档案）：页面预览页表、三视图切换（0=缩略图 1=列表 2=树）、所属合集、相关推荐。
@@ -502,6 +507,37 @@ public class AppModel {
                 )
                 case None => ()
             }
+        }
+        // html 离屏渲染出口：正文/子资源都由 worker 拉字节（Blitz 不碰网络），
+        // 任务名带 pageKey 去重；完成经 pump 的 drain 分发回填 htmlPage。
+        htmlPage.fetchHtml = {
+            key, arc, path => match (htmlSeed) {
+                case Some(seed) =>
+                    // 快照/测试种子页：离线直灌，不走网络（api 可为 None）。
+                    htmlPage.htmlLoaded(key, utf8BytesOf(seed))
+                case None =>
+                    match (api) {
+                        case Some(a) =>
+                            let _ = worker.submit("html:${key}", {=> (key, a.pageBytes(arc, path))})
+                        case None =>
+                            htmlPage.htmlFailed(key, "未连接服务器")
+                    }
+            }
+        }
+        htmlPage.fetchResource = {
+            key, arc, url, path => match (api) {
+                case Some(a) =>
+                    let _ = worker.submit("htmlres:${key}:${url}", {=> (key, url, a.pageBytes(arc, path))})
+                case None =>
+                    // 离线（快照种子）：即时判败，避免在途计数永不自减。
+                    htmlPage.resourceFailed(key, url)
+            }
+        }
+        // html 阅读主题随当前深浅色初始化（后续切换在 applyPendingTheme 同步）。
+        applyHtmlThemeCss()
+        // html 页滚到底视为读完：并入 ReaderModel 进度上报（防抖语义与翻页一致）。
+        htmlPage.onHtmlRead = {
+            => reader.markCurrentPageRead()
         }
         // 初始选中 active 服务器（回退首个）；api 不再在此构建——
         // 登录/恢复会话时按选中服务器的 baseUrl 现场创建。
@@ -2284,6 +2320,31 @@ public class AppModel {
         readerVersion.value += 1
     }
 
+    // html 页 PgUp/PgDn/空格：先页内按视口高翻滚（重叠 24px）；到底/到顶后
+    // 外溢现有翻页语义。返回是否消费（非 html 页/未就绪返回 false 由调用方放行）。
+    public func readerHtmlPageTurn(down!: Bool): Bool {
+        if (htmlPage.state != "ready") {
+            return false
+        }
+        let vh = Float32(htmlPage.viewportHeight())
+        if (vh <= 0.0) {
+            return false
+        }
+        let delta = max(24.0, vh - 24.0)
+        let moved = htmlPage.scrollBy(if (down) {
+            delta
+        } else {
+            -delta
+        })
+        if (!moved) {
+            reader.turnPage(down)
+            readerIndex.value = reader.displayPage
+            readerPageSlider.value = Float32(reader.displayPage)
+        }
+        readerVersion.value += 1
+        true
+    }
+
     // 方向键翻页（T2 阅读舞台接线）：cui Key 已在视图层映射为 KeyCode，方向换算
     //（RTL 反转/TTB 上下/webtoon 不响应）全部在 ReaderModel.keyDirection 内；
     // None（webtoon/无效键）自然不翻页。命中后同步 1 基镜像并 bump readerVersion——
@@ -2341,6 +2402,8 @@ public class AppModel {
     private var lastChromeSync: Bool = true
     // 当前 spread 的媒体镜像。媒体加载只随内容 spread 变化，绝不能随 dock 展开项变化。
     private var lastLane: LaneId = Book
+    // 当前 spread 的 html 页镜像（-1=无）：html 会话生命周期只跟 spread 走。
+    private var lastHtmlPageIdx: Int64 = -1
     // 自动播放计时：上次自动翻页（或开关/间隔变更）的时钟读数（reader.clock 基准）。
     private var lastAutoPlayTurnMs: Int64 = 0
     // ---- 无缝续读：下一档案解析/拼接状态 ----
@@ -2468,6 +2531,25 @@ public class AppModel {
         readerVersion.value += 1
     }
 
+    // ---- html 阅读排版（M4.3）：字号/页边距档位，持久化 + 立即重建 UA CSS ----
+
+    public func setReaderHtmlFontSize(n: Int64): Unit {
+        reader.setHtmlFontSize(n)
+        applyHtmlThemeCss()
+        readerVersion.value += 1
+    }
+
+    public func setReaderHtmlMargin(n: Int64): Unit {
+        reader.setHtmlMargin(n)
+        applyHtmlThemeCss()
+        readerVersion.value += 1
+    }
+
+    // 深浅色与排版档位统一的 UA CSS 应用出口（init / 主题切换 / 档位变更共用）。
+    private func applyHtmlThemeCss(): Unit {
+        htmlPage.setThemeCss(htmlThemeCss(isLight(), fontSize: reader.htmlFontSize, margin: reader.htmlMargin))
+    }
+
     // ---- lane ⇄ 播放同步 ----
 
     // UI 手动切 lane：只改变 dock 展开的控制组。frontend 的 lane 不是内容源选择器，
@@ -2584,6 +2666,7 @@ public class AppModel {
                 case None => ()
             }
             case Book => playback.stop()
+            case Html(_) => playback.stop() // html 页无媒体；Blitz 离屏渲染不在此驱动
             case Video(i) => match (reader.pageAt(i)) {
                 case Some(p) =>
                     let arc = reader.arcidOfReal(i)
@@ -2612,6 +2695,7 @@ public class AppModel {
     public func close(): Unit {
         stopTaskStream()
         playback.stop()
+        htmlPage.close()
         match (mediaProxy) {
             case Some(proxy) => proxy.close()
             case None => ()
@@ -3068,6 +3152,9 @@ public class AppModel {
         }
         settings.theme = themeRippleTarget
         persistSettings(settings)
+        // html 阅读纸面同步新主题（活动会话立即重渲染，下一帧取新帧）。
+        htmlPage.setThemeCss(htmlThemeCss(themeRippleTarget == "light", fontSize: reader.htmlFontSize,
+            margin: reader.htmlMargin))
         if (let Some(h) <- themeChangeHandler) {
             h(themeRippleTarget)
         }
@@ -3252,6 +3339,35 @@ public class AppModel {
             syncPlaybackToLane(lastLane)
             readerVersion.value += 1
         }
+        // html 页生命周期同媒体：翻离/离开阅读器即关会话（framebuffer 归还）；
+        // 进入 html 页 open 标称视口，舞台首帧经 ensureViewport 校正为真实物理像素。
+        let htmlIdx: Int64 = if (onReaderPage) {
+            match (reader.spreadHtmlPage()) {
+                case Some(i) => i
+                case None => -1
+            }
+        } else {
+            -1
+        }
+        if (htmlIdx != lastHtmlPageIdx) {
+            lastHtmlPageIdx = htmlIdx
+            if (htmlIdx < 0) {
+                htmlPage.close()
+            } else {
+                match (reader.pageAt(htmlIdx)) {
+                    case Some(p) =>
+                        let arc = reader.arcidOfReal(htmlIdx)
+                        let path = if (p.sourcePath.size > 0) {
+                            p.sourcePath
+                        } else {
+                            p.id
+                        }
+                        htmlPage.open(arc, path, 1280, 800, 1.0)
+                    case None => ()
+                }
+            }
+            readerVersion.value += 1
+        }
         let results = worker.drain()
         for (r in results) {
             if (r.tag.size > 0 && r.tag != language.value) {
@@ -3362,6 +3478,17 @@ public class AppModel {
         if (r.name == "next.resolve" || r.name.startsWith("next.files")) {
             appendInFlight = false
             reader.appendNextFailed("没有下一档案了")
+            readerVersion.value += 1
+            return
+        }
+        // html 取字节失败：阅读器内联错误态（可点击重试），不 toast；
+        // 与图片管线同惯例，401 不做全局 logout。htmlres 须先于 html 匹配。
+        if (r.name.startsWith("htmlres:")) {
+            htmlPage.resourceFailed(r.name.removePrefix("htmlres:"), "")
+            return
+        }
+        if (r.name.startsWith("html:")) {
+            htmlPage.htmlFailed(r.name.removePrefix("html:"), r.error)
             readerVersion.value += 1
             return
         }
@@ -4114,6 +4241,24 @@ public class AppModel {
                     if (k.startsWith("backdrop:audio:")) {
                         imageState(k).value = "ready"
                     }
+                case None => ()
+            }
+        } else if (name.startsWith("htmlres:")) {
+            // 子资源到货：回填 WebviewSession（key 对号入座，迟到结果由模型内丢弃）。
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, url, bytes) = (p as (String, String, Array<UInt8>)).getOrThrow()
+                    htmlPage.resourceLoaded(key, url, bytes)
+                    readerVersion.value += 1
+                case None => ()
+            }
+        } else if (name.startsWith("html:")) {
+            // 正文到货：灌入 Blitz 会话，首帧由舞台 takeHtmlFrame 取走。
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, bytes) = (p as (String, Array<UInt8>)).getOrThrow()
+                    htmlPage.htmlLoaded(key, bytes)
+                    readerVersion.value += 1
                 case None => ()
             }
         } else if (name.startsWith("playback:")) {

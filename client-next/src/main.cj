@@ -5,6 +5,7 @@ import lanlu_client_next.app.*
 import lanlu_client_next.ui.*
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
+import webview.warmup
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
 func rootView(model: AppModel): Unit {
@@ -135,6 +136,11 @@ main(): Int64 {
         loadSettings()
     }
     println("[boot] 2 settings loaded, seedMode=${seedMode}")
+    // webview 字体预热：fontique 系统字体扫描（FcConfigBuildFonts）是 loadHtml
+    // 崩溃窗口的主要来源，提前到 GC 未活跃、主线程浅栈的启动阶段完成一次；
+    // 进程级共享，后续 loadHtml 复用不再重建（见 webview_native session.rs）。
+    warmup()
+    println("[boot] 2.1 webview fonts warmed")
     let model = AppModel(settings, persistSettings: {s => saveSettings(s)})
     if (seedMode.size > 0) {
         seedLibrarySnapshot(model, seedMode)

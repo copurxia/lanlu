@@ -272,12 +272,12 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
                 Label(model.settings.username).fontSize(15.fp)
                 Label(model.settings.serverUrl).fontSize(11.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            Button(model.t("overview.switchServer"), {=> model.navigate(Page.Login)})
-                .key("overview.switchServer")
-                .style(ghostStyleOf(model))
-            Button(model.t("overview.logout"), {=> logoutOpen.value = true})
-                .key("overview.logout")
-                .style(dangerGhostStyleOf())
+            // 图标钮对齐 client SettingsScreen overviewActions：⇄ 切换服务器（默认弱色）、
+            // 门/箭头退出登录（danger 红）。
+            GhostIconButton(GhostGlyph.Swap, "overview.switchServer", size: 36.0,
+                onClick: {=> model.navigate(Page.Login)})
+            GhostIconButton(GhostGlyph.LogOut, "overview.logout", size: 36.0,
+                color: Some(LANLU_DANGER), onClick: {=> logoutOpen.value = true})
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
     }
 
@@ -607,22 +607,6 @@ private func appearancePage(model: AppModel): Unit {
                     set: {
                         _, v =>
                             model.setTheme(indexToTheme(v))
-                            return v
-                    }
-                )
-            )
-        }
-    }
-    detailCard(model, "界面缩放") {
-        settingRowIcon(model, "缩放", "跟随系统显示器缩放或固定百分比；需重启生效", GhostGlyph.Monitor) {
-            // 与主题卡同款：初值取自持久化设置，set 写回 model.setUiScale（落盘 + Toast 提示重启）。
-            SegmentedControl(
-                ["跟随系统", "100%", "125%", "150%", "200%"],
-                rememberState<Int64>("settings.scaleIdx", {=> uiScaleToIndex(model.settings.uiScale)}).project(
-                    get: {v => v},
-                    set: {
-                        _, v =>
-                            model.setUiScale(indexToUiScale(v))
                             return v
                     }
                 )
