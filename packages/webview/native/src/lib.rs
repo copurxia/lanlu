@@ -174,6 +174,17 @@ pub unsafe extern "C" fn lanlu_wv_content_height(s: *mut WvSession) -> f32 {
     catch_unwind(AssertUnwindSafe(run)).ok().flatten().unwrap_or(0.0)
 }
 
+/// 把目标分页位置回退到完整文本行/图片之前，避免下一纸面从半行开始。
+#[unsafe(no_mangle)]
+/// # Safety
+/// `s` must be null or a live session.
+pub unsafe extern "C" fn lanlu_wv_page_break_before(s: *mut WvSession, target_y: f32) -> f32 {
+    let run = || -> Option<f32> {
+        unsafe { as_session(s) }.map(|session| session.page_break_before(target_y))
+    };
+    catch_unwind(AssertUnwindSafe(run)).ok().flatten().unwrap_or(target_y.max(0.0))
+}
+
 /// 注入/替换 UA 级主题 CSS(深浅色)。
 #[unsafe(no_mangle)]
 /// # Safety

@@ -17,8 +17,8 @@ import std.collection.{ArrayList, HashMap}
 private let DOCK_BOOK_BODY_W: Float32 = 356.0
 private let DOCK_AUDIO_BODY_W: Float32 = 390.0
 private let DOCK_VIDEO_BODY_W: Float32 = 426.0
-// html lane body：页内滚动进度条 200 + 页码数字区 70（无翻页钮，Book 兜底提供）。
-private let DOCK_HTML_BODY_W: Float32 = 280.0
+// html lane body：页内滚动进度 + 页码 + HTML 专属字号/页边距调节。
+private let DOCK_HTML_BODY_W: Float32 = 420.0
 private let DOCK_TAB: Float32 = 36.0
 private let DOCK_PAD: Float32 = 6.0
 private let DOCK_GAP: Float32 = 4.0
@@ -86,6 +86,12 @@ class ReaderDock <: Widget {
     private var muteRect = Rect.zero()
     private var subtitleRect = Rect.zero()
     private var htmlSeekRect = Rect.zero()
+    private var htmlFontDownRect = Rect.zero()
+    private var htmlFontValueRect = Rect.zero()
+    private var htmlFontUpRect = Rect.zero()
+    private var htmlMarginDownRect = Rect.zero()
+    private var htmlMarginValueRect = Rect.zero()
+    private var htmlMarginUpRect = Rect.zero()
 
     public init(model: AppModel) {
         this.model = model
@@ -210,8 +216,14 @@ class ReaderDock <: Widget {
                 muteRect = Rect(bx + 108.0 + 140.0 + 94.0, cy - 15.0, 30.0, 30.0)
                 subtitleRect = Rect(bx + 376.0, cy - 15.0, 38.0, 30.0)
             case LaneId.Html(_) =>
-                // 页内滚动进度条（200）+ 页码数字区（70），无翻页钮（Book 兜底）。
-                htmlSeekRect = Rect(bx, cy - 10.0, 200.0, 20.0)
+                // 进度 150 + 页码 54 + 字号三格 + 页边距三格；Book lane 兜底翻章节。
+                htmlSeekRect = Rect(bx, cy - 10.0, 150.0, 20.0)
+                htmlFontDownRect = Rect(bx + 212.0, cy - 15.0, 28.0, 30.0)
+                htmlFontValueRect = Rect(bx + 240.0, cy - 15.0, 32.0, 30.0)
+                htmlFontUpRect = Rect(bx + 272.0, cy - 15.0, 28.0, 30.0)
+                htmlMarginDownRect = Rect(bx + 306.0, cy - 15.0, 28.0, 30.0)
+                htmlMarginValueRect = Rect(bx + 334.0, cy - 15.0, 36.0, 30.0)
+                htmlMarginUpRect = Rect(bx + 370.0, cy - 15.0, 28.0, 30.0)
         }
     }
 
@@ -354,7 +366,8 @@ class ReaderDock <: Widget {
             pointSize: 12.0)
     }
 
-    // html lane body：页内滚动进度条（电子书式，页内粒度而非页码粒度）。
+    // html lane body：页内滚动进度条（电子书式，页内粒度而非页码粒度）以及
+    // HTML 专属排版控制。字号/页边距展示实际 px 值，左右按钮按档位调节。
     // 值 = HtmlPageModel.htmlPageProgress01（scrollY/(contentHeight-viewportH)）；
     // 未就绪（loading/error）显示 0 格，页码照常（拖动由 handle 的 htmlSeek 消费）。
     private func drawHtmlBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
@@ -376,8 +389,44 @@ class ReaderDock <: Widget {
         }
         let nw = ctx.renderer.textWidth(num, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
-        ctx.renderer.text(num, sr.right() + 6.0 + (70.0 - nw) / 2.0, sr.centerY() - nh / 2.0, dimColor(ctx, a),
+        ctx.renderer.text(num, sr.right() + 4.0 + (54.0 - nw) / 2.0, sr.centerY() - nh / 2.0, dimColor(ctx, a),
             pointSize: 12.0)
+
+        let divider = fadeColor(ctx.theme.overlayBorder, Float32(a) / 255.0)
+        ctx.renderer.strokeLine(sr.right() + 62.0, sr.centerY() - 8.0, sr.right() + 62.0, sr.centerY() + 8.0,
+            Pen(width: 1.0, color: divider))
+        drawHtmlValue(ctx, htmlFontValueRect, dy, "${model.reader.htmlFontSize}", a)
+        drawHtmlAdjust(ctx, htmlFontDownRect, dy, "reader:dock:htmlFontDown", "A-",
+            htmlFontTierIndex(model.reader.htmlFontSize) > 0, a)
+        drawHtmlAdjust(ctx, htmlFontUpRect, dy, "reader:dock:htmlFontUp", "A+",
+            htmlFontTierIndex(model.reader.htmlFontSize) < 3, a)
+
+        ctx.renderer.strokeLine(htmlFontUpRect.right() + 3.0, sr.centerY() - 8.0,
+            htmlFontUpRect.right() + 3.0, sr.centerY() + 8.0, Pen(width: 1.0, color: divider))
+        drawHtmlValue(ctx, htmlMarginValueRect, dy, "${model.reader.htmlMargin}", a)
+        drawHtmlAdjust(ctx, htmlMarginDownRect, dy, "reader:dock:htmlMarginDown", "M-",
+            htmlMarginTierIndex(model.reader.htmlMargin) > 0, a)
+        drawHtmlAdjust(ctx, htmlMarginUpRect, dy, "reader:dock:htmlMarginUp", "M+",
+            htmlMarginTierIndex(model.reader.htmlMargin) < 2, a)
+    }
+
+    private func drawHtmlValue(ctx: UiContext, rect: Rect, dy: Float32, value: String, a: Int64): Unit {
+        ctx.renderer.textCenter(value, rect.shift(0.0, dy), dimColor(ctx, a), pointSize: 10.5)
+    }
+
+    private func drawHtmlAdjust(ctx: UiContext, rect: Rect, dy: Float32, id: String, label: String, enabled: Bool,
+        a: Int64): Unit {
+        let shifted = rect.shift(0.0, dy)
+        if (enabled && ctx.isHovered(id)) {
+            ctx.renderer.fillCircle(shifted.centerX(), shifted.centerY(), shifted.w / 2.0,
+                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+        }
+        let color = if (enabled) {
+            dimColor(ctx, a)
+        } else {
+            ctx.theme.mutedText.withAlpha(min(a, 72))
+        }
+        ctx.renderer.textCenter(label, shifted, color, pointSize: 10.5)
     }
 
     private func drawAudioBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
@@ -547,6 +596,26 @@ class ReaderDock <: Widget {
                         return true
                     }
                 }
+                if (isHtmlActive()) {
+                    let fontTier = htmlFontTierIndex(model.reader.htmlFontSize)
+                    let marginTier = htmlMarginTierIndex(model.reader.htmlMargin)
+                    if (htmlFontDownRect.contains(x, y) && fontTier > 0) {
+                        model.setReaderHtmlFontSize(htmlFontTierPx(fontTier - 1))
+                        return true
+                    }
+                    if (htmlFontUpRect.contains(x, y) && fontTier < 3) {
+                        model.setReaderHtmlFontSize(htmlFontTierPx(fontTier + 1))
+                        return true
+                    }
+                    if (htmlMarginDownRect.contains(x, y) && marginTier > 0) {
+                        model.setReaderHtmlMargin(htmlMarginTierPx(marginTier - 1))
+                        return true
+                    }
+                    if (htmlMarginUpRect.contains(x, y) && marginTier < 2) {
+                        model.setReaderHtmlMargin(htmlMarginTierPx(marginTier + 1))
+                        return true
+                    }
+                }
                 return true
             case UiEvent.MouseWheel(_, _, x, y) =>
                 // 胶囊上滚轮不翻页（原型 dock 浮于舞台之上，滚动留给滑条语义）。
@@ -578,6 +647,17 @@ class ReaderDock <: Widget {
         }
         if (htmlSeekRect.contains(x, y) && isHtmlActive()) {
             ctx.claimHover("reader:dock:htmlSeek", CursorShape.Interactive)
+        }
+        if (isHtmlActive()) {
+            let htmlSpots = [("reader:dock:htmlFontDown", htmlFontDownRect),
+                ("reader:dock:htmlFontUp", htmlFontUpRect),
+                ("reader:dock:htmlMarginDown", htmlMarginDownRect),
+                ("reader:dock:htmlMarginUp", htmlMarginUpRect)]
+            for ((id, rect) in htmlSpots) {
+                if (rect.contains(x, y)) {
+                    ctx.claimHover(id, CursorShape.Interactive)
+                }
+            }
         }
         match (model.reader.mode) {
             case ReadingMode.Webtoon => ()
@@ -633,6 +713,39 @@ class ReaderDock <: Widget {
         let amount = Float64(max(0.0, min(1.0, (x - htmlSeekRect.x) / htmlSeekRect.w)))
         hp.scrollTo(Float32(amount) * maxScroll)
     }
+}
+
+// HTML 排版档位 px ⇔ 索引（见 settings.clampHtmlFontSize/clampHtmlMargin）。
+func htmlFontTierIndex(px: Int64): Int64 {
+    if (px <= 14) {
+        0
+    } else if (px <= 17) {
+        1
+    } else if (px <= 20) {
+        2
+    } else {
+        3
+    }
+}
+
+func htmlFontTierPx(i: Int64): Int64 {
+    let tiers: Array<Int64> = [13, 16, 19, 22]
+    tiers[Int64(max(0, min(3, i)))]
+}
+
+func htmlMarginTierIndex(px: Int64): Int64 {
+    if (px <= 36) {
+        0
+    } else if (px <= 60) {
+        1
+    } else {
+        2
+    }
+}
+
+func htmlMarginTierPx(i: Int64): Int64 {
+    let tiers: Array<Int64> = [24, 48, 72]
+    tiers[Int64(max(0, min(2, i)))]
 }
 
 // dock 叠层：readerView 的 ZStack 内底部居中（原型 #dock bottom:20px）；

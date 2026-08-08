@@ -84,6 +84,54 @@ func htmlReadingMaxOffsetUsesWholeSpreads(): Unit {
     @Expect(htmlReadingMaxOffset(2000.0, 1000.0, true), 0.0)
 }
 
+@Test
+func htmlLiveViewportResizeRealignsSpread(): Unit {
+    let m = HtmlPageModel()
+    try {
+        m.fetchHtml = {_, _, _ => ()}
+        m.setDoublePage(true)
+        m.open("arc1", "text/long.html", 2000, 972, 1.0)
+        m.htmlLoaded("arc1:text/long.html",
+            utf8BytesOf("<html><body><div style='height:5000px'>long chapter</div></body></html>"))
+        m.ensureViewport(2000, 972, 1.0)
+        let _ = m.takeHtmlFrame()
+        @Expect(m.contentHeight > 4000.0, true)
+
+        // 每张纸面末尾预留 12px 字形安全带：972 高对应实际页步 960。
+        m.scrollTo(1944.0)
+        @Expect(m.scrollY(), 1920.0)
+        m.ensureViewport(2000, 1024, 1.0)
+        @Expect(m.viewportHeight(), 1024)
+        // 保持同一 spread 序号；新实际页步为 1012。
+        @Expect(m.scrollY(), 2024.0)
+    } finally {
+        m.close()
+    }
+}
+
+@Test
+func htmlDoublePageLeavesLineSafeRemainder(): Unit {
+    let m = HtmlPageModel()
+    try {
+        m.fetchHtml = {_, _, _ => ()}
+        m.setDoublePage(true)
+        m.open("arc1", "text/lines.html", 440, 120, 1.0)
+        m.setThemeCss(htmlThemeCss(true, fontSize: 16, margin: 24, doublePage: true))
+        m.htmlLoaded("arc1:text/lines.html", utf8BytesOf(
+            "<html><body><p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen " +
+            "fifteen sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four " +
+            "twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two</p></body></html>"))
+        m.ensureViewport(440, 120, 1.0)
+        let _ = m.takeHtmlFrame()
+        // 纸面正文最多用到 viewport-12；下一纸面从完整行边界开始。
+        @Expect(m.pageVisibleHeight(false) <= 108.0, true)
+        @Expect(m.pageVisibleHeight(false) > 0.0, true)
+        @Expect(m.pageVisibleHeight(true) <= 108.0, true)
+    } finally {
+        m.close()
+    }
+}
+
 // ---- 主题 CSS ----
 
 @Test
@@ -97,8 +145,9 @@ func htmlThemeCssPalettes(): Unit {
     // 深浅两套互不串色
     @Expect(light.contains("#16161a"), false)
     @Expect(dark.contains("#ffffff"), false)
-    // 排版设置必须覆盖 EPUB 自带 body 样式，且上下留出阅读安全区。
-    @Expect(light.contains("padding: 20px 48px !important"), true)
+    // 排版设置必须覆盖 EPUB 自带 body 样式；纵向安全区由每个 ReaderStage 纸面
+    // 统一留出，body 只承载用户可调的横向页边距。
+    @Expect(light.contains("padding: 0 48px !important"), true)
     @Expect(light.contains("max-width: 960px !important"), true)
     @Expect(htmlThemeCss(true, doublePage: true).contains("max-width: none !important"), true)
 }

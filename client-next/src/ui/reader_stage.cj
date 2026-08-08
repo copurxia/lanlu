@@ -140,6 +140,20 @@ private let STAGE_ZOOM: Float32 = 2.0
 private let HTML_FLING_MS: Int64 = 220
 private let HTML_FLING_VELOCITY_THRESHOLD: Float32 = 0.4 // px/ms（400px/s）
 
+// HTML 是铺满视口的离屏纹理，不像图片 contain 会天然留下纸面安全区。每个 HTML
+// 纸面都显式留出顶部 20vp；chrome 可见时，底部再为 lane 胶囊（48vp）、其
+// bottom 20vp 与 12vp 间隙共留 80vp。隐藏 chrome 后只保留普通 20vp 页边距。
+private let HTML_PAPER_TOP: Float32 = 20.0
+private let HTML_PAPER_BOTTOM: Float32 = 20.0
+private let HTML_PAPER_DOCK_BOTTOM: Float32 = 80.0
+
+func htmlPaperFrame(frame: Rect, chromeVisible: Bool): Rect {
+    let top = min(HTML_PAPER_TOP, max(0.0, frame.h))
+    let wantedBottom = if (chromeVisible) { HTML_PAPER_DOCK_BOTTOM } else { HTML_PAPER_BOTTOM }
+    let bottom = min(wantedBottom, max(0.0, frame.h - top))
+    Rect(frame.x, frame.y + top, frame.w, max(0.0, frame.h - top - bottom))
+}
+
 // 滚轮在 html 页边界外溢翻页的冷却判定（纯函数，可单测）：距上次外溢不足冷却窗
 // 则吞掉本次（防连续滚轮在边界误翻多页）。
 func htmlOverflowTurnAllowed(lastMs: Int64, now: Int64, cooldownMs: Int64): Bool {
@@ -940,8 +954,12 @@ class ReaderStage <: Widget {
     private func drawHtmlStage(ctx: UiContext, pageIdx: Int64): Unit {
         let hp = model.htmlPage
         let scale = max(1.0, ctx.displayScale)
+        let paper = htmlPaperFrame(frame, model.reader.chromeVisible)
+        // 先铺满整个舞台，paper 外的顶部/底部安全区保持真实纸面背景；不能依赖
+        // WebView 文档首尾 padding，否则第二页起仍会贴边并钻进浮层。
+        ctx.renderer.fill(frame, ctx.theme.panel)
         hp.setDoublePage(model.reader.doublePage)
-        hp.ensureViewport(Int32(frame.w * scale), Int32(frame.h * scale), scale)
+        hp.ensureViewport(Int32(paper.w * scale), Int32(paper.h * scale), scale)
         // 拖动松手惯性：ease-out 追踪释放时速度推算的目标位移。scrollTo 驱动
         // native 滚动（dirty → 新帧 → generation 前进 → 本分支续帧）；曲线落定后
         // scrollTo 无变化不再出帧，静止零重绘。
@@ -964,24 +982,28 @@ class ReaderStage <: Widget {
                 case Some(fr) => registerPixelImage(ctx.renderer, spreadKey, fr.width, fr.height, fr.rgba)
                 case None => ()
             }
-            let left = Rect(frame.x, frame.y, frame.w / 2.0, frame.h)
-            let right = Rect(left.right(), frame.y, frame.w - left.w, frame.h)
+            let left = Rect(paper.x, paper.y, paper.w / 2.0, paper.h)
+            let right = Rect(left.right(), paper.y, paper.w - left.w, paper.h)
             match (pixelTexture(ctx.renderer, key)) {
-                case Some(texture) => ctx.renderer.texture(texture, left)
+                case Some(texture) =>
+                    ctx.renderer.texture(texture, left)
+                    maskHtmlPageRemainder(ctx, left, hp.pageVisibleHeight(false))
                 case None => drawHtmlPlaceholder(ctx, left, hp.state)
             }
             match (pixelTexture(ctx.renderer, spreadKey)) {
-                case Some(texture) => ctx.renderer.texture(texture, right)
+                case Some(texture) =>
+                    ctx.renderer.texture(texture, right)
+                    maskHtmlPageRemainder(ctx, right, hp.pageVisibleHeight(true))
                 case None => drawHtmlPlaceholder(ctx, right, hp.state)
             }
             ctx
                 .renderer
-                .strokeLine(frame.centerX(), frame.y + 20.0, frame.centerX(), frame.bottom() - 20.0,
+                .strokeLine(paper.centerX(), paper.y, paper.centerX(), paper.bottom(),
                     Pen(width: 1.0, color: ctx.theme.panelEdge))
         } else {
             match (pixelTexture(ctx.renderer, key)) {
-                case Some(texture) => ctx.renderer.texture(texture, frame)
-                case None => drawHtmlPlaceholder(ctx, frame, hp.state)
+                case Some(texture) => ctx.renderer.texture(texture, paper)
+                case None => drawHtmlPlaceholder(ctx, paper, hp.state)
             }
         }
         if (hp.htmlGeneration != st.lastHtmlGeneration) {
@@ -989,6 +1011,13 @@ class ReaderStage <: Widget {
             ctx.requestFrame()
         } else if (hp.resourcesInFlight > 0) {
             ctx.requestFrameAfter(100)
+        }
+    }
+
+    private func maskHtmlPageRemainder(ctx: UiContext, rect: Rect, visibleHeight: Float32): Unit {
+        let used = max(0.0, min(rect.h, visibleHeight))
+        if (used < rect.h - 0.5) {
+            ctx.renderer.fill(Rect(rect.x, rect.y + used, rect.w, rect.h - used), ctx.theme.panel)
         }
     }
 

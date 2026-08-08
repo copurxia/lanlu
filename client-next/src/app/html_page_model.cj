@@ -1,6 +1,7 @@
 package lanlu_client_next.app
 
 import std.collection.{ArrayList, HashMap, HashSet}
+import std.math.abs
 import webview.{HtmlFrame, WebviewSession}
 
 // html 页离屏渲染模型（对照 playback_model：纯逻辑可单测，网络出口全部注入）。
@@ -12,6 +13,10 @@ import webview.{HtmlFrame, WebviewSession}
 // 子资源 URL 的伪 scheme：loadHtml 以 lanlu://<arcid>/<pagePath> 作 baseUrl，
 // 相对资源即解析为同 scheme 绝对 URL，再经 htmlResourcePath 还原归档内路径。
 public let HTML_SCHEME = "lanlu"
+
+// Parley 行框之外仍可能有少量字形 overhang/抗锯齿像素；分页目标提前 12px，
+// 让纸面底部在外部安全边距之前还有稳定留白，不露出下一行的顶部。
+private let HTML_PAGE_END_GUARD: Float32 = 12.0
 
 // 十六进制位值；非法返回 -1。
 private func hexVal(b: UInt8): Int64 {
@@ -78,8 +83,9 @@ foreign func memcpy(destination: CPointer<Unit>, source: CPointer<Unit>, count: 
 // load_html 后自动重新套用（Rust 侧 theme_css 跨文档驻留）。
 // fontSize/margin 为阅读设置面板的字号档位与页边距档位（px，就近取档后传入）。
 // 布局对齐 frontend：单页内容限宽居中；双页由两个半宽离屏视口组成，因此每个
-// 视口都铺满自己的纸面。垂直 20px 安全区避免正文贴住顶底 chrome。关键排版项
-// 使用 !important，确保 EPUB 自带 body 样式不能覆盖用户的字号和页边距设置。
+// 视口都铺满自己的纸面。逐纸面的上下安全区由 ReaderStage 留出，body 只负责
+// 用户可调的横向页边距，避免仅文档首尾有 padding、后续纸面仍贴住 chrome。
+// 关键排版项使用 !important，确保 EPUB 自带 body 样式不能覆盖用户设置。
 public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48, doublePage!: Bool = false): String {
     // (纸面, 正文, 链接, 次文字, 代码底) 五组色取自 palette.cj 明/暗两档。
     let (bg, fg, link, dim, codeBg) = if (light) {
@@ -97,7 +103,7 @@ public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48
     "html { background: ${bg} !important; color: ${fg} !important; }\n" +
         "body { background: ${bg} !important; color: ${fg} !important; max-width: ${maxWidth} !important; " +
         "min-height: 100% !important; box-sizing: border-box !important; margin: 0 auto !important; " +
-        "padding: 20px ${mg}px !important; line-height: 1.75 !important; font-size: ${fs}px !important; " +
+        "padding: 0 ${mg}px !important; line-height: 1.75 !important; font-size: ${fs}px !important; " +
         "word-break: break-word; }\n" + "a { color: ${link}; text-decoration: none; }\n" +
         "img, video, svg, iframe { max-width: 100%; height: auto; }\n" + "p { margin: 0.6em 0; }\n" +
         "h1, h2, h3, h4, h5, h6 { line-height: 1.4; margin: 1.2em 0 0.6em; }\n" +
@@ -236,6 +242,13 @@ public class HtmlPageModel {
     private var viewH: Int32 = 0
     private var viewScale: Float32 = 0.0
     private var doublePage = false
+    // 双页不是按任意 viewport 高度硬切，而是在 native 排版结果的完整文本行/图片
+    // 边界生成页首。spreadPageIndex 恒为偶数，指向当前左纸面。
+    private let pageOffsets = ArrayList<Float32>()
+    private var spreadPageIndex: Int64 = 0
+    // 从单页切入双页时按原滚动位置选择最近 spread；普通 resize 则保持 spread 序号。
+    private var paginationAnchor: Float32 = 0.0
+    private var usePaginationAnchor = false
     // 本页是否已触发过 onHtmlRead（每页一次；open 重置）。
     private var bottomReported = false
 
@@ -256,6 +269,10 @@ public class HtmlPageModel {
         htmlGeneration = 0
         resourcesInFlight = 0
         bottomReported = false
+        pageOffsets.clear()
+        spreadPageIndex = 0
+        paginationAnchor = 0.0
+        usePaginationAnchor = false
         triedUrls.clear()
         resourceBytes.clear()
         pendingHtmlBytes = Array<UInt8>(0, repeat: 0u8)
@@ -342,22 +359,26 @@ public class HtmlPageModel {
         } else {
             wPx
         }
+        var viewportChanged = false
+        let oldSpread = spreadPageIndex / 2
         match (session) {
             case Some(s) =>
                 if (pageW != viewW || hPx != viewH || scale != viewScale) {
                     let oldScroll = s.scrollY()
                     let oldContent = s.contentHeight()
                     s.resize(pageW, hPx, scale)
+                    viewportChanged = true
                     viewW = pageW
                     viewH = hPx
                     viewScale = scale
                     let newContent = s.contentHeight()
-                    if (oldContent > 0.0 && newContent > 0.0 && oldContent != newContent) {
+                    if (!doublePage && oldContent > 0.0 && newContent > 0.0 && oldContent != newContent) {
                         s.scrollTo(htmlRestoredScroll(oldScroll, oldContent, newContent, viewportHeightPx()))
                     }
                 }
             case None =>
                 session = Some(WebviewSession(pageW, hPx, scale))
+                viewportChanged = true
                 viewW = pageW
                 viewH = hPx
                 viewScale = scale
@@ -386,9 +407,15 @@ public class HtmlPageModel {
                     }
                     spreadSession = Some(right)
             }
-            syncSpreadSession()
+            if (viewportChanged || pageOffsets.size == 0) {
+                rebuildPagination(oldSpread)
+            } else {
+                syncSpreadSession()
+            }
         } else {
             closeSpreadSession()
+            pageOffsets.clear()
+            spreadPageIndex = 0
         }
     }
 
@@ -490,14 +517,24 @@ public class HtmlPageModel {
                 let frame = s.takeFrame()
                 match (frame) {
                     case Some(f) =>
-                        contentHeight = s.contentHeight()
+                        let nextContentHeight = s.contentHeight()
+                        let paginationChanged = doublePage && abs(nextContentHeight - contentHeight) > 0.5
+                        contentHeight = nextContentHeight
+                        if (paginationChanged) {
+                            rebuildPagination(spreadPageIndex / 2)
+                        }
                         htmlGeneration += 1
                         if (state == "ready" && !bottomReported && viewH > 0 && contentHeight > 0.0) {
-                            let visibleBottom = s.scrollY() + viewportHeightPx() * (if (doublePage) {
-                                2.0
+                            let visibleBottom = if (doublePage) {
+                                let afterSpread = spreadPageIndex + 2
+                                if (afterSpread < pageOffsets.size) {
+                                    pageOffsets[afterSpread]
+                                } else {
+                                    contentHeight
+                                }
                             } else {
-                                1.0
-                            })
+                                s.scrollY() + viewportHeightPx()
+                            }
                             if (visibleBottom >= contentHeight - 1.0) {
                                 bottomReported = true
                                 match (onHtmlRead) {
@@ -550,20 +587,15 @@ public class HtmlPageModel {
     }
 
     public func scrollTo(y: Float32): Unit {
+        if (doublePage) {
+            if (pageOffsets.size > 0) {
+                spreadPageIndex = nearestSpreadPageIndex(max(0.0f32, y))
+                applyPaginationScroll()
+            }
+            return
+        }
         match (session) {
-            case Some(s) =>
-                let target = if (doublePage) {
-                    let step = viewportHeightPx() * 2.0
-                    if (step > 0.0) {
-                        min(maxReadingOffset(), Float32(Int64(max(0.0f32, y) / step + 0.5)) * step)
-                    } else {
-                        0.0f32
-                    }
-                } else {
-                    y
-                }
-                s.scrollTo(target)
-                syncSpreadSession()
+            case Some(s) => s.scrollTo(y)
             case None => ()
         }
     }
@@ -573,6 +605,9 @@ public class HtmlPageModel {
     }
 
     private func readingOffset(): Float32 {
+        if (doublePage && pageOffsets.size > 0) {
+            return pageOffsets[max(0, min(spreadPageIndex, pageOffsets.size - 1))]
+        }
         match (session) {
             case Some(s) => s.scrollY()
             case None => 0.0
@@ -580,30 +615,38 @@ public class HtmlPageModel {
     }
 
     private func turnSpread(forward: Bool): Bool {
-        let step = viewportHeightPx() * 2.0
-        if (step <= 0.0 || contentHeight <= 0.0) {
+        if (pageOffsets.size == 0 || contentHeight <= 0.0) {
             return false
         }
-        let maxOffset = maxReadingOffset()
-        let current = readingOffset()
-        if ((forward && current >= maxOffset - 1.0) || (!forward && current <= 1.0)) {
+        let maxIndex = maxSpreadPageIndex()
+        if ((forward && spreadPageIndex >= maxIndex) || (!forward && spreadPageIndex <= 0)) {
             return false
         }
-        scrollTo(if (forward) {
-            min(maxOffset, current + step)
+        spreadPageIndex = if (forward) {
+            min(maxIndex, spreadPageIndex + 2)
         } else {
-            max(0.0f32, current - step)
-        })
+            max(0, spreadPageIndex - 2)
+        }
+        applyPaginationScroll()
         true
     }
 
     public func maxReadingOffset(): Float32 {
+        if (doublePage && pageOffsets.size > 0) {
+            return pageOffsets[maxSpreadPageIndex()]
+        }
         htmlReadingMaxOffset(contentHeight, viewportHeightPx(), doublePage)
     }
 
     private func syncSpreadSession(): Unit {
         match (spreadSession) {
-            case Some(s) => s.scrollToPage(readingOffset() + viewportHeightPx())
+            case Some(s) =>
+                let rightIndex = spreadPageIndex + 1
+                if (rightIndex < pageOffsets.size) {
+                    s.scrollToPage(pageOffsets[rightIndex])
+                } else {
+                    s.scrollToPage(contentHeight + viewportHeightPx())
+                }
             case None => ()
         }
     }
@@ -613,7 +656,13 @@ public class HtmlPageModel {
         if (doublePage == v) {
             return
         }
+        if (v) {
+            paginationAnchor = readingOffset()
+            usePaginationAnchor = true
+        }
         doublePage = v
+        pageOffsets.clear()
+        spreadPageIndex = 0
         if (!v) {
             closeSpreadSession()
         }
@@ -628,6 +677,9 @@ public class HtmlPageModel {
         match (spreadSession) {
             case Some(s) => s.setThemeCss(css)
             case None => ()
+        }
+        if (doublePage && state == "ready") {
+            rebuildPagination(spreadPageIndex / 2)
         }
     }
 
@@ -645,6 +697,8 @@ public class HtmlPageModel {
         htmlGeneration = 0
         resourcesInFlight = 0
         bottomReported = false
+        pageOffsets.clear()
+        spreadPageIndex = 0
     }
 
     private func closeSession(): Unit {
@@ -668,5 +722,102 @@ public class HtmlPageModel {
             case None => ()
         }
         spreadSession = None
+    }
+
+    // 按排版后的完整行/图片建立页首表。每页至多一个 viewport；若单个不可分割
+    // 元素本身高于一页，退回固定步长以保证一定前进。
+    private func rebuildPagination(preserveSpread: Int64): Unit {
+        if (!doublePage || viewH <= 0) {
+            return
+        }
+        match (session) {
+            case Some(s) =>
+                let viewport = viewportHeightPx()
+                let total = s.contentHeight()
+                if (viewport <= 0.0 || total <= 0.0) {
+                    return
+                }
+                pageOffsets.clear()
+                pageOffsets.add(0.0f32)
+                var current: Float32 = 0.0
+                var guard: Int64 = 0
+                while (current + viewport < total - 0.5 && guard < 10000) {
+                    let target = current + max(1.0f32, viewport - HTML_PAGE_END_GUARD)
+                    let snapped = s.pageBreakBefore(target)
+                    let minAdvance = max(1.0f32, viewport * 0.25)
+                    let next = if (snapped >= current + minAdvance && snapped <= target) {
+                        snapped
+                    } else {
+                        target
+                    }
+                    if (next <= current + 0.5) {
+                        break
+                    }
+                    pageOffsets.add(next)
+                    current = next
+                    guard++
+                }
+
+                if (usePaginationAnchor) {
+                    spreadPageIndex = nearestSpreadPageIndex(paginationAnchor)
+                    usePaginationAnchor = false
+                } else {
+                    spreadPageIndex = min(maxSpreadPageIndex(), max(0, preserveSpread) * 2)
+                }
+                contentHeight = total
+                applyPaginationScroll()
+            case None => ()
+        }
+    }
+
+    private func maxSpreadPageIndex(): Int64 {
+        if (pageOffsets.size == 0) {
+            return 0
+        }
+        ((pageOffsets.size - 1) / 2) * 2
+    }
+
+    private func nearestSpreadPageIndex(y: Float32): Int64 {
+        var best: Int64 = 0
+        var bestDistance = abs(y)
+        var i: Int64 = 0
+        while (i < pageOffsets.size) {
+            let distance = abs(pageOffsets[i] - y)
+            if (distance < bestDistance) {
+                best = i
+                bestDistance = distance
+            }
+            i += 2
+        }
+        best
+    }
+
+    private func applyPaginationScroll(): Unit {
+        if (pageOffsets.size == 0) {
+            return
+        }
+        match (session) {
+            case Some(s) => s.scrollToPage(pageOffsets[spreadPageIndex])
+            case None => ()
+        }
+        syncSpreadSession()
+    }
+
+    /** 当前左/右纸面真正可绘制的正文高度；余部应保持纸面背景，避免露出下一行。 */
+    public func pageVisibleHeight(right: Bool): Float32 {
+        if (!doublePage || pageOffsets.size == 0) {
+            return viewportHeightPx()
+        }
+        let index = spreadPageIndex + (if (right) { 1 } else { 0 })
+        if (index >= pageOffsets.size) {
+            return 0.0
+        }
+        let start = pageOffsets[index]
+        let end = if (index + 1 < pageOffsets.size) {
+            pageOffsets[index + 1]
+        } else {
+            contentHeight
+        }
+        max(0.0f32, min(viewportHeightPx(), end - start))
     }
 }

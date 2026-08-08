@@ -19,6 +19,7 @@ foreign func lanlu_wv_scroll_to(s: CPointer<Unit>, y: Float32): Unit
 foreign func lanlu_wv_scroll_to_page(s: CPointer<Unit>, y: Float32): Unit
 foreign func lanlu_wv_scroll_y(s: CPointer<Unit>): Float32
 foreign func lanlu_wv_content_height(s: CPointer<Unit>): Float32
+foreign func lanlu_wv_page_break_before(s: CPointer<Unit>, targetY: Float32): Float32
 foreign func lanlu_wv_set_theme_css(s: CPointer<Unit>, css: CString, cssLen: UIntNative): Unit
 foreign func lanlu_wv_provide_resource(s: CPointer<Unit>, url: CString, bytes: CPointer<UInt8>, bytesLen: UIntNative): Int32
 foreign func lanlu_wv_pending_count(s: CPointer<Unit>): UIntNative
@@ -112,7 +113,7 @@ public class WebviewSession <: Resource {
         unsafe { lanlu_wv_scroll_to(handle, y) }
     }
 
-    /** 分页副视口定位；允许末页越过普通滚动上界并以空白补足。 */
+    /** 分页视口定位；允许末页越过普通滚动上界并以空白补足。 */
     public func scrollToPage(y: Float32): Unit {
         ensureOpen()
         unsafe { lanlu_wv_scroll_to_page(handle, y) }
@@ -127,6 +128,14 @@ public class WebviewSession <: Resource {
     public func contentHeight(): Float32 {
         if (handle.isNull()) { return 0.0 }
         unsafe { lanlu_wv_content_height(handle) }
+    }
+
+    /** 把分页目标回退到完整文本行/图片之前；用于纸面分页，不改变当前滚动位置。 */
+    public func pageBreakBefore(targetY: Float32): Float32 {
+        if (handle.isNull()) {
+            return max(0.0f32, targetY)
+        }
+        unsafe { lanlu_wv_page_break_before(handle, targetY) }
     }
 
     /** 注入/替换 UA 级主题 CSS(深浅色)。 */

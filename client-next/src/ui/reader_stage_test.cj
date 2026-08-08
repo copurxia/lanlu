@@ -1,5 +1,7 @@
 package lanlu_client_next.ui
 
+import cui.*
+
 // 长图滚动纯函数用例（reader_stage.cj 的宽适配高/最大偏移；滚动钳制在舞台内联，
 // 边界语义 = maxOffset 处继续下滚翻页、0 处继续上滚翻页）。
 
@@ -66,4 +68,37 @@ func htmlOverflowCooldownAllowsAfterWindow(): Unit {
     @Expect(htmlOverflowTurnAllowed(0, 500, 150), true)
     // 从未外溢（lastMs 远负）：直接放行。
     @Expect(htmlOverflowTurnAllowed(-10000, 0, 150), true)
+}
+
+@Test
+func htmlPaperFrameReservesChromeAndLaneSafeArea(): Unit {
+    // 顶栏可见时 readerBody 已把舞台下推 52vp；HTML 自身再留纸面顶距，并在
+    // 底部避开 48vp lane + 20vp bottom + 12vp 间隙。
+    let visible = htmlPaperFrame(Rect(0.0, 52.0, 1440.0, 848.0), true)
+    @Expect(visible.x, 0.0)
+    @Expect(visible.y, 72.0)
+    @Expect(visible.w, 1440.0)
+    @Expect(visible.h, 748.0)
+    // chrome 隐藏后顶栏与 lane 都退出，只保留上下普通页边距并吃回高度。
+    let hidden = htmlPaperFrame(Rect(0.0, 0.0, 1440.0, 900.0), false)
+    @Expect(hidden.x, 0.0)
+    @Expect(hidden.y, 20.0)
+    @Expect(hidden.w, 1440.0)
+    @Expect(hidden.h, 860.0)
+}
+
+@Test
+func htmlDockTypographyTierMappings(): Unit {
+    @Expect(htmlFontTierIndex(13), 0)
+    @Expect(htmlFontTierIndex(16), 1)
+    @Expect(htmlFontTierIndex(19), 2)
+    @Expect(htmlFontTierIndex(22), 3)
+    @Expect(htmlFontTierPx(-1), 13)
+    @Expect(htmlFontTierPx(4), 22)
+
+    @Expect(htmlMarginTierIndex(24), 0)
+    @Expect(htmlMarginTierIndex(48), 1)
+    @Expect(htmlMarginTierIndex(72), 2)
+    @Expect(htmlMarginTierPx(-1), 24)
+    @Expect(htmlMarginTierPx(3), 72)
 }

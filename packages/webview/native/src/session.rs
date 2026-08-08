@@ -191,8 +191,8 @@ impl WvSession {
         }
     }
 
-    /// 分页副视口定位：允许页首超过普通滚动上界，使末页不足一屏时余部为空白，
-    /// 而不是被 clamp 后与左页重复。仅供只读的双页右纸面使用。
+    /// 分页视口定位：允许页首超过普通滚动上界，使末页不足一屏时余部为空白，
+    /// 而不是被 clamp 后与相邻纸面重复。
     pub fn scroll_to_page(&mut self, y: f32) {
         let Some(doc) = &mut self.doc else { return };
         let current = doc.as_ref().viewport_scroll();
@@ -214,6 +214,64 @@ impl WvSession {
         let Some(doc) = &self.doc else { return 0.0 };
         let layout = &doc.as_ref().root_element().final_layout;
         layout.size.height.max(layout.content_size.height)
+    }
+
+    /// Return a page boundary at or immediately before `target_y` that does not
+    /// bisect a laid-out text line (or a raster image).  The caller can use the
+    /// returned document offset as the start of the next paper viewport.
+    ///
+    /// Blitz paints a long, continuous document.  Scrolling by an arbitrary
+    /// viewport height can therefore put the lower half of a glyph row at the
+    /// top of the next viewport.  CSS multi-column layout would normally avoid
+    /// that; this small pagination primitive gives the native reader the same
+    /// line-boundary guarantee while retaining bounded off-screen buffers.
+    pub fn page_break_before(&self, target_y: f32) -> f32 {
+        let target_y = target_y.max(0.0);
+        let Some(doc) = &self.doc else { return target_y };
+        if target_y <= f32::EPSILON {
+            return 0.0;
+        }
+
+        fn visit(doc: &blitz_dom::BaseDocument, node_id: usize, target: f32, best: &mut Option<f32>) {
+            let Some(node) = doc.get_node(node_id) else { return };
+            let position = node.absolute_position(0.0, 0.0);
+
+            if let Some(element) = node.element_data() {
+                if let Some(inline) = element.inline_layout_data.as_ref() {
+                    let scale = inline.layout.scale().max(f32::EPSILON);
+                    let content_y = position.y + node.final_layout.content_box_y();
+                    for line in inline.layout.lines() {
+                        let metrics = line.metrics();
+                        let top = content_y + metrics.block_min_coord / scale;
+                        let bottom = content_y + metrics.block_max_coord / scale;
+                        if top + 0.5 < target && bottom - 0.5 > target {
+                            if best.is_none_or(|current| top > current) {
+                                *best = Some(top.max(0.0));
+                            }
+                        }
+                    }
+                }
+
+                // Loaded raster media is indivisible just like a text line.  Do
+                // not apply this to arbitrary blocks: a paragraph may be taller
+                // than a page and snapping to its top would prevent progress.
+                if element.raster_image_data().is_some() {
+                    let top = position.y;
+                    let bottom = top + node.final_layout.size.height;
+                    if top + 0.5 < target && bottom - 0.5 > target && best.is_none_or(|current| top > current) {
+                        *best = Some(top.max(0.0));
+                    }
+                }
+            }
+
+            for &child_id in &node.children {
+                visit(doc, child_id, target, best);
+            }
+        }
+
+        let mut best = None;
+        visit(doc.as_ref(), 0, target_y, &mut best);
+        best.unwrap_or(target_y).min(target_y)
     }
 
     /// 注入 UA 级主题 CSS(深浅色);替换式:先移除旧的再添加。

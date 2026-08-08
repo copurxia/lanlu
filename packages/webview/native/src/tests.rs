@@ -40,6 +40,7 @@ fn c_abi_handles_null_and_invalid_inputs() {
         assert_eq!(lanlu_wv_frame_width(ptr::null_mut()), 0);
         assert_eq!(lanlu_wv_scroll_y(ptr::null_mut()), 0.0);
         assert_eq!(lanlu_wv_content_height(ptr::null_mut()), 0.0);
+        assert_eq!(lanlu_wv_page_break_before(ptr::null_mut(), 123.0), 123.0);
         assert_eq!(lanlu_wv_scroll_by(ptr::null_mut(), 10.0), 0);
 
         let s = lanlu_wv_create(64, 64, 1.0);
@@ -51,6 +52,37 @@ fn c_abi_handles_null_and_invalid_inputs() {
         lanlu_wv_destroy(s);
         // 双 destroy(null)不应崩溃;悬垂指针双 destroy 属调用方 UB,不在防御范围。
         lanlu_wv_destroy(ptr::null_mut());
+    }
+}
+
+#[test]
+fn page_break_moves_out_of_a_text_line() {
+    unsafe {
+        let html_str = r#"<html><head><style>
+body { margin: 0; padding: 0 24px; font: 16px sans-serif; line-height: 28px; }
+p { margin: 0; }
+</style></head><body><p>
+one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen
+seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four twenty-five
+twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two thirty-three
+</p></body></html>"#;
+        let s = lanlu_wv_create(220, 120, 1.0);
+        let html = CString::new(html_str).unwrap();
+        assert_eq!(lanlu_wv_load_html(s, html.as_ptr() as *const u8, html.as_bytes().len(), ptr::null()), 0);
+
+        // Probe every pixel: at least one target through a glyph row must be
+        // pulled back, while the result never advances beyond the request.
+        let mut moved = None;
+        for target in 1..lanlu_wv_content_height(s) as i32 {
+            let snapped = lanlu_wv_page_break_before(s, target as f32);
+            assert!(snapped <= target as f32);
+            if snapped < target as f32 - 1.0 {
+                moved = Some((target as f32, snapped));
+                break;
+            }
+        }
+        assert!(moved.is_some(), "a target crossing a laid-out line should be snapped");
+        lanlu_wv_destroy(s);
     }
 }
 
