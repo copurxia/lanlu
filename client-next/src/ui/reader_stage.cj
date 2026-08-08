@@ -176,6 +176,7 @@ class ReaderStageState {
     var lastVideoGeneration: UInt64 = 0 // 视频舞台已见的帧代际（新帧驱动续帧用）
     var lastHtmlGeneration: UInt64 = 0 // html 舞台已见的帧代际（新帧驱动续帧用）
     var lastHtmlOverflowMs: Int64 = -10000 // html 滚动边界外溢翻页的冷却基准
+
     // html 页拖动/惯性状态（M3.2）：拖动记录起点与速度；松手后 ease-out 续滚。
     var htmlDragActive = false
     var htmlDragStartY: Float32 = 0.0
@@ -939,11 +940,12 @@ class ReaderStage <: Widget {
     private func drawHtmlStage(ctx: UiContext, pageIdx: Int64): Unit {
         let hp = model.htmlPage
         let scale = max(1.0, ctx.displayScale)
+        hp.setDoublePage(model.reader.doublePage)
         hp.ensureViewport(Int32(frame.w * scale), Int32(frame.h * scale), scale)
         // 拖动松手惯性：ease-out 追踪释放时速度推算的目标位移。scrollTo 驱动
         // native 滚动（dirty → 新帧 → generation 前进 → 本分支续帧）；曲线落定后
         // scrollTo 无变化不再出帧，静止零重绘。
-        if (st.htmlFlingActive && hp.state == "ready") {
+        if (st.htmlFlingActive && hp.state == "ready" && !model.reader.doublePage) {
             let t = st.htmlFlingTween.animate(ctx, target: 1.0)
             hp.scrollTo(st.htmlFlingStart + st.htmlFlingDelta * t)
             if (t >= 1.0) {
@@ -951,20 +953,36 @@ class ReaderStage <: Widget {
             }
         }
         hp.pumpResources()
-        let key = "html:${hp.pageKey}"
+        let key = "html:${hp.pageKey}:left"
+        let spreadKey = "html:${hp.pageKey}:right"
         match (hp.takeHtmlFrame()) {
             case Some(fr) => registerPixelImage(ctx.renderer, key, fr.width, fr.height, fr.rgba)
             case None => ()
         }
-        match (pixelTexture(ctx.renderer, key)) {
-            case Some(texture) => ctx.renderer.texture(texture, frame)
-            case None =>
-                let text = if (hp.state == "error") {
-                    model.t("reader.htmlError")
-                } else {
-                    model.t("common.loading")
-                }
-                drawPagePlaceholder(ctx, frame, text)
+        if (model.reader.doublePage) {
+            match (hp.takeHtmlSpreadFrame()) {
+                case Some(fr) => registerPixelImage(ctx.renderer, spreadKey, fr.width, fr.height, fr.rgba)
+                case None => ()
+            }
+            let left = Rect(frame.x, frame.y, frame.w / 2.0, frame.h)
+            let right = Rect(left.right(), frame.y, frame.w - left.w, frame.h)
+            match (pixelTexture(ctx.renderer, key)) {
+                case Some(texture) => ctx.renderer.texture(texture, left)
+                case None => drawHtmlPlaceholder(ctx, left, hp.state)
+            }
+            match (pixelTexture(ctx.renderer, spreadKey)) {
+                case Some(texture) => ctx.renderer.texture(texture, right)
+                case None => drawHtmlPlaceholder(ctx, right, hp.state)
+            }
+            ctx
+                .renderer
+                .strokeLine(frame.centerX(), frame.y + 20.0, frame.centerX(), frame.bottom() - 20.0,
+                    Pen(width: 1.0, color: ctx.theme.panelEdge))
+        } else {
+            match (pixelTexture(ctx.renderer, key)) {
+                case Some(texture) => ctx.renderer.texture(texture, frame)
+                case None => drawHtmlPlaceholder(ctx, frame, hp.state)
+            }
         }
         if (hp.htmlGeneration != st.lastHtmlGeneration) {
             st.lastHtmlGeneration = hp.htmlGeneration
@@ -972,6 +990,15 @@ class ReaderStage <: Widget {
         } else if (hp.resourcesInFlight > 0) {
             ctx.requestFrameAfter(100)
         }
+    }
+
+    private func drawHtmlPlaceholder(ctx: UiContext, rect: Rect, state: String): Unit {
+        let text = if (state == "error") {
+            model.t("reader.htmlError")
+        } else {
+            model.t("common.loading")
+        }
+        drawPagePlaceholder(ctx, rect, text)
     }
 
     // ── 音频舞台：区域编排，不在这里计算任何子区域坐标 ──
@@ -1503,7 +1530,8 @@ class ReaderStage <: Widget {
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
                 // html 页拖动滚动（M3.2）：按下记录起点与速度基线；MouseMove 跟手
                 // 滚动，MouseUp 按是否真拖决定消费与否——简单点击仍落到底层翻页区。
-                if (htmlPage.isSome() && model.htmlPage.state == "ready" && frame.contains(x, y)) {
+                if (htmlPage.isSome() && model.htmlPage.state == "ready" && !model.reader.doublePage && frame.contains(
+                    x, y)) {
                     st.htmlDragActive = true
                     st.htmlDragMoved = false
                     st.htmlDragStartY = y

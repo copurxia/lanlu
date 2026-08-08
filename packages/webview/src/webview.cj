@@ -16,6 +16,7 @@ foreign func lanlu_wv_load_html(s: CPointer<Unit>, html: CPointer<UInt8>, htmlLe
 foreign func lanlu_wv_resize(s: CPointer<Unit>, width: UInt32, height: UInt32, scale: Float32): Unit
 foreign func lanlu_wv_scroll_by(s: CPointer<Unit>, dy: Float32): Int32
 foreign func lanlu_wv_scroll_to(s: CPointer<Unit>, y: Float32): Unit
+foreign func lanlu_wv_scroll_to_page(s: CPointer<Unit>, y: Float32): Unit
 foreign func lanlu_wv_scroll_y(s: CPointer<Unit>): Float32
 foreign func lanlu_wv_content_height(s: CPointer<Unit>): Float32
 foreign func lanlu_wv_set_theme_css(s: CPointer<Unit>, css: CString, cssLen: UIntNative): Unit
@@ -109,6 +110,12 @@ public class WebviewSession <: Resource {
     public func scrollTo(y: Float32): Unit {
         ensureOpen()
         unsafe { lanlu_wv_scroll_to(handle, y) }
+    }
+
+    /** 分页副视口定位；允许末页越过普通滚动上界并以空白补足。 */
+    public func scrollToPage(y: Float32): Unit {
+        ensureOpen()
+        unsafe { lanlu_wv_scroll_to_page(handle, y) }
     }
 
     public func scrollY(): Float32 {

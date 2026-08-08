@@ -778,7 +778,7 @@ private func seedReader(model: AppModel): Unit {
     }
     // 双页/RTL 态开关（--reader-double / --reader-rtl）：验证 spread 布局与方向动画。
     if (harnessHasArg("--reader-double")) {
-        model.reader.setDoublePage(true)
+        model.toggleReaderDoublePage()
     }
     if (harnessHasArg("--reader-rtl")) {
         model.reader.setMode(ReadingMode.SingleRtl)

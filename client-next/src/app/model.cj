@@ -2352,6 +2352,11 @@ public class AppModel {
     public func readerKeyTurn(key: KeyCode): Unit {
         match (reader.keyDirection(key)) {
             case Some(forward) =>
+                // HTML 双页先在当前章节内翻 spread；到章节边界才进入前/后一档案页。
+                // 单页 HTML 同样保留“先滚正文、再翻档案页”的既有语义。
+                if (htmlPage.state == "ready" && readerHtmlPageTurn(down: forward)) {
+                    return
+                }
                 reader.turnPage(forward)
                 readerIndex.value = reader.displayPage
                 readerPageSlider.value = Float32(reader.displayPage)
@@ -2491,6 +2496,8 @@ public class AppModel {
     }
     public func toggleReaderDoublePage(): Unit {
         reader.setDoublePage(!reader.doublePage)
+        htmlPage.setDoublePage(reader.doublePage)
+        applyHtmlThemeCss()
         readerVersion.value += 1
     }
     public func toggleReaderSplitCover(): Unit {
@@ -2547,7 +2554,9 @@ public class AppModel {
 
     // 深浅色与排版档位统一的 UA CSS 应用出口（init / 主题切换 / 档位变更共用）。
     private func applyHtmlThemeCss(): Unit {
-        htmlPage.setThemeCss(htmlThemeCss(isLight(), fontSize: reader.htmlFontSize, margin: reader.htmlMargin))
+        htmlPage.setDoublePage(reader.doublePage)
+        htmlPage.setThemeCss(htmlThemeCss(isLight(), fontSize: reader.htmlFontSize, margin: reader.htmlMargin,
+            doublePage: reader.doublePage))
     }
 
     // ---- lane ⇄ 播放同步 ----
@@ -3154,7 +3163,7 @@ public class AppModel {
         persistSettings(settings)
         // html 阅读纸面同步新主题（活动会话立即重渲染，下一帧取新帧）。
         htmlPage.setThemeCss(htmlThemeCss(themeRippleTarget == "light", fontSize: reader.htmlFontSize,
-            margin: reader.htmlMargin))
+            margin: reader.htmlMargin, doublePage: reader.doublePage))
         if (let Some(h) <- themeChangeHandler) {
             h(themeRippleTarget)
         }

@@ -100,6 +100,9 @@ fn content_height_and_scroll_with_clamp() {
         let max_scroll = content_h - 300.0;
         assert!((lanlu_wv_scroll_y(s) - max_scroll).abs() < 1.0, "应 clamp 到内容底部");
         assert_eq!(lanlu_wv_scroll_by(s, 10.0), 0, "到底后应返回 0 供外溢翻页");
+        // 分页右纸面允许页首越过普通上界，短末页剩余区域应保持空白而非回退重复。
+        lanlu_wv_scroll_to_page(s, content_h + 100.0);
+        assert!((lanlu_wv_scroll_y(s) - content_h - 100.0).abs() < 1.0);
         // 向上到顶同理
         assert_eq!(lanlu_wv_scroll_by(s, -99999.0), 1);
         assert_eq!(lanlu_wv_scroll_by(s, -10.0), 0, "到顶后应返回 0");
@@ -164,6 +167,24 @@ fn theme_css_takes_effect() {
         let frame = std::slice::from_raw_parts(lanlu_wv_frame_ptr(s), 100 * 100 * 4);
         let corner = rgba_at(frame, 100, 2, 2);
         assert_eq!(corner[0], 0xFF, "主题 CSS 应把背景变红");
+        assert_eq!(corner[1], 0x00);
+        lanlu_wv_destroy(s);
+    }
+}
+
+#[test]
+fn theme_css_set_before_load_takes_effect() {
+    unsafe {
+        let s = lanlu_wv_create(600, 300, 1.0);
+        let css = CString::new("body { background: #ff0000 !important; }").unwrap();
+        lanlu_wv_set_theme_css(s, css.as_ptr() as *const u8, css.as_bytes().len());
+        let html = CString::new(XHTML).unwrap();
+        assert_eq!(lanlu_wv_load_html(s, html.as_ptr() as *const u8, html.as_bytes().len(), ptr::null()), 0);
+        let _ = lanlu_wv_render(s);
+
+        let frame = std::slice::from_raw_parts(lanlu_wv_frame_ptr(s), 600 * 300 * 4);
+        let corner = rgba_at(frame, 600, 2, 2);
+        assert_eq!(corner[0], 0xFF, "加载前设置的主题 CSS 应保留到文档创建后");
         assert_eq!(corner[1], 0x00);
         lanlu_wv_destroy(s);
     }

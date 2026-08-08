@@ -144,6 +144,18 @@ pub unsafe extern "C" fn lanlu_wv_scroll_to(s: *mut WvSession, y: f32) {
     }));
 }
 
+/// 分页副视口绝对定位到 y，不钳制内容底部；仅供双页右纸面渲染末页空白。
+#[unsafe(no_mangle)]
+/// # Safety
+/// `s` must be a live session.
+pub unsafe extern "C" fn lanlu_wv_scroll_to_page(s: *mut WvSession, y: f32) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if let Some(session) = unsafe { as_session(s) } {
+            session.scroll_to_page(y);
+        }
+    }));
+}
+
 /// 当前滚动偏移(逻辑像素)。未加载返回 0。
 #[unsafe(no_mangle)]
 /// # Safety

@@ -1,6 +1,6 @@
 package lanlu_client_next.app
 
-import std.collection.{ArrayList, HashSet}
+import std.collection.{ArrayList, HashMap, HashSet}
 import webview.{HtmlFrame, WebviewSession}
 
 // html 页离屏渲染模型（对照 playback_model：纯逻辑可单测，网络出口全部注入）。
@@ -51,7 +51,11 @@ public func percentDecodeBytes(src: Array<UInt8>): Array<UInt8> {
 // 经 getChars 一次 memcpy 拷出后归还。快照种子页/离线测试注入用）。
 public func utf8BytesOf(s: String): Array<UInt8> {
     let cstr = unsafe { LibC.mallocCString(s) }
-    let n = if (cstr.isNull()) { 0 } else { cstr.size() }
+    let n = if (cstr.isNull()) {
+        0
+    } else {
+        cstr.size()
+    }
     let bytes = Array<UInt8>(n, repeat: 0u8)
     try {
         if (n > 0) {
@@ -73,10 +77,10 @@ foreign func memcpy(destination: CPointer<Unit>, source: CPointer<Unit>, count: 
 // 色板；阅读纸面用面板色而非页面底，长文不刺眼。注入后 Blitz 在每次
 // load_html 后自动重新套用（Rust 侧 theme_css 跨文档驻留）。
 // fontSize/margin 为阅读设置面板的字号档位与页边距档位（px，就近取档后传入）。
-// 布局对齐 frontend：内容限宽居中（max-w-4xl≈896 语义：960 - 2×48 = 864 恰与
-// frontend p-4 后的内容宽一致）；纸面/前景保留主题深浅（frontend 的 bg-white
-// 是浏览器默认，桌面端深色纸面阅读更舒适，属有意差异）。
-public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48): String {
+// 布局对齐 frontend：单页内容限宽居中；双页由两个半宽离屏视口组成，因此每个
+// 视口都铺满自己的纸面。垂直 20px 安全区避免正文贴住顶底 chrome。关键排版项
+// 使用 !important，确保 EPUB 自带 body 样式不能覆盖用户的字号和页边距设置。
+public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48, doublePage!: Bool = false): String {
     // (纸面, 正文, 链接, 次文字, 代码底) 五组色取自 palette.cj 明/暗两档。
     let (bg, fg, link, dim, codeBg) = if (light) {
         ("#ffffff", "#1d1d21", "#c78a1e", "#6d6d76", "#f0f0f3")
@@ -85,11 +89,17 @@ public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48
     }
     let fs = max(12, min(24, fontSize))
     let mg = max(0, min(120, margin))
-    "html, body { background: ${bg}; color: ${fg}; }\n" +
-        "body { max-width: 960px; margin: 0 auto; padding: 0 ${mg}px; line-height: 1.75; font-size: ${fs}px; word-break: break-word; }\n" +
-        "a { color: ${link}; text-decoration: none; }\n" +
-        "img, video, svg, iframe { max-width: 100%; height: auto; }\n" +
-        "p { margin: 0.6em 0; }\n" +
+    let maxWidth = if (doublePage) {
+        "none"
+    } else {
+        "960px"
+    }
+    "html { background: ${bg} !important; color: ${fg} !important; }\n" +
+        "body { background: ${bg} !important; color: ${fg} !important; max-width: ${maxWidth} !important; " +
+        "min-height: 100% !important; box-sizing: border-box !important; margin: 0 auto !important; " +
+        "padding: 20px ${mg}px !important; line-height: 1.75 !important; font-size: ${fs}px !important; " +
+        "word-break: break-word; }\n" + "a { color: ${link}; text-decoration: none; }\n" +
+        "img, video, svg, iframe { max-width: 100%; height: auto; }\n" + "p { margin: 0.6em 0; }\n" +
         "h1, h2, h3, h4, h5, h6 { line-height: 1.4; margin: 1.2em 0 0.6em; }\n" +
         "blockquote { margin: 0.8em 0; padding: 0 1em; color: ${dim}; }\n" +
         "code, pre { background: ${codeBg}; padding: 0.1em 0.3em; }"
@@ -98,7 +108,7 @@ public func htmlThemeCss(light: Bool, fontSize!: Int64 = 16, margin!: Int64 = 48
 /**
  * 把待供数 URL 解析为归档内路径。
  * 仅接受 lanlu://<arcid>/<path> 形态且 arcid 匹配；规范化 "."/".." 段
- *（越界 ".." 钳在根，不产生归档外路径）。不匹配返回 ""。
+ * （越界 ".." 钳在根，不产生归档外路径）。不匹配返回 ""。
  */
 public func htmlResourcePath(url: String, arcid: String): String {
     let prefix = "${HTML_SCHEME}://"
@@ -172,10 +182,24 @@ public func htmlRestoredScroll(oldScroll: Float32, oldContent: Float32, newConte
     max(0.0f32, min(maxOff, ratio * newContent))
 }
 
+// 阅读页最大起始偏移：单页按普通滚动上界；双页按完整 spread 取整，允许最后右页
+// 只有部分正文、其余为空白，不把右页钳回去与左页重复。
+func htmlReadingMaxOffset(contentHeight: Float32, viewportHeight: Float32, doublePage: Bool): Float32 {
+    let viewport = max(0.0f32, viewportHeight)
+    if (!doublePage) {
+        return max(0.0f32, contentHeight - viewport)
+    }
+    let step = viewport * 2.0
+    if (step <= 0.0 || contentHeight <= 0.0) {
+        return 0.0f32
+    }
+    Float32(Int64(max(0.0f32, contentHeight - 1.0) / step)) * step
+}
+
 public class HtmlPageModel {
     // ---- 状态（只读暴露；AppModel 变更后 bump readerVersion 通知视图）----
-    public var pageKey: String = ""      // "${arcid}:${pagePath}"，空串=无 html 页
-    public var state: String = "idle"    // idle/loading/ready/error
+    public var pageKey: String = "" // "${arcid}:${pagePath}"，空串=无 html 页
+    public var state: String = "idle" // idle/loading/ready/error
     public var lastError: String = ""
     public var contentHeight: Float32 = 0.0
     // 已交付 UI 的帧代际（takeHtmlFrame 每取到新帧 +1）：舞台据此只在新帧续帧。
@@ -194,17 +218,24 @@ public class HtmlPageModel {
 
     // ---- 内部 ----
     private var session: ?WebviewSession = None
+    // 双页右纸面：与 session 使用同一正文/CSS/资源，仅滚动位置领先一个视口高。
+    private var spreadSession: ?WebviewSession = None
     private var arcid: String = ""
     private var pagePath: String = ""
     // 正文章节字节在会话尚未按帧尺寸创建时暂存，ensureViewport 补灌。
     private var pendingHtmlBytes = Array<UInt8>(0, repeat: 0u8)
+    private var documentHtmlBytes = Array<UInt8>(0, repeat: 0u8)
     // 每 URL 只试一次：失败/不可解析记入跳过集，不阻塞正文渲染。
     private let triedUrls = HashSet<String>()
+    // 切到双页时右纸面可能晚于正文资源到货；保留本章节资源字节用于即时回填，
+    // 避免重复网络请求，也避免右页丢图/丢样式。
+    private let resourceBytes = HashMap<String, Array<UInt8>>()
     // 当前主题 CSS（主题切换时经 setThemeCss 替换；新会话创建时补套）。
     private var themeCss: String = ""
     private var viewW: Int32 = 0
     private var viewH: Int32 = 0
     private var viewScale: Float32 = 0.0
+    private var doublePage = false
     // 本页是否已触发过 onHtmlRead（每页一次；open 重置）。
     private var bottomReported = false
 
@@ -226,7 +257,9 @@ public class HtmlPageModel {
         resourcesInFlight = 0
         bottomReported = false
         triedUrls.clear()
+        resourceBytes.clear()
         pendingHtmlBytes = Array<UInt8>(0, repeat: 0u8)
+        documentHtmlBytes = Array<UInt8>(0, repeat: 0u8)
         session = Some(WebviewSession(wPx, hPx, scale))
         viewW = wPx
         viewH = hPx
@@ -250,8 +283,7 @@ public class HtmlPageModel {
             return
         }
         match (session) {
-            case Some(_) =>
-                loadIntoSession(bytes)
+            case Some(_) => loadIntoSession(bytes)
             case None =>
                 // 会话还没按真实帧尺寸创建：暂存，ensureViewport 时补灌。
                 pendingHtmlBytes = bytes
@@ -280,16 +312,20 @@ public class HtmlPageModel {
     }
 
     private func loadIntoSession(bytes: Array<UInt8>): Unit {
+        documentHtmlBytes = bytes
         match (session) {
-            case Some(s) =>
-                try {
-                    s.loadHtml(bytes, "${HTML_SCHEME}://${arcid}/${pagePath}")
-                    state = "ready"
-                    pumpResources()
-                } catch (e: Exception) {
-                    state = "error"
-                    lastError = "webview loadHtml failed"
+            case Some(s) => try {
+                s.loadHtml(bytes, "${HTML_SCHEME}://${arcid}/${pagePath}")
+                match (spreadSession) {
+                    case Some(right) => right.loadHtml(bytes, "${HTML_SCHEME}://${arcid}/${pagePath}")
+                    case None => ()
                 }
+                state = "ready"
+                pumpResources()
+            } catch (e: Exception) {
+                state = "error"
+                lastError = "webview loadHtml failed"
+            }
             case None => ()
         }
     }
@@ -301,23 +337,28 @@ public class HtmlPageModel {
         if (wPx <= 0 || hPx <= 0 || pageKey.size == 0) {
             return
         }
+        let pageW = if (doublePage) {
+            max(1, wPx / 2)
+        } else {
+            wPx
+        }
         match (session) {
             case Some(s) =>
-                if (wPx != viewW || hPx != viewH || scale != viewScale) {
+                if (pageW != viewW || hPx != viewH || scale != viewScale) {
                     let oldScroll = s.scrollY()
                     let oldContent = s.contentHeight()
-                    s.resize(wPx, hPx, scale)
-                    viewW = wPx
+                    s.resize(pageW, hPx, scale)
+                    viewW = pageW
                     viewH = hPx
                     viewScale = scale
                     let newContent = s.contentHeight()
                     if (oldContent > 0.0 && newContent > 0.0 && oldContent != newContent) {
-                        s.scrollTo(htmlRestoredScroll(oldScroll, oldContent, newContent, Float32(hPx)))
+                        s.scrollTo(htmlRestoredScroll(oldScroll, oldContent, newContent, viewportHeightPx()))
                     }
                 }
             case None =>
-                session = Some(WebviewSession(wPx, hPx, scale))
-                viewW = wPx
+                session = Some(WebviewSession(pageW, hPx, scale))
+                viewW = pageW
                 viewH = hPx
                 viewScale = scale
                 if (pendingHtmlBytes.size > 0) {
@@ -326,10 +367,37 @@ public class HtmlPageModel {
                     loadIntoSession(bytes)
                 }
         }
+        if (doublePage) {
+            match (spreadSession) {
+                case Some(right) => right.resize(pageW, hPx, scale)
+                case None =>
+                    let right = WebviewSession(pageW, hPx, scale)
+                    if (themeCss.size > 0) {
+                        right.setThemeCss(themeCss)
+                    }
+                    if (documentHtmlBytes.size > 0) {
+                        right.loadHtml(documentHtmlBytes, "${HTML_SCHEME}://${arcid}/${pagePath}")
+                        for (url in right.pendingResources()) {
+                            match (resourceBytes.get(url)) {
+                                case Some(bytes) => let _ = right.provideResource(url, bytes)
+                                case None => ()
+                            }
+                        }
+                    }
+                    spreadSession = Some(right)
+            }
+            syncSpreadSession()
+        } else {
+            closeSpreadSession()
+        }
     }
 
     public func viewportHeight(): Int32 {
-        viewH
+        Int32(viewportHeightPx())
+    }
+
+    private func viewportHeightPx(): Float32 {
+        Float32(viewH) / max(1.0f32, viewScale)
     }
 
     // 子资源泵：pending URL → 归档内路径 → 经注入出口异步拉取。
@@ -339,23 +407,45 @@ public class HtmlPageModel {
             return
         }
         match (session) {
-            case Some(s) =>
-                for (url in s.pendingResources()) {
-                    if (triedUrls.contains(url)) {
+            case Some(s) => for (url in s.pendingResources()) {
+                match (resourceBytes.get(url)) {
+                    case Some(bytes) =>
+                        let _ = s.provideResource(url, bytes)
                         continue
-                    }
-                    let path = htmlResourcePath(url, arcid)
-                    if (path.size == 0) {
-                        triedUrls.add(url)
-                        continue
-                    }
+                    case None => ()
+                }
+                if (triedUrls.contains(url)) {
+                    continue
+                }
+                let path = htmlResourcePath(url, arcid)
+                if (path.size == 0) {
                     triedUrls.add(url)
+                    continue
+                }
+                triedUrls.add(url)
+                resourcesInFlight++
+                match (fetchResource) {
+                    case Some(cb) => cb(pageKey, arcid, url, path)
+                    case None => resourcesInFlight--
+                }
+            }
+            case None => ()
+        }
+        match (spreadSession) {
+            case Some(s) => for (url in s.pendingResources()) {
+                if (triedUrls.contains(url)) {
+                    continue
+                }
+                let path = htmlResourcePath(url, arcid)
+                triedUrls.add(url)
+                if (path.size > 0) {
                     resourcesInFlight++
                     match (fetchResource) {
                         case Some(cb) => cb(pageKey, arcid, url, path)
                         case None => resourcesInFlight--
                     }
                 }
+            }
             case None => ()
         }
     }
@@ -367,11 +457,16 @@ public class HtmlPageModel {
         if (resourcesInFlight > 0) {
             resourcesInFlight--
         }
+        resourceBytes[url] = bytes
         match (session) {
             case Some(s) =>
                 let _ = s.provideResource(url, bytes)
                 // 资源注入可能触发样式重算并暴露新的 pending（css 内 @import/url()）。
                 pumpResources()
+            case None => ()
+        }
+        match (spreadSession) {
+            case Some(s) => let _ = s.provideResource(url, bytes)
             case None => ()
         }
     }
@@ -398,8 +493,12 @@ public class HtmlPageModel {
                         contentHeight = s.contentHeight()
                         htmlGeneration += 1
                         if (state == "ready" && !bottomReported && viewH > 0 && contentHeight > 0.0) {
-                            let maxScroll = max(0.0f32, contentHeight - Float32(viewH))
-                            if (maxScroll <= 1.0 || s.scrollY() >= maxScroll - 1.0) {
+                            let visibleBottom = s.scrollY() + viewportHeightPx() * (if (doublePage) {
+                                2.0
+                            } else {
+                                1.0
+                            })
+                            if (visibleBottom >= contentHeight - 1.0) {
                                 bottomReported = true
                                 match (onHtmlRead) {
                                     case Some(cb) => cb()
@@ -414,20 +513,36 @@ public class HtmlPageModel {
         }
     }
 
+    /** 双页右纸面的新帧；单页模式返回 None。 */
+    public func takeHtmlSpreadFrame(): ?HtmlFrame {
+        match (spreadSession) {
+            case Some(s) =>
+                let frame = s.takeFrame()
+                if (frame.isSome()) {
+                    htmlGeneration += 1
+                }
+                frame
+            case None => None
+        }
+    }
+
     /** 页内进度 0..1 = scrollY/(contentHeight-viewportH)；内容不溢出视为 1.0。 */
     public func htmlPageProgress01(): Float32 {
         if (state != "ready" || contentHeight <= 0.0 || viewH <= 0) {
             return 0.0f32
         }
-        let maxScroll = max(0.0f32, contentHeight - Float32(viewH))
+        let maxScroll = maxReadingOffset()
         if (maxScroll <= 1.0) {
             return 1.0f32
         }
-        max(0.0f32, min(1.0f32, scrollY() / maxScroll))
+        max(0.0f32, min(1.0f32, readingOffset() / maxScroll))
     }
 
     /** 向下滚动 dy 像素；返回 false 表示已到边界（调用方可外溢给翻页）。 */
     public func scrollBy(dy: Float32): Bool {
+        if (doublePage) {
+            return turnSpread(dy > 0.0)
+        }
         match (session) {
             case Some(s) => s.scrollBy(dy)
             case None => false
@@ -436,21 +551,81 @@ public class HtmlPageModel {
 
     public func scrollTo(y: Float32): Unit {
         match (session) {
-            case Some(s) => s.scrollTo(y)
+            case Some(s) =>
+                let target = if (doublePage) {
+                    let step = viewportHeightPx() * 2.0
+                    if (step > 0.0) {
+                        min(maxReadingOffset(), Float32(Int64(max(0.0f32, y) / step + 0.5)) * step)
+                    } else {
+                        0.0f32
+                    }
+                } else {
+                    y
+                }
+                s.scrollTo(target)
+                syncSpreadSession()
             case None => ()
         }
     }
 
     public func scrollY(): Float32 {
+        readingOffset()
+    }
+
+    private func readingOffset(): Float32 {
         match (session) {
             case Some(s) => s.scrollY()
             case None => 0.0
         }
     }
 
+    private func turnSpread(forward: Bool): Bool {
+        let step = viewportHeightPx() * 2.0
+        if (step <= 0.0 || contentHeight <= 0.0) {
+            return false
+        }
+        let maxOffset = maxReadingOffset()
+        let current = readingOffset()
+        if ((forward && current >= maxOffset - 1.0) || (!forward && current <= 1.0)) {
+            return false
+        }
+        scrollTo(if (forward) {
+            min(maxOffset, current + step)
+        } else {
+            max(0.0f32, current - step)
+        })
+        true
+    }
+
+    public func maxReadingOffset(): Float32 {
+        htmlReadingMaxOffset(contentHeight, viewportHeightPx(), doublePage)
+    }
+
+    private func syncSpreadSession(): Unit {
+        match (spreadSession) {
+            case Some(s) => s.scrollToPage(readingOffset() + viewportHeightPx())
+            case None => ()
+        }
+    }
+
+    /** 切换单双页布局；正文不重载，ensureViewport 在下一帧调整纸面数量与宽度。 */
+    public func setDoublePage(v: Bool): Unit {
+        if (doublePage == v) {
+            return
+        }
+        doublePage = v
+        if (!v) {
+            closeSpreadSession()
+        }
+    }
+
     public func setThemeCss(css: String): Unit {
         themeCss = css
         match (session) {
+            case Some(s) => s.setThemeCss(css)
+            case None => ()
+        }
+        match (spreadSession) {
             case Some(s) => s.setThemeCss(css)
             case None => ()
         }
@@ -478,9 +653,20 @@ public class HtmlPageModel {
             case None => ()
         }
         session = None
+        closeSpreadSession()
         pendingHtmlBytes = Array<UInt8>(0, repeat: 0u8)
+        documentHtmlBytes = Array<UInt8>(0, repeat: 0u8)
         triedUrls.clear()
+        resourceBytes.clear()
         arcid = ""
         pagePath = ""
+    }
+
+    private func closeSpreadSession(): Unit {
+        match (spreadSession) {
+            case Some(s) => s.close()
+            case None => ()
+        }
+        spreadSession = None
     }
 }

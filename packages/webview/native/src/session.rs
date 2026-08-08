@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use blitz_dom::{DocumentConfig, util::Color};
+use blitz_dom::{DocumentConfig, Point, util::Color};
 use blitz_html::HtmlDocument;
 use blitz_paint::paint_scene;
 use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
@@ -191,6 +191,18 @@ impl WvSession {
         }
     }
 
+    /// 分页副视口定位：允许页首超过普通滚动上界，使末页不足一屏时余部为空白，
+    /// 而不是被 clamp 后与左页重复。仅供只读的双页右纸面使用。
+    pub fn scroll_to_page(&mut self, y: f32) {
+        let Some(doc) = &mut self.doc else { return };
+        let current = doc.as_ref().viewport_scroll();
+        let next = Point { x: current.x, y: y.max(0.0) as f64 };
+        if next != current {
+            doc.as_mut().set_viewport_scroll(next);
+            self.dirty = true;
+        }
+    }
+
     pub fn scroll_y(&self) -> f32 {
         self.doc
             .as_ref()
@@ -206,14 +218,15 @@ impl WvSession {
 
     /// 注入 UA 级主题 CSS(深浅色);替换式:先移除旧的再添加。
     pub fn set_theme_css(&mut self, css: &str) {
-        let Some(doc) = &mut self.doc else { return };
-        if let Some(old) = &self.theme_css {
-            doc.as_mut().remove_user_agent_stylesheet(old);
+        if let Some(doc) = &mut self.doc {
+            if let Some(old) = &self.theme_css {
+                doc.as_mut().remove_user_agent_stylesheet(old);
+            }
+            doc.as_mut().add_user_agent_stylesheet(css);
+            doc.as_mut().resolve(0.0);
+            self.dirty = true;
         }
-        doc.as_mut().add_user_agent_stylesheet(css);
         self.theme_css = Some(css.to_string());
-        doc.as_mut().resolve(0.0);
-        self.dirty = true;
     }
 
     /// 回填子资源字节;URL 不在 pending 队列时忽略(幂等)。

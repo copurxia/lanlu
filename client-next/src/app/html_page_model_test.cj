@@ -73,6 +73,17 @@ func htmlRestoredScrollUnknownOldContent(): Unit {
     @Expect(htmlRestoredScroll(100.0, 0.0, 3000.0, 800.0), 0.0)
 }
 
+@Test
+func htmlReadingMaxOffsetUsesWholeSpreads(): Unit {
+    @Expect(htmlReadingMaxOffset(900.0, 1000.0, false), 0.0)
+    @Expect(htmlReadingMaxOffset(1500.0, 1000.0, false), 500.0)
+    // 双页可容纳两屏：短章只有一个 spread；3.3 屏内容只有第二个 spread 起点 2000。
+    @Expect(htmlReadingMaxOffset(1500.0, 1000.0, true), 0.0)
+    @Expect(htmlReadingMaxOffset(3300.0, 1000.0, true), 2000.0)
+    // 恰好两屏不应制造空白的下一 spread。
+    @Expect(htmlReadingMaxOffset(2000.0, 1000.0, true), 0.0)
+}
+
 // ---- 主题 CSS ----
 
 @Test
@@ -86,6 +97,10 @@ func htmlThemeCssPalettes(): Unit {
     // 深浅两套互不串色
     @Expect(light.contains("#16161a"), false)
     @Expect(dark.contains("#ffffff"), false)
+    // 排版设置必须覆盖 EPUB 自带 body 样式，且上下留出阅读安全区。
+    @Expect(light.contains("padding: 20px 48px !important"), true)
+    @Expect(light.contains("max-width: 960px !important"), true)
+    @Expect(htmlThemeCss(true, doublePage: true).contains("max-width: none !important"), true)
 }
 
 // ---- HtmlPageModel 状态机 ----
@@ -100,7 +115,11 @@ class HtmlFetchLog {
 func htmlOpenIdempotentWhileLoading(): Unit {
     let m = HtmlPageModel()
     let log = HtmlFetchLog()
-    m.fetchHtml = { key, arc, p => log.calls.add("${key}|${arc}|${p}"); log.count++ }
+    m.fetchHtml = {
+        key, arc, p =>
+        log.calls.add("${key}|${arc}|${p}");
+        log.count++
+    }
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     @Expect(m.state, "loading")
     @Expect(m.pageKey, "arc1:text/ch1.html")
@@ -114,7 +133,7 @@ func htmlOpenIdempotentWhileLoading(): Unit {
 func htmlFailedAndRetry(): Unit {
     let m = HtmlPageModel()
     let log = HtmlFetchLog()
-    m.fetchHtml = { key, arc, p => log.count++ }
+    m.fetchHtml = {key, arc, p => log.count++}
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     @Expect(log.count, 1)
     m.htmlFailed("arc1:text/ch1.html", "网络中断")
@@ -131,7 +150,7 @@ func htmlFailedAndRetry(): Unit {
 @Test
 func htmlLateResultsIgnoredAfterClose(): Unit {
     let m = HtmlPageModel()
-    m.fetchHtml = { _, _, _ => () }
+    m.fetchHtml = {_, _, _ => ()}
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     m.close()
     @Expect(m.state, "idle")
@@ -150,7 +169,7 @@ func htmlLateResultsIgnoredAfterClose(): Unit {
 func htmlRetryOnlyInErrorState(): Unit {
     let m = HtmlPageModel()
     let log = HtmlFetchLog()
-    m.fetchHtml = { _, _, _ => log.count++ }
+    m.fetchHtml = {_, _, _ => log.count++}
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     @Expect(log.count, 1)
     // loading 态 retry 不触发新拉取
@@ -163,7 +182,7 @@ func htmlRetryOnlyInErrorState(): Unit {
 @Test
 func htmlResourceFailedAccounting(): Unit {
     let m = HtmlPageModel()
-    m.fetchHtml = { _, _, _ => () }
+    m.fetchHtml = {_, _, _ => ()}
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     // 手工记账场景：在途数不降到负
     m.resourceFailed("arc1:text/ch1.html", "lanlu://arc1/missing.png")
@@ -177,7 +196,7 @@ func htmlResourceFailedAccounting(): Unit {
 @Test
 func htmlIsOpenSemantics(): Unit {
     let m = HtmlPageModel()
-    m.fetchHtml = { _, _, _ => () }
+    m.fetchHtml = {_, _, _ => ()}
     @Expect(m.isOpen("arc1:text/ch1.html"), false)
     m.open("arc1", "text/ch1.html", 1280, 800, 1.0)
     @Expect(m.isOpen("arc1:text/ch1.html"), true)

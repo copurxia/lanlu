@@ -626,7 +626,7 @@ class ReaderDock <: Widget {
         if (hp.state != "ready" || htmlSeekRect.w <= 0.0) {
             return
         }
-        let maxScroll = max(0.0f32, hp.contentHeight - Float32(hp.viewportHeight()))
+        let maxScroll = hp.maxReadingOffset()
         if (maxScroll <= 1.0) {
             return
         }
