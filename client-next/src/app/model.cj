@@ -207,6 +207,11 @@ public class AppModel {
     private let localizer = Localizer()
     public let language: State<String>
     public var api: ?LanluApi = None
+    // 离线缓存（响应快照 + 进度队列）：按 active 服务器地址懒加载；打开失败为 None（不阻断）。
+    private var offlineCache: ?OfflineCache = None
+    // 离线回退通知：worker 线程 mark（仅方法调用，规避 cjc 1.1.3 GC 屏障缺陷），UI pump 轮询 take。
+    private let offlineNotice = OfflineNotice()
+    private var offlineToastShown = false
     public let worker = ApiWorker()
 
     // 书库
@@ -831,7 +836,10 @@ public class AppModel {
 
     private func resumeProfile(p: ServerProfile): Unit {
         let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl),
+            serverHash: fnv1a64Hex(p.baseUrl),
+            onOfflineFallback: {=> offlineNotice.mark()})
         a.setToken(p.token)
         api = a
         let _ = worker.submit("me", {=> a.me()})
@@ -855,7 +863,10 @@ public class AppModel {
             case None => return
         }
         let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl),
+            serverHash: fnv1a64Hex(p.baseUrl),
+            onOfflineFallback: {=> offlineNotice.mark()})
         loading.value = true
         loginError.value = ""
         let sid = p.id
@@ -895,7 +906,10 @@ public class AppModel {
             return
         }
         let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl),
+            serverHash: fnv1a64Hex(p.baseUrl),
+            onOfflineFallback: {=> offlineNotice.mark()})
         loading.value = true
         loginError.value = ""
         let sid = p.id
@@ -1898,6 +1912,56 @@ public class AppModel {
         }
     }
 
+    // 离线缓存单例：懒打开（打开失败 None，离线能力缺失不阻断启动），多服务器靠前缀隔离。
+    private func offlineCacheFor(baseUrl: String): ?OfflineCache {
+        match (offlineCache) {
+            case Some(c) => return c
+            case None => ()
+        }
+        let c = OfflineCache.open(defaultOfflineCacheRoot())
+        offlineCache = c
+        c
+    }
+
+    // 离线回退提示：pump 每帧轮询，worker 置位后 UI 线程 toast（每次会话一次）。
+    private func pollOfflineNotice(): Unit {
+        if (offlineNotice.take()) {
+            if (!offlineToastShown) {
+                offlineToastShown = true
+                toaster.show("离线模式：显示缓存数据", kind: ToastKind.Info)
+            }
+        }
+    }
+
+    // 服务端恢复（探测 online/登录成功）后补报离线阅读进度；单条失败保留队列下次再试。
+    private func flushOfflineProgress(baseUrl: String): Unit {
+        let c = match (offlineCache) {
+            case Some(x) => x
+            case None => return
+        }
+        let hash = fnv1a64Hex(baseUrl)
+        let entries = c.listProgress(hash)
+        if (entries.size == 0) {
+            return
+        }
+        let _ = worker.submit("offline-flush", {
+            =>
+                var anyOk = false
+                for (e in entries) {
+                    match (api) {
+                        case Some(a) =>
+                            try {
+                                a.setProgress(e[0], e[1])
+                                c.deleteProgress(hash, e[0])
+                                anyOk = true
+                            } catch (_: Exception) {}
+                        case None => ()
+                    }
+                }
+                return anyOk
+        })
+    }
+
     // 磁盘缓存周期 sweep（#10）：启动一次之外，每小时兜底或累计新写入超阈值（512MB）时补扫。
     // 与在途读取的竞争沿用 ImageCache 既有惯例兜底：sweep 跳过 .bin 在途半成品、按 mtime
     // 最旧优先删（刚定稿、即将被解码的文件最后被考虑），解码侧打开失败经 decodeCachedOrEvict
@@ -2713,6 +2777,10 @@ public class AppModel {
             case Some(a) => a.close()
             case None => ()
         }
+        match (offlineCache) {
+            case Some(c) => c.close()
+            case None => ()
+        }
     }
 
     // 顶栏 ♥：切换当前档案收藏；元数据未到货（arcid 不匹配）时忽略，完成后由 dispatch 刷新 meta。
@@ -3250,6 +3318,11 @@ public class AppModel {
         synchronized(imageMutex) {
             imageStates.clear()
         }
+        // 联动清理离线响应/进度缓存（当前服务器前缀；跨服务器互不影响）。
+        match (offlineCache) {
+            case Some(c) => c.clearServer(fnv1a64Hex(activeBaseUrl()))
+            case None => ()
+        }
         refreshCacheInfo()
         toaster.show(t("cache.cleared"), kind: ToastKind.Success)
     }
@@ -3377,6 +3450,8 @@ public class AppModel {
             }
             readerVersion.value += 1
         }
+        // 离线回退通知轮询：worker 置位后在此（UI 线程）toast。
+        pollOfflineNotice()
         let results = worker.drain()
         for (r in results) {
             if (r.tag.size > 0 && r.tag != language.value) {
@@ -3735,6 +3810,11 @@ public class AppModel {
                         navigate(Page.Library)
                         loadCategories()
                         loadBrowseRows()
+                        // 登录成功：服务端已恢复，补报该服务器的离线阅读进度。
+                        match (settings.profileById(sid)) {
+                            case Some(prof) => flushOfflineProgress(prof.baseUrl)
+                            case None => ()
+                        }
                     }
                 case None => ()
             }
@@ -3743,7 +3823,14 @@ public class AppModel {
         } else if (name.startsWith("probe:")) {
             // 探测成功：任务载荷即服务器 id（见 probeServers）。
             match (r.payload) {
-                case Some(p) => probeState((p as String).getOrThrow()).value = "online"
+                case Some(p) =>
+                    let pid = (p as String).getOrThrow()
+                    probeState(pid).value = "online"
+                    // 服务端已恢复：补报该服务器的离线阅读进度。
+                    match (settings.profileById(pid)) {
+                        case Some(prof) => flushOfflineProgress(prof.baseUrl)
+                        case None => ()
+                    }
                 case None => ()
             }
         } else if (name == "me") {

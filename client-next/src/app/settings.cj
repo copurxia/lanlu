@@ -1,13 +1,16 @@
 package lanlu_client_next.app
 
-import kv4cj.*
 import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM, LANGUAGE_ZH, normalizeLanguagePreference}
+import lanlu_client_next.net.decodeRaw
+import rocksdb_ffi.{RocksDb, RocksDbOperationResult}
 import std.collection.ArrayList
 import std.env.getVariable
 import std.fs.{exists, Directory, Path}
+import std.io.{ByteBuffer, readToEnd}
 import std.overflow.*
 import std.sync.Mutex
 import std.time.{DateTime, MonoTime}
+import stdx.encoding.json.stream.*
 
 // 一台已保存的 lanlu 服务器：列表管理 + 按服务器各存会话（token/username）。
 public class ServerProfile {
@@ -167,91 +170,191 @@ public class AppSettings {
 
 public func defaultSettingsRoot(): String {
     let home = getVariable("HOME") ?? "."
-    "${home}/.config/lanlu-client-next/mmkv"
+    "${home}/.config/lanlu-client-next/kv"
 }
 
-private var settingsStore: ?MMKV = None
+private var settingsStore: ?RocksDb = None
 
 public func initializeSettingsStore(): Unit {
     initializeSettingsStore(defaultSettingsRoot())
 }
 
+// RocksDB 是目录型 DB，root 直接作为 DB 路径；打开失败抛异常（与旧 store 未初始化即抛一致）。
 public func initializeSettingsStore(root: String): Unit {
     if (!exists(Path(root))) {
         Directory.create(Path(root), recursive: true)
     }
-    MMKV.initializeMMKV(root, MMKVLogWarning)
-    settingsStore = MMKV.mmkvWithID("client-settings")
+    match (RocksDb.openLowMemory(root)) {
+        case (true, Some(db), _) => settingsStore = db
+        case (_, _, err) => throw Exception("rocksdb settings store open failed: ${err}")
+    }
 }
 
-private func store(): MMKV {
+// 包内可见（测试注入坏数据用）；public 仅供本包调用方使用。
+func store(): RocksDb {
     match (settingsStore) {
-        case Some(kv) => kv
+        case Some(db) => db
         case None => throw Exception("settings store is not initialized")
     }
 }
 
-private func serverKey(index: Int64, field: String): String {
-    "servers.${index}.${field}"
-}
-
 public func loadSettings(): AppSettings {
     let kv = store()
+    match (kv.getResult("settings")) {
+        case RocksDbOperationResult<String>.Ok(body) => parseSettingsJson(body)
+        // 键缺失或读失败一律回落全默认（坏数据自愈，不再有逐键回退）。
+        case _ => AppSettings()
+    }
+}
+
+// ---- 单键 JSON 整表快照（schema_version=2）----
+// 整个 AppSettings 序列化为一个 JSON 文档存 "settings" 键，单次 put 天然原子（WAL 持久化），
+// 不再有 servers.count/索引键与旧键清理。解析失败回落全默认 AppSettings()。
+private func parseSettingsJson(body: String): AppSettings {
     let s = AppSettings()
-    s.theme = kv.getString("appearance.theme", defaultValue: "dark")
+    var buf = ByteBuffer()
+    unsafe { buf.write(body.rawData()) }
+    let r = JsonReader(buf)
+    try {
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "appearance" => readAppearance(r, s)
+                            case "reader" => readReader(r, s)
+                            case "network" => readNetwork(r, s)
+                            case "servers" => readServers(r, s)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => return AppSettings()
+            }
+        }
+    } catch (_: Exception) {
+        return AppSettings()
+    }
+    normalizeLoadedSettings(s)
+    s
+}
+
+private func readAppearance(r: JsonReader, s: AppSettings): Unit {
+    r.startObject()
+    while (r.peek() != EndObject) {
+        let n = r.readName()
+        match (n) {
+            case "theme" => s.theme = decodeRaw<String>(r.readValueBytes(), "dark")
+            case "font_path" => s.fontPath = decodeRaw<String>(r.readValueBytes(), "")
+            case "language" => s.languagePreference = decodeRaw<String>(r.readValueBytes(), LANGUAGE_SYSTEM)
+            case _ => r.skip()
+        }
+    }
+    r.endObject()
+}
+
+private func readReader(r: JsonReader, s: AppSettings): Unit {
+    r.startObject()
+    while (r.peek() != EndObject) {
+        let n = r.readName()
+        match (n) {
+            case "mode" => s.readerMode = decodeRaw<String>(r.readValueBytes(), "single-ltr")
+            case "double_page" => s.readerDoublePage = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "split_cover" => s.readerSplitCover = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "long_page" => s.readerLongPage = decodeRaw<Bool>(r.readValueBytes(), true)
+            case "tap_turn_page" => s.readerTapTurnPage = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "double_tap_zoom" => s.readerDoubleTapZoom = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "auto_hide" => s.readerAutoHide = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "seamless_next" => s.readerSeamlessNext = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "show_info" => s.readerShowInfo = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "auto_play" => s.readerAutoPlay = decodeRaw<Bool>(r.readValueBytes(), false)
+            case "auto_play_interval" => s.readerAutoPlayInterval = decodeRaw<Int64>(r.readValueBytes(), 3)
+            case "html_font_size" => s.readerHtmlFontSize = decodeRaw<Int64>(r.readValueBytes(), 16)
+            case "html_margin" => s.readerHtmlMargin = decodeRaw<Int64>(r.readValueBytes(), 48)
+            case _ => r.skip()
+        }
+    }
+    r.endObject()
+}
+
+private func readNetwork(r: JsonReader, s: AppSettings): Unit {
+    r.startObject()
+    while (r.peek() != EndObject) {
+        let n = r.readName()
+        match (n) {
+            case "probe_connect_timeout_sec" => s.probeConnectTimeoutSec = decodeRaw<Int64>(r.readValueBytes(), 5)
+            case _ => r.skip()
+        }
+    }
+    r.endObject()
+}
+
+private func readServers(r: JsonReader, s: AppSettings): Unit {
+    r.startObject()
+    while (r.peek() != EndObject) {
+        let n = r.readName()
+        match (n) {
+            case "active_id" => s.activeServerId = decodeRaw<String>(r.readValueBytes(), "")
+            case "list" =>
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    s.servers.add(readServerProfile(r))
+                }
+                r.endArray()
+            case _ => r.skip()
+        }
+    }
+    r.endObject()
+}
+
+private func readServerProfile(r: JsonReader): ServerProfile {
+    let p = ServerProfile()
+    r.startObject()
+    while (r.peek() != EndObject) {
+        let n = r.readName()
+        match (n) {
+            case "id" => p.id = decodeRaw<String>(r.readValueBytes(), "")
+            case "name" => p.name = decodeRaw<String>(r.readValueBytes(), "")
+            case "base_url" => p.baseUrl = normalizeServerUrl(decodeRaw<String>(r.readValueBytes(), ""))
+            case "token" => p.token = decodeRaw<String>(r.readValueBytes(), "")
+            case "username" => p.username = decodeRaw<String>(r.readValueBytes(), "")
+            case "last_used_at" => p.lastUsedAt = decodeRaw<String>(r.readValueBytes(), "")
+            case _ => r.skip()
+        }
+    }
+    r.endObject()
+    p
+}
+
+// 读路径归一化（对齐旧 loadSettings）：非法枚举回落、档位钳制、超时范围、activeId 校验。
+private func normalizeLoadedSettings(s: AppSettings): Unit {
     if (s.theme != "light") {
         s.theme = "dark"
     }
-    s.fontPath = kv.getString("appearance.font_path")
-    s.languagePreference = normalizeLanguagePreference(
-        kv.getString("appearance.language", defaultValue: LANGUAGE_SYSTEM))
-    s.readerMode = kv.getString("reader.mode", defaultValue: "single-ltr")
+    s.languagePreference = normalizeLanguagePreference(s.languagePreference)
     if (s.readerMode != "single-ltr" && s.readerMode != "single-rtl" && s.readerMode != "single-ttb" && s.readerMode !=
         "webtoon") {
         s.readerMode = "single-ltr"
     }
-    s.readerDoublePage = kv.getBool("reader.double_page")
-    s.readerSplitCover = kv.getBool("reader.split_cover")
-    s.readerLongPage = kv.getBool("reader.long_page", defaultValue: true)
-    s.readerTapTurnPage = kv.getBool("reader.tap_turn_page")
-    s.readerDoubleTapZoom = kv.getBool("reader.double_tap_zoom")
-    s.readerAutoHide = kv.getBool("reader.auto_hide")
-    s.readerSeamlessNext = kv.getBool("reader.seamless_next")
-    s.readerShowInfo = kv.getBool("reader.show_info")
-    s.readerAutoPlay = kv.getBool("reader.auto_play")
-    s.readerAutoPlayInterval = kv.getInt64("reader.auto_play_interval", defaultValue: 3)
     if (s.readerAutoPlayInterval < 1 || s.readerAutoPlayInterval > 10) {
         s.readerAutoPlayInterval = 3
     }
-    s.readerHtmlFontSize = clampHtmlFontSize(kv.getInt64("reader.html_font_size", defaultValue: 16))
-    s.readerHtmlMargin = clampHtmlMargin(kv.getInt64("reader.html_margin", defaultValue: 48))
-    s.probeConnectTimeoutSec = kv.getInt64("network.probe_connect_timeout_sec", defaultValue: 5)
+    s.readerHtmlFontSize = clampHtmlFontSize(s.readerHtmlFontSize)
+    s.readerHtmlMargin = clampHtmlMargin(s.readerHtmlMargin)
     if (s.probeConnectTimeoutSec < 1 || s.probeConnectTimeoutSec > 60) {
         s.probeConnectTimeoutSec = 5
-    }
-    s.activeServerId = kv.getString("servers.active_id")
-    let count = kv.getInt64("servers.count")
-    for (i in 0..count) {
-        let p = ServerProfile()
-        p.id = kv.getString(serverKey(i, "id"))
-        p.name = kv.getString(serverKey(i, "name"))
-        p.baseUrl = normalizeServerUrl(kv.getString(serverKey(i, "base_url")))
-        p.token = kv.getString(serverKey(i, "token"))
-        p.username = kv.getString(serverKey(i, "username"))
-        p.lastUsedAt = kv.getString(serverKey(i, "last_used_at"))
-        if (p.id.size > 0 && p.baseUrl.size > 0) {
-            s.servers.add(p)
-        }
     }
     if (s.profileById(s.activeServerId).isNone()) {
         s.activeServerId = ""
     }
     s.syncActiveProfile()
-    s
 }
 
 // ---- 落盘防抖（leading 即时 + trailing 合并）----
-// 滑条类高频调用（自动播放间隔拖动、窗口期连续设置变更）会逐次触发整表重写 + MMKV sync。
+// 滑条类高频调用（自动播放间隔拖动、窗口期连续设置变更）会逐次触发整表重写。
 // 这里给 saveSettings 加 300ms 合并：距上次落盘超窗 → 立即写（leading，开关类即时性不变）；
 // 窗口内的连续调用只记最新快照，由后台线程到点做一次 trailing flush（合并后只写最终值）。
 // 以下变量不 private 以便同包测试注入窗口/复位状态；saveClock 默认单调时钟毫秒。
@@ -351,58 +454,75 @@ private func writeSettings(s: AppSettings): Unit {
 private func writeSettingsLocked(s: AppSettings): Unit {
     let kv = store()
     s.syncActiveProfile()
-    let oldCount = kv.getInt64("servers.count")
-    let _ = kv.set("schema.version", Int64(1))
-    let _ = kv.set("appearance.theme", s.theme)
-    let _ = kv.set("appearance.font_path", s.fontPath)
-    let _ = kv.set("appearance.language", normalizeLanguagePreference(s.languagePreference))
-    let _ = kv.set("reader.mode", s.readerMode)
-    let _ = kv.set("reader.double_page", s.readerDoublePage)
-    let _ = kv.set("reader.split_cover", s.readerSplitCover)
-    let _ = kv.set("reader.long_page", s.readerLongPage)
-    let _ = kv.set("reader.tap_turn_page", s.readerTapTurnPage)
-    let _ = kv.set("reader.double_tap_zoom", s.readerDoubleTapZoom)
-    let _ = kv.set("reader.auto_hide", s.readerAutoHide)
-    let _ = kv.set("reader.seamless_next", s.readerSeamlessNext)
-    let _ = kv.set("reader.show_info", s.readerShowInfo)
-    let _ = kv.set("reader.auto_play", s.readerAutoPlay)
-    let _ = kv.set("reader.auto_play_interval", s.readerAutoPlayInterval)
-    let _ = kv.set("reader.html_font_size", clampHtmlFontSize(s.readerHtmlFontSize))
-    let _ = kv.set("reader.html_margin", clampHtmlMargin(s.readerHtmlMargin))
-    let _ = kv.set("network.probe_connect_timeout_sec", s.probeConnectTimeoutSec)
-    let _ = kv.set("servers.active_id", s.activeServerId)
-    let _ = kv.set("servers.count", s.servers.size)
-    for (i in 0..s.servers.size) {
-        let p = s.servers[i]
-        let _ = kv.set(serverKey(i, "id"), p.id)
-        let _ = kv.set(serverKey(i, "name"), p.name)
-        let _ = kv.set(serverKey(i, "base_url"), p.baseUrl)
-        let _ = kv.set(serverKey(i, "token"), p.token)
-        let _ = kv.set(serverKey(i, "username"), p.username)
-        let _ = kv.set(serverKey(i, "last_used_at"), p.lastUsedAt)
+    // 整表序列化为单个 JSON 文档，一次 put 原子落盘（RocksDB WAL 保证持久，替代原 kv.sync()）。
+    let _ = kv.putResult("settings", settingsToJson(s))
+}
+
+private func settingsToJson(s: AppSettings): String {
+    let out = ByteBuffer()
+    let w = JsonWriter(out)
+    w.startObject()
+    w.writeName("schema_version").writeValue(2)
+    w.writeName("appearance")
+    w.startObject()
+    w.writeName("theme").writeValue(s.theme)
+    w.writeName("font_path").writeValue(s.fontPath)
+    w.writeName("language").writeValue(normalizeLanguagePreference(s.languagePreference))
+    w.endObject()
+    w.writeName("reader")
+    w.startObject()
+    w.writeName("mode").writeValue(s.readerMode)
+    w.writeName("double_page").writeValue(s.readerDoublePage)
+    w.writeName("split_cover").writeValue(s.readerSplitCover)
+    w.writeName("long_page").writeValue(s.readerLongPage)
+    w.writeName("tap_turn_page").writeValue(s.readerTapTurnPage)
+    w.writeName("double_tap_zoom").writeValue(s.readerDoubleTapZoom)
+    w.writeName("auto_hide").writeValue(s.readerAutoHide)
+    w.writeName("seamless_next").writeValue(s.readerSeamlessNext)
+    w.writeName("show_info").writeValue(s.readerShowInfo)
+    w.writeName("auto_play").writeValue(s.readerAutoPlay)
+    w.writeName("auto_play_interval").writeValue(s.readerAutoPlayInterval)
+    w.writeName("html_font_size").writeValue(clampHtmlFontSize(s.readerHtmlFontSize))
+    w.writeName("html_margin").writeValue(clampHtmlMargin(s.readerHtmlMargin))
+    w.endObject()
+    w.writeName("network")
+    w.startObject()
+    w.writeName("probe_connect_timeout_sec").writeValue(s.probeConnectTimeoutSec)
+    w.endObject()
+    w.writeName("servers")
+    w.startObject()
+    w.writeName("active_id").writeValue(s.activeServerId)
+    w.writeName("list")
+    w.startArray()
+    for (p in s.servers) {
+        w.startObject()
+        w.writeName("id").writeValue(p.id)
+        w.writeName("name").writeValue(p.name)
+        w.writeName("base_url").writeValue(p.baseUrl)
+        w.writeName("token").writeValue(p.token)
+        w.writeName("username").writeValue(p.username)
+        w.writeName("last_used_at").writeValue(p.lastUsedAt)
+        w.endObject()
     }
-    for (i in s.servers.size..oldCount) {
-        kv.removeValuesForKeys(
-            [serverKey(i, "id"), serverKey(i, "name"), serverKey(i, "base_url"), serverKey(i, "token"),
-                serverKey(i, "username"), serverKey(i, "last_used_at")])
-    }
-    kv.sync()
+    w.endArray()
+    w.endObject()
+    w.endObject()
+    w.flush()
+    String.fromUtf8(readToEnd(out))
 }
 
 public func closeSettingsStore(): Unit {
     flushPendingSave()
     match (settingsStore) {
-        case Some(kv) => kv.sync()
+        case Some(db) => db.close()
         case None => ()
     }
-    MMKV.onExit()
     settingsStore = None
 }
 
 // 清空客户端设置并保留已打开的 store，供“恢复默认设置”和测试隔离复用。
 public func clearSettings(): Unit {
-    store().clearAll()
-    store().sync()
+    let _ = store().deleteResult("settings")
 }
 
 // 服务器地址 → 稳定的短目录名（区分多服务器缓存）。

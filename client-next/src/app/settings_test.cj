@@ -20,7 +20,7 @@ private func resetTestStore(): Unit {
 }
 
 @Test
-func settingsDefaultsComeFromMmkv(): Unit {
+func settingsDefaultsComeFromStore(): Unit {
     resetTestStore()
     let s = loadSettings()
     @Expect(s.theme, "dark")
@@ -36,7 +36,7 @@ func settingsDefaultsComeFromMmkv(): Unit {
 }
 
 @Test
-func settingsRoundTripThroughMmkv(): Unit {
+func settingsRoundTripThroughStore(): Unit {
     resetTestStore()
     let s = AppSettings()
     s.theme = "light"
@@ -85,7 +85,7 @@ func settingsRoundTripThroughMmkv(): Unit {
 }
 
 @Test
-func deletingLastServerRemovesMmkvEntries(): Unit {
+func deletingLastServerPersistsRemoval(): Unit {
     resetTestStore()
     let s = AppSettings()
     let srv = s.upsertServer("", "A", "http://a")
@@ -113,6 +113,22 @@ func serverEditingPreservesSession(): Unit {
     @Expect(a2.name, "A2")
     @Expect(a2.baseUrl, "http://a2")
     @Expect(a2.token, "tok-a")
+}
+
+@Test
+func corruptedSettingsFallBackToDefaults(): Unit {
+    // 坏数据自愈：settings 键写入非法 JSON 后 loadSettings() 回落全默认，不抛不残留。
+    resetTestStore()
+    let _ = store().putResult("settings", "{not-valid-json")
+    let s = loadSettings()
+    @Expect(s.theme, "dark")
+    @Expect(s.servers.size, 0)
+    @Expect(s.serverUrl, "")
+    // 归一化后继续可写可读（round-trip 不受坏数据影响）。
+    s.theme = "light"
+    saveSettings(s)
+    flushPendingSave()
+    @Expect(loadSettings().theme, "light")
 }
 
 @Test

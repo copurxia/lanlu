@@ -30,9 +30,7 @@ defaults:
   run:
     shell: bash
 
-env:
-  KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
-  MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
+env: {}
 
 jobs:
   quality:
@@ -104,9 +102,6 @@ jobs:
     name: Build, test and headless smoke test
     runs-on: ubuntu-26.04
     timeout-minutes: 45
-    env:
-      KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
-      MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -166,7 +161,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb libvulkan1 \
-            libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev \
+            libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev librocksdb-dev \
             libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
             libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6
@@ -182,58 +177,16 @@ jobs:
             packages/fontkit_ffi/native/target
           key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
-      - name: Fetch pinned kv4cj source
-        run: |
-          set -euo pipefail
-          mkdir -p ref
-          git clone https://gitcode.com/copur/kv4cj.git ref/kv4cj
-          git -C ref/kv4cj checkout --detach "${KV4CJ_COMMIT}"
-          actual_commit="$(git -C ref/kv4cj rev-parse HEAD)"
-          if [ "${actual_commit}" != "${KV4CJ_COMMIT}" ]; then
-            echo "::error::Unexpected kv4cj commit ${actual_commit}."
-            exit 1
-          fi
-
-      - name: Build pinned MMKV native libraries
-        run: |
-          set -euo pipefail
-          mmkv_source="${RUNNER_TEMP}/MMKV"
-          mmkv_build="${RUNNER_TEMP}/MMKV-build"
-          git clone --depth 1 --branch v1.2.15 https://github.com/Tencent/MMKV.git "${mmkv_source}"
-          actual_commit="$(git -C "${mmkv_source}" rev-parse HEAD)"
-          if [ "${actual_commit}" != "${MMKV_COMMIT}" ]; then
-            echo "::error::Unexpected MMKV commit ${actual_commit}."
-            exit 1
-          fi
-
-          sed -i '/add_library(core/,/STATIC/ s/STATIC/SHARED/' "${mmkv_source}/Core/CMakeLists.txt"
-          # MMKV 1.2.15 relied on a transitive stdint include that newer GCC releases
-          # no longer provide. Make the pinned source portable across runner compilers.
-          sed -i '/#include <string>/i #include <cstdint>' "${mmkv_source}/Core/MMKVPredef.h"
-          cmake -S "${mmkv_source}/Core" -B "${mmkv_build}" -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${mmkv_build}" --parallel
-          install -Dm755 "${mmkv_build}/libcore.so" ref/kv4cj/lib/libcore.so
-
-          (
-            cd ref/kv4cj/mmkv_cpp
-            ./configure
-            make -j"$(nproc)"
-          )
-          test -s ref/kv4cj/lib/libmymmkv.so
-
       - name: Configure native library path
         run: |
           set -euo pipefail
-          # client-next/target/release/kv4cj 存放 cjpm 编译期生成的 libkv4cj.so，运行时同样需要。
-          native_paths="${GITHUB_WORKSPACE}/ref/kv4cj/lib:${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3:${GITHUB_WORKSPACE}/client-next/target/release/kv4cj"
+          native_paths="${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
           printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
 
       - name: Verify native libraries
         run: |
           set -euo pipefail
           libraries=(
-            ref/kv4cj/lib/libcore.so
-            ref/kv4cj/lib/libmymmkv.so
             packages/cangjie-gui/sdl/.sdl3/libSDL3.so
             packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so
           )
@@ -293,10 +246,9 @@ jobs:
           cp target/release/bin/main "${appdir}/${pkgname}"
           cp target/release/bin/lanlu_logo_gold.png "${appdir}/"
 
-          # 捆绑非系统私有库（MMKV、kv4cj、SDL3、仓颉 runtime 等）；
-          # apt 系统库（vips、vlc 等）通过 control 的 Depends 声明。
-          LD_LIBRARY_PATH="$PWD/target/release/kv4cj:${LD_LIBRARY_PATH:-}" \
-            ldd "${appdir}/${pkgname}" | awk '$3 ~ /^\// {print $3}' | sort -u > dist/ldd.txt
+          # 捆绑非系统私有库（SDL3、仓颉 runtime 等）；
+          # apt 系统库（vips、vlc、rocksdb 等）通过 control 的 Depends 声明。
+          ldd "${appdir}/${pkgname}" | awk '$3 ~ /^\// {print $3}' | sort -u > dist/ldd.txt
           while IFS= read -r lib; do
             case "$lib" in
               /usr/*|/lib/*|/lib64/*) ;;
@@ -327,7 +279,7 @@ jobs:
             "Architecture: ${arch}" \
             "Maintainer: lanlu <lanlu@localhost>" \
             "Installed-Size: ${installed_size}" \
-            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6" \
+            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6, librocksdb9.11 | librocksdb8.9" \
             "Section: graphics" \
             "Priority: optional" \
             "Description: Lanlu desktop client built on CangjieGUI" \
@@ -360,9 +312,7 @@ jobs:
     defaults:
       run:
         shell: pwsh
-    env:
-      KV4CJ_COMMIT: 1658201fda103a0e78bf4f7d1b792da37e15d026
-      MMKV_COMMIT: c09632cb2f821ad725e7dc188ac1656b1ef53bb4
+    env: {}
     steps:
       - name: Configure Git line endings
         run: git config --global core.autocrlf input
@@ -427,6 +377,7 @@ jobs:
             mingw-w64-x86_64-libvips
             mingw-w64-x86_64-vlc
             mingw-w64-x86_64-dlfcn
+            mingw-w64-x86_64-rocksdb
 
       - name: Cache Cangjie and Rust dependencies
         uses: actions/cache@v4
@@ -439,53 +390,6 @@ jobs:
             packages/fontkit_ffi/native/target
           key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
 
-      - name: Fetch pinned kv4cj source
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Path ref -Force | Out-Null
-          git clone https://gitcode.com/copur/kv4cj.git ref/kv4cj
-          git -C ref/kv4cj checkout --detach $env:KV4CJ_COMMIT
-          $actualCommit = (git -C ref/kv4cj rev-parse HEAD).Trim()
-          if ($actualCommit -ne $env:KV4CJ_COMMIT) {
-            throw "Unexpected kv4cj commit $actualCommit"
-          }
-
-      - name: Build pinned MMKV native libraries
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          mkdir -p build-script-cache
-          git clone https://github.com/Tencent/MMKV.git build-script-cache/MMKV
-          git -C build-script-cache/MMKV checkout --detach "${MMKV_COMMIT}"
-          actual_commit="$(git -C build-script-cache/MMKV rev-parse HEAD)"
-          if [ "${actual_commit}" != "${MMKV_COMMIT}" ]; then
-            echo "Unexpected MMKV commit ${actual_commit}" >&2
-            exit 1
-          fi
-
-          sed -i '/add_library(core/,/STATIC/ s/STATIC/SHARED/' build-script-cache/MMKV/Core/CMakeLists.txt
-          sed -i '/#include <string>/i #include <cstdint>' build-script-cache/MMKV/Core/MMKVPredef.h
-          cmake \
-            -S build-script-cache/MMKV/Core \
-            -B build-script-cache/MMKV-build \
-            -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-script-cache/MMKV-build --parallel
-
-          mkdir -p ref/kv4cj/lib
-          core_dll="$(find build-script-cache/MMKV-build -type f -iname 'libcore.dll' -print -quit)"
-          core_import="$(find build-script-cache/MMKV-build -type f -iname 'libcore.dll.a' -print -quit)"
-          test -n "${core_dll}"
-          test -n "${core_import}"
-          cp "${core_dll}" "${core_import}" ref/kv4cj/lib/
-
-          (
-            cd ref/kv4cj/mmkv_cpp
-            ./configure
-            make -j"$(nproc)"
-          )
-          test -s ref/kv4cj/lib/libmymmkv.dll
-
       - name: Configure Windows native paths
         env:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
@@ -493,9 +397,8 @@ jobs:
           $ErrorActionPreference = "Stop"
           $mingwBin = Join-Path $env:MSYS2_LOCATION "mingw64/bin"
           $mingwLib = Join-Path $env:MSYS2_LOCATION "mingw64/lib"
-          $kv4cjLib = Join-Path $env:GITHUB_WORKSPACE "ref/kv4cj/lib"
           $sdlLib = Join-Path $env:GITHUB_WORKSPACE "packages/cangjie-gui/sdl/.sdl3"
-          @($mingwBin, $kv4cjLib, $sdlLib) |
+          @($mingwBin, $sdlLib) |
             ForEach-Object { Add-Content -LiteralPath $env:GITHUB_PATH -Value $_ }
           $mingwLibraryPath = $mingwLib.Replace("\", "/")
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "MINGW_LIBRARY_PATH=$mingwLibraryPath"
@@ -546,9 +449,7 @@ jobs:
           runtime_dir="$(find "${CANGJIE_HOME}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
 
           search_dirs=(
-            "$PWD/client-next/target/release/kv4cj"
             "$PWD/client-next/target/release/bin"
-            "$PWD/ref/kv4cj/lib"
             "$PWD/packages/cangjie-gui/sdl/.sdl3"
             "${MINGW_LIBRARY_PATH%/lib}/bin"
             "${runtime_dir}"
@@ -612,7 +513,7 @@ jobs:
           # 关键库校验：任一缺失直接失败，避免打出跑不起来的 zip。
           # SDL3/SDL3_ttf 磁盘与 PE import 表的名字可能是带/不带 lib 前缀的任一形态，
           # 收集时已按 PE 记录名落盘（必要时经变体别名），这里按"对内任一存在"判定。
-          for required in libcangjie-runtime.dll libkv4cj.dll; do
+          for required in libcangjie-runtime.dll librocksdb.dll; do
             if ! ls "${stage}"/"${required}" >/dev/null 2>&1; then
               echo "::error::Required runtime DLL ${required} was not collected."
               exit 1

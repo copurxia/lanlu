@@ -27,21 +27,21 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 | libvips | 图片转码（`vips_ffi` 本地包依赖，链接 `-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0`） |
 | libVLC 3+ | 应用内视频解码（`libvlc_ffi` 本地包依赖，Linux 包通常为 `libvlc-dev` + `vlc-plugin-base`） |
 | SDL3 动态库 | 位于 `../packages/cangjie-gui/sdl/.sdl3/`，运行时必须加入 `LD_LIBRARY_PATH` |
-| MMKV 1.2.15 / kv4cj | 按 `../ref/kv4cj/README.md` 先生成 `libcore.so` 与 `libmymmkv.so` |
+| libRocksDB | 设置与离线缓存存储（`rocksdb_ffi` 本地包依赖；Linux 包为 `librocksdb-dev`，Windows 为 MSYS2 `mingw-w64-x86_64-rocksdb`） |
 | stdx | 以二进制依赖引入（`CANGJIE_STDX_PATH`，与根项目同款配置） |
 
 ## 构建
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../ref/kv4cj/lib:$LD_LIBRARY_PATH cjpm build
+LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH cjpm build
 ```
 
 ## 运行
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../ref/kv4cj/lib:../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
+LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main
 ```
 
@@ -80,12 +80,12 @@ cairo 插件方案失效时的兜底；注意该构建在 GNOME 下窗口无装�
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../ref/kv4cj/lib:$LD_LIBRARY_PATH cjpm test
+LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH cjpm test
 ```
 
 ## 多语言开发
 
-语言偏好保存在 MMKV 的 `appearance.language`，可取 `system`、`zh` 或 `en`。界面词条集中在
+语言偏好保存在设置库（RocksDB 单键 JSON 快照）的 `appearance.language`，可取 `system`、`zh` 或 `en`。界面词条集中在
 `src/i18n/localizer.cj`；新增词条时必须同时补齐中英文目录，`localizer_test.cj` 会校验目录键集合一致。
 界面通过 `AppModel.t` 取词条并使用命名参数插值，避免按语序拼接句子。
 
@@ -97,8 +97,8 @@ GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client
 
 运行前需在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置
 `STDX_URL` 和 `STDX_WINDOWS_URL`，分别指向 Linux 与 Windows x86_64 cjnative static stdx 压缩包。
-CI 会先将固定提交的 CangjieGUI 克隆到 `packages/cangjie-gui`，并按固定提交构建 kv4cj 与
-MMKV 1.2.15；这些步骤均不依赖开发机目录或其中的预编译文件。
+CI 会先将固定提交的 CangjieGUI 克隆到 `packages/cangjie-gui`；原生库依赖（vips、vlc、rocksdb 等）由
+apt（Linux）/ MSYS2（Windows）安装。这些步骤均不依赖开发机目录或其中的预编译文件。
 
 `cjlint` 报告和 `cjfmt` 差异会作为 artifact 保留 14 天。当前格式检查为建议项；完成现有代码格式化
 基线清理后，可移除工作流中该步骤的 `continue-on-error`，将其升级为合并门槛。
@@ -111,7 +111,7 @@ MMKV 1.2.15；这些步骤均不依赖开发机目录或其中的预编译文件
 ```bash
 cd client-next
 SDL_VIDEODRIVER=dummy \
-    LD_LIBRARY_PATH=../ref/kv4cj/lib:../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
+    LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main --snapshot /tmp/client-next.bmp
 ```
 
@@ -119,8 +119,9 @@ SDL_VIDEODRIVER=dummy \
 
 | 内容 | 位置 |
 |------|------|
-| 客户端设置（MMKV，服务器、会话、主题、阅读选项） | `~/.config/lanlu-client-next/mmkv/` |
+| 客户端设置（RocksDB 单键 JSON 快照，服务器、会话、主题、阅读选项） | `~/.config/lanlu-client-next/kv/` |
 | 图片磁盘缓存（按服务器地址哈希分目录） | `~/.cache/lanlu-client-next/` |
+| 离线响应/阅读进度缓存（RocksDB，按服务器哈希分前缀；离线阅读回退 + 进度补报） | `~/.cache/lanlu-client-next/offline-kv/` |
 
 ## 项目结构
 

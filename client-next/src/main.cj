@@ -129,7 +129,7 @@ main(): Int64 {
         let s = AppSettings()
         s.serverUrl = "https://demo.lanlu.local"
         // 亮主题快照：种子模式跳过磁盘配置，唯独 theme 取自磁盘——隔离 HOME 预置
-        // MMKV 中 theme=light 即可拍亮主题快照，其余字段保持离线默认。
+        // 设置库中 theme=light 即可拍亮主题快照，其余字段保持离线默认。
         s.theme = loadSettings().theme
         s
     } else {

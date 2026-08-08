@@ -45,8 +45,22 @@ public class LanluApi {
     private let base: String
     // TCP connect 超时（qwest 原生支持，不再需要看门狗）：None = 不设（默认行为不变）。
     private let connectTimeout: ?Duration
+    // 离线缓存（读穿透回退 + 阅读进度队列）；None = 离线能力关闭（探测用实例不传）。
+    private let offlineCache: ?OfflineCache
+    private let serverHash: String
+    // 离线回退命中时的一次性通知回调（model 用 toast 提示）。
+    private let onOfflineFallback: ?(() -> Unit)
 
-    public init(baseUrl: String, connectTimeout!: ?Duration = None) {
+    public init(
+        baseUrl: String,
+        connectTimeout!: ?Duration = None,
+        offlineCache!: ?OfflineCache = None,
+        serverHash!: String = "",
+        onOfflineFallback!: ?(() -> Unit) = None
+    ) {
+        this.offlineCache = offlineCache
+        this.serverHash = serverHash
+        this.onOfflineFallback = onOfflineFallback
         var b = baseUrl.trimAscii()
         while (b.endsWith("/")) {
             b = b[0..b.size - 1]
@@ -143,6 +157,50 @@ public class LanluApi {
         resp.text()
     }
 
+    // 离线读穿透（GET 白名单端点专用）：在线成功返回原始 body 并写响应快照；
+    // 网络类异常（连接失败/超时等，非 ApiException）时回退缓存，命中返回缓存 body 并触发
+    // 一次性通知；未命中/缓存未开启原样重抛。ApiException（401/非 2xx）不触发回退。
+    private func checkedBodyCached(path: String): String {
+        try {
+            let resp = client.get(path).send()
+            if (resp.status == 401) {
+                resp.close()
+                throw ApiException(401, "登录状态已失效，请重新登录")
+            }
+            if (!resp.isSuccess()) {
+                throw ApiException(resp.status, resp.text())
+            }
+            let body = resp.text()
+            try {
+                match (offlineCache) {
+                    case Some(c) => c.storeResponse(serverHash, path, body)
+                    case None => ()
+                }
+            } catch (_: Exception) {}
+            return body
+        } catch (e: ApiException) {
+            throw e
+        } catch (_: Exception) {
+            // 网络类异常：尝试回退离线缓存。
+            try {
+                match (offlineCache) {
+                    case Some(c) =>
+                        match (c.getResponse(serverHash, path)) {
+                            case Some(body) =>
+                                match (onOfflineFallback) {
+                                    case Some(f) => f()
+                                    case None => ()
+                                }
+                                return body
+                            case None => ()
+                        }
+                    case None => ()
+                }
+            } catch (_: Exception) {}
+            throw Exception("网络不可用且无离线缓存")
+        }
+    }
+
     // connectTimeout 已由 qwest 原生支持（TcpSocket.connect(timeout)，见构造），
     // 看门狗（withHardTimeout）随迁移删除：TCP connect 挂死不再拖住调用线程。
     public func info(): ServerInfo {
@@ -195,7 +253,7 @@ public class LanluApi {
     }
 
     public func me(): LoginData {
-        let env = checked(client.get("/api/auth/me").send())
+        let env = parseEnvelope(checkedBodyCached("/api/auth/me"))
         // /api/auth/me 的 data 是 {"user": {...}}（UserDataView 序列化形态），
         // 直接解 LoginData 即可（token 缺省为空串）——不能再包一层 {"user": ...}，
         // 否则双重嵌套导致 username/isAdmin 全部解析落空。
@@ -203,15 +261,7 @@ public class LanluApi {
     }
 
     public func search(q: SearchQuery): SearchPage {
-        let resp = client.get("/api/search${buildSearchQuery(q)}").send()
-        if (resp.status == 401) {
-            resp.close()
-            throw ApiException(401, "登录状态已失效，请重新登录")
-        }
-        if (!resp.isSuccess()) {
-            throw ApiException(resp.status, resp.text())
-        }
-        parseSearchPage(resp.text())
+        parseSearchPage(checkedBodyCached("/api/search${buildSearchQuery(q)}"))
     }
 
     // 随机推荐：服务端没有 /api/search/random 路由（routes/api/search.cj 只注册 GET /api/search），
@@ -223,24 +273,16 @@ public class LanluApi {
         q.sortby = "RANDOM()"
         q.pageSize = count
         q.lang = lang
-        let resp = client.get("/api/search${buildSearchQuery(q)}").send()
-        if (resp.status == 401) {
-            resp.close()
-            throw ApiException(401, "登录状态已失效，请重新登录")
-        }
-        if (!resp.isSuccess()) {
-            throw ApiException(resp.status, resp.text())
-        }
-        parseSearchPage(resp.text())
+        parseSearchPage(checkedBodyCached("/api/search${buildSearchQuery(q)}"))
     }
 
     public func categories(): ArrayList<CategoryItem> {
-        parseCategoryList(checkedBody(client.get("/api/categories").send()))
+        parseCategoryList(checkedBodyCached("/api/categories"))
     }
 
     public func metadata(arcid: String, lang!: String = ""): ArchiveMeta {
         let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
-        parseArchiveMeta(checkedBody(client.get("/api/archives/${arcid}/metadata${suffix}").send()))
+        parseArchiveMeta(checkedBodyCached("/api/archives/${arcid}/metadata${suffix}"))
     }
 
     public func updateArchiveMetadata(arcid: String, body: String): Unit {
@@ -248,7 +290,7 @@ public class LanluApi {
     }
 
     public func files(arcid: String): ArrayList<PageInfo> {
-        parsePages(checkedBody(client.get("/api/archives/${arcid}/files").send()))
+        parsePages(checkedBodyCached("/api/archives/${arcid}/files"))
     }
 
     public func assetBytes(assetId: Int64): Array<UInt8> {
@@ -297,13 +339,13 @@ public class LanluApi {
     // 合集列表：GET /api/tankoubons 返回裸 {"filtered":N,"result":[...],"total":N}（无包络）。
     public func listTankoubons(lang!: String = ""): ArrayList<TankoubonInfo> {
         let path = if (lang.size > 0) { "/api/tankoubons?lang=${percentEncode(lang)}" } else { "/api/tankoubons" }
-        parseTankoubonList(checkedBody(client.get(path).send()))
+        parseTankoubonList(checkedBodyCached(path))
     }
 
     // 单个合集：GET /api/tankoubons/:id/metadata 返回裸对象（children 为 member 对象数组）。
     public func getTankoubon(id: String, lang!: String = ""): TankoubonInfo {
         let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
-        parseTankoubon(checkedBody(client.get("/api/tankoubons/${id}/metadata${suffix}").send()))
+        parseTankoubon(checkedBodyCached("/api/tankoubons/${id}/metadata${suffix}"))
     }
 
     public func updateTankoubonMetadata(id: String, body: String): Unit {
@@ -337,7 +379,7 @@ public class LanluApi {
     public func listArchiveTankoubons(arcid: String, lang!: String = ""): ArrayList<TankoubonInfo> {
         let base = "/api/archives/${arcid}/tankoubons"
         let path = if (lang.size > 0) { "${base}?lang=${percentEncode(lang)}" } else { base }
-        parseTankoubonList(checkedBody(client.get(path).send()))
+        parseTankoubonList(checkedBodyCached(path))
     }
 
     // 相关推荐（档案详情）：GET /api/recommendations?scene=archive_related&archive_id=X
@@ -345,8 +387,8 @@ public class LanluApi {
     // 混进的合集项没有 arcid，过滤丢弃（对齐 frontend getArchiveRelated 的 isArchiveItem 过滤）。
     public func relatedArchives(arcid: String, count: Int64, lang!: String = ""): ArrayList<SearchItem> {
         let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
-        let body = checkedBody(
-            client.get("/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}${languageQuery}").send())
+        let body = checkedBodyCached(
+            "/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}${languageQuery}")
         let page = parseSearchPage(body)
         let list = ArrayList<SearchItem>()
         for (it in page.items) {
@@ -361,9 +403,8 @@ public class LanluApi {
     // assets 为对象），复用 parseTankoubonList；过滤掉无 id 的档案项。
     public func relatedTankoubons(tankid: String, count: Int64, lang!: String = ""): ArrayList<TankoubonInfo> {
         let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
-        let body = checkedBody(
-            client.get(
-                "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}${languageQuery}").send())
+        let body = checkedBodyCached(
+            "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}${languageQuery}")
         let all = parseTankoubonList(body)
         let list = ArrayList<TankoubonInfo>()
         for (t in all) {
@@ -386,7 +427,20 @@ public class LanluApi {
     }
 
     public func setProgress(arcid: String, page: Int64): Unit {
-        let _ = checked(client.put("/api/archives/${arcid}/progress/${page}").body("").send())
+        try {
+            let _ = checked(client.put("/api/archives/${arcid}/progress/${page}").body("").send())
+        } catch (e: ApiException) {
+            throw e
+        } catch (_: Exception) {
+            // 网络类失败：进度入队待补报后原样重抛（worker 线程失败静默语义不变）。
+            try {
+                match (offlineCache) {
+                    case Some(c) => c.enqueueProgress(serverHash, arcid, page)
+                    case None => ()
+                }
+            } catch (_: Exception) {}
+            throw Exception("网络不可用，阅读进度已离线暂存")
+        }
     }
 
     public func setFavorite(arcid: String, fav: Bool): Unit {
