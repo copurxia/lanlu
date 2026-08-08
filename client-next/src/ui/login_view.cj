@@ -128,7 +128,8 @@ func serverCard(model: AppModel, p: ServerProfile): Unit {
                 }.spacing(2.vp)
                 Spacer()
                 // 在线状态点（probeServers 探测）：绿=在线 红=离线 灰=未知/在途。
-                VStack {}.width(7.vp).height(7.vp)
+                // hug() 退出 HStack 的 flex 分配：VStack 默认 flexible，不写会被剩余宽度拉成长条。
+                VStack {}.hug().width(7.vp).height(7.vp)
                     .background(probeColorOf(model, p.id), 999.vp)
                 cardActions(model, p, confirming)
             }.spacing(9.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(11.vp, 9.vp)
