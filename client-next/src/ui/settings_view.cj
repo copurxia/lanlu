@@ -92,7 +92,6 @@ private func settingsNav(model: AppModel, section: State<Int64>): Unit {
     VStack {
         ScrollView(key: "settings-nav") {
             VStack {
-                Label(model.t("common.settings")).fontSize(15.fp).padding(16.vp, 12.vp, 16.vp, 10.vp)
                 // 导航前置图标对齐原型 #set-nav .side-item .ico（书库侧栏无图标，仅设置导航有）。
                 VStack {
                     NavItem(model.t("common.overview"), active: section.value == 0,
@@ -157,7 +156,8 @@ private func settingsNav(model: AppModel, section: State<Int64>): Unit {
                     NavItem(model.t("settings.about"), active: section.value == 15, glyph: GhostGlyph.Info) {
                         => section.value = 15
                     }
-                }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(10.vp, 0.vp)
+                }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+                    .padding(10.vp, 10.vp, 10.vp, 0.vp)
                 Divider()
                 // 返回入口在顶栏返回钮（同详情页），菜单内不再放「返回书库」。
                 Label("v0.1.0 · CangjieGUI").fontSize(11.fp).muted().padding(14.vp, 0.vp, 14.vp, 10.vp)

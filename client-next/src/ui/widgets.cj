@@ -1015,6 +1015,146 @@ func ghostStyleOf(model: AppModel): SurfaceStyle {
 private let CARD_ZOOM: Float32 = 0.05
 private let CARD_OVERLAY_MS: Int64 = 180
 
+// 对齐 frontend BaseMediaCard：只为首批 24 张卡片播放 520ms 入场，按序号
+// 每张错开 50ms（最多 500ms），避免长列表持续占用重绘。
+private let CARD_ENTRANCE_MS: Int64 = 520
+private let CARD_ENTRANCE_LIMIT: Int64 = 24
+private let CARD_ENTRANCE_STAGGER_MS: Int64 = 50
+private let CARD_ENTRANCE_MAX_DELAY_MS: Int64 = 500
+
+// 卡片入场状态按 cardKey 驻留；同一条目因选择态/收藏态重建时不会重复播放。
+class CardEntranceState {
+    var startedAt: ?UInt64 = None
+    var progress: Float32 = 0.0
+}
+
+// 构建期读取上一帧 progress 布局位移，绘制期由 ticker 推进时钟。该模式与 HoverLift
+// 一致，可在应用层无法直接包裹 builder 子树的限制下保持连续动画。
+class CardEntranceTicker <: Widget {
+    private let state: CardEntranceState
+    private let index: Int64
+
+    public init(state: CardEntranceState, index: Int64) {
+        this.state = state
+        this.index = index
+        if (index >= CARD_ENTRANCE_LIMIT) {
+            state.progress = 1.0
+        }
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size.zero()
+    }
+
+    public func layout(_: UiContext, _: Rect): Unit {}
+
+    public func draw(ctx: UiContext): Unit {
+        if (state.progress >= 1.0 || index >= CARD_ENTRANCE_LIMIT) {
+            return
+        }
+        let startedAt = match (state.startedAt) {
+            case Some(value) => value
+            case None =>
+                state.startedAt = Some(ctx.frame.elapsedMs)
+                ctx.frame.elapsedMs
+        }
+        let elapsed = ctx.frame.elapsedMs - startedAt
+        let delay = UInt64(min(index * CARD_ENTRANCE_STAGGER_MS, CARD_ENTRANCE_MAX_DELAY_MS))
+        if (elapsed < delay) {
+            ctx.requestFrame()
+            return
+        }
+        let wasInFlight = state.progress < 1.0
+        state.progress = min(1.0, Float32(Int64(elapsed - delay)) / Float32(CARD_ENTRANCE_MS))
+        // 到达 1.0 时再补一帧，让构建期位移精确归零，而不是停在上一帧的近似值。
+        if (state.progress < 1.0 || wasInFlight) {
+            ctx.requestFrame()
+        }
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
+
+// CUI 暂无整棵子树的 global alpha；在同色页面底上覆盖反向透明遮罩，可让图片、
+// 文本和自绘图形一起淡入，而不是只淡化 surface 修饰器。
+class CardEntranceVeil <: Widget {
+    private let state: CardEntranceState
+    private var frame = Rect.zero()
+
+    public init(state: CardEntranceState) {
+        this.state = state
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size.zero()
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        let alpha = cardEntranceOpacity(state.progress)
+        if (alpha < 1.0) {
+            ctx.renderer.fill(frame, ctx.theme.bg.withAlpha(Int64(255.0 * (1.0 - alpha))))
+        }
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
+
+// CSS animation timing-function cubic-bezier(.16,1,.3,1)：逐关键帧分段求值，
+// 对齐 frontend archive-card-in 的 0% / 55% / 80% / 100% 纵向回弹。
+private func cardEntranceCurve(progress: Float32): Float32 {
+    let x = max(0.0, min(1.0, progress))
+    var low: Float32 = 0.0
+    var high: Float32 = 1.0
+    var parameter: Float32 = x
+    for (_ in 0..12) {
+        parameter = (low + high) / 2.0
+        let u = 1.0 - parameter
+        let bx = 3.0 * u * u * parameter * 0.16 + 3.0 * u * parameter * parameter * 0.3 +
+            parameter * parameter * parameter
+        if (bx < x) {
+            low = parameter
+        } else {
+            high = parameter
+        }
+    }
+    let u = 1.0 - parameter
+    3.0 * u * u * parameter + 3.0 * u * parameter * parameter + parameter * parameter * parameter
+}
+
+private func cardEntranceSegment(progress: Float32, start: Float32, end: Float32, from: Float32,
+    to: Float32): Float32 {
+    let local = cardEntranceCurve((progress - start) / (end - start))
+    from + (to - from) * local
+}
+
+private func cardEntranceOffset(progress: Float32): Float32 {
+    if (progress < 0.55) {
+        cardEntranceSegment(progress, 0.0, 0.55, 14.0, -2.0)
+    } else if (progress < 0.8) {
+        cardEntranceSegment(progress, 0.55, 0.8, -2.0, 1.0)
+    } else {
+        cardEntranceSegment(progress, 0.8, 1.0, 1.0, 0.0)
+    }
+}
+
+private func cardEntranceOpacity(progress: Float32): Float32 {
+    if (progress >= 0.55) {
+        1.0
+    } else {
+        cardEntranceCurve(progress / 0.55)
+    }
+}
+
 // 悬停动画传感器：HoverSensor 的变体——认领 hoverId，并在 draw 里同步推进封面缩放
 // Spring 与浮层显隐 Tween。卡片构建期读取动画值（应用层拿不到 buildChild，自定义
 // Widget 无法包裹 builder 子树，只能采用「传感器 + 构建期读值」组合）。
@@ -1331,7 +1471,7 @@ public func searchItemKey(item: SearchItem): String {
 }
 
 // 卡片按类型分派：聚合合辑条目渲染合集卡（点进合集详情），其余渲染档案卡。
-public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
+public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32, index!: Int64 = 0): Unit {
     if (isTankItem(item)) {
         let t = TankCardItem()
         t.id = item.tankoubonId
@@ -1342,9 +1482,9 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
         t.archiveCount = item.archiveCount
         t.readPct = progressPct(item.pagecount, item.progress)
         t.isfavorite = item.isfavorite
-        tankCard(model, t, coverW)
+        tankCard(model, t, coverW, index: index)
     } else {
-        archiveCard(model, item, coverW)
+        archiveCard(model, item, coverW, index: index)
     }
 }
 
@@ -1352,28 +1492,29 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
 // （HoverLift 推进 Spring、PixelImageView.zoom 绕中心放大裁回框内，CoverBorder 切 accent）；
 // 右上 NEW 红 pill；悬浮层提供标签/简介/详情/收藏操作；底部 3vp 进度条；
 // 封面下标题 1 行截断 + meta 行 muted。
-public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
+public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32, index!: Int64 = 0): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
         {=> model.openDetail(item.arcid)}, {=> model.toggleFavoriteOnCard(item.arcid)},
         {=> model.enterSelection(item.arcid)}, isNew: item.isnew, tank: false, favorited: item.isfavorite,
-        pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+        pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv, index: index)
 }
 
 // 书架历史卡片复用同一封面骨架，但 meta 改为“相对阅读时间 · 页数”。
-public func archiveCardWithMeta(model: AppModel, item: SearchItem, coverW: Float32, meta: String): Unit {
+public func archiveCardWithMeta(model: AppModel, item: SearchItem, coverW: Float32, meta: String,
+    index!: Int64 = 0): Unit {
     homeCoverCard(model, item.arcid, item.title, meta, coverW, item.coverAssetId, {=> model.openDetail(item.arcid)},
         {=> model.toggleFavoriteOnCard(item.arcid)}, {=> model.enterSelection(item.arcid)}, isNew: item.isnew,
         tank: false, favorited: item.isfavorite, pct: progressPct(item.pagecount, item.progress),
-        summary: item.description, tagsCsv: item.tagsCsv)
+        summary: item.description, tagsCsv: item.tagsCsv, index: index)
 }
 
 // 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上开书图标「合集」角标，
 // meta 为「N 个档案 · X%」。点击进合集详情（T11 接通路由）。
-public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
+public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32, index!: Int64 = 0): Unit {
     homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%", coverW,
         item.coverAssetId, {=> model.openTank(item.id)}, {=> model.toggleTankFavoriteOnCard(item.id)},
         {=> model.enterSelection(item.id)}, isNew: false, tank: true, favorited: item.isfavorite, pct: item.readPct,
-        summary: item.description, tagsCsv: item.tagsCsv)
+        summary: item.description, tagsCsv: item.tagsCsv, index: index)
 }
 
 // 卡片公共骨架：封面 ZStack（可选叠层/封面/描边/角标/进度/悬浮信息层）+ 标题 + meta。
@@ -1381,7 +1522,7 @@ public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit
 // 并选中本卡；tank 详情成员卡由调用方在回调里顺带记录 detailSelectionOwner（见 detail_view）。
 private func homeCoverCard(model: AppModel, id: String, title: String, meta: String, coverW: Float32,
     coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit, isNew!: Bool, tank!: Bool,
-    favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = ""): Unit {
+    favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = "", index!: Int64 = 0): Unit {
     let coverH = coverW * 4.0 / 3.0
     let cardKey = if (tank) {
         "tank:${id}"
@@ -1389,6 +1530,11 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
         "arc:${id}"
     }
     let hoverId = "cover:${cardKey}"
+    let entrance = rememberState<CardEntranceState>("entrance:${cardKey}", {=> CardEntranceState()}).value
+    if (index >= CARD_ENTRANCE_LIMIT) {
+        entrance.progress = 1.0
+    }
+    let entranceY = cardEntranceOffset(entrance.progress)
     // Spring 0→1 驱动封面缩放（HoverLift 传感器在 draw 里推进弹簧）。
     let zoomSpring = rememberState<Spring>("zoom:${cardKey}", {=> Spring(0.0)}).value
     let overlayTween = rememberState<Tween>("overlay-motion:${cardKey}", {
@@ -1408,73 +1554,77 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
             onClick()
         }
     }) {
-        VStack {
-            ZStack {
-                if (tank) {
-                    let hi = if (model.isLight()) {
-                        LANLU_L_TANK_STACK_HI
-                    } else {
-                        LANLU_TANK_STACK_HI
-                    }
-                    let lo = if (model.isLight()) {
-                        LANLU_L_TANK_STACK_LO
-                    } else {
-                        LANLU_TANK_STACK_LO
-                    }
-                    let edge = if (model.isLight()) {
-                        LANLU_L_PANEL_EDGE
-                    } else {
-                        LANLU_PANEL_EDGE
-                    }
-                    TankBackdrop(hi, lo, edge)
-                }
-                HoverLift(hoverId, zoomSpring, overlayTween, overlayHovered)
-                if (coverAssetId > 0) {
-                    remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
-                        Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
-                        zoom: 1.0 + CARD_ZOOM * zoomSpring.value, radius: coverW * 0.072)
-                } else {
-                    noCoverBox(model, coverW, coverH)
-                }
-                CoverBorder(hoverId)
-                if (selecting && selected) {
-                    SelectionRing()
-                }
-                if (overlayT > 0.001) {
-                    CoverClipStart()
-                    cardHoverOverlay(summary, tagsCsv, coverH, overlayT)
-                    CoverClipEnd()
-                }
-                // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
-                // 选择模式下不挂载：浮层按钮的详情/收藏语义与 toggle 选中冲突。
-                if (!selecting) {
-                    CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite, onSelect)
-                }
-                // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）；
-                // 选择模式下 NEW 让位给勾选圆点（选择态比「新到」更需要一目了然）。
-                HStack {
+        ZStack {
+            CardEntranceTicker(entrance, index)
+            VStack {
+                ZStack {
                     if (tank) {
-                        tankBadge(model)
+                        let hi = if (model.isLight()) {
+                            LANLU_L_TANK_STACK_HI
+                        } else {
+                            LANLU_TANK_STACK_HI
+                        }
+                        let lo = if (model.isLight()) {
+                            LANLU_L_TANK_STACK_LO
+                        } else {
+                            LANLU_TANK_STACK_LO
+                        }
+                        let edge = if (model.isLight()) {
+                            LANLU_L_PANEL_EDGE
+                        } else {
+                            LANLU_PANEL_EDGE
+                        }
+                        TankBackdrop(hi, lo, edge)
                     }
-                    Spacer()
-                    if (selecting) {
-                        SelectionDot(selected)
-                    } else if (isNew && !tank) {
-                        newBadge()
+                    HoverLift(hoverId, zoomSpring, overlayTween, overlayHovered)
+                    if (coverAssetId > 0) {
+                        remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
+                            Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
+                            zoom: 1.0 + CARD_ZOOM * zoomSpring.value, radius: coverW * 0.072)
+                    } else {
+                        noCoverBox(model, coverW, coverH)
                     }
-                }.crossAxisAlignment(CrossAxisAlignment.Start).padding(8.vp)
-                // 底部进度条：全宽（两端内缩在 CoverProgress 内部处理）。
-                if (pct > 0) {
-                    VStack {
+                    CoverBorder(hoverId)
+                    if (selecting && selected) {
+                        SelectionRing()
+                    }
+                    if (overlayT > 0.001) {
+                        CoverClipStart()
+                        cardHoverOverlay(summary, tagsCsv, coverH, overlayT)
+                        CoverClipEnd()
+                    }
+                    // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
+                    // 选择模式下不挂载：浮层按钮的详情/收藏语义与 toggle 选中冲突。
+                    if (!selecting) {
+                        CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite, onSelect)
+                    }
+                    // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）；
+                    // 选择模式下 NEW 让位给勾选圆点（选择态比「新到」更需要一目了然）。
+                    HStack {
+                        if (tank) {
+                            tankBadge(model)
+                        }
                         Spacer()
-                        CoverProgress(pct)
+                        if (selecting) {
+                            SelectionDot(selected)
+                        } else if (isNew && !tank) {
+                            newBadge()
+                        }
+                    }.crossAxisAlignment(CrossAxisAlignment.Start).padding(8.vp)
+                    // 底部进度条：全宽（两端内缩在 CoverProgress 内部处理）。
+                    if (pct > 0) {
+                        VStack {
+                            Spacer()
+                            CoverProgress(pct)
+                        }
                     }
-                }
-            // 浮层内容不能反向参与封面测量；封面槽位始终保持调用方给定的固定尺寸。
-            }.alignment(Alignment.TopLeading).width(coverW).height(coverH)
-            Label(title).maxLines(1).fontSize(12.5.fp)
-            Label(meta).fontSize(11.fp).muted()
-        }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(coverW)
+                    // 浮层内容不能反向参与封面测量；封面槽位始终保持调用方给定的固定尺寸。
+                }.alignment(Alignment.TopLeading).width(coverW).height(coverH)
+                Label(title).maxLines(1).fontSize(12.5.fp)
+                Label(meta).fontSize(11.fp).muted()
+            }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(coverW).offset(x: 0.0, y: entranceY)
+            CardEntranceVeil(entrance).offset(x: 0.0, y: entranceY)
+        }.alignment(Alignment.TopLeading)
     }
 }
 
@@ -1649,10 +1799,11 @@ public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem
                     favorited: item.isfavorite,
                     pct: progressPct(item.pagecount, item.progress),
                     summary: item.description,
-                    tagsCsv: item.tagsCsv
+                    tagsCsv: item.tagsCsv,
+                    index: i
                 )
             } else {
-                searchItemCard(model, item, coverW)
+                searchItemCard(model, item, coverW, index: i)
             }
     }.height(stripH)
 }
@@ -2484,10 +2635,11 @@ public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId:
                     favorited: item.isfavorite,
                     pct: item.readPct,
                     summary: item.description,
-                    tagsCsv: item.tagsCsv
+                    tagsCsv: item.tagsCsv,
+                    index: i
                 )
             } else {
-                tankCard(model, item, REL_COVER_W)
+                tankCard(model, item, REL_COVER_W, index: i)
             }
     }.height(REL_STRIP_H)
 }
@@ -2838,18 +2990,21 @@ public func memberGridContent(model: AppModel, members: Array<SearchItem>, onEnt
     let coverH = cellW * 4.0 / 3.0
     let rows = (members.size + cols - 1) / cols
     let gridH = Float32(rows) * (coverH + MEMBER_TEXT_H) + Float32(rows - 1) * 16.0
-    LazyGrid(members, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0, id: "member-grid") {
-        item => if (model.selectionMode.value) {
+    LazyGrid(members.size, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0, id: "member-grid",
+        itemAt: {i => (i, members[i])}) {
+        pair =>
+        let (index, item) = pair
+        if (model.selectionMode.value) {
             memberSelectCard(model, item, cellW)
         } else {
-            memberCard(model, item, cellW, onEnterSelection, onRemove)
+            memberCard(model, item, cellW, onEnterSelection, onRemove, index: index)
         }
     }.height(gridH)
 }
 
 // 成员卡：复用首页卡骨架，悬停提供详情/收藏/多选图标按钮。
 private func memberCard(model: AppModel, item: SearchItem, coverW: Float32, onEnterSelection: (String) -> Unit,
-    onRemove: (String) -> Unit): Unit {
+    onRemove: (String) -> Unit, index!: Int64 = 0): Unit {
     ContextMenu(
         items: [
             MenuItem("打开详情", {=> model.openDetail(item.arcid)}),
@@ -2867,7 +3022,8 @@ private func memberCard(model: AppModel, item: SearchItem, coverW: Float32, onEn
         homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
             {=> model.openDetail(item.arcid)}, {=> model.toggleFavoriteOnCard(item.arcid)},
             {=> onEnterSelection(item.arcid)}, isNew: item.isnew, tank: false, favorited: item.isfavorite,
-            pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+            pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv,
+            index: index)
     }
 }
 

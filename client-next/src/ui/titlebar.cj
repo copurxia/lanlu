@@ -9,7 +9,7 @@ import std.collection.ArrayList
 // 左→右 = 品牌（金色圆角方块 + Lanlu）→ 弹性空隙 → 全局搜索框（icon + 占位 + kbd「/」，
 // 默认封顶 460vp，点击/聚焦后展开至 680vp，在品牌与右侧固定带之间水平居中）→
 // 弹性空隙 → 导航胶囊（首页/书架/在线源，
-// 后两项无页面置灰）→ 上传 → ⚙ 设置 → ◐ 主题 → 用户芯片 → 1×20 分隔线 → 最小化/最大化/关闭。
+// 后两项无页面置灰）→ ◐ 主题 → 用户菜单 → 1×20 分隔线 → 最小化/最大化/关闭。
 // 窗口拖动走 SdlWindow.setDragRegions 多矩形（main.cj 注册：品牌区 + 搜索框两侧的弹性空隙，
 // 见 titleBarDragRects）——DRAGGABLE 内鼠标事件不投递给应用，
 // 故所有交互控件都必须落在注册矩形之外。双击最大化手势因同一限制放弃（YAGNI）。
@@ -27,8 +27,8 @@ private let SEARCH_EXPANDED_W: Float32 = 680.0
 private let SEARCH_EXPAND_MS: Int64 = 220
 // 首页搜索框右侧筛选钮占 34vp，外加 HStack 的 10vp 间距。
 private let FILTER_BUTTON_SLOT_W: Float32 = 44.0
-// 右侧固定带保留宽（右内边距 16 + 胶囊 ≈182 + 设置/主题 34×2 + 用户芯片 ≤150 + 分隔线 13
-// + 窗口控制 118 + 间距 6×10 ≈ 607，取 640 留安全边；用户名超长的芯片已截断兜底）。
+// 右侧固定带保留宽（右内边距 16 + 胶囊 ≈182 + 主题 34 + 用户芯片 ≤166 + 分隔线 13
+// + 窗口控制 118 + 间距 ≈ 80，取 640 留安全边；用户名超长的芯片已截断兜底）。
 private let DRAG_RIGHT_RESERVE: Int32 = 640
 
 // 返回钮（详情/合集页）占位宽：左内边距 16 + 钮 34 + 间距 10 = 60，品牌矩形右移至 60、
@@ -81,6 +81,16 @@ private let SEARCH_FIELD_ID = "titlebar-search"
 private let SCANCODE_SLASH: Int32 = 56
 // 头像底色（原型 .avatar 渐变 #4a6fa5→#2b3a55，取起色实色近似；renderer 无渐变填充）。
 private let AVATAR_BLUE = Color.rgb(0x4A, 0x6F, 0xA5)
+private let USER_MENU_OWNER = "titlebar:user-menu"
+private let USER_MENU_WIDTH: Float32 = 176.0
+private let USER_MENU_ROW_HEIGHT: Float32 = 36.0
+private let USER_MENU_PADDING: Float32 = 6.0
+private let USER_MENU_GROUP_GAP: Float32 = 9.0
+private let USER_MENU_ITEM_COUNT: Int64 = 4
+private let USER_MENU_LIGHT_SURFACE = Color.rgb(255, 255, 255)
+private let USER_MENU_LIGHT_BORDER = Color.rgba(0, 0, 0, 28)
+private let USER_MENU_LIGHT_TEXT = Color.rgb(0x1D, 0x1D, 0x21)
+private let USER_MENU_LIGHT_HOVER = Color.rgb(0xF2, 0xF2, 0xF4)
 
 // 控制钮图形种类（右侧固定的窗口控制三钮；主题钮已改为 GhostIconButton.Theme 风格）。
 // public：阅读器顶栏（reader_bar.cj）复用同一组窗口控制钮。
@@ -551,14 +561,21 @@ private func runesToString(runes: Array<Rune>, start: Int64, end: Int64): String
     builder.toString()
 }
 
-// 用户芯片（原型 .user-chip）：elev 胶囊 + 圆形头像（username 首字母）+ 用户名文本。
-// 纯展示不交互（账号操作在设置页）；用户名超 8 字截断，防止把右侧固定带撑出拖动区预算。
-private class UserChip <: Widget {
+// 用户菜单（原型 .user-chip）：点击用户信息展开上传、设置、切换服务器与退出登录。
+// 菜单通过 Overlay 绘制在页面之上；点击外部/Esc 关闭，方向键与 Enter 可操作。
+// 用户名超 8 字截断，防止把右侧固定带撑出拖动区预算。
+private class UserMenuChip <: Widget {
     private let model: AppModel
+    private let logoutOpen: State<Bool>
+    private let open: State<Bool>
+    private let highlight: State<Int64>
     private var frame = Rect.zero()
 
-    public init(model: AppModel) {
+    public init(model: AppModel, logoutOpen: State<Bool>) {
         this.model = model
+        this.logoutOpen = logoutOpen
+        this.open = rememberState<Bool>("${USER_MENU_OWNER}:open", {=> false})
+        this.highlight = rememberState<Int64>("${USER_MENU_OWNER}:highlight", {=> 0})
         emit(this)
     }
 
@@ -573,7 +590,7 @@ private class UserChip <: Widget {
     }
 
     public func measure(ctx: UiContext, _: Size): Size {
-        let w = 4.0 + 24.0 + 7.0 + ctx.renderer.textWidth(displayName(), pointSize: 12.0) + 10.0
+        let w = 4.0 + 24.0 + 7.0 + ctx.renderer.textWidth(displayName(), pointSize: 12.0) + 6.0 + 12.0 + 8.0
         Size(w, 32.0)
     }
 
@@ -582,10 +599,19 @@ private class UserChip <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, ctx.theme.panel)
-        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: ctx
-            .theme
-            .panelEdge))
+        let hovered = ctx.isHovered(USER_MENU_OWNER)
+        ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, if (hovered || open.value) {
+            ctx.theme.overlayHover
+        } else {
+            ctx.theme.panel
+        })
+        ctx
+            .renderer
+            .strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: if (open.value) {
+                ctx.theme.accent
+            } else {
+                ctx.theme.panelEdge
+            }))
         let ax = frame.x + 4.0 + 12.0
         ctx.renderer.fillCircle(ax, frame.centerY(), 12.0, AVATAR_BLUE)
         let initial = initialLetter()
@@ -595,8 +621,17 @@ private class UserChip <: Widget {
         let name = displayName()
         let nw = ctx.renderer.textWidth(name, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
-        ctx.renderer.text(name, frame.right() - 10.0 - nw, frame.centerY() - nh / 2.0, ctx.theme.mutedText,
-            pointSize: 12.0)
+        let arrowX = frame.right() - 14.0
+        ctx.renderer.text(name, arrowX - 10.0 - nw, frame.centerY() - nh / 2.0, ctx.theme.mutedText, pointSize: 12.0)
+        drawIcon(ctx.renderer, IconName.ChevronDown, Rect(arrowX - 6.0, frame.centerY() - 6.0, 12.0, 12.0),
+            ctx.theme.mutedText)
+
+        if (open.value) {
+            let menu = popupRect(ctx)
+            ctx.setOverlay(
+                Overlay(owner: USER_MENU_OWNER, handleEvent: {c, event => handlePopup(c, event, menu)},
+                    render: {c => drawPopup(c, menu)}))
+        }
     }
 
     // 首 rune 作头像字母（空名兜底 U；不做大小写变换，中日韩文字原样亦成立）。
@@ -608,15 +643,197 @@ private class UserChip <: Widget {
         runesToString(runes, 0, 1)
     }
 
-    public func handle(_: UiContext, _: UiEvent): Bool {
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(USER_MENU_OWNER, CursorShape.Interactive)
+                }
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    open.value = true
+                    highlight.value = 0
+                    return true
+                }
+            case _ => ()
+        }
         false
     }
+
+    private func popupRect(ctx: UiContext): Rect {
+        let height = USER_MENU_PADDING * 2.0 + USER_MENU_ROW_HEIGHT * Float32(USER_MENU_ITEM_COUNT) + USER_MENU_GROUP_GAP
+        let x = max(4.0, min(frame.right() - USER_MENU_WIDTH, ctx.viewportWidth - USER_MENU_WIDTH - 4.0))
+        let y = min(frame.bottom() + 6.0, ctx.viewportHeight - height - 4.0)
+        Rect(x, max(4.0, y), USER_MENU_WIDTH, height)
+    }
+
+    private func rowRect(menu: Rect, index: Int64): Rect {
+        let groupOffset: Float32 = if (index >= 2) {
+            USER_MENU_GROUP_GAP
+        } else {
+            0.0
+        }
+        Rect(menu.x + 5.0, menu.y + USER_MENU_PADDING + Float32(index) * USER_MENU_ROW_HEIGHT + groupOffset,
+            menu.w - 10.0, USER_MENU_ROW_HEIGHT)
+    }
+
+    private func itemAt(menu: Rect, x: Float32, y: Float32): Int64 {
+        for (i in 0..USER_MENU_ITEM_COUNT) {
+            if (rowRect(menu, i).contains(x, y)) {
+                return i
+            }
+        }
+        -1
+    }
+
+    private func itemLabel(index: Int64): String {
+        match (index) {
+            case 0 => model.t("titlebar.uploadFiles")
+            case 1 => model.t("common.settings")
+            case 2 => model.t("overview.switchServer")
+            case 3 => model.t("overview.logout")
+            case _ => ""
+        }
+    }
+
+    private func itemGlyph(index: Int64): GhostGlyph {
+        match (index) {
+            case 0 => GhostGlyph.Named(IconName.Upload)
+            case 1 => GhostGlyph.Gear
+            case 2 => GhostGlyph.Swap
+            case 3 => GhostGlyph.LogOut
+            case _ => GhostGlyph.Menu
+        }
+    }
+
+    private func drawPopup(ctx: UiContext, menu: Rect): Unit {
+        let surface = if (model.isLight()) {
+            USER_MENU_LIGHT_SURFACE
+        } else {
+            ctx.theme.panelRaised
+        }
+        let border = if (model.isLight()) {
+            USER_MENU_LIGHT_BORDER
+        } else {
+            ctx.theme.panelEdge
+        }
+        let textColor = if (model.isLight()) {
+            USER_MENU_LIGHT_TEXT
+        } else {
+            ctx.theme.text
+        }
+        let hover = if (model.isLight()) {
+            USER_MENU_LIGHT_HOVER
+        } else {
+            ctx.theme.overlayHover
+        }
+        ctx.renderer.fillRoundedRect(menu, 10.0, surface)
+        ctx.renderer.strokeRoundedRect(menu.inset(0.5), 9.5, Pen(width: 1.0, color: border))
+        let separatorY = menu.y + USER_MENU_PADDING + USER_MENU_ROW_HEIGHT * 2.0 + USER_MENU_GROUP_GAP / 2.0
+        ctx.renderer.fill(Rect(menu.x + 10.0, separatorY, menu.w - 20.0, 1.0), border)
+
+        for (i in 0..USER_MENU_ITEM_COUNT) {
+            let row = rowRect(menu, i)
+            let selected = i == highlight.value
+            if (selected) {
+                ctx.renderer.fillRoundedRect(row, 7.0, if (i == 3) {
+                    LANLU_DANGER.withAlpha(28)
+                } else {
+                    hover
+                })
+            }
+            let color = if (i == 3) {
+                LANLU_DANGER
+            } else {
+                textColor
+            }
+            drawGhostGlyph(ctx.renderer, itemGlyph(i), row.x + 17.0, row.centerY(), color)
+            let label = itemLabel(i)
+            let textHeight = ctx.renderer.textHeight(pointSize: 12.0)
+            ctx.renderer.text(label, row.x + 34.0, row.centerY() - textHeight / 2.0, color, pointSize: 12.0)
+        }
+    }
+
+    private func handlePopup(ctx: UiContext, event: UiEvent, menu: Rect): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (menu.contains(x, y)) {
+                    let index = itemAt(menu, x, y)
+                    if (index >= 0) {
+                        highlight.value = index
+                    }
+                    ctx.claimHover(USER_MENU_OWNER, CursorShape.Interactive)
+                }
+                false
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (menu.contains(x, y)) {
+                    runItem(ctx, itemAt(menu, x, y))
+                } else {
+                    close(ctx)
+                }
+                true
+            case UiEvent.MouseDown(_, _, _) =>
+                close(ctx)
+                true
+            case UiEvent.KeyDown(Key.Escape, _) =>
+                close(ctx)
+                true
+            case UiEvent.KeyDown(Key.Enter, _) =>
+                runItem(ctx, highlight.value)
+                true
+            case UiEvent.KeyDown(Key.Down, _) =>
+                highlight.value = (highlight.value + 1) % USER_MENU_ITEM_COUNT
+                true
+            case UiEvent.KeyDown(Key.Up, _) =>
+                highlight.value = (highlight.value + USER_MENU_ITEM_COUNT - 1) % USER_MENU_ITEM_COUNT
+                true
+            case _ => false
+        }
+    }
+
+    private func runItem(ctx: UiContext, index: Int64): Unit {
+        close(ctx)
+        match (index) {
+            case 0 => model.openUploadDrawer()
+            case 1 => model.navigate(Page.Settings)
+            case 2 => model.navigate(Page.Login)
+            case 3 => logoutOpen.value = true
+            case _ => ()
+        }
+    }
+
+    private func close(ctx: UiContext): Unit {
+        open.value = false
+        ctx.removeOverlay(USER_MENU_OWNER)
+    }
+}
+
+private func titleBarLogoutConfirmModal(model: AppModel, logoutOpen: State<Bool>): Unit {
+    Modal(logoutOpen, body: {
+        => VStack {
+            Label(model.t("titlebar.logoutTitle")).fontSize(15.fp)
+            Label(model.t("titlebar.logoutDescription")).fontSize(12.fp).muted()
+            HStack {
+                Spacer()
+                Button(model.t("common.cancel"), {=> logoutOpen.value = false}).style(ghostStyleOf(model))
+                Button(
+                    model.t("overview.logout"),
+                    {
+                        =>
+                            logoutOpen.value = false
+                            model.logout()
+                    }
+                ).role(ButtonRole.Danger)
+            }.spacing(8.vp)
+        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(340.vp)
+    })
 }
 
 // 自定义标题栏：品牌 + 全局搜索 + 导航胶囊 + 设置/主题 + 用户芯片 + 分隔线 +
 // 最小化/最大化/关闭。登录页只保留品牌与右侧主题/窗口控制（无可搜内容、无会话用户）。
 // 最小化/最大化经 SdlWindow 扩展直达，关闭走 ctx.requestClose()。
 public func titleBar(window: SdlWindow, model: AppModel): Unit {
+    let logoutOpen = rememberState<Bool>("titlebar:logout-open", {=> false})
     let onLogin = match (model.page.value) {
         case Page.Login => true
         case _ => false
@@ -675,18 +892,12 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
                 }
                 Spacer()
                 NavPill(model)
-                GhostIconButton(GhostGlyph.Named(IconName.Upload), "titlebar:upload") {
-                    => model.openUploadDrawer()
-                }
-                GhostIconButton(GhostGlyph.Gear, "titlebar:settings") {
-                    => model.navigate(Page.Settings)
-                }
             } else {
                 Spacer()
             }
             ThemeToggleButton(model, "titlebar:theme")
             if (!onLogin && model.settings.username.size > 0) {
-                UserChip(model)
+                UserMenuChip(model, logoutOpen)
             }
             WinSep()
             WinControlButton(WinGlyph.Min, "titlebar:min") {_ => window.minimize()}
@@ -697,4 +908,5 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         SearchKeys(model)
     // alignment 是 ZStack 专有链式，须排在返回 Widget 的通用修饰器 height 之前。
     }.alignment(Alignment.TopLeading).height(Float32(TITLEBAR_HEIGHT))
+    titleBarLogoutConfirmModal(model, logoutOpen)
 }

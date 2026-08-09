@@ -283,8 +283,9 @@ private func searchGrid(model: AppModel): Unit {
     // (count, itemAt) 形式直接读 model 的 ArrayList，不为网格每帧 toArray 全量拷贝（评审 #29）。
     let items = model.items.value
     LazyGrid(items.size, cols, coverH + CARD_TEXT_H, spacing: GRID_SPACING,
-        columnSpacing: GRID_SPACING, id: "search-grid", itemAt: {i => items[i]}) { item =>
-        searchItemCard(model, item, cellW)
+        columnSpacing: GRID_SPACING, id: "search-grid", itemAt: {i => (i, items[i])}) { pair =>
+        let (index, item) = pair
+        searchItemCard(model, item, cellW, index: index)
     // Float32 走 padding 的 vp 重载（.vp 后缀仅 Int64/Float64 有）。
     }.padding(GRID_PADDING)
 }

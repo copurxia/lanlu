@@ -115,74 +115,108 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
     }
     // 打开即异步拉取合集列表（仅触发一次）。
     if (open.value && !cell.started) {
-        cell.begin()
-        match (model.api) {
-            case Some(a) =>
-                let _ = model.worker.submit("dlg.addtank:${arcid}", {
-                    =>
-                        try {
-                            cell.store(a.listTankoubons(lang: model.language.value))
-                        } catch (e: Exception) {
-                            cell.storeError(e.message)
-                        }
-                        return true
-                })
-            case None => cell.storeError(model.t("dialog.notLoggedIn"))
-        }
+        submitAddToTankList(model, cell, arcid)
     }
     Modal(open, body: {
-        =>
+        => ZStack {
             VStack {
                 Label(model.t("dialog.addToCollection")).fontSize(15.fp)
                 if (cell.error().size > 0) {
-                    Label(model.t("dialog.loadFailed", params: [("error", cell.error())])).fontSize(12.fp).muted()
+                    HStack {
+                        Label(model.t("dialog.loadFailed", params: [("error", cell.error())]))
+                            .fontSize(12.fp)
+                            .muted()
+                            .maxLines(3)
+                            .flex()
+                        Button(model.t("dialog.retry"), {=> submitAddToTankList(model, cell, arcid)}).style(
+                            ghostStyleOf(model))
+                    }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
                 } else {
                     match (cell.fetch()) {
                         case Some(tanks) =>
                             if (tanks.size == 0) {
                                 Label(model.t("dialog.noCollectionsCreate")).fontSize(12.fp).muted()
+                            } else {
+                                ScrollView(key: "dlg.addtank.list:${arcid}") {
+                                    VStack {
+                                        for (t in tanks) {
+                                            ClickArea(
+                                                onClick: {
+                                                    =>
+                                                        open.value = false
+                                                        model.addArchivesToTank(t.id, arcidListOf(arcid))
+                                                }
+                                            ) {
+                                                ZStack {
+                                                    HoverSensor("dlg.tankrow:${t.id}")
+                                                    HoverFill("dlg.tankrow:${t.id}", 8.0)
+                                                    HStack {
+                                                        Label(t.name).fontSize(13.fp).maxLines(1).flex()
+                                                        Label(
+                                                            model.t("dialog.archiveCount",
+                                                                params: [("count", "${t.archiveCount}")]))
+                                                            .fontSize(11.fp)
+                                                            .muted()
+                                                    }
+                                                        .spacing(8.vp)
+                                                        .crossAxisAlignment(CrossAxisAlignment.Center)
+                                                        .hug()
+                                                        .fillWidth()
+                                                        .padding(8.vp, 6.vp)
+                                                }.alignment(Alignment.TopLeading)
+                                            }
+                                        }
+                                    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth()
+                                }.height(240.vp)
                             }
-                            VStack {
-                                for (t in tanks) {
-                                    ClickArea(onClick: {
-                                        =>
-                                            open.value = false
-                                            model.addArchivesToTank(t.id, arcidListOf(arcid))
-                                    }) {
-                                        ZStack {
-                                            HoverSensor("dlg.tankrow:${t.id}")
-                                            HoverFill("dlg.tankrow:${t.id}", 8.0)
-                                            HStack {
-                                                Label(t.name).fontSize(13.fp).maxLines(1).flex()
-                                                Label(model.t("dialog.archiveCount",
-                                                    params: [("count", "${t.archiveCount}")])).fontSize(11.fp).muted()
-                                            }.spacing(8.vp).hug().padding(8.vp, 6.vp)
-                                        }.alignment(Alignment.TopLeading)
-                                    }
-                                }
-                            }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start)
                         case None => Label(model.t("common.loading")).fontSize(12.fp).muted()
                     }
                 }
                 Label(model.t("dialog.newCollection")).fontSize(11.fp).muted()
                 HStack {
                     TextField(newName, key: "dlg.addtank.field:${arcid}").flex()
-                    Button(model.t("dialog.createAndAdd"), {
-                        =>
-                            let name = newName.value.trimAscii()
-                            if (name.size > 0) {
-                                open.value = false
-                                model.createTankAndAdd(name, arcidListOf(arcid))
-                            }
-                    }).role(ButtonRole.Primary)
-                }.spacing(8.vp)
+                    Button(
+                        model.t("dialog.createAndAdd"),
+                        {
+                            =>
+                                let name = newName.value.trimAscii()
+                                if (name.size > 0) {
+                                    open.value = false
+                                    model.createTankAndAdd(name, arcidListOf(arcid))
+                                }
+                        }
+                    ).role(ButtonRole.Primary)
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
                 HStack {
                     Spacer()
                     Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
-                }
-            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(360.vp)
+                }.hug().fillWidth()
+            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().width(360.vp)
             LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})
+        }.alignment(Alignment.TopLeading)
     })
+}
+
+private func submitAddToTankList(model: AppModel, cell: DialogCell<ArrayList<TankoubonInfo>>, arcid: String): Unit {
+    cell.begin()
+    match (model.api) {
+        case Some(a) =>
+            // State 只在 UI 线程读取；跨线程共享结果通过 DialogCell 的 Mutex 保护。
+            let lang = model.language.value
+            let _ = model.worker.submit(
+                "dlg.addtank:${arcid}",
+                {
+                    =>
+                        try {
+                            cell.store(a.listTankoubons(lang: lang))
+                        } catch (e: Exception) {
+                            cell.storeError(e.message)
+                        }
+                        return true
+                }
+            )
+        case None => cell.storeError(model.t("dialog.notLoggedIn"))
+    }
 }
 
 // ---- 合集详情「添加档案」----
@@ -202,93 +236,130 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
     if (open.value && !cell.started) {
         submitTankAddSearch(model, cell, tankId, "")
     }
-    Modal(open, body: {
-        =>
-            let light = model.isLight()
-            let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-            let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
-            // 已是成员的 id 不列出（合集不重复收录同一档案）。
-            let memberIds = HashSet<String>()
-            for (it in model.tankMembers.value) {
-                memberIds.add(it.arcid)
-            }
-            VStack {
-                Label(model.t("dialog.addArchives")).fontSize(15.fp)
-                HStack {
-                    TextField(query, key: "dlg.tankadd.field:${tankId}").flex()
-                    Button(model.t("dialog.search"), {
-                        => submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
-                    })
-                        .style(ghostStyleOf(model))
-                }.spacing(8.vp)
-                if (cell.error().size > 0) {
-                    Label(model.t("dialog.searchFailed", params: [("error", cell.error())])).fontSize(12.fp).muted()
+    Modal(
+        open,
+        body: {
+            =>
+                let light = model.isLight()
+                let accent = if (light) {
+                    LANLU_L_ACCENT
                 } else {
-                    match (cell.fetch()) {
-                        case Some(items) =>
-                            let shown = ArrayList<SearchItem>()
-                            for (it in items) {
-                                if (it.arcid.size > 0 && !memberIds.contains(it.arcid)) {
-                                    shown.add(it)
-                                }
-                            }
-                            if (shown.size == 0) {
-                                Label(model.t("dialog.noArchives")).fontSize(12.fp).muted()
-                            } else {
-                                ScrollView {
-                                    VStack {
-                                        for (it in shown) {
-                                            let on = picked.value.contains(it.arcid)
-                                            ClickArea(onClick: {
-                                                =>
-                                                    if (picked.value.contains(it.arcid)) {
-                                                        picked.value.remove(it.arcid)
-                                                    } else {
-                                                        picked.value.add(it.arcid)
-                                                    }
-                                                    picked.value = picked.value
-                                            }) {
-                                                HStack {
-                                                    VStack {
-                                                        if (on) {
-                                                            Icon(IconName.Check, size: 12.vp, color: accent)
-                                                        }
-                                                    }.crossAxisAlignment(CrossAxisAlignment.Center)
-                                                        .width(18.vp)
-                                                    Label(it.title).fontSize(13.fp).maxLines(1).flex()
-                                                    Label(model.t("detail.pages",
-                                                        params: [("count", "${it.pagecount}")])).fontSize(11.fp).muted()
-                                                }.spacing(8.vp).hug().padding(8.vp, 6.vp)
-                                                    .background(if (on) { accentSoft } else {
-                                                        Color.rgba(0, 0, 0, 0)
-                                                    }, 8.vp)
-                                            }
-                                        }
-                                    }.spacing(2.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-                                        .fillWidth()
-                                }.height(300.vp)
-                            }
-                        case None => Label(model.t("dialog.searching")).fontSize(12.fp).muted()
-                    }
+                    LANLU_ACCENT
                 }
-                HStack {
-                    Spacer()
-                    Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
-                    Button(model.t("dialog.addCount", params: [("count", "${picked.value.size}")]), {
-                        =>
-                            if (picked.value.size > 0) {
-                                open.value = false
-                                let ids = ArrayList<String>()
-                                for (id in picked.value) {
-                                    ids.add(id)
-                                }
-                                model.addArchivesToTank(tankId, ids)
+                let accentSoft = if (light) {
+                    LANLU_L_ACCENT_SOFT
+                } else {
+                    LANLU_ACCENT_SOFT
+                }
+                // 已是成员的 id 不列出（合集不重复收录同一档案）。
+                let memberIds = HashSet<String>()
+                for (it in model.tankMembers.value) {
+                    memberIds.add(it.arcid)
+                }
+                ZStack {
+                    VStack {
+                        Label(model.t("dialog.addArchives")).fontSize(15.fp)
+                        HStack {
+                            TextField(query, key: "dlg.tankadd.field:${tankId}").flex()
+                            Button(model.t("dialog.search"), {
+                                => submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
+                            }).style(ghostStyleOf(model))
+                        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
+                        if (cell.error().size > 0) {
+                            HStack {
+                                Label(model.t("dialog.searchFailed", params: [("error", cell.error())]))
+                                    .fontSize(12.fp)
+                                    .muted()
+                                    .maxLines(3)
+                                    .flex()
+                                Button(model.t("dialog.retry"), {
+                                    => submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
+                                }).style(ghostStyleOf(model))
+                            }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
+                        } else {
+                            match (cell.fetch()) {
+                                case Some(items) =>
+                                    let shown = ArrayList<SearchItem>()
+                                    for (it in items) {
+                                        if (it.arcid.size > 0 && !memberIds.contains(it.arcid)) {
+                                            shown.add(it)
+                                        }
+                                    }
+                                    if (shown.size == 0) {
+                                        Label(model.t("dialog.noArchives")).fontSize(12.fp).muted()
+                                    } else {
+                                        ScrollView {
+                                            VStack {
+                                                for (it in shown) {
+                                                    let on = picked.value.contains(it.arcid)
+                                                    ClickArea(
+                                                        onClick: {
+                                                            =>
+                                                                if (picked.value.contains(it.arcid)) {
+                                                                    picked.value.remove(it.arcid)
+                                                                } else {
+                                                                    picked.value.add(it.arcid)
+                                                                }
+                                                                picked.value = picked.value
+                                                        }
+                                                    ) {
+                                                        HStack {
+                                                            VStack {
+                                                                if (on) {
+                                                                    Icon(IconName.Check, size: 12.vp, color: accent)
+                                                                }
+                                                            }
+                                                                .crossAxisAlignment(CrossAxisAlignment.Center)
+                                                                .hug()
+                                                                .width(18.vp)
+                                                            Label(it.title).fontSize(13.fp).maxLines(1).flex()
+                                                            Label(
+                                                                model.t("detail.pages",
+                                                                    params: [("count", "${it.pagecount}")]))
+                                                                .fontSize(11.fp)
+                                                                .muted()
+                                                        }
+                                                            .spacing(8.vp)
+                                                            .crossAxisAlignment(CrossAxisAlignment.Center)
+                                                            .hug()
+                                                            .fillWidth()
+                                                            .padding(8.vp, 6.vp)
+                                                            .background(if (on) {
+                                                                accentSoft
+                                                            } else {
+                                                                Color.rgba(0, 0, 0, 0)
+                                                            }, 8.vp)
+                                                    }
+                                                }
+                                            }
+                                                .spacing(2.0)
+                                                .crossAxisAlignment(CrossAxisAlignment.Start)
+                                                .hug()
+                                                .fillWidth()
+                                        }.height(300.vp)
+                                    }
+                                case None => Label(model.t("dialog.searching")).fontSize(12.fp).muted()
                             }
-                    }).role(ButtonRole.Primary)
-                }.spacing(8.vp)
-            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(420.vp)
-            LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})
-    })
+                        }
+                        HStack {
+                            Spacer()
+                            Button(model.t("common.cancel"), {=> open.value = false}).style(ghostStyleOf(model))
+                            Button(model.t("dialog.addCount", params: [("count", "${picked.value.size}")]), {
+                                => if (picked.value.size > 0) {
+                                    open.value = false
+                                    let ids = ArrayList<String>()
+                                    for (id in picked.value) {
+                                        ids.add(id)
+                                    }
+                                    model.addArchivesToTank(tankId, ids)
+                                }
+                            }).role(ButtonRole.Primary)
+                        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
+                    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().width(420.vp)
+                    LoadPoll({=> !open.value || cell.fetch().isSome() || cell.error().size > 0})
+                }.alignment(Alignment.TopLeading)
+        }
+    )
 }
 
 // 发起一轮对话框内搜索：结果直接写格（worker 去重兜底，连点搜索只跑一个在途）。
@@ -298,19 +369,22 @@ private func submitTankAddSearch(model: AppModel, cell: DialogCell<ArrayList<Sea
     match (model.api) {
         case Some(a) =>
             let lang = model.language.value
-            let _ = model.worker.submit("dlg.tankadd:${tankId}", {
-                =>
-                    try {
-                        let q = SearchQuery()
-                        q.filter = filter
-                        q.pageSize = 100
-                        q.lang = lang
-                        cell.store(a.search(q).items)
-                    } catch (e: Exception) {
-                        cell.storeError(e.message)
-                    }
-                    return true
-            })
+            let _ = model.worker.submit(
+                "dlg.tankadd:${tankId}",
+                {
+                    =>
+                        try {
+                            let q = SearchQuery()
+                            q.filter = filter
+                            q.pageSize = 100
+                            q.lang = lang
+                            cell.store(a.search(q).items)
+                        } catch (e: Exception) {
+                            cell.storeError(e.message)
+                        }
+                        return true
+                }
+            )
         case None => cell.storeError(model.t("dialog.notLoggedIn"))
     }
 }

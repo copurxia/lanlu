@@ -157,6 +157,16 @@ public class LanluApi {
         resp.text()
     }
 
+    // Tankoubon 等旧 mutation 端点返回裸 {success,error,...}，不能走 Envelope 解析。
+    private func checkedMutation(resp: Response, valueField!: String = ""): ApiMutationResult {
+        let status = resp.status
+        let result = parseApiMutationResult(checkedBody(resp), valueField: valueField)
+        if (!result.success) {
+            throw ApiException(status, result.error)
+        }
+        result
+    }
+
     // 离线读穿透（GET 白名单端点专用）：在线成功返回原始 body 并写响应快照；
     // 网络类异常（连接失败/超时等，非 ApiException）时回退缓存，命中返回缓存 body 并触发
     // 一次性通知；未命中/缓存未开启原样重抛。ApiException（401/非 2xx）不触发回退。
@@ -267,11 +277,12 @@ public class LanluApi {
     // 随机能力由 /api/search?sortby=RANDOM() 提供——archive_dao.cj 对 sortby=="RANDOM()"
     // 特判为 ORDER BY RANDOM() DESC（括号字面量经 query 解码后还原）。响应形态与
     // /api/search 完全一致，复用 SearchQuery 构造与 parseSearchPage 解析。
-    public func randomSearch(count: Int64, lang!: String = ""): SearchPage {
+    public func randomSearch(count: Int64, lang!: String = "", groupbyTanks!: Bool = false): SearchPage {
         let q = SearchQuery()
         q.sortby = "RANDOM()"
         q.pageSize = count
         q.lang = lang
+        q.groupbyTanks = groupbyTanks
         parseSearchPage(checkedBodyCached("/api/search${buildSearchQuery(q)}"))
     }
 
@@ -460,19 +471,25 @@ public class LanluApi {
         let _ = checked(client.delete("/api/tankoubons/${percentEncode(id)}").send())
     }
 
-    // 新建合集：PUT /api/tankoubons?name=X（name 在 query），响应 data 为 {success, tankoubon_id}。
+    // 新建合集：PUT /api/tankoubons?name=X（name 在 query），响应为裸 {success, tankoubon_id}。
     public func createTankoubon(name: String): String {
-        let env = checked(client.put("/api/tankoubons?name=${percentEncode(name)}").body("").send())
-        uploadResultText(env.dataRaw, "tankoubon_id")
+        let result = checkedMutation(client.put("/api/tankoubons?name=${percentEncode(name)}").body("").send(),
+            valueField: "tankoubon_id")
+        if (result.value.trimAscii().size == 0) {
+            throw ApiException(200, "服务器未返回新合集 ID")
+        }
+        result.value
     }
 
     // 合集成员增删：PUT/DELETE /api/tankoubons/{tankId}/{arcid}。
     public func addTankMember(tankId: String, arcid: String): Unit {
-        let _ = checked(client.put("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").body("").send())
+        let _ = checkedMutation(
+            client.put("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").body("").send())
     }
 
     public func removeTankMember(tankId: String, arcid: String): Unit {
-        let _ = checked(client.delete("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").send())
+        let _ = checkedMutation(
+            client.delete("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").send())
     }
 
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。

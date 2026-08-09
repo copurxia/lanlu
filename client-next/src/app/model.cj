@@ -1907,10 +1907,12 @@ public class AppModel {
         r.failed = false
         let lang = language.value
         if (r.key == "random") {
-            let _ = worker.submitTagged("row:random", lang, {=> a.randomSearch(BROWSE_ROW_SIZE, lang: lang)})
+            let groupbyTanks = tankGroupOn()
+            let _ = worker.submitTagged("row:random", lang,
+                {=> a.randomSearch(BROWSE_ROW_SIZE, lang: lang, groupbyTanks: groupbyTanks)})
         } else {
-            // 继续阅读 = 最近阅读倒序（固定）；分类行跟随工具条排序/方向。两者都随
-            // 「合集聚合」开关带 groupby_tanks（随机行走 randomSearch 独立接口，不参与聚合）。
+            // 继续阅读 = 最近阅读倒序（固定）；分类行跟随工具条排序/方向。
+            // 浏览模式的所有行（包括上面的随机行）都跟随「合集聚合」开关。
             let q = SearchQuery()
             q.pageSize = BROWSE_ROW_SIZE
             q.groupbyTanks = tankGroupOn()
@@ -4656,7 +4658,14 @@ public class AppModel {
             match (r.payload) {
                 case Some(p) =>
                     let (ok, total) = (p as (Int64, Int64)).getOrThrow()
-                    toaster.show("已加入合集 ${ok}/${total}", kind: ToastKind.Success)
+                    let kind = if (ok == total) {
+                        ToastKind.Success
+                    } else if (ok == 0) {
+                        ToastKind.Error
+                    } else {
+                        ToastKind.Warning
+                    }
+                    toaster.show("已加入合集 ${ok}/${total}", kind: kind)
                 case None => ()
             }
             let tankid = name.removePrefix("tankadd:")
@@ -4689,7 +4698,12 @@ public class AppModel {
             match (r.payload) {
                 case Some(p) =>
                     let (ok, total) = (p as (Int64, Int64)).getOrThrow()
-                    toaster.show("合集已创建（加入 ${ok}/${total}）", kind: ToastKind.Success)
+                    let kind = if (ok == total) {
+                        ToastKind.Success
+                    } else {
+                        ToastKind.Warning
+                    }
+                    toaster.show("合集已创建（加入 ${ok}/${total}）", kind: kind)
                 case None => ()
             }
             refreshLibrary()

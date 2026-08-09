@@ -21,6 +21,13 @@ public class ArchiveUploadResult {
     public var taskId: Int64 = 0
 }
 
+/** Parsed result for mutation endpoints that return a raw `{success, error, ...}` object. */
+public class ApiMutationResult {
+    public var success: Bool = false
+    public var error: String = ""
+    public var value: String = ""
+}
+
 public func isSupportedArchiveUpload(path: String): Bool {
     let name = path.toAsciiLower()
     let extensions = [
@@ -136,4 +143,47 @@ public func uploadResultText(raw: String, field: String): String {
         reader.endObject()
     } catch (_: Exception) {}
     ""
+}
+
+/**
+ * Parses Lanlu mutation responses in either their real raw-object form or an optional
+ * `{data: ...}` envelope. `valueField` extracts an operation-specific identifier such
+ * as `tankoubon_id` without making the generic result depend on that endpoint.
+ */
+public func parseApiMutationResult(raw: String, valueField!: String = ""): ApiMutationResult {
+    let result = ApiMutationResult()
+    let body = unwrapDataRaw(raw)
+    if (body.trimAscii().size == 0) {
+        result.error = "服务器返回了空响应"
+        return result
+    }
+    var buffer = ByteBuffer()
+    unsafe { buffer.write(body.rawData()) }
+    let reader = JsonReader(buffer)
+    try {
+        reader.startObject()
+        while (reader.peek() != EndObject) {
+            let name = reader.readName()
+            match (name) {
+                case "success" =>
+                    let value = reader.readValueBytes()
+                    result.success = decodeRaw<Int64>(value, 0) == 1 || decodeRaw<Bool>(value, false)
+                case "error" => result.error = decodeRaw<String>(reader.readValueBytes(), "")
+                case _ =>
+                    if (valueField.size > 0 && name == valueField) {
+                        result.value = decodeRaw<String>(reader.readValueBytes(), "")
+                    } else {
+                        reader.skip()
+                    }
+            }
+        }
+        reader.endObject()
+    } catch (e: Exception) {
+        result.success = false
+        result.error = "无法解析服务器响应：${e.message}"
+    }
+    if (!result.success && result.error.trimAscii().size == 0) {
+        result.error = "服务器拒绝了本次操作"
+    }
+    result
 }

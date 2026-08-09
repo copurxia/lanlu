@@ -52,6 +52,17 @@ func randomSortbyIsPercentEncoded(): Unit {
     @Expect(buildSearchQuery(q), "?page=1&pageSize=12&sortby=RANDOM%28%29&order=asc")
 }
 
+// 随机推荐与其他浏览行一样跟随「合集聚合」开关。
+@Test
+func randomSortCanGroupByTanks(): Unit {
+    let q = SearchQuery()
+    q.sortby = "RANDOM()"
+    q.pageSize = 12
+    q.groupbyTanks = true
+    @Expect(buildSearchQuery(q),
+        "?page=1&pageSize=12&sortby=RANDOM%28%29&order=asc&groupby_tanks=true")
+}
+
 // T11 合集成员列表：search?tankoubon_id=X&sortby=tank_order（对齐 frontend fetchArchives）。
 @Test
 func tankoubonMemberQueryIsBuilt(): Unit {

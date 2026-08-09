@@ -235,8 +235,13 @@ private func favoritesContent(model: AppModel, items: ArrayList<SearchItem>): Un
     let cardW = shelfCardWidth(model.shelfContentWidth.value)
     ScrollView(key: "shelf:favorites") {
         FlowRow {
-            ForEach(items, key: {item => searchItemKey(item)}) {
-                item => searchItemCard(model, item, cardW)
+            var index: Int64 = 0
+            for (item in items) {
+                let entranceIndex = index
+                Keyed(searchItemKey(item)) {
+                    searchItemCard(model, item, cardW, index: entranceIndex)
+                }
+                index += 1
             }
         }.spacing(SHELF_GRID_GAP, 18.0)
     }.padding(SHELF_PADDING, 4.0, SHELF_PADDING, 30.0)
@@ -296,9 +301,15 @@ private func historyGroup(model: AppModel, title: String, items: ArrayList<Searc
             Divider()
         }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
         FlowRow {
-            ForEach(items, key: {item => searchItemKey(item)}) {
-                item => archiveCardWithMeta(model, item, cardW,
-                    "${relativeReadTime(model, now, item.lastreadtime)} · ${model.t("shelf.pages", params: [("count", "${item.pagecount}")])}")
+            var index: Int64 = 0
+            for (item in items) {
+                let entranceIndex = index
+                Keyed(searchItemKey(item)) {
+                    archiveCardWithMeta(model, item, cardW,
+                        "${relativeReadTime(model, now, item.lastreadtime)} · ${model.t("shelf.pages", params: [("count", "${item.pagecount}")])}",
+                        index: entranceIndex)
+                }
+                index += 1
             }
         }.spacing(SHELF_GRID_GAP, 18.0)
     }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
