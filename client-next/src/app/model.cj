@@ -2398,11 +2398,8 @@ public class AppModel {
     }
 
     // backdrop 模糊背景：元数据到货后，若有封面则提交 worker 任务，将封面缩到 ~256px 宽
-    // 并经 vips 渐变高斯模糊（iOS progressive blur 风：顶部 σ2 较清晰 → 底部 σ10
-    // 重糊，解码期预合成单张图；σ 按 256px 中间图计，上屏拉伸 5 倍+ 后底部等效
-    // 近原均匀 σ8 的量级，再叠 scrim 不至于奶雾）后解码为 RGBA 像素，供 detail_view
-    // 以 PixelImageView 放大为背景。失败静默（不 toast，不阻塞页面），backdrop 区域
-    // 回退为纯色渐变。
+    // 并经 vips 高斯模糊后解码为 RGBA 像素，供 detail_view 以 PixelImageView 放大为背景。
+    // 失败静默（不 toast，不阻塞页面），backdrop 区域回退为纯色渐变。
     private func requestBackdrop(arcid: String, assetId: Int64): Unit {
         let a = api ?? return
         let imgKey = "backdrop:${arcid}"
@@ -2416,7 +2413,7 @@ public class AppModel {
                     let writer = ImageWriter(this, a, "asset:${assetId}")
                     let rawKey = "asset:${assetId}"
                     let path = c.ensureCached(rawKey, writer)
-                    let d = decodeBackdrop(path, 256, blurSigma: 2.0, progressiveMaxSigma: 10.0)
+                    let d = decodeBackdrop(path, 256)
                     return (imgKey, d)
             }
         )

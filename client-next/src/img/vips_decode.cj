@@ -224,13 +224,8 @@ public func decodeCachedOrEvict(cache: ImageCache, key: String, path: String,
 // 旧实现只缩到 ~48px 宽靠 SDL Linear 放大得到"模糊"，高对比内容（漫画线稿）会糊成脏块；
 // 改为中间尺寸（~256px）+ sigma 高斯模糊，质感对齐原型 filter: blur(36px)。
 // blurSigma 为高斯核 sigma（中间图像素单位），0 表示不模糊（回退旧行为的逃生口）。
-// progressiveMaxSigma > blurSigma 时启用渐变模糊（iOS progressive blur 的 CPU 预合成
-// 近似）：跳过均匀模糊，在归一化 RGBA 上生成多档模糊后逐行插值——顶部 σ=blurSigma
-// 最清晰、底部 σ=progressiveMaxSigma 最糊，见 progressiveBlendBackdrop；0（默认）关闭。
-public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0,
-    progressiveMaxSigma!: Float64 = 0.0): NativeDecodedImage {
+public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0): NativeDecodedImage {
     ensureVips()
-    let progressive = progressiveMaxSigma > 0.0 && progressiveMaxSigma > blurSigma
     var inImg: VipsImagePtr = CPointer<VipsImage>()
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()
     var blurImg: VipsImagePtr = CPointer<VipsImage>()
@@ -255,10 +250,9 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
             throw Exception("vips resize 失败: ${VipsApi.takeErrorString()}")
         }
 
-        // 3. 真高斯模糊（sigma > 0 时）：在中间尺寸上模糊，放大后保持柔和。
-        // 渐变模糊时跳过——多档模糊延后到归一化 RGBA 之后（见下方 progressive 分支）。
+        // 3. 真高斯模糊（sigma > 0 时）：在中间尺寸上模糊，放大后保持柔和
         var src = resizedImg
-        if (blurSigma > 0.0 && !progressive) {
+        if (blurSigma > 0.0) {
             let blurRc = VipsApi.gaussblur(resizedImg, CPointer<VipsImagePtr>(inout blurImg), blurSigma)
             if (blurRc != 0 || blurImg.isNull()) {
                 throw Exception("vips gaussblur 失败: ${VipsApi.takeErrorString()}")
@@ -297,12 +291,6 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         let bh = VipsApi.imageHeight(normImg)
         if (bw <= 0 || bh <= 0) { throw Exception("vips 尺寸非法: ${bw}x${bh}") }
 
-        // 渐变模糊分支：normImg（未糊的归一化 RGBA）借给 helper 做多档模糊 + 逐行混合，
-        // 释放仍归本函数 finally；helper 返回的缓冲所有权已在 NativeDecodedImage 内。
-        if (progressive) {
-            return progressiveBlendBackdrop(normImg, bw, bh, blurSigma, progressiveMaxSigma)
-        }
-
         var size: UIntNative = 0
         mem = VipsApi.writeToMemory(normImg, CPointer<UIntNative>(inout size))
         if (mem.isNull() || size == 0) { throw Exception("vips 写内存失败: ${VipsApi.takeErrorString()}") }
@@ -323,79 +311,6 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         VipsApi.unref(u8Img)
         VipsApi.unref(normImg)
         VipsApi.free(mem)
-    }
-}
-
-// 渐变模糊合成（decodeBackdrop progressive 分支专用）：对归一化 RGBA 图生成 3 档
-// 高斯模糊（σ = min / √(min·max) 几何中值 / max，感知上近似等距），再按行位置
-// ease-in 在相邻两档间逐像素插值：顶部接近 min、底部接近 max，得到模糊半径
-// 纵向渐变的单张图（iOS variable blur 的 CPU 预合成近似）。backdrop 仅 ~256px 宽，
-// 逐像素混合在工作线程毫秒级。img 仅借用（调用方负责 unref）；混合结果写回
-// 第 0 档缓冲并移交 NativeDecodedImage，其余档位缓冲 finally 释放。
-private func progressiveBlendBackdrop(img: VipsImagePtr, w: Int32, h: Int32,
-    minSigma: Float64, maxSigma: Float64): NativeDecodedImage {
-    let midSigma = sqrt(max(minSigma, 0.5) * maxSigma)
-    let sigmas = [minSigma, midSigma, maxSigma]
-    let bufs = Array<CPointer<UInt8>>(3, repeat: CPointer<UInt8>())
-    let expected = Int64(w) * Int64(h) * 4
-    try {
-        // 1. 逐档模糊并落地为 RGBA 内存（σ=0 档直接写原图，逃生口兼容）。
-        for (i in 0..3) {
-            var blurred: VipsImagePtr = CPointer<VipsImage>()
-            var srcImg = img
-            if (sigmas[i] > 0.0) {
-                let rc = VipsApi.gaussblur(img, CPointer<VipsImagePtr>(inout blurred), sigmas[i])
-                if (rc != 0 || blurred.isNull()) {
-                    throw Exception("vips gaussblur(σ=${sigmas[i]}) 失败: ${VipsApi.takeErrorString()}")
-                }
-                srcImg = blurred
-            }
-            var size: UIntNative = 0
-            let mem = VipsApi.writeToMemory(srcImg, CPointer<UIntNative>(inout size))
-            VipsApi.unref(blurred)
-            if (mem.isNull() || Int64(size) != expected) {
-                VipsApi.free(mem)
-                throw Exception("vips 写内存失败(σ=${sigmas[i]}): ${VipsApi.takeErrorString()}")
-            }
-            bufs[i] = CPointer<UInt8>(mem)
-        }
-
-        // 2. 逐行混合写回第 0 档：t 经 ease-in（t²，上大半贴近 min 保持清晰、底部才快速
-        // 转糊；backdrop 会被拉伸 5 倍+ 上屏，对称 smoothstep 会让中部过早变雾）后映射到
-        // [0,2] 档位轴，在相邻两档间定点插值（fi ∈ 0..256，>>8 还原）。dst 与操作数
-        // 同行同序读后写，无别名风险。
-        let wi = Int64(w)
-        let hi = Int64(h)
-        let dst = bufs[0]
-        for (y in 0..hi) {
-            let t = if (hi <= 1) { 1.0 } else { Float64(y) / Float64(hi - 1) }
-            let eased = t * t
-            let pos = eased * 2.0
-            var seg = Int64(pos)
-            if (seg > 1) { seg = 1 }
-            let fi = Int64((pos - Float64(seg)) * 256.0)
-            let a = bufs[seg]
-            let b = bufs[seg + 1]
-            let rowStart = y * wi * 4
-            unsafe {
-                for (i in rowStart..rowStart + wi * 4) {
-                    let av = Int64((a + i).read())
-                    let bv = Int64((b + i).read())
-                    (dst + i).write(UInt8(av + (((bv - av) * fi) >> 8)))
-                }
-            }
-        }
-
-        // 3. 第 0 档缓冲所有权移交：置空后 finally 不再释放。
-        let out = NativeDecodedImage(w, h, dst, expected)
-        bufs[0] = CPointer<UInt8>()
-        return out
-    } finally {
-        for (b in bufs) {
-            if (!b.isNull()) {
-                VipsApi.free(CPointer<Unit>(b))
-            }
-        }
     }
 }
 

@@ -1976,14 +1976,12 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
                             fit: ImageFit.Cover).fillWidth()
                     }
                     // 双层 scrim（原型 .backdrop .scrim；明暗两组）：横向左侧压暗 + 底部融入页面底。
-                    // 亮色底部 scrim 起点 alpha 115→60、全不透明点 0.92→0.98：配合渐变模糊后
-                    // 白纱叠加过重（奶雾），把融底渐变压低并下移，让 backdrop 中上部多露封面色彩。
                     if (light) {
                         GradientScrim(direction: GradientDirection.Right,
                             stops: [(0.0, Color.rgba(244, 244, 246, 140)), (0.4, Color.rgba(244, 244, 246, 0)),
                                 (1.0, Color.rgba(244, 244, 246, 0))])
                         GradientScrim(direction: GradientDirection.Bottom,
-                            stops: [(0.0, Color.rgba(244, 244, 246, 60)), (0.98, bg), (1.0, bg)])
+                            stops: [(0.0, Color.rgba(244, 244, 246, 115)), (0.92, bg), (1.0, bg)])
                     } else {
                         GradientScrim(direction: GradientDirection.Right,
                             stops: [(0.0, Color.rgba(11, 11, 13, 128)), (0.4, Color.rgba(11, 11, 13, 0)),
@@ -2029,7 +2027,7 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
 }
 
 // hero grid（原型 .hero）：封面（200vp 2:3，合集带双层堆栈垫底，顶对齐横跨模糊带）｜
-// 中列（顶对齐 + 96vp 顶距：badges/标题/meta/内联进度/3 行简介/标签 chips）｜
+// 中列（与封面顶对齐：badges/标题/meta/内联进度/3 行简介/标签 chips）｜
 // 玻璃操作卡（底对齐，主按钮 + 图标行）。
 public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int64, actionIcons: () -> Unit, tank!: Bool): Unit {
     let light = model.isLight()
@@ -2081,7 +2079,7 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 }
                 if (coverAssetId > 0) {
                     remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
-                        Length(HERO_COVER_W, LengthUnit.Vp), Length(HERO_COVER_H, LengthUnit.Vp))
+                        Length(HERO_COVER_W, LengthUnit.Vp), Length(HERO_COVER_H, LengthUnit.Vp), radius: 14.0)
                 } else {
                     noCoverBox(model, HERO_COVER_W, HERO_COVER_H)
                 }
@@ -2169,7 +2167,7 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 if (data.tags.size > 0) {
                     VStack {tagFlow(model, data.tags)}.padding(0.0, 12.0, 0.0, 0.0)
                 }
-            }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).width(midW).padding(0.0, 96.0, 0.0, 4.0)
+            }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).width(midW).padding(0.0, 0.0, 0.0, 4.0)
         }.spacing(26.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(32.vp, 0.vp, 32.vp, 0.vp)
 
         // 玻璃操作卡（176vp，半透明 capsule 底 + 1px 描边）：ZStack 默认拉伸子元素，
@@ -2232,7 +2230,8 @@ public func detailCard(model: AppModel, title: String, count!: String = "", tool
     }.background(bg, 14.vp).fillWidth()
 }
 
-// 字段列表（原型 .info-list .info-row）：k 76vp muted 定宽 + v 单行截断，行间细分隔线。
+// 字段列表（原型 .info-list .info-row）：k 76vp muted 定宽，v 占满剩余宽度并按需换行；
+// 行与分割线都铺满卡片内容宽度，避免按各行自然内容宽度收缩。
 public func infoList(model: AppModel, rows: Array<(String, String)>): Unit {
     let sep = if (model.isLight()) {
         Color.rgba(0, 0, 0, 15)
@@ -2245,13 +2244,13 @@ public func infoList(model: AppModel, rows: Array<(String, String)>): Unit {
                 let (k, v) = row
                 HStack {
                     Label(k).fontSize(12.fp).muted().width(76.vp)
-                    Label(v).fontSize(12.fp).maxLines(1)
-                }.spacing(12.vp).hug().padding(0.vp, 7.vp)
+                    Label(v).fontSize(12.fp).wrap().tight().flex()
+                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth().padding(0.vp, 7.vp)
                 if (i + 1 < rows.size) {
-                    Divider(color: sep)
+                    Divider(color: sep).fillWidth()
                 }
         }
-    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
+    }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth()
 }
 
 // 标签 chip（原型 .tag）：1px panelEdge 描边 + 低透明底 + muted 字 pill（圆角全圆）；
