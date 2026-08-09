@@ -369,6 +369,18 @@ public class PlaybackModel {
         ans
     }
 
+    // 直接选择字幕轨（dock 字幕面板用）：id=-1 关闭字幕。
+    public func setSubtitleTrack(id: Int32): Unit {
+        if (!isVideo || !started) { return }
+        match (vlcRunner) {
+            case Some(r) =>
+                let _ = r.setSubtitleTrack(id)
+                subtitleTracks = r.subtitleTracks()
+                subtitleTrackId = id
+            case None => ()
+        }
+    }
+
     public func cycleSubtitleTrack(): Unit {
         if (!isVideo || !started) { return }
         match (vlcRunner) {

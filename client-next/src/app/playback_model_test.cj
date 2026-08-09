@@ -281,6 +281,40 @@ func playbackLoadResetsDuration(): Unit {
 }
 
 
+// ---- 字幕直接设轨 ----
+
+@Test
+func setSubtitleTrackIgnoredWhenNotStarted(): Unit {
+    let f = PbFixture()
+    f.model.loadRemote("arc1", 4, "http://server/movie.mkv", "token")
+    f.model.subtitleTrackId = 0
+    // 已加载但未开始播放：vlcRunner 尚未建立，直接设轨必须是空操作
+    f.model.setSubtitleTrack(2)
+    @Expect(f.model.subtitleTrackId, 0)
+}
+
+@Test
+func setSubtitleTrackIgnoredWhenNotVideo(): Unit {
+    let f = PbFixture()
+    f.model.load("arc1", 4, "p4") // 音频
+    f.model.onDownloaded("arc1:4", "/cache/p4")
+    f.model.play()
+    f.model.subtitleTrackId = 1
+    f.model.setSubtitleTrack(3)
+    @Expect(f.model.subtitleTrackId, 1)
+}
+
+@Test
+func setSubtitleTrackIgnoredWithoutVlcRunner(): Unit {
+    let f = PbFixture()
+    f.model.load("arc1", 4, "p4", video: true)
+    f.model.onDownloaded("arc1:4", "/cache/p4")
+    f.model.play() // started=true，但注入的是 FakeRunner（无 vlcRunner）
+    f.model.subtitleTrackId = 1
+    f.model.setSubtitleTrack(3)
+    @Expect(f.model.subtitleTrackId, 1)
+}
+
 // ---- 歌词当前行：二分 + 单调前进缓存 ----
 
 @Test

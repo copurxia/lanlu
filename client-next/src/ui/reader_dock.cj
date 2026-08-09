@@ -23,6 +23,23 @@ private let DOCK_TAB: Float32 = 36.0
 private let DOCK_PAD: Float32 = 6.0
 private let DOCK_GAP: Float32 = 4.0
 
+// 字幕/音量弹出面板常量
+private let SUBTITLE_POPUP_OWNER = "reader:dock:subtitlePopup"
+private let VOLUME_POPUP_OWNER = "reader:dock:volumePopup"
+private let POPUP_ANIMATION_MS: Int64 = 180
+private let POPUP_ENTER_SCALE: Float32 = 0.95
+private let POPUP_ENTER_OFFSET_Y: Float32 = 4.0
+private let SUBTITLE_POPUP_W: Float32 = 200.0
+private let SUBTITLE_ROW_H: Float32 = 28.0
+private let SUBTITLE_POPUP_PAD: Float32 = 6.0
+private let SUBTITLE_TITLE_H: Float32 = 24.0
+private let VOLUME_POPUP_W: Float32 = 160.0
+private let VOLUME_POPUP_PAD: Float32 = 8.0
+private let VOLUME_SLIDER_W: Float32 = 120.0
+private let VOLUME_SLIDER_H: Float32 = 20.0
+private let VOLUME_BTN_H: Float32 = 30.0
+private let VOLUME_TEXT_H: Float32 = 16.0
+
 // dock 动画状态：rememberState 跨帧保留（每帧重建的 Widget 只是声明）。
 class ReaderDockState {
     // chrome 显隐滑块：初始取当前可见性（静态首帧即停稳，快照稳定，同 Drawer 惯例）。
@@ -38,6 +55,14 @@ class ReaderDockState {
     // 媒体 lane 出现动画（scale .6→1 + 淡入）的弹簧：按 lane key 驻留，
     // lane 消失后条目留存无害（下次同 lane 再现从停稳值起播）。
     let laneSprings = HashMap<String, Spring>()
+    // 字幕选择面板
+    var subtitleOpen = false
+    let subtitleAnim = Tween(POPUP_ANIMATION_MS, {t: Float32 => Easing.easeOutCubic(t)})
+    // 音量调节面板
+    var volumeOpen = false
+    let volumeAnim = Tween(POPUP_ANIMATION_MS, {t: Float32 => Easing.easeOutCubic(t)})
+    // 音量滑条拖拽中
+    var volumeDragging = false
 
     init(chromeVisible: Bool) {
         slide = Spring(if (chromeVisible) {
@@ -62,6 +87,11 @@ class ReaderDockState {
 // 颜色 alpha 按比例缩放（dock 滑出/淡入时整组元素同步衰减）。
 private func fadeColor(c: Color, k: Float32): Color {
     c.withAlpha(Int64(Float32(Int64(c.a)) * max(0.0, min(1.0, k))))
+}
+
+// 弹出面板颜色 alpha 随动画进度缩放（与 fadeColor 同语义，面板专用命名）。
+private func popupAlpha(c: Color, progress: Float32): Color {
+    fadeColor(c, progress)
 }
 
 class ReaderDock <: Widget {
@@ -236,6 +266,7 @@ class ReaderDock <: Widget {
         })
         slideT = t
         if (t <= 0.01) {
+            closeAllPopups(ctx)
             return
         } // 隐藏停稳：不绘制（事件侧 handle 同步放空）
         let dy = (1.0 - t) * (frame.h + 24.0) // 下滑出屏（原型 chrome-dock-in 反向）
@@ -256,6 +287,27 @@ class ReaderDock <: Widget {
                 drawLaneBody(ctx, lane, dy, Int64(Float32(a255) * max(0.0, min(1.0, st.body.value))))
                 ctx.renderer.popClip()
             }
+        }
+        // 字幕/音量弹出面板（Overlay 浮层，事件优先于树，绘制在最顶层）
+        if (st.subtitleOpen || st.subtitleAnim.value > 0.0) {
+            let popup = subtitlePopupRect(ctx)
+            ctx.setOverlay(Overlay(owner: SUBTITLE_POPUP_OWNER, handleEvent: {
+                c, e => if (st.subtitleOpen) {
+                    handleSubtitleOverlay(c, e, popup)
+                } else {
+                    handleClosingPopup(c, e)
+                }
+            }, render: {c => drawSubtitlePopup(c, popup)}))
+        }
+        if (st.volumeOpen || st.volumeAnim.value > 0.0) {
+            let popup = volumePopupRect(ctx)
+            ctx.setOverlay(Overlay(owner: VOLUME_POPUP_OWNER, handleEvent: {
+                c, e => if (st.volumeOpen) {
+                    handleVolumeOverlay(c, e, popup)
+                } else {
+                    handleClosingPopup(c, e)
+                }
+            }, render: {c => drawVolumePopup(c, popup)}))
         }
     }
 
@@ -452,18 +504,33 @@ class ReaderDock <: Widget {
             .renderer
             .text(timeText, audioSeekRect.right() + 6.0 + (88.0 - tw) / 2.0, audioSeekRect.centerY() + dy - th / 2.0,
                 dimColor(ctx, a), pointSize: 12.0)
+        // 音量按钮：面板打开时保持高亮底色
+        if (st.volumeOpen) {
+            ctx.renderer.fillCircle(muteRect.centerX(), muteRect.centerY() + dy, muteRect.w / 2.0,
+                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+        }
         let _ = drawBodyButton(ctx, muteRect, dy, "reader:dock:mute", a)
-        drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY() + dy, pb.muted, dimColor(ctx, a))
+        drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY() + dy, pb.muted,
+            if (st.volumeOpen) {
+                mainColor(ctx, a)
+            } else {
+                dimColor(ctx, a)
+            })
     }
 
     private func drawVideoBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
         drawAudioBody(ctx, dy, a)
         let pb = model.playback
+        // 面板打开时按钮保持高亮底色
+        if (st.subtitleOpen) {
+            ctx.renderer.fillCircle(subtitleRect.centerX(), subtitleRect.centerY() + dy, subtitleRect.w / 2.0,
+                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+        }
         let hover = drawBodyButton(ctx, subtitleRect, dy, "reader:dock:subtitle", a)
         let enabled = pb.subtitleTrackId >= 0
         let color = if (enabled) {
             ctx.theme.accent.withAlpha(a)
-        } else if (hover) {
+        } else if (hover || st.subtitleOpen) {
             mainColor(ctx, a)
         } else {
             dimColor(ctx, a)
@@ -491,6 +558,348 @@ class ReaderDock <: Widget {
         renderer.strokeLine(cx - 4.0 * d, cy, cx + 1.5 * d, cy + 4.2, pen)
         renderer.strokeLine(cx + 2.0 * d, cy, cx + 6.5 * d, cy - 4.2, pen)
         renderer.strokeLine(cx + 2.0 * d, cy, cx + 6.5 * d, cy + 4.2, pen)
+    }
+
+    // ── 字幕/音量弹出面板 ──
+
+    // 关闭中浮层仍消费事件（防止穿透到下层控件），点击触发按钮可反转回打开。
+    private func handleClosingPopup(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (subtitleRect.contains(x, y) && model.playback.isVideo) {
+                    toggleSubtitlePopup(ctx)
+                } else if (muteRect.contains(x, y)) {
+                    toggleVolumePopup(ctx)
+                }
+                true
+            case _ => true
+        }
+    }
+
+    // 打开/关闭字幕面板（互斥：打开时关闭音量面板）
+    private func toggleSubtitlePopup(ctx: UiContext): Unit {
+        if (st.subtitleOpen) {
+            closeSubtitlePopup(ctx)
+        } else {
+            closeVolumePopup(ctx)
+            st.subtitleOpen = true
+            ctx.requestFrame()
+        }
+    }
+
+    private func closeSubtitlePopup(ctx: UiContext): Unit {
+        st.subtitleOpen = false
+        let _ = st.subtitleAnim.animate(ctx, target: 0.0)
+        ctx.removeOverlay(SUBTITLE_POPUP_OWNER)
+    }
+
+    // 打开/关闭音量面板（互斥：打开时关闭字幕面板）
+    private func toggleVolumePopup(ctx: UiContext): Unit {
+        if (st.volumeOpen) {
+            closeVolumePopup(ctx)
+        } else {
+            closeSubtitlePopup(ctx)
+            st.volumeOpen = true
+            ctx.requestFrame()
+        }
+    }
+
+    private func closeVolumePopup(ctx: UiContext): Unit {
+        st.volumeOpen = false
+        st.volumeDragging = false
+        let _ = st.volumeAnim.animate(ctx, target: 0.0)
+        ctx.removeOverlay(VOLUME_POPUP_OWNER)
+    }
+
+    // dock 隐藏时关闭所有面板
+    private func closeAllPopups(ctx: UiContext): Unit {
+        if (st.subtitleOpen) {
+            closeSubtitlePopup(ctx)
+        }
+        if (st.volumeOpen) {
+            closeVolumePopup(ctx)
+        }
+    }
+
+    // ── 字幕选择面板 ──
+
+    // 字幕面板内容行数（含 Off 选项 + 标题行）
+    private func subtitleItemCount(): Int64 {
+        model.playback.subtitleTracks.size + 1 // +1 for "Off"
+    }
+
+    private func subtitlePopupRect(ctx: UiContext): Rect {
+        let itemCount = subtitleItemCount()
+        let contentH = SUBTITLE_TITLE_H + Float32(itemCount) * SUBTITLE_ROW_H
+        let h = SUBTITLE_POPUP_PAD * 2.0 + contentH
+        // 从 subtitleRect 向上弹出，水平右对齐 subtitleRect 右缘
+        let x = max(4.0, min(subtitleRect.right() - SUBTITLE_POPUP_W, ctx.viewportWidth - SUBTITLE_POPUP_W - 4.0))
+        let y = max(4.0, frame.y - h - 8.0)
+        Rect(x, y, SUBTITLE_POPUP_W, h)
+    }
+
+    // 面板内行矩形（index 0 = Off, 1..N = subtitleTracks）
+    private func subtitleRowRect(popup: Rect, index: Int64): Rect {
+        Rect(popup.x + 4.0, popup.y + SUBTITLE_POPUP_PAD + SUBTITLE_TITLE_H + Float32(index) * SUBTITLE_ROW_H,
+            popup.w - 8.0, SUBTITLE_ROW_H)
+    }
+
+    private func subtitleItemAt(popup: Rect, y: Float32): Int64 {
+        let listTop = popup.y + SUBTITLE_POPUP_PAD + SUBTITLE_TITLE_H
+        if (y < listTop) {
+            return -1
+        }
+        let idx = Int64((y - listTop) / SUBTITLE_ROW_H)
+        if (idx >= 0 && idx < subtitleItemCount()) {
+            return idx
+        }
+        -1
+    }
+
+    private func handleSubtitleOverlay(ctx: UiContext, event: UiEvent, popup: Rect): Bool {
+        match (event) {
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (popup.contains(x, y)) {
+                    let idx = subtitleItemAt(popup, y)
+                    if (idx >= 0) {
+                        let trackId: Int32 = if (idx == 0) {
+                            -1 // Off
+                        } else {
+                            model.playback.subtitleTracks[idx - 1].id
+                        }
+                        model.playback.setSubtitleTrack(trackId)
+                    }
+                }
+                closeSubtitlePopup(ctx)
+                true
+            case UiEvent.KeyDown(Key.Escape, _) =>
+                closeSubtitlePopup(ctx)
+                true
+            case _ => false
+        }
+    }
+
+    private func drawSubtitlePopup(ctx: UiContext, popup: Rect): Unit {
+        let target: Float32 = if (st.subtitleOpen) {
+            1.0
+        } else {
+            0.0
+        }
+        let progress = st.subtitleAnim.animate(ctx, target: target)
+        let shell = animatedPopupRect(popup, progress)
+        // 表面与阴影
+        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0,
+            popupAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRect(shell, 10.0, popupAlpha(ctx.theme.panelRaised, progress))
+        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5,
+            Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
+        ctx.renderer.pushClip(shell)
+        // 标题行
+        let titleY = shell.y + SUBTITLE_POPUP_PAD
+        let titleColor = popupAlpha(ctx.theme.mutedText, progress)
+        ctx.renderer.text("Subtitles", shell.x + 12.0, titleY + 4.0, titleColor, pointSize: 10.0)
+        // 分隔线
+        let sepY = titleY + SUBTITLE_TITLE_H
+        ctx.renderer.fill(Rect(shell.x + 8.0, sepY, shell.w - 16.0, 1.0), popupAlpha(ctx.theme.panelEdge, progress))
+        // 字幕轨列表
+        let pb = model.playback
+        let itemCount = subtitleItemCount()
+        if (itemCount <= 1 && pb.subtitleTracks.isEmpty()) {
+            // 无字幕轨
+            let noSubColor = popupAlpha(ctx.theme.mutedText, progress)
+            let row = subtitleRowRect(shell, 0)
+            ctx.renderer.textCenter("No subtitles", row, noSubColor, pointSize: 12.0)
+        } else {
+            for (i in 0..itemCount) {
+                let row = subtitleRowRect(shell, i)
+                let isSelected = if (i == 0) {
+                    pb.subtitleTrackId < 0
+                } else {
+                    pb.subtitleTracks[i - 1].id == pb.subtitleTrackId
+                }
+                // hover 高亮
+                if (row.contains(ctx.mouseX, ctx.mouseY) && !isSelected) {
+                    ctx.renderer.fillRoundedRect(row, 6.0, popupAlpha(ctx.theme.overlayHover, progress))
+                }
+                // 选中标记（对勾）
+                let textColor = if (isSelected) {
+                    popupAlpha(ctx.theme.accent, progress)
+                } else {
+                    popupAlpha(ctx.theme.text, progress)
+                }
+                if (isSelected) {
+                    drawPopupCheckmark(ctx, row, popupAlpha(ctx.theme.accent, progress))
+                }
+                // 轨道名称
+                let label = if (i == 0) {
+                    "Off"
+                } else {
+                    let track = pb.subtitleTracks[i - 1]
+                    if (track.name.size > 0) {
+                        track.name
+                    } else {
+                        "Track ${track.id}"
+                    }
+                }
+                let textX = row.x + 24.0 // 留对勾位置
+                let textY = row.centerY() - ctx.renderer.textHeight(pointSize: 12.0) / 2.0
+                let labelRect = Rect(textX, row.y, max(0.0, row.right() - textX - 8.0), row.h)
+                ctx.renderer.pushClip(labelRect)
+                ctx.renderer.text(label, textX, textY, textColor, pointSize: 12.0)
+                ctx.renderer.popClip()
+            }
+        }
+        ctx.renderer.popClip()
+        if (!st.subtitleOpen && progress <= 0.0) {
+            ctx.requestFrame()
+        }
+    }
+
+    // ── 音量调节面板 ──
+
+    private func volumePopupRect(ctx: UiContext): Rect {
+        let h = VOLUME_POPUP_PAD * 2.0 + VOLUME_BTN_H + VOLUME_SLIDER_H + VOLUME_TEXT_H + 8.0
+        // 从 muteRect 向上弹出，水平居中对齐 muteRect 中心
+        let cx = muteRect.centerX()
+        let x = max(4.0, min(cx - VOLUME_POPUP_W / 2.0, ctx.viewportWidth - VOLUME_POPUP_W - 4.0))
+        let y = max(4.0, frame.y - h - 8.0)
+        Rect(x, y, VOLUME_POPUP_W, h)
+    }
+
+    // 音量面板内各区域
+    private func volumeMuteBtnRect(popup: Rect): Rect {
+        Rect(popup.centerX() - 15.0, popup.y + VOLUME_POPUP_PAD, 30.0, VOLUME_BTN_H)
+    }
+
+    private func volumeSliderRect(popup: Rect): Rect {
+        Rect(popup.centerX() - VOLUME_SLIDER_W / 2.0,
+            popup.y + VOLUME_POPUP_PAD + VOLUME_BTN_H + 4.0,
+            VOLUME_SLIDER_W, VOLUME_SLIDER_H)
+    }
+
+    private func volumeTextRect(popup: Rect): Rect {
+        Rect(popup.x, popup.y + VOLUME_POPUP_PAD + VOLUME_BTN_H + 4.0 + VOLUME_SLIDER_H + 4.0,
+            popup.w, VOLUME_TEXT_H)
+    }
+
+    private func handleVolumeOverlay(ctx: UiContext, event: UiEvent, popup: Rect): Bool {
+        let sliderRect = volumeSliderRect(popup)
+        let muteBtnRect = volumeMuteBtnRect(popup)
+        match (event) {
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (muteBtnRect.contains(x, y)) {
+                    model.playback.toggleMute()
+                    return true
+                }
+                if (sliderRect.contains(x, y)) {
+                    st.volumeDragging = true
+                    volumeFromSliderX(x, sliderRect)
+                    return true
+                }
+                if (!popup.contains(x, y)) {
+                    closeVolumePopup(ctx)
+                }
+                true
+            case UiEvent.MouseMove(x, _) =>
+                if (st.volumeDragging) {
+                    volumeFromSliderX(x, sliderRect)
+                    return true
+                }
+                false
+            case UiEvent.MouseUp(MouseButton.Left, _, _) =>
+                if (st.volumeDragging) {
+                    st.volumeDragging = false
+                    return true
+                }
+                false
+            case UiEvent.KeyDown(Key.Escape, _) =>
+                closeVolumePopup(ctx)
+                true
+            case _ => false
+        }
+    }
+
+    private func volumeFromSliderX(x: Float32, sliderRect: Rect): Unit {
+        if (sliderRect.w <= 0.0) {
+            return
+        }
+        let amount = Float64(max(0.0, min(1.0, (x - sliderRect.x) / sliderRect.w)))
+        model.playback.setVolume(amount)
+    }
+
+    private func drawVolumePopup(ctx: UiContext, popup: Rect): Unit {
+        let target: Float32 = if (st.volumeOpen) {
+            1.0
+        } else {
+            0.0
+        }
+        let progress = st.volumeAnim.animate(ctx, target: target)
+        let shell = animatedPopupRect(popup, progress)
+        // 表面与阴影
+        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0,
+            popupAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRect(shell, 10.0, popupAlpha(ctx.theme.panelRaised, progress))
+        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5,
+            Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
+        ctx.renderer.pushClip(shell)
+        let pb = model.playback
+        // 静音按钮
+        let muteBtn = volumeMuteBtnRect(shell)
+        if (muteBtn.contains(ctx.mouseX, ctx.mouseY)) {
+            ctx.renderer.fillCircle(muteBtn.centerX(), muteBtn.centerY(), muteBtn.w / 2.0,
+                popupAlpha(ctx.theme.overlayHover, progress))
+        }
+        drawMuteGlyph(ctx.renderer, muteBtn.centerX(), muteBtn.centerY(), pb.muted,
+            popupAlpha(ctx.theme.text, progress))
+        // 音量滑条
+        let slider = volumeSliderRect(shell)
+        let cy = slider.centerY()
+        let amount = Float32(max(0.0, min(1.0, pb.volume)))
+        let trackColor = if (pb.muted) {
+            popupAlpha(ctx.theme.mutedText.withAlpha(60), progress)
+        } else {
+            popupAlpha(ctx.theme.onMedia.withAlpha(51), progress)
+        }
+        ctx.renderer.fillRoundedRect(Rect(slider.x, cy - 2.0, slider.w, 4.0), 2.0, trackColor)
+        if (amount > 0.0 && !pb.muted) {
+            ctx.renderer.fillRoundedRect(Rect(slider.x, cy - 2.0, slider.w * amount, 4.0), 2.0,
+                popupAlpha(ctx.theme.accent, progress))
+            ctx.renderer.fillCircle(slider.x + slider.w * amount, cy, 5.0, popupAlpha(ctx.theme.accent, progress))
+        } else if (pb.muted) {
+            // 静音时画灰色圆头在 0 位置
+            ctx.renderer.fillCircle(slider.x, cy, 5.0, popupAlpha(ctx.theme.mutedText, progress))
+        }
+        // 音量百分比文本
+        let textR = volumeTextRect(shell)
+        let volumeText = if (pb.muted) {
+            "Muted"
+        } else {
+            "${Int64(pb.volume * 100.0)}%"
+        }
+        ctx.renderer.textCenter(volumeText, textR, popupAlpha(ctx.theme.mutedText, progress), pointSize: 10.0)
+        ctx.renderer.popClip()
+        if (!st.volumeOpen && progress <= 0.0) {
+            ctx.requestFrame()
+        }
+    }
+
+    // ── 面板共用 ──
+
+    // 弹出面板动画矩形：scale + 上移
+    private func animatedPopupRect(popup: Rect, progress: Float32): Rect {
+        let scale = POPUP_ENTER_SCALE + (1.0 - POPUP_ENTER_SCALE) * progress
+        let w = popup.w * scale
+        let h = popup.h * scale
+        Rect(popup.x + (popup.w - w) / 2.0, popup.y + (popup.h - h) + POPUP_ENTER_OFFSET_Y * (1.0 - progress), w, h)
+    }
+
+    // 弹出面板对勾标记
+    private func drawPopupCheckmark(ctx: UiContext, row: Rect, color: Color): Unit {
+        let cx = row.x + 12.0
+        let cy = row.centerY()
+        let pen = Pen(width: 1.8, color: color)
+        ctx.renderer.strokeLine(cx - 4.5, cy, cx - 1.0, cy + 3.5, pen)
+        ctx.renderer.strokeLine(cx - 1.0, cy + 3.5, cx + 5.0, cy - 3.5, pen)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -588,11 +997,11 @@ class ReaderDock <: Widget {
                         return true
                     }
                     if (muteRect.contains(x, y)) {
-                        model.playback.toggleMute()
+                        toggleVolumePopup(ctx)
                         return true
                     }
                     if (subtitleRect.contains(x, y) && model.playback.isVideo) {
-                        model.playback.cycleSubtitleTrack()
+                        toggleSubtitlePopup(ctx)
                         return true
                     }
                 }
