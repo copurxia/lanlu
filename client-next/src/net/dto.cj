@@ -2,6 +2,7 @@ package lanlu_client_next.net
 
 import std.collection.{ArrayList, HashMap}
 import std.io.ByteBuffer
+import std.sort.sort
 import stdx.encoding.json.stream.*
 
 // ---- 标量快路径（#32）----
@@ -738,6 +739,16 @@ private func isLeapYear(y: Int64): Bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }
 
+// 页面元数据 attachments 中 slot=subtitle 的外挂字幕条目（多选字幕面板的数据源，
+// 对齐 client/frontend 的 getSubtitleAttachments：order_index 升序、同名按字典序）。
+public class SubtitleAttachment {
+    public var assetId: Int64 = 0
+    public var kind: String = ""
+    public var name: String = ""
+    public var language: String = ""
+    public var orderIndex: Int64 = 0
+}
+
 public class PageInfo {
     public var id: String = ""
     public var sourcePath: String = ""
@@ -749,6 +760,7 @@ public class PageInfo {
     public var hiddenInFiles: Bool = false
     public var lyricsAssetId: Int64 = 0
     public var thumbAssetId: Int64 = 0
+    public var subtitleAttachments = ArrayList<SubtitleAttachment>()
 }
 
 public func parsePages(body: String): ArrayList<PageInfo> {
@@ -895,6 +907,11 @@ private func applyPageMetadata(page: PageInfo, raw: String): Unit {
                     if (assetId > 0) {
                         page.lyricsAssetId = assetId
                     }
+                    // 源级元数据后应用：仅当含字幕条目时覆盖页级（同歌词的"存在即优先"语义）。
+                    let subtitles = metadataSubtitleAttachments(attachmentsRaw)
+                    if (!subtitles.isEmpty()) {
+                        page.subtitleAttachments = subtitles
+                    }
                 case _ => r.skip()
             }
         }
@@ -1002,6 +1019,56 @@ private func metadataLyricsAssetId(raw: String): Int64 {
     } catch (_: Exception) {
         0
     }
+}
+
+private func metadataSubtitleAttachments(raw: String): ArrayList<SubtitleAttachment> {
+    let list = ArrayList<SubtitleAttachment>()
+    if (raw.size == 0) {
+        return list
+    }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        while (r.peek() != EndObject) {
+            if (r.readName() == "attachments") {
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    r.startObject()
+                    let item = SubtitleAttachment()
+                    var slot = ""
+                    while (r.peek() != EndObject) {
+                        match (r.readName()) {
+                            case "slot" => slot = decodeRaw<String>(r.readValueBytes(), "").trimAscii().toAsciiLower()
+                            case "asset_id" => item.assetId = fastInt64(r.readValueBytes(), 0)
+                            case "kind" => item.kind = decodeRaw<String>(r.readValueBytes(), "").trimAscii()
+                            case "name" => item.name = decodeRaw<String>(r.readValueBytes(), "").trimAscii()
+                            case "language" => item.language = decodeRaw<String>(r.readValueBytes(), "").trimAscii()
+                            case "order_index" => item.orderIndex = fastInt64(r.readValueBytes(), 0)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    if (slot == "subtitle" && item.assetId > 0) {
+                        list.add(item)
+                    }
+                }
+                r.endArray()
+            } else {
+                r.skip()
+            }
+        }
+        r.endObject()
+    } catch (_: Exception) {
+        return ArrayList<SubtitleAttachment>()
+    }
+    sort(list, lessThan: {a, b =>
+        if (a.orderIndex != b.orderIndex) {
+            a.orderIndex < b.orderIndex
+        } else {
+            a.name < b.name
+        }
+    }, stable: true)
+    list
 }
 
 private func pageSourcePath(raw: String): String {

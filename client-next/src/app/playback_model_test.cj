@@ -1,6 +1,7 @@
 package lanlu_client_next.app
 
 import std.collection.ArrayList
+import lanlu_client_next.net.SubtitleAttachment
 
 // PlaybackModel 单测：注入假时钟/假 runner/假下载，覆盖 load→downloaded→play→pause→
 // seek→skip→位置推进→mute→stop 全链路，以及重复 load 忽略与 error 路径。
@@ -368,4 +369,92 @@ func parseTimedLyricsSortsUnsortedInput(): Unit {
     @Expect(lines[3].text, "c")
     @Expect(lines[0].timeSec, 10.0)
     @Expect(lines[3].timeSec, 30.0)
+}
+
+// ---- 外挂字幕（多选，同 frontend/client）----
+
+func subAtt(assetId: Int64, kind: String): SubtitleAttachment {
+    let a = SubtitleAttachment()
+    a.assetId = assetId
+    a.kind = kind
+    a
+}
+
+@Test
+func subtitleCueParsersCoverSrtVttAss(): Unit {
+    let srt = parseSrtCues("1\n00:00:01,000 --> 00:00:03,500\n你好\n世界\n\n2\n00:00:04,000 --> 00:00:05,000\n再見\n")
+    @Expect(srt.size, 2)
+    @Expect(srt[0].start, 1.0)
+    @Expect(srt[0].end, 3.5)
+    @Expect(srt[0].text, "你好\n世界") // 多行正文保留，序号行过滤
+    @Expect(srt[1].text, "再見")
+
+    // VTT：头部剔除 + end 尾部位置参数（align:start）截去
+    let vtt = parseVttCues("WEBVTT\n\n00:01.000 --> 00:02.500 align:start\nhello\n")
+    @Expect(vtt.size, 1)
+    @Expect(vtt[0].start, 1.0)
+    @Expect(vtt[0].end, 2.5)
+    @Expect(vtt[0].text, "hello")
+
+    // ASS：Format 行定位列 + override 块剔除 + 正文内逗号保留
+    let ass = parseAssCues("[Script Info]\nTitle: t\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}台詞,含む\n")
+    @Expect(ass.size, 1)
+    @Expect(ass[0].start, 1.0)
+    @Expect(ass[0].end, 2.0)
+    @Expect(ass[0].text, "台詞,含む")
+
+    // 内容嗅探：无 kind 时 [Script Info] 头进 ASS 解析，BOM 剔除
+    let sniffed = parseSubtitleText("\u{FEFF}[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n", "")
+    @Expect(sniffed.size, 1)
+    @Expect(sniffed[0].text, "x")
+}
+
+@Test
+func subtitleMultiSelectToggleAndCueQuery(): Unit {
+    let f = PbFixture()
+    let requests = ArrayList<String>()
+    let req = requests
+    f.model.onSubtitleDownload = { key, assetId => req.add("${key}|${assetId}") }
+    f.model.loadRemote("arc1", 2, "http://s/v.mkv", "token")
+    let atts = ArrayList<SubtitleAttachment>()
+    atts.add(subAtt(101, "srt"))
+    atts.add(subAtt(102, "ass"))
+    f.model.loadSubtitles(atts)
+
+    // 多选：两条都选中，各自触发下载；选中序升序维持
+    f.model.toggleSubtitleIndex(1)
+    f.model.toggleSubtitleIndex(0)
+    @Expect(f.model.activeSubtitleIndexes.size, 2)
+    @Expect(f.model.activeSubtitleIndexes[0], 0)
+    @Expect(f.model.activeSubtitleIndexes[1], 1)
+    @Expect(requests.size, 2)
+
+    // 到货回填（媒体 key 对号入座；迟到他 key 静默丢弃）
+    f.model.onSubtitleDownloaded("other:9", 102, "bogus")
+    f.model.onSubtitleDownloaded("arc1:2", 101, "1\n00:00:02,000 --> 00:00:04,000\n你好\n")
+    f.model.play()
+    f.advance(3000) // t=3：仅字幕 0 命中
+    let t1 = f.model.activeSubtitleTexts()
+    @Expect(t1.size, 1)
+    @Expect(t1[0], "你好")
+
+    // 取消再重选：cue 缓存命中不重复下载
+    f.model.toggleSubtitleIndex(0)
+    @Expect(f.model.activeSubtitleIndexes.size, 1)
+    f.model.toggleSubtitleIndex(0)
+    @Expect(f.model.activeSubtitleIndexes.size, 2)
+    @Expect(requests.size, 2)
+
+    // 出窗：无命中
+    f.advance(3000) // t=6
+    @Expect(f.model.activeSubtitleTexts().size, 0)
+
+    // Off 清空选中
+    f.model.clearSubtitles()
+    @Expect(f.model.activeSubtitleIndexes.isEmpty(), true)
+    @Expect(f.model.activeSubtitleTexts().size, 0)
+
+    // 换媒体：选项与选中一并重置
+    f.model.loadRemote("arc1", 3, "http://s/v2.mkv", "token")
+    @Expect(f.model.subtitleAttachments.size, 0)
 }

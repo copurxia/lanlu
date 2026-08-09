@@ -911,9 +911,11 @@ class ReaderStage <: Widget {
             case None => ()
         }
         match (pixelTexture(ctx.renderer, key)) {
-            case Some(texture) => ctx
-                .renderer
-                .texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
+            case Some(texture) =>
+                ctx
+                    .renderer
+                    .texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
+                drawSubtitleOverlay(ctx)
             case None =>
                 var title = model.t("reader.video")
                 match (model.reader.pageAt(pageIdx)) {
@@ -945,6 +947,57 @@ class ReaderStage <: Widget {
             } else {
                 ctx.requestFrameAfter(33)
             }
+        }
+    }
+
+    // 外挂字幕 overlay（多条同时命中自下而上堆叠，同 frontend activeCues 气泡）：
+    // 半透明黑底圆角 + 白字居中，chrome 可见时抬高避开 dock。
+    private func drawSubtitleOverlay(ctx: UiContext): Unit {
+        let texts = model.playback.activeSubtitleTexts()
+        if (texts.isEmpty()) { return }
+        let ps: Float32 = 13.0
+        let lineH = ctx.renderer.textHeight(pointSize: ps)
+        let padX: Float32 = 12.0
+        let padY: Float32 = 8.0
+        let gap: Float32 = 6.0
+        let maxW = frame.w * 0.92
+        // 逐气泡分行并量宽（cue 文本含 \n 时拆多行，单行超宽由裁切兜底）。
+        let bubbleLines = ArrayList<Array<String>>()
+        let bubbleWidths = ArrayList<Float32>()
+        var totalH: Float32 = 0.0
+        for (text in texts) {
+            let lines = text.split("\n")
+            var w: Float32 = 0.0
+            for (line in lines) {
+                let lw = ctx.renderer.textWidth(line, pointSize: ps)
+                if (lw > w) { w = lw }
+            }
+            bubbleLines.add(lines)
+            bubbleWidths.add(min(maxW, w + padX * 2.0))
+            totalH += padY * 2.0 + Float32(lines.size) * lineH
+        }
+        totalH += gap * Float32(texts.size - 1)
+        let bottomMargin: Float32 = if (model.reader.chromeVisible) {
+            84.0
+        } else {
+            20.0
+        }
+        var y = frame.y + frame.h - bottomMargin - totalH
+        for (i in 0..texts.size) {
+            let lines = bubbleLines[Int64(i)]
+            let w = bubbleWidths[Int64(i)]
+            let h = padY * 2.0 + Float32(lines.size) * lineH
+            let x = frame.centerX() - w / 2.0
+            ctx.renderer.fillRoundedRect(Rect(x, y, w, h), 10.0, Color.rgba(0, 0, 0, 173))
+            var ty = y + padY
+            for (line in lines) {
+                let lw = ctx.renderer.textWidth(line, pointSize: ps)
+                ctx.renderer.pushClip(Rect(x + 2.0, ty - 2.0, w - 4.0, lineH + 4.0))
+                ctx.renderer.text(line, frame.centerX() - lw / 2.0, ty, Color.rgb(255, 255, 255), pointSize: ps)
+                ctx.renderer.popClip()
+                ty += lineH
+            }
+            y += h + gap
         }
     }
 

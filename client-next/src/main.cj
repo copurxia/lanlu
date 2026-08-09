@@ -148,8 +148,34 @@ main(): Int64 {
         model.tryResumeSession()
     }
     println("[boot] 3 model ready, creating DesktopApp")
+    // 启动时一次性缩放适配（ADR：不做运行时动态缩放）：seedMode 钉死 1.0 保证
+    // CI 快照像素确定性；正常启动取主显示器 contentScale（Windows 高 DPI 下 >1，
+    // primaryDisplayInfo 内部自带 SDL_Init(VIDEO) 引用计数，建窗前调用安全），
+    // 查询失败回退 1.0。逻辑尺寸按可用桌面区钳制：默认 1440×900 在 150% 缩放的
+    // 1080p 屏上物理 2160×1350 超界，收缩逻辑尺寸使 逻辑×scale ≤ usableBounds；
+    // 钳制结果低于 960×640 最小窗口时不再收缩（宁可超界也保住最小可用布局）。
+    var uiScale: Float32 = 1.0
+    var winW = harnessWindowWidth()
+    var winH = harnessWindowHeight()
+    if (seedMode.size == 0) {
+        try {
+            let geo = primaryDisplayInfo().geometry
+            uiScale = geo.contentScale
+            let maxW = Int32(geo.usableBounds.w / uiScale)
+            let maxH = Int32(geo.usableBounds.h / uiScale)
+            if (maxW >= 960 && winW > maxW) {
+                winW = maxW
+            }
+            if (maxH >= 640 && winH > maxH) {
+                winH = maxH
+            }
+        } catch (_: Exception) {
+            uiScale = 1.0
+        }
+    }
+    println("[boot] 3.5 uiScale=${uiScale} window=${winW}x${winH}")
     let app = DesktopApp(
-        WindowSpec("lanlu", harnessWindowWidth(), harnessWindowHeight(),
+        WindowSpec("lanlu", winW, winH, scale: uiScale,
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
             } else {

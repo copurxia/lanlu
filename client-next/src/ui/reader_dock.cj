@@ -2,6 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
+import lanlu_client_next.net.SubtitleAttachment
 import std.collection.{ArrayList, HashMap}
 
 // ── 阅读页底部 lane 胶囊（reader-redesign #dock，T2）──
@@ -37,7 +38,6 @@ private let VOLUME_POPUP_W: Float32 = 160.0
 private let VOLUME_POPUP_PAD: Float32 = 8.0
 private let VOLUME_SLIDER_W: Float32 = 120.0
 private let VOLUME_SLIDER_H: Float32 = 20.0
-private let VOLUME_BTN_H: Float32 = 30.0
 private let VOLUME_TEXT_H: Float32 = 16.0
 
 // dock 动画状态：rememberState 跨帧保留（每帧重建的 Widget 只是声明）。
@@ -527,7 +527,8 @@ class ReaderDock <: Widget {
                 fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
         }
         let hover = drawBodyButton(ctx, subtitleRect, dy, "reader:dock:subtitle", a)
-        let enabled = pb.subtitleTrackId >= 0
+        // 有内嵌轨或有外挂字幕选中都算"字幕开"（同 frontend 计数徽标语义）。
+        let enabled = pb.subtitleTrackId >= 0 || !pb.activeSubtitleIndexes.isEmpty()
         let color = if (enabled) {
             ctx.theme.accent.withAlpha(a)
         } else if (hover || st.subtitleOpen) {
@@ -622,10 +623,45 @@ class ReaderDock <: Widget {
     }
 
     // ── 字幕选择面板 ──
+    // 行布局：Off | 外挂字幕（多选切换）| [Embedded 分隔行] | 内嵌轨（单选）。
+    // 多选语义同 frontend/client：点选不关面板，面板外点击/Esc 关闭。
 
-    // 字幕面板内容行数（含 Off 选项 + 标题行）
+    // 外挂字幕选项标签（同 client buildSubtitleOptionLabel）。
+    private func subtitleAttachmentLabel(a: SubtitleAttachment, index: Int64): String {
+        let language = a.language
+        let kind = a.kind.toAsciiLower()
+        let name = a.name
+        if (language.size > 0 && kind.size > 0) { return "${language} · ${kind}" }
+        if (language.size > 0) { return language }
+        if (name.size > 0 && kind.size > 0 && !name.toAsciiLower().endsWith(".${kind}")) {
+            return "${name} · ${kind}"
+        }
+        if (name.size > 0) { return name }
+        if (kind.size > 0) { return kind }
+        "Subtitle ${index + 1}"
+    }
+
+    private func isSubtitleIndexActive(index: Int64): Bool {
+        for (i in model.playback.activeSubtitleIndexes) {
+            if (i == index) { return true }
+        }
+        false
+    }
+
+    // 外挂与内嵌两段都存在时，中间插一行分隔标题（占一行高，不可点）。
+    private func subtitleHasSeparator(pb: PlaybackModel): Bool {
+        !pb.subtitleAttachments.isEmpty() && !pb.subtitleTracks.isEmpty()
+    }
+
+    // 字幕面板内容行数（Off + 外挂 + 分隔行 + 内嵌轨）。
     private func subtitleItemCount(): Int64 {
-        model.playback.subtitleTracks.size + 1 // +1 for "Off"
+        let pb = model.playback
+        1 + pb.subtitleAttachments.size +
+            (if (subtitleHasSeparator(pb)) {
+                1
+            } else {
+                0
+            }) + pb.subtitleTracks.size
     }
 
     private func subtitlePopupRect(ctx: UiContext): Rect {
@@ -660,18 +696,37 @@ class ReaderDock <: Widget {
         match (event) {
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
                 if (popup.contains(x, y)) {
-                    let idx = subtitleItemAt(popup, y)
-                    if (idx >= 0) {
-                        let trackId: Int32 = if (idx == 0) {
-                            -1 // Off
-                        } else {
-                            model.playback.subtitleTracks[idx - 1].id
-                        }
-                        model.playback.setSubtitleTrack(trackId)
+                    let pb = model.playback
+                    let extCount = pb.subtitleAttachments.size
+                    let sep = if (subtitleHasSeparator(pb)) {
+                        1
+                    } else {
+                        0
                     }
+                    let idx = subtitleItemAt(popup, y)
+                    if (idx == 0) {
+                        // Off：外挂多选与内嵌轨一并关闭
+                        pb.clearSubtitles()
+                        pb.setSubtitleTrack(-1)
+                    } else if (idx > 0 && idx <= extCount) {
+                        pb.toggleSubtitleIndex(idx - 1)
+                    } else if (idx > extCount + sep) {
+                        let track = pb.subtitleTracks[idx - 1 - extCount - sep]
+                        pb.setSubtitleTrack(track.id)
+                    }
+                    // 多选语义：点选保持面板打开（外部点击/Esc 关闭）。
+                    ctx.requestFrame()
+                } else {
+                    closeSubtitlePopup(ctx)
                 }
-                closeSubtitlePopup(ctx)
                 true
+            case UiEvent.MouseMove(x, y) =>
+                // 面板内移动续帧刷新 hover 高亮（不穿透到下层）。
+                if (popup.contains(x, y)) {
+                    ctx.requestFrame()
+                    return true
+                }
+                false
             case UiEvent.KeyDown(Key.Escape, _) =>
                 closeSubtitlePopup(ctx)
                 true
@@ -701,21 +756,37 @@ class ReaderDock <: Widget {
         // 分隔线
         let sepY = titleY + SUBTITLE_TITLE_H
         ctx.renderer.fill(Rect(shell.x + 8.0, sepY, shell.w - 16.0, 1.0), popupAlpha(ctx.theme.panelEdge, progress))
-        // 字幕轨列表
+        // 字幕列表：Off + 外挂（多选）+ [分隔] + 内嵌轨（单选）
         let pb = model.playback
-        let itemCount = subtitleItemCount()
-        if (itemCount <= 1 && pb.subtitleTracks.isEmpty()) {
-            // 无字幕轨
+        let extCount = pb.subtitleAttachments.size
+        let trkCount = pb.subtitleTracks.size
+        let sep = if (subtitleHasSeparator(pb)) {
+            1
+        } else {
+            0
+        }
+        if (extCount == 0 && trkCount == 0) {
+            // 无字幕可选（外挂/内嵌都没有）
             let noSubColor = popupAlpha(ctx.theme.mutedText, progress)
             let row = subtitleRowRect(shell, 0)
             ctx.renderer.textCenter("No subtitles", row, noSubColor, pointSize: 12.0)
         } else {
+            let itemCount = subtitleItemCount()
             for (i in 0..itemCount) {
                 let row = subtitleRowRect(shell, i)
+                if (sep > 0 && i == extCount + 1) {
+                    // 分隔行：内嵌轨小标题
+                    ctx.renderer.text("Embedded", row.x + 8.0,
+                        row.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
+                        popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
+                    continue
+                }
                 let isSelected = if (i == 0) {
-                    pb.subtitleTrackId < 0
+                    pb.activeSubtitleIndexes.isEmpty() && pb.subtitleTrackId < 0
+                } else if (i <= extCount) {
+                    isSubtitleIndexActive(i - 1)
                 } else {
-                    pb.subtitleTracks[i - 1].id == pb.subtitleTrackId
+                    pb.subtitleTracks[i - 1 - extCount - sep].id == pb.subtitleTrackId
                 }
                 // hover 高亮
                 if (row.contains(ctx.mouseX, ctx.mouseY) && !isSelected) {
@@ -730,11 +801,13 @@ class ReaderDock <: Widget {
                 if (isSelected) {
                     drawPopupCheckmark(ctx, row, popupAlpha(ctx.theme.accent, progress))
                 }
-                // 轨道名称
+                // 行标签
                 let label = if (i == 0) {
                     "Off"
+                } else if (i <= extCount) {
+                    subtitleAttachmentLabel(pb.subtitleAttachments[i - 1], i - 1)
                 } else {
-                    let track = pb.subtitleTracks[i - 1]
+                    let track = pb.subtitleTracks[i - 1 - extCount - sep]
                     if (track.name.size > 0) {
                         track.name
                     } else {
@@ -756,9 +829,10 @@ class ReaderDock <: Widget {
     }
 
     // ── 音量调节面板 ──
+    // 面板只含滑条与百分比：静音不再重复画图标，直接点 dock 静音按钮切换。
 
     private func volumePopupRect(ctx: UiContext): Rect {
-        let h = VOLUME_POPUP_PAD * 2.0 + VOLUME_BTN_H + VOLUME_SLIDER_H + VOLUME_TEXT_H + 8.0
+        let h = VOLUME_POPUP_PAD * 2.0 + VOLUME_SLIDER_H + 4.0 + VOLUME_TEXT_H
         // 从 muteRect 向上弹出，水平居中对齐 muteRect 中心
         let cx = muteRect.centerX()
         let x = max(4.0, min(cx - VOLUME_POPUP_W / 2.0, ctx.viewportWidth - VOLUME_POPUP_W - 4.0))
@@ -767,28 +841,25 @@ class ReaderDock <: Widget {
     }
 
     // 音量面板内各区域
-    private func volumeMuteBtnRect(popup: Rect): Rect {
-        Rect(popup.centerX() - 15.0, popup.y + VOLUME_POPUP_PAD, 30.0, VOLUME_BTN_H)
-    }
-
     private func volumeSliderRect(popup: Rect): Rect {
         Rect(popup.centerX() - VOLUME_SLIDER_W / 2.0,
-            popup.y + VOLUME_POPUP_PAD + VOLUME_BTN_H + 4.0,
+            popup.y + VOLUME_POPUP_PAD,
             VOLUME_SLIDER_W, VOLUME_SLIDER_H)
     }
 
     private func volumeTextRect(popup: Rect): Rect {
-        Rect(popup.x, popup.y + VOLUME_POPUP_PAD + VOLUME_BTN_H + 4.0 + VOLUME_SLIDER_H + 4.0,
+        Rect(popup.x, popup.y + VOLUME_POPUP_PAD + VOLUME_SLIDER_H + 4.0,
             popup.w, VOLUME_TEXT_H)
     }
 
     private func handleVolumeOverlay(ctx: UiContext, event: UiEvent, popup: Rect): Bool {
         let sliderRect = volumeSliderRect(popup)
-        let muteBtnRect = volumeMuteBtnRect(popup)
         match (event) {
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
-                if (muteBtnRect.contains(x, y)) {
+                // 面板打开时点 dock 静音图标 = 切换静音（替代原面板内重复的图标按钮）。
+                if (muteRect.contains(x, y)) {
                     model.playback.toggleMute()
+                    ctx.requestFrame()
                     return true
                 }
                 if (sliderRect.contains(x, y)) {
@@ -843,14 +914,6 @@ class ReaderDock <: Widget {
             Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
         ctx.renderer.pushClip(shell)
         let pb = model.playback
-        // 静音按钮
-        let muteBtn = volumeMuteBtnRect(shell)
-        if (muteBtn.contains(ctx.mouseX, ctx.mouseY)) {
-            ctx.renderer.fillCircle(muteBtn.centerX(), muteBtn.centerY(), muteBtn.w / 2.0,
-                popupAlpha(ctx.theme.overlayHover, progress))
-        }
-        drawMuteGlyph(ctx.renderer, muteBtn.centerX(), muteBtn.centerY(), pb.muted,
-            popupAlpha(ctx.theme.text, progress))
         // 音量滑条
         let slider = volumeSliderRect(shell)
         let cy = slider.centerY()

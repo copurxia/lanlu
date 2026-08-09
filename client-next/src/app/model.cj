@@ -545,6 +545,26 @@ public class AppModel {
                 case None => ()
             }
         }
+        // 外挂字幕文本：任务名带 assetId 天然多条去重；完成经 pump drain 回填
+        // playback.onSubtitleDownloaded（文本体积限同歌词 1MiB）。
+        playback.onSubtitleDownload = {
+            key, assetId => match (api) {
+                case Some(a) => let _ = worker.submit(
+                    "subtitle:${key}:${assetId}",
+                    {
+                        =>
+                            let bytes = a.assetBytes(assetId)
+                            let text = if (bytes.size <= 1048576) {
+                                String.fromUtf8(bytes)
+                            } else {
+                                ""
+                            }
+                            (key, assetId, text)
+                    }
+                )
+                case None => ()
+            }
+        }
         // html 离屏渲染出口：正文/子资源都由 worker 拉字节（Blitz 不碰网络），
         // 任务名带 pageKey 去重；完成经 pump 的 drain 分发回填 htmlPage。
         htmlPage.fetchHtml = {
@@ -2895,6 +2915,7 @@ public class AppModel {
                             created
                     }
                     playback.loadRemote(arc, i, proxy.open(url, token), "")
+                    playback.loadSubtitles(p.subtitleAttachments)
                     // 进入视频页自动播放：已加载且未在播放时启动
                     if (playback.loaded && !playback.playing) { playback.play() }
                 case None => ()
@@ -3897,12 +3918,16 @@ public class AppModel {
         // 下载阶段成功的中间结果在 dispatch 中静默忽略。
         if (r.name.startsWith("imgdl:")) {
             finishImageTask()
+            // 不 toast 但留 stderr 痕迹：Windows 上批量封面失败类故障（如缺解码器）
+            // 全靠这条日志定位（与 [boot]/[win] 诊断风格一致）。
+            eprintln("[img] download failed ${r.name}: ${r.error}")
             imageState(r.name.removePrefix("imgdl:")).value = "error"
             return
         }
         // 图片任务失败不 toast，只置 error 态并补发队列。
         if (r.name.startsWith("img:")) {
             finishImageTask()
+            eprintln("[img] decode failed ${r.name}: ${r.error}")
             imageState(r.name.removePrefix("img:")).value = "error"
             return
         }
@@ -4861,6 +4886,15 @@ public class AppModel {
                 case Some(p) =>
                     let (key, lyrics) = (p as (String, String)).getOrThrow()
                     playback.onLyricsDownloaded(key, lyrics)
+                    readerVersion.value += 1
+                case None => ()
+            }
+        } else if (name.startsWith("subtitle:")) {
+            // 外挂字幕文本到货：回填 PlaybackModel（key 对号入座，迟到结果由模型内丢弃）。
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, assetId, text) = (p as (String, Int64, String)).getOrThrow()
+                    playback.onSubtitleDownloaded(key, assetId, text)
                     readerVersion.value += 1
                 case None => ()
             }

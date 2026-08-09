@@ -380,6 +380,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-libvips
+            mingw-w64-x86_64-libheif
             mingw-w64-x86_64-vlc
             mingw-w64-x86_64-dlfcn
             mingw-w64-x86_64-rocksdb
@@ -474,8 +475,27 @@ jobs:
 
           needed() { objdump -p "$1" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'; }
 
-          declare -A seen=()
+          # libvips 的 HEIF/AVIF 等解码器在 MSYS2 打包为运行时模块（GModule 动态加载，
+          # 不在 PE import 表里，递归收集发现不了）；服务器封面资产统一 AVIF，
+          # 缺模块则 Windows 上所有封面解码失败。按 libvips Windows 的 prefix 推断
+          # 规则（以 libvips DLL 所在目录为 prefix，libdir=<prefix>/lib），模块须落在
+          # <stage>/lib/vips-modules-8.x/；模块自身的依赖（libheif 及其传递依赖）
+          # 随后入队递归收集，落到 stage 根目录（loader 按应用目录解析）。
           queue=("main.exe")
+          modules_src="$(find "${MINGW_LIBRARY_PATH}" -maxdepth 1 -type d -name 'vips-modules-*' -print -quit)"
+          if [ -z "${modules_src}" ]; then
+            echo "::error::vips modules directory not found under ${MINGW_LIBRARY_PATH}."
+            exit 1
+          fi
+          modules_rel="lib/$(basename "${modules_src}")"
+          mkdir -p "${stage}/${modules_rel}"
+          for mod in "${modules_src}"/*.dll; do
+            cp -L "$mod" "${stage}/${modules_rel}/"
+            queue+=("${modules_rel}/$(basename "$mod")")
+            echo "collect (vips module): ${modules_rel}/$(basename "$mod")"
+          done
+
+          declare -A seen=()
           while ((${#queue[@]} > 0)); do
             current="${queue[0]}"
             queue=("${queue[@]:1}")
@@ -525,6 +545,15 @@ jobs:
               exit 1
             fi
           done
+          # AVIF 封面硬依赖：heif 模块与其直接依赖 libheif 必须同时在包里。
+          if ! ls "${stage}"/lib/vips-modules-*/vips-heif.dll >/dev/null 2>&1; then
+            echo "::error::vips-heif.dll module was not collected (AVIF covers would fail to decode)."
+            exit 1
+          fi
+          if ! ls "${stage}"/libheif*.dll >/dev/null 2>&1; then
+            echo "::error::libheif runtime DLL was not collected (AVIF covers would fail to decode)."
+            exit 1
+          fi
           for pair in "libSDL3.dll SDL3.dll" "libSDL3_ttf.dll SDL3_ttf.dll"; do
             present=0
             for name in $pair; do

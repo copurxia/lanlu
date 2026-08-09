@@ -153,6 +153,27 @@ func pagesParseDisplayMetadataWithDefaultSourcePriority(): Unit {
     @Expect(page.hiddenInFiles, true)
 }
 
+// 外挂字幕附件（多选字幕面板数据源）：slot=subtitle 过滤、order_index 升序 +
+// 同序按名字典序；源级元数据含字幕条目时覆盖页级。
+@Test
+func pagesParseSubtitleAttachments(): Unit {
+    let body = "{\"pages\":[{\"id\":\"v1\",\"type\":\"video\",\"metadata\":{\"attachments\":[{\"slot\":\"subtitle\",\"asset_id\":11,\"kind\":\"srt\",\"name\":\"b.zh.srt\",\"language\":\"中文\",\"order_index\":2},{\"slot\":\"lyrics\",\"asset_id\":99},{\"slot\":\"subtitle\",\"asset_id\":10,\"kind\":\"ass\",\"name\":\"a.ass\",\"order_index\":2},{\"slot\":\"subtitle\",\"asset_id\":12,\"kind\":\"vtt\",\"name\":\"c.vtt\",\"order_index\":1}]}}]}"
+    let page = parsePages(body)[0]
+    @Expect(page.subtitleAttachments.size, 3)
+    @Expect(page.subtitleAttachments[0].assetId, 12) // order_index 1 先行
+    @Expect(page.subtitleAttachments[1].assetId, 10) // 同序按名：a.ass < b.zh.srt
+    @Expect(page.subtitleAttachments[2].assetId, 11)
+    @Expect(page.subtitleAttachments[2].language, "中文")
+    @Expect(page.subtitleAttachments[2].kind, "srt")
+    @Expect(page.lyricsAssetId, 99) // 其他 slot 不受影响
+
+    // 源级元数据含字幕条目 → 覆盖页级
+    let withSource = "{\"pages\":[{\"id\":\"v2\",\"type\":\"video\",\"metadata\":{\"attachments\":[{\"slot\":\"subtitle\",\"asset_id\":11,\"kind\":\"srt\"}]},\"default_source\":{\"path\":\"m.mkv\",\"metadata\":{\"attachments\":[{\"slot\":\"subtitle\",\"asset_id\":21,\"kind\":\"ass\"}]}}}]}"
+    let p2 = parsePages(withSource)[0]
+    @Expect(p2.subtitleAttachments.size, 1)
+    @Expect(p2.subtitleAttachments[0].assetId, 21)
+}
+
 @Test
 func nullScalarFieldsFallBackToDefaults(): Unit {
     let body = "{\"data\":[{\"type\":\"archive\",\"arcid\":\"a2\",\"archivetype\":\"image\",\"filename\":\"f\",\"isnew\":false,\"isfavorite\":false,\"favoritetime\":null,\"lastreadtime\":null,\"pagecount\":1,\"progress\":0,\"size\":1,\"assets\":{},\"description\":null,\"tags\":\"\",\"title\":\"t\",\"release_at\":0,\"created_at\":0,\"updated_at\":0}],\"draw\":1,\"page\":1,\"pageSize\":1,\"recordsFiltered\":1,\"recordsTotal\":1}"

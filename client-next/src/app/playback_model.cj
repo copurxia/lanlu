@@ -3,9 +3,10 @@ package lanlu_client_next.app
 import std.time.MonoTime
 import std.process.executeWithOutput
 import std.convert.Parsable
-import std.collection.ArrayList
+import std.collection.{ArrayList, HashMap}
 import std.sort.sort
 import libvlc_ffi.{SubtitleTrack, VideoFrame, VlcPlayer}
+import lanlu_client_next.net.SubtitleAttachment
 
 // 阅读器媒体 lane 的播放引擎（纯逻辑可单测：进程/时钟/下载全部注入，同 ReaderModel 风格）。
 // 音视频统一通过鉴权代理 URL 按 HTTP Range 交给 libVLC 流式读取。
@@ -24,6 +25,18 @@ public class LyricLine {
     init(timeSec: Float64, text: String) { this.timeSec = timeSec; this.text = text }
 }
 
+// 外挂字幕 cue（SRT/VTT/ASS 解析产物，同 frontend/client 的 SubtitleCue）。
+public class SubtitleCue {
+    public let start: Float64
+    public let end: Float64
+    public let text: String
+    init(start: Float64, end: Float64, text: String) {
+        this.start = start
+        this.end = end
+        this.text = text
+    }
+}
+
 public class PlaybackModel {
     // ---- 状态（只读暴露；AppModel 变更后 bump readerVersion 通知视图）----
     public var mediaKey: String = ""       // "arcid:pageIndex"，空串=无媒体
@@ -37,6 +50,10 @@ public class PlaybackModel {
     public var isVideo: Bool = false
     public var subtitleTracks = ArrayList<SubtitleTrack>()
     public var subtitleTrackId: Int32 = -1
+    // 外挂字幕（attachments slot=subtitle）：多选语义对齐 frontend/client——
+    // activeSubtitleIndexes 存选中项在 subtitleAttachments 中的下标（升序）。
+    public var subtitleAttachments = ArrayList<SubtitleAttachment>()
+    public var activeSubtitleIndexes = ArrayList<Int64>()
     public var lyricsLines = ArrayList<LyricLine>()
     // 已交付 UI 的视频帧代际（takeVideoFrame 每取到新帧 +1）：阅读器舞台据此
     // 只在新帧到达时续帧，而非固定 60fps。
@@ -48,6 +65,8 @@ public class PlaybackModel {
     // 下载出口：(arcid, pageId) 触发后台下载；完成经 onDownloaded/onFailed 回填。
     public var onDownload: ?(String, String) -> Unit = None
     public var onLyricsDownload: ?(String, Int64) -> Unit = None
+    // 外挂字幕文本下载出口：(mediaKey, assetId)；完成经 onSubtitleDownloaded 回填。
+    public var onSubtitleDownload: ?(String, Int64) -> Unit = None
     // 播放器；None 时惰性使用 libVLC（测试可注入假 runner）。
     public var processRunner: ?ProcessRunner = None
 
@@ -59,6 +78,8 @@ public class PlaybackModel {
     private var startOffsetSec: Float64 = 0.0
     private var pausedOffsetSec: Float64 = 0.0
     private var vlcRunner: ?LibVlcRunner = None
+    // 外挂字幕 cue 缓存：按 assetId 驻留（同 frontend subtitleCache，切页不重下）。
+    private let subtitleCuesByAsset = HashMap<Int64, ArrayList<SubtitleCue>>()
 
     public init() {
         let start = MonoTime.now()
@@ -314,6 +335,8 @@ public class PlaybackModel {
         isVideo = false
         subtitleTracks.clear()
         subtitleTrackId = -1
+        subtitleAttachments.clear()
+        activeSubtitleIndexes.clear()
         lyricsLines.clear()
         videoGeneration = 0
         lastSubtitleRefreshMs = -10000
@@ -397,6 +420,90 @@ public class PlaybackModel {
                 subtitleTrackId = nextId
             case None => ()
         }
+    }
+
+    // ── 外挂字幕（多选，同 frontend/client activeSubtitleIndexes）──
+
+    // 装载当前媒体的外挂字幕选项（Video lane 激活时调）：换媒体即重置选中。
+    public func loadSubtitles(attachments: ArrayList<SubtitleAttachment>): Unit {
+        subtitleAttachments = attachments
+        activeSubtitleIndexes.clear()
+    }
+
+    // 切换外挂字幕选中态：已选→移除；未选→加入（升序维持）并首次触发文本下载。
+    public func toggleSubtitleIndex(index: Int64): Unit {
+        if (index < 0 || index >= subtitleAttachments.size) { return }
+        var found: Int64 = -1
+        for (i in 0..activeSubtitleIndexes.size) {
+            if (activeSubtitleIndexes[Int64(i)] == index) {
+                found = Int64(i)
+                break
+            }
+        }
+        if (found >= 0) {
+            let _ = activeSubtitleIndexes.remove(at: found)
+            return
+        }
+        activeSubtitleIndexes.add(index)
+        sort(activeSubtitleIndexes, lessThan: {a, b => a < b}, stable: true)
+        let assetId = subtitleAttachments[index].assetId
+        // cue 缓存命中（本会话内已下过）不重复下载。
+        if (subtitleCuesByAsset.contains(assetId)) { return }
+        match (onSubtitleDownload) {
+            case Some(cb) => cb(mediaKey, assetId)
+            case None => ()
+        }
+    }
+
+    // Off：清空外挂字幕选中（内嵌轨由 setSubtitleTrack(-1) 另关）。
+    public func clearSubtitles(): Unit {
+        activeSubtitleIndexes.clear()
+    }
+
+    // 字幕文本到货：按 mediaKey 对号入座，解析成 cue 缓存（迟到/切走静默丢弃）。
+    public func onSubtitleDownloaded(key: String, assetId: Int64, text: String): Unit {
+        if (key != mediaKey) { return }
+        var kind = ""
+        for (a in subtitleAttachments) {
+            if (a.assetId == assetId) {
+                kind = a.kind
+                break
+            }
+        }
+        subtitleCuesByAsset[assetId] = parseSubtitleText(text, kind)
+    }
+
+    // 当前命中外挂字幕的 overlay 文本（每条选中字幕至多一条，顺序同选中序，
+    // 同 frontend activeCues）；cue 未到货/无命中不占位。
+    public func activeSubtitleTexts(): ArrayList<String> {
+        let result = ArrayList<String>()
+        if (!isVideo || activeSubtitleIndexes.isEmpty()) { return result }
+        let now = positionSec
+        for (idx in activeSubtitleIndexes) {
+            if (idx < 0 || idx >= subtitleAttachments.size) { continue }
+            match (subtitleCuesByAsset.get(subtitleAttachments[idx].assetId)) {
+                case Some(cues) =>
+                    // cue 按 start 升序（解析产物即文件序，常规字幕文件时间单调）：
+                    // 二分最后一条 start<=now，再验证未超 end。
+                    var lo: Int64 = 0
+                    var hi = cues.size - 1
+                    var hit: Int64 = -1
+                    while (lo <= hi) {
+                        let mid = (lo + hi) / 2
+                        if (cues[mid].start <= now) {
+                            hit = mid
+                            lo = mid + 1
+                        } else {
+                            hi = mid - 1
+                        }
+                    }
+                    if (hit >= 0 && cues[hit].end >= now) {
+                        result.add(cues[hit].text)
+                    }
+                case None => ()
+            }
+        }
+        result
     }
 
     private func clampPos(v: Float64): Float64 {
@@ -500,4 +607,225 @@ public func probeMediaDuration(path: String): Float64 {
     } catch (_: Exception) {
         0.0
     }
+}
+
+// ===== 外挂字幕解析（SRT/VTT/ASS，逐行移植 client ReaderScreen 同名函数）=====
+
+// 字幕时间戳 "hh:mm:ss[.mmm]" / "mm:ss[.mmm]"：非法/空返 0（同 client parseTimestamp）。
+private func parseSubtitleTimestamp(raw: String): Float64 {
+    let parts = raw.trimAscii().replace(",", ".").split(":")
+    var values = ArrayList<Float64>()
+    for (p in parts) {
+        try {
+            values.add(Float64.parse(p))
+        } catch (_: Exception) {
+            return 0.0
+        }
+    }
+    if (values.size == 3) {
+        values[0] * 3600.0 + values[1] * 60.0 + values[2]
+    } else if (values.size == 2) {
+        values[0] * 60.0 + values[1]
+    } else if (values.size == 1) {
+        values[0]
+    } else {
+        0.0
+    }
+}
+
+// 首个空白分隔前的 token（VTT 时间截去 align: 等位置参数）。
+private func firstToken(s: String): String {
+    var i: Int64 = 0
+    while (i < s.size) {
+        let b = s[i]
+        if (b == 0x20u8 || b == 0x09u8) { break }
+        i += 1
+    }
+    s[0..i]
+}
+
+private func isDigitsOnly(s: String): Bool {
+    if (s.size == 0) { return false }
+    for (c in s) {
+        if (c < 0x30u8 || c > 0x39u8) { return false }
+    }
+    true
+}
+
+private func startsWithIgnoreCase(text: String, prefix: String): Bool {
+    text.toAsciiLower().startsWith(prefix.toAsciiLower())
+}
+
+public func parseSrtCues(raw: String): ArrayList<SubtitleCue> {
+    let cues = ArrayList<SubtitleCue>()
+    let text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    for (block in text.split("\n\n")) {
+        let trimmed = block.trimAscii()
+        if (trimmed.size == 0) { continue }
+        let lines = trimmed.split("\n")
+        var timeLine = ""
+        for (line in lines) {
+            let l = line.trimAscii()
+            if (timeLine.size == 0 && l.contains("-->")) {
+                timeLine = l
+            }
+        }
+        if (timeLine.size == 0) { continue }
+        let halves = timeLine.split("-->")
+        if (halves.size < 2) { continue }
+        let startRaw = halves[0].trimAscii()
+        let endRaw = halves[1].trimAscii()
+        if (startRaw.size == 0 || endRaw.size == 0) { continue }
+        // 正文：非空、非时间行、非纯数字序号行。
+        var body = ""
+        for (line in lines) {
+            let l = line.trimAscii()
+            if (l.size == 0 || l == timeLine || isDigitsOnly(l)) { continue }
+            if (body.size > 0) { body += "\n" }
+            body += l
+        }
+        body = body.trimAscii()
+        if (body.size == 0) { continue }
+        cues.add(SubtitleCue(parseSubtitleTimestamp(startRaw), parseSubtitleTimestamp(endRaw), body))
+    }
+    cues
+}
+
+public func parseVttCues(raw: String): ArrayList<SubtitleCue> {
+    let cues = ArrayList<SubtitleCue>()
+    var text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    if (startsWithIgnoreCase(text, "WEBVTT")) {
+        var i: Int64 = 6
+        while (i < text.size) {
+            let b = text[i]
+            if (b != 0x20u8 && b != 0x09u8 && b != 0x0Au8) { break }
+            i += 1
+        }
+        text = text[i..text.size]
+    }
+    for (block in text.split("\n\n")) {
+        let trimmed = block.trimAscii()
+        if (trimmed.size == 0) { continue }
+        var lines = ArrayList<String>()
+        for (line in trimmed.split("\n")) {
+            let l = line.trimAscii()
+            if (l.size > 0) { lines.add(l) }
+        }
+        var timeLine = ""
+        for (line in lines) {
+            if (timeLine.size == 0 && line.contains("-->")) {
+                timeLine = line
+            }
+        }
+        if (timeLine.size == 0) { continue }
+        let halves = timeLine.split("-->")
+        if (halves.size < 2) { continue }
+        let startRaw = firstToken(halves[0].trimAscii())
+        let endRaw = firstToken(halves[1].trimAscii())
+        if (startRaw.size == 0 || endRaw.size == 0) { continue }
+        var body = ""
+        for (line in lines) {
+            if (line == timeLine) { continue }
+            if (body.size > 0) { body += "\n" }
+            body += line
+        }
+        body = body.trimAscii()
+        if (body.size == 0) { continue }
+        cues.add(SubtitleCue(parseSubtitleTimestamp(startRaw), parseSubtitleTimestamp(endRaw), body))
+    }
+    cues
+}
+
+// ASS/SSA 正文清洗：{...} override 块剔除，\N \n 换行、\h 空格（同 client）。
+private func stripAssFormatting(raw: String): String {
+    var out = ""
+    var rest = raw
+    var open = rest.indexOf("{")
+    while (open.isSome()) {
+        match (open) {
+            case Some(o) =>
+                out += rest[0..o]
+                match (rest.indexOf("}")) {
+                    case Some(c) => rest = rest[(c + 1)..rest.size]
+                    case None => rest = ""
+                }
+            case None => ()
+        }
+        open = rest.indexOf("{")
+    }
+    out += rest
+    out = out.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " ")
+    out.trimAscii()
+}
+
+public func parseAssCues(raw: String): ArrayList<SubtitleCue> {
+    let cues = ArrayList<SubtitleCue>()
+    let text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    var eventSection = false
+    var formatFields = ArrayList<String>()
+    for (line in text.split("\n")) {
+        let trimmed = line.trimAscii()
+        if (trimmed.size == 0) { continue }
+        if (trimmed.toAsciiLower() == "[events]") {
+            eventSection = true
+            continue
+        }
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            eventSection = false
+            continue
+        }
+        if (!eventSection) { continue }
+        if (startsWithIgnoreCase(trimmed, "Format:")) {
+            formatFields = ArrayList<String>()
+            for (f in trimmed[7..trimmed.size].split(",")) {
+                formatFields.add(f.trimAscii().toAsciiLower())
+            }
+            continue
+        }
+        if (!startsWithIgnoreCase(trimmed, "Dialogue:")) { continue }
+        let payload = trimmed[9..trimmed.size].trimAscii()
+        let parts = payload.split(",")
+        let fieldCount = if (formatFields.size > 10) { formatFields.size } else { 10 }
+        if (parts.size < fieldCount) { continue }
+        var startIndex: Int64 = -1
+        var endIndex: Int64 = -1
+        var textIndex: Int64 = -1
+        for (i in 0..formatFields.size) {
+            let f = formatFields[Int64(i)]
+            if (f == "start" && startIndex < 0) { startIndex = Int64(i) }
+            if (f == "end" && endIndex < 0) { endIndex = Int64(i) }
+            if (f == "text" && textIndex < 0) { textIndex = Int64(i) }
+        }
+        if (startIndex < 0) { startIndex = 1 }
+        if (endIndex < 0) { endIndex = 2 }
+        if (textIndex < 0) { textIndex = 9 }
+        let headLen = if (startIndex > endIndex) { startIndex } else { endIndex }
+        if (textIndex <= headLen || textIndex >= parts.size) { continue }
+        var body = ""
+        for (i in textIndex..parts.size) {
+            if (i > textIndex) { body += "," }
+            body += parts[i]
+        }
+        body = stripAssFormatting(body)
+        if (body.size == 0) { continue }
+        cues.add(SubtitleCue(parseSubtitleTimestamp(parts[startIndex]),
+            parseSubtitleTimestamp(parts[endIndex]), body))
+    }
+    cues
+}
+
+// 按 kind/内容嗅探选择解析器（同 client parseSubtitleText）。
+public func parseSubtitleText(raw: String, kind: String): ArrayList<SubtitleCue> {
+    var text = raw
+    if (text.startsWith("\u{FEFF}")) { text = text[3..text.size] }
+    text = text.trimAscii()
+    let lowerKind = kind.toAsciiLower()
+    if (lowerKind.contains("ass") || lowerKind.contains("ssa") ||
+        startsWithIgnoreCase(text, "[Script Info]")) {
+        return parseAssCues(text)
+    }
+    if (lowerKind.contains("vtt") || startsWithIgnoreCase(text, "WEBVTT")) {
+        return parseVttCues(text)
+    }
+    parseSrtCues(text)
 }
