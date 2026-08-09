@@ -2869,6 +2869,8 @@ public class AppModel {
                     }
                     playback.loadRemote(arc, i, proxy.open(url, token), "", video: false)
                     playback.loadLyrics(p.lyricsAssetId)
+                    // 进入音频页自动播放：已加载且未在播放时启动
+                    if (playback.loaded && !playback.playing) { playback.play() }
                 case None => ()
             }
             case Book => playback.stop()
@@ -2893,6 +2895,8 @@ public class AppModel {
                             created
                     }
                     playback.loadRemote(arc, i, proxy.open(url, token), "")
+                    // 进入视频页自动播放：已加载且未在播放时启动
+                    if (playback.loaded && !playback.playing) { playback.play() }
                 case None => ()
             }
         }
