@@ -588,6 +588,10 @@ jobs:
       - name: Publish to nightly release
         env:
           GH_TOKEN: ${{ github.token }}
+          # 该 job 只下载产物、不 checkout 源码，工作目录不是 git 仓库；
+          # gh 默认靠 git remote 推断仓库，非 git 目录会报 "failed to run git"，
+          # 故用 GH_REPO 显式指定目标仓库。
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           ls -l release-assets
