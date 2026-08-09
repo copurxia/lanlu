@@ -157,7 +157,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
                 => MiniSeg([model.t("detail.thumbnails"), model.t("detail.list"), model.t("detail.tree")],
                     model.pageViewIndex, key: "pv-seg")
             }) {
-                => pagePreview(model, model.detailPages.value, m.progress) {
+                => pagePreview(model, m.arcid, model.detailPages.value, m.progress) {
                     no => model.openReader(m.arcid, no)
                 }
             }

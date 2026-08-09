@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{SearchItem, TankoubonInfo, PageInfo}
+import lanlu_client_next.net.{SearchItem, TankoubonInfo, PageInfo, percentEncode}
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.fs.{exists, Path}
 import std.math.{cos, sin}
@@ -1057,12 +1057,14 @@ class CardHoverActions <: Widget {
         Rect(frame.x + 88.0, frame.y + frame.h - 42.0, 32.0, 32.0)
     }
 
-    private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph, hoverId: String,
+    private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph,
         active: Bool, reveal: Float32): Unit {
         let t = max(0.0, min(1.0, reveal))
         if (t <= 0.0) { return }
         let rect = baseRect.shift(0.0, (1.0 - t) * 6.0)
-        let bg = if (ctx.isHovered(hoverId)) {
+        // 操作钮与封面必须共享同一个 hover ID，否则上层按钮先认领 MouseMove 后会让
+        // 封面 HoverLift 误判为移出并收起整层。按钮自身的高亮直接按实际绘制热区判断。
+        let bg = if (rect.contains(ctx.mouseX, ctx.mouseY)) {
             Color.rgba(255, 255, 255, Int64(64.0 * t))
         } else {
             Color.rgba(255, 255, 255, Int64(38.0 * t))
@@ -1077,9 +1079,9 @@ class CardHoverActions <: Widget {
         let detailsT = max(0.0, min(1.0, (progress - 0.06) / 0.94))
         let favoriteT = max(0.0, min(1.0, (progress - 0.16) / 0.84))
         let selectT = max(0.0, min(1.0, (progress - 0.26) / 0.74))
-        drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), "cover-details:${key}", false, detailsT)
-        drawButton(ctx, favoriteRect(), GhostGlyph.Heart, "cover-favorite:${key}", favorited, favoriteT)
-        drawButton(ctx, selectRect(), GhostGlyph.Named(IconName.Check), "cover-select:${key}", false, selectT)
+        drawButton(ctx, detailsRect(), GhostGlyph.Named(IconName.Eye), false, detailsT)
+        drawButton(ctx, favoriteRect(), GhostGlyph.Heart, favorited, favoriteT)
+        drawButton(ctx, selectRect(), GhostGlyph.Named(IconName.Check), false, selectT)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -1088,12 +1090,11 @@ class CardHoverActions <: Widget {
         }
         match (event) {
             case UiEvent.MouseMove(x, y) =>
-                if (detailsRect().contains(x, y)) {
-                    ctx.claimHover("cover-details:${key}", CursorShape.Interactive)
-                } else if (favoriteRect().contains(x, y)) {
-                    ctx.claimHover("cover-favorite:${key}", CursorShape.Interactive)
-                } else if (selectRect().contains(x, y)) {
-                    ctx.claimHover("cover-select:${key}", CursorShape.Interactive)
+                if (detailsRect().contains(x, y) || favoriteRect().contains(x, y) ||
+                    selectRect().contains(x, y)) {
+                    // ZStack 从上到下派发，操作层会先于 HoverLift 收到事件。继续认领封面
+                    // hoverId，保证指针从图片移入按钮时浮层不会因 ID 切换而消失。
+                    ctx.claimHover("cover:${key}", CursorShape.Interactive)
                 }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (favoriteRect().contains(x, y)) {
@@ -2146,7 +2147,7 @@ public func pageTypeIcon(pageType: String): ?IconName {
 // 页面预览卡体：按 model.pageViewIndex（0=缩略图 1=列表 2=树）切换；
 // readUpTo 为已读页码（≤ 该页码的页半透明）；点击页进阅读器对应页。
 // pages 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
-public func pagePreview(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
+public func pagePreview(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     if (pages.size == 0) { return }
     if (model.pageViewIndex.value == 1) {
@@ -2154,13 +2155,13 @@ public func pagePreview(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: I
     } else if (model.pageViewIndex.value == 2) {
         pvTree(model, pages, readUpTo, onOpenPage)
     } else {
-        pvGrid(model, pages, readUpTo, onOpenPage)
+        pvGrid(model, arcid, pages, readUpTo, onOpenPage)
     }
 }
 
 // 缩略图态（原型 .pv-grid）：auto-fill minmax(96px,1fr) → 列数按主列宽现算；
 // 单元格 16:10，左上页码 pill，右上媒体类型图标，已读半透明。
-private func pvGrid(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
+private func pvGrid(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0 // 减去 d-card 两侧 18vp 内边距
     var cols = if (w <= 0.0) { 6 } else { Int64((w + 10.0) / 106.0) }
@@ -2173,12 +2174,36 @@ private func pvGrid(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
     LazyGrid(pages.size, cols, cellH, spacing: 10.0, columnSpacing: 10.0,
         id: "pv-grid", itemAt: {i => (i + 1, pages[i])}) { item =>
         let (no, p) = item
-        pvThumb(model, no, p.pageType, no <= readUpTo, cellH) {=> onOpenPage(no) }
+        pvThumb(model, arcid, no, p, no <= readUpTo, cellW, cellH) {=> onOpenPage(no) }
     }.height(pagePreviewViewportHeight(gridH))
 }
 
-private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
-    h: Float32, onOpen: () -> Unit): Unit {
+// 详情页缩略图复用阅读器的原始页面磁盘缓存，但以 thumb: 展示 key 解码到 300px 档：
+// 冷缓存只下载一份原图，之后进入阅读器可直接从同一原始缓存解码 2000px 档。
+// 自定义缩略图优先走资产；非图片页没有自定义缩略图时保留媒体类型占位，避免把
+// 视频/音频/html 原文件当图片送去解码。
+func pagePreviewThumbKey(arcid: String, page: PageInfo): String {
+    if (page.thumbAssetId > 0) {
+        return "asset:${page.thumbAssetId}"
+    }
+    if ((page.pageType == "image" || page.pageType == "") && page.id.size > 0) {
+        return "thumb:${arcid}:${page.id}"
+    }
+    ""
+}
+
+func pagePreviewThumbUrl(arcid: String, page: PageInfo): String {
+    if (page.thumbAssetId > 0) {
+        return "/api/assets/${page.thumbAssetId}"
+    }
+    if ((page.pageType == "image" || page.pageType == "") && page.id.size > 0) {
+        return "/api/archives/${arcid}/page?path=${percentEncode(page.id)}"
+    }
+    ""
+}
+
+private func pvThumb(model: AppModel, arcid: String, no: Int64, page: PageInfo, read: Bool, w: Float32, h: Float32,
+    onOpen: () -> Unit): Unit {
     let light = model.isLight()
     // 原型 .pv-thumb 渐变近色（扁平近似），明暗两组。
     let thumbBg = if (light) { Color.rgb(0xD0, 0xD9, 0xE6) } else { Color.rgb(0x1D, 0x26, 0x35) }
@@ -2189,12 +2214,21 @@ private func pvThumb(model: AppModel, no: Int64, pageType: String, read: Bool,
     let badgeFgRead = if (light) { Color.rgba(0x1D, 0x1D, 0x21, 115) } else { Color.rgba(0xF2, 0xF2, 0xF4, 115) }
     let iconFg = if (light) { LANLU_L_TEXT } else { LANLU_TEXT }
     let iconFgRead = if (light) { Color.rgba(0x1D, 0x1D, 0x21, 115) } else { Color.rgba(0xE8, 0xE8, 0xEA, 115) }
-    let icon = pageTypeIcon(pageType)
+    let icon = pageTypeIcon(page.pageType)
+    let thumbKey = pagePreviewThumbKey(arcid, page)
+    let thumbUrl = pagePreviewThumbUrl(arcid, page)
     // ClickArea 是发射类不是 Widget，opacity 要下放到内部 ZStack（传感器全透明不受影响）。
     ClickArea(onClick: onOpen) {
         ZStack {
             HoverSensor("pv:${no}")
             VStack {}.fillWidth().height(h).background(thumbBg, 9.vp)
+            if (thumbKey.size > 0) {
+                // pvGrid 由 LazyGrid 虚拟化：只有当前视口和少量 overscan 行会构建到这里，
+                // 因而 remoteImage 的构建期请求天然是可见项按需加载；普通优先级确保
+                // 阅读器当前页的 highPriority 请求仍可插队。
+                remoteImage(model, thumbKey, thumbUrl, Length(w, LengthUnit.Vp), Length(h, LengthUnit.Vp),
+                    radius: 9.0)
+            }
             VStack {
                 HStack {
                     Label("${no}").fontSize(9.fp).foregroundColor(if (read) { badgeFgRead } else { badgeFg })
