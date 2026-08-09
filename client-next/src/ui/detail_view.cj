@@ -50,12 +50,15 @@ class DangerIconButton <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let hovered = ctx.isHovered(hoverId)
-        let radius: Float32 = if (size >= 34.0) { 9.0 } else { 8.0 }
+        let radius: Float32 = if (size >= 34.0) {
+            9.0
+        } else {
+            8.0
+        }
         if (hovered) {
             ctx.renderer.fillRoundedRect(frame, radius, Color.rgba(0xE0, 0x5D, 0x5D, 30))
         }
-        drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(),
-            Color.rgb(0xE0, 0x5D, 0x5D))
+        drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(), Color.rgb(0xE0, 0x5D, 0x5D))
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -75,10 +78,215 @@ class DangerIconButton <: Widget {
     }
 }
 
+private class DetailMenuAction {
+    let label: String
+    let enabled: Bool
+    let danger: Bool
+    let action: () -> Unit
+    init(label: String, action: () -> Unit, enabled!: Bool = true, danger!: Bool = false) {
+        this.label = label
+        this.action = action
+        this.enabled = enabled
+        this.danger = danger
+    }
+}
+
+// 详情操作卡在管理员态最多有 6 个图标：2xl 直出全部；常规桌面宽度保留
+// 3 个高频动作 + “更多”；真正窄屏才只保留“更多”。
+private let DETAIL_INLINE_ACTIONS_MIN_WIDTH: Int64 = 1536
+private let DETAIL_COMPACT_ACTIONS_MIN_WIDTH: Int64 = 900
+
+// 窄屏“更多”是可交互 overlay 菜单：点击外部/Esc 关闭，方向键与 Enter 可操作；
+// 宽屏不构建它，所有允许动作直接显示在操作卡里。
+private class DetailMoreButton <: Widget {
+    private let owner: String
+    private let hoverId: String
+    private let actions: Array<DetailMenuAction>
+    private let open: State<Bool>
+    private let highlight: State<Int64>
+    private var frame = Rect.zero()
+
+    init(key: String, actions: Array<DetailMenuAction>) {
+        owner = "detail-more:${key}"
+        hoverId = "${owner}:button"
+        this.actions = actions
+        open = rememberState<Bool>("${owner}:open", {=> false})
+        highlight = rememberState<Int64>("${owner}:highlight", {=> 0})
+        emit(this)
+    }
+
+    public func measure(_: UiContext, _: Size): Size {
+        Size(28.0, 28.0)
+    }
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        if (ctx.isHovered(hoverId) || open.value) {
+            ctx.renderer.fillRoundedRect(frame, 8.0, ctx.theme.overlayHover)
+        }
+        drawGhostGlyph(ctx.renderer, GhostGlyph.Ellipsis, frame.centerX(), frame.centerY(), ctx.theme.text)
+        if (open.value && actions.size > 0) {
+            let menu = popupRect(ctx)
+            ctx.setOverlay(
+                Overlay(owner: owner, handleEvent: {c, e => handlePopup(c, e, menu)}, render: {c => drawPopup(c, menu)}))
+        }
+    }
+
+    public func handle(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(hoverId, CursorShape.Interactive)
+                }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    open.value = !open.value
+                    highlight.value = firstEnabled()
+                    return true
+                }
+            case _ => ()
+        }
+        false
+    }
+
+    private func popupRect(ctx: UiContext): Rect {
+        let w: Float32 = 190.0
+        let h = Float32(actions.size) * 36.0 + 10.0
+        let x = max(4.0, min(frame.right() - w, ctx.viewportWidth - w - 4.0))
+        var y = frame.bottom() + 4.0
+        if (y + h > ctx.viewportHeight - 4.0) {
+            y = max(4.0, frame.y - h - 4.0)
+        }
+        Rect(x, y, w, h)
+    }
+
+    private func drawPopup(ctx: UiContext, menu: Rect): Unit {
+        ctx.renderer.fillRoundedRect(menu, 10.0, ctx.theme.panelRaised)
+        ctx.renderer.strokeRoundedRect(menu.inset(0.5), 9.5, Pen(width: 1.0, color: ctx.theme.panelEdge))
+        var y = menu.y + 5.0
+        for (i in 0..actions.size) {
+            let item = actions[i]
+            let row = Rect(menu.x + 5.0, y, menu.w - 10.0, 36.0)
+            if (i == highlight.value && item.enabled) {
+                ctx.renderer.fillRoundedRect(row, 7.0, ctx.theme.overlayHover)
+            }
+            let color = if (!item.enabled) {
+                ctx.theme.mutedText
+            } else if (item.danger) {
+                Color.rgb(0xE0, 0x5D, 0x5D)
+            } else {
+                ctx.theme.text
+            }
+            let th = ctx.renderer.textHeight(pointSize: 12.0)
+            ctx.renderer.text(item.label, row.x + 10.0, row.centerY() - th / 2.0, color, pointSize: 12.0)
+            y += 36.0
+        }
+    }
+
+    private func handlePopup(ctx: UiContext, event: UiEvent, menu: Rect): Bool {
+        match (event) {
+            case UiEvent.MouseMove(x, y) =>
+                if (menu.contains(x, y)) {
+                    let i = Int64((y - menu.y - 5.0) / 36.0)
+                    if (i >= 0 && i < actions.size && actions[i].enabled) {
+                        highlight.value = i
+                    }
+                    ctx.claimHover(owner, CursorShape.Default)
+                }
+                false
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (menu.contains(x, y)) {
+                    run(ctx, Int64((y - menu.y - 5.0) / 36.0))
+                } else {
+                    close(ctx)
+                }
+                true
+            case UiEvent.MouseDown(_, _, _) =>
+                close(ctx);
+                true
+            case UiEvent.KeyDown(Key.Escape, _) =>
+                close(ctx);
+                true
+            case UiEvent.KeyDown(Key.Enter, _) =>
+                run(ctx, highlight.value);
+                true
+            case UiEvent.KeyDown(Key.Down, _) =>
+                moveHighlight(1);
+                true
+            case UiEvent.KeyDown(Key.Up, _) =>
+                moveHighlight(-1);
+                true
+            case _ => false
+        }
+    }
+
+    private func run(ctx: UiContext, i: Int64): Unit {
+        close(ctx)
+        if (i >= 0 && i < actions.size && actions[i].enabled) {
+            actions[i].action()
+        }
+    }
+    private func close(ctx: UiContext): Unit {
+        open.value = false
+        ctx.removeOverlay(owner)
+    }
+    private func firstEnabled(): Int64 {
+        for (i in 0..actions.size) {
+            if (actions[i].enabled) {
+                return i
+            }
+        }
+        0
+    }
+    private func moveHighlight(direction: Int64): Unit {
+        var i = highlight.value + direction
+        while (i >= 0 && i < actions.size) {
+            if (actions[i].enabled) {
+                highlight.value = i
+                return
+            }
+            i += direction
+        }
+    }
+}
+
 public func detailView(model: AppModel): Unit {
     match (model.meta.value) {
-        case None => Panel {Label(model.t("common.loading")).muted()}
+        case None => match (model.page.value) {
+            case Page.Detail(id) => detailLoadPanel(model, model.detailLoadState.value, model.detailLoadError.value,
+                {=> model.retryDetail(id)})
+            case _ => Panel {Label(model.t("common.loading")).muted()}
+        }
         case Some(m) => archiveDetailBody(model, m)
+    }
+}
+
+private func detailLoadPanel(model: AppModel, state: String, message: String, retry: () -> Unit): Unit {
+    Panel {
+        VStack {
+            if (state == "error") {
+                VStack {
+                    Icon(IconName.Process, size: 28.vp).foregroundColor(Color.rgb(0xE0, 0x5D, 0x5D))
+                    Label(if (message.size > 0) {
+                        message
+                    } else {
+                        "加载失败"
+                    }).muted().wrap()
+                    Button("重试", retry).role(ButtonRole.Primary)
+                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+            } else {
+                VStack {
+                    Spinner(22.0, if (model.isLight()) {
+                        LANLU_L_ACCENT
+                    } else {
+                        LANLU_ACCENT
+                    })
+                    Label(model.t("common.loading")).muted()
+                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+            }
+        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(28.vp)
     }
 }
 
@@ -108,6 +316,7 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     hero.badges = badgeList.toArray()
     hero.isNew = m.isnew
     hero.title = m.title
+    hero.clearlogoAssetId = m.clearlogoAssetId
     hero.metaLine = archiveMetaLine(model, m)
     hero.progressPct = pct
     hero.progressText = model.t("detail.readPercent", params: [("percent", "${pct}")])
@@ -125,40 +334,108 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
             model.openReader(m.arcid, start)
     }
 
+    let isSource = sourceNamespace(m.arcid).size > 0
+    let wideActions = model.windowWidth.value >= DETAIL_INLINE_ACTIONS_MIN_WIDTH
+    let compactActions = model.windowWidth.value >= DETAIL_COMPACT_ACTIONS_MIN_WIDTH
+    let download: () -> Unit = {=> beginArchiveDownload(model, m)}
+    let toggleRead: () -> Unit = {=> model.toggleIsNew(m.arcid, !m.isnew)}
+    let moreActions = ArrayList<DetailMenuAction>()
+    let overflowActions = ArrayList<DetailMenuAction>()
+    moreActions.add(DetailMenuAction(model.t("detail.download"), download, enabled: !isSource || model.isAdmin.value))
+    if (!isSource) {
+        moreActions.add(DetailMenuAction(model.t("detail.favorite"), {
+            => model.toggleFavorite(m.arcid, !m.isfavorite)
+        }))
+    }
+    if (!isSource) {
+        let readAction = DetailMenuAction(if (m.isnew) {
+            "标为已读"
+        } else {
+            "标为未读"
+        }, toggleRead)
+        moreActions.add(readAction)
+        moreActions.add(DetailMenuAction("加入合集", {=> addTankOpen.value = true}))
+        let editAction = DetailMenuAction("编辑", {=> model.openArchiveMetadataEditor(m.arcid)})
+        moreActions.add(editAction)
+        overflowActions.add(readAction)
+        overflowActions.add(editAction)
+        if (model.isAdmin.value) {
+            let deleteAction = DetailMenuAction(model.t("detail.delete"), {=> delOpen.value = true}, danger: true)
+            moreActions.add(deleteAction)
+            overflowActions.add(deleteAction)
+        }
+    }
+
     let actionIcons: () -> Unit = {
-        =>
-            // 矢量图标钮（28vp 紧凑尺寸）：编辑走 sdl 图标库 Pencil，下载/加入合集/更多
-            // 为 GhostGlyph 手绘矢量（替代原 ⬇/⊕/编/⋯ 文本兜底）。
-            // 加入合集/删除已接（第二波）；下载/更多动作留 TODO。
-            GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
-                => model.toggleFavorite(m.arcid, !m.isfavorite)
+        => if (wideActions) {
+            if (!isSource) {
+                GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> addTankOpen.value = true}
+                GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
+                    => model.toggleFavorite(m.arcid, !m.isfavorite)
+                }
             }
-            GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0) {
-                => model.todoToast(model.t("detail.download"))
+            if (!isSource || model.isAdmin.value) {
+                GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0, onClick: download)
             }
-            GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> addTankOpen.value = true }
-            GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
-                => model.openArchiveMetadataEditor(m.arcid)
+            if (!isSource) {
+                GhostIconButton(if (m.isnew) {
+                    GhostGlyph.Named(IconName.Check)
+                } else {
+                    GhostGlyph.Named(IconName.Refresh)
+                }, "detail:read-status", size: 28.0, onClick: toggleRead)
+                GhostIconButton(GhostGlyph.Named(IconName.Pencil), "detail:edit", size: 28.0) {
+                    => model.openArchiveMetadataEditor(m.arcid)
+                }
+                if (model.isAdmin.value) {
+                    DangerIconButton(GhostGlyph.Named(IconName.Trash), "detail:delete", size: 28.0) {
+                        => delOpen.value = true
+                    }
+                }
             }
-            DangerIconButton(GhostGlyph.Named(IconName.Trash), "detail:delete", size: 28.0) {
-                => delOpen.value = true
+        } else if (compactActions) {
+            if (!isSource) {
+                GhostIconButton(GhostGlyph.AddTank, "detail:addtank", size: 28.0) {=> addTankOpen.value = true}
+                GhostIconButton(GhostGlyph.Heart, "detail:fav", size: 28.0, active: m.isfavorite) {
+                    => model.toggleFavorite(m.arcid, !m.isfavorite)
+                }
             }
-            GhostIconButton(GhostGlyph.Ellipsis, "detail:more", size: 28.0) {
-                => model.todoToast(model.t("detail.moreActions"))
+            if (!isSource || model.isAdmin.value) {
+                GhostIconButton(GhostGlyph.Download, "detail:download", size: 28.0, onClick: download)
             }
+            if (overflowActions.size > 0) {
+                DetailMoreButton("archive:${m.arcid}:overflow", overflowActions.toArray())
+            }
+        } else {
+            DetailMoreButton("archive:${m.arcid}", moreActions.toArray())
+        }
     }
 
     // 主列：页面预览（到货才显示）→ 所属合集（无数据隐藏）→ 相关推荐（无数据隐藏）
     let mainCards = ArrayList<() -> Unit>()
-    if (model.detailPages.value.size > 0) {
+    if (model.detailPagesState.value != "idle") {
         mainCards.add({
-            => detailCard(model, model.t("detail.pagePreview"), count: model.t("detail.pages",
-                params: [("count", "${model.detailPages.value.size}")]), tools: {
-                => MiniSeg([model.t("detail.thumbnails"), model.t("detail.list"), model.t("detail.tree")],
-                    model.pageViewIndex, key: "pv-seg")
-            }) {
-                => pagePreview(model, m.arcid, model.detailPages.value, m.progress) {
-                    no => model.openReader(m.arcid, no)
+            => detailCard(model, model.t("detail.pagePreview"),
+                count: model.t("detail.pages", params: [("count", "${model.detailPages.value.size}")]), tools: {
+                    => MiniSeg([model.t("detail.thumbnails"), model.t("detail.list"), model.t("detail.tree")],
+                        model.pageViewIndex, key: "pv-seg")
+                }) {
+                => if (model.detailPagesState.value == "loading") {
+                    Label(model.t("common.loading")).fontSize(12.fp).muted().padding(12.vp)
+                } else if (model.detailPagesState.value == "error") {
+                    VStack {
+                        Label(if (model.detailPagesError.value.size > 0) {
+                            model.detailPagesError.value
+                        } else {
+                            "页面预览加载失败"
+                        }).fontSize(12.fp).muted().wrap()
+                        Button("重试", {=> model.retryDetail(m.arcid)}).style(ghostStyleOf(model))
+                    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(12.vp)
+                } else if (model.detailPages.value.size == 0) {
+                    Label("这个档案没有可预览页面").fontSize(12.fp).muted().padding(12.vp)
+                } else {
+                    pagePreview(model, m.arcid, model.detailPages.value, m.progress) {
+                        no => model.openReader(m.arcid, no)
+                    }
                 }
             }
         })
@@ -173,7 +450,8 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
     if (model.relatedItems.value.size > 0) {
         mainCards.add({
             => detailCard(model, model.t("detail.related")) {
-                => cardRow(model, "related", model.relatedItems.value, 132.0, 238.0)
+                => cardRow(model, "related", model.relatedItems.value, 132.0, 238.0,
+                    recommendationScene: "archive_related", seedType: "archive", seedId: m.arcid)
             }
         })
     }
@@ -206,17 +484,21 @@ private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {
         tank: false)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局，同 settings_view 惯例）。
     addToTankDialog(model, addTankOpen, m.arcid)
-    confirmModal(model, delOpen, model.t("detail.deleteArchiveTitle"), model.t("detail.deleteArchiveDetail",
-        params: [("title", m.title)]), model.t("detail.delete"), {
-        => model.deleteArchive(m.arcid)
-    })
+    confirmModal(model, delOpen, model.t("detail.deleteArchiveTitle"),
+        model.t("detail.deleteArchiveDetail", params: [("title", m.title)]), model.t("detail.delete"), {
+            => model.deleteArchive(m.arcid)
+        })
 }
 
 // ---- 合集详情 ----
 
 public func tankView(model: AppModel): Unit {
     match (model.tank.value) {
-        case None => Panel {Label(model.t("common.loading")).muted()}
+        case None => match (model.page.value) {
+            case Page.Tank(id) => detailLoadPanel(model, model.tankLoadState.value, model.tankLoadError.value,
+                {=> model.retryTank(id)})
+            case _ => Panel {Label(model.t("common.loading")).muted()}
+        }
         case Some(t) => tankDetailBody(model, t)
     }
 }
@@ -232,37 +514,59 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     let addOpen = rememberState<Bool>("tank.addOpen:${t.id}", {=> false})
     let removeOpen = rememberState<Bool>("tank.removeOpen:${t.id}", {=> false})
     let batchDelOpen = rememberState<Bool>("tank.batchDelOpen:${t.id}", {=> false})
+    let batchEditOpen = rememberState<Bool>("tank.batchEditOpen:${t.id}", {=> false})
+    let batchAddTags = rememberState<String>("tank.batchAddTags:${t.id}", {=> ""})
+    let batchRemoveTags = rememberState<String>("tank.batchRemoveTags:${t.id}", {=> ""})
+    let batchSummary = rememberState<String>("tank.batchSummary:${t.id}", {=> ""})
     let members = model.tankMembers.value
     let pct = tankReadPct(t)
     let hero = DetailHeroData()
     hero.badges = [model.t("detail.collectionBadge")]
     hero.title = t.name
+    hero.clearlogoAssetId = t.clearlogoAssetId
     hero.metaLine = tankMetaLine(model, t)
     hero.progressPct = pct
     hero.progressText = model.t("detail.readPercent", params: [("percent", "${pct}")])
     hero.summary = oneLineSummary(t.description)
     hero.tags = t.tags
-    hero.primaryLabel = model.t("detail.readFromStart")
-    hero.primaryEnabled = members.size > 0
-    hero.onPrimary = {=> model.startTankReading()}
+    hero.primaryLabel = "添加档案"
+    hero.primaryEnabled = true
+    hero.onPrimary = {=> addOpen.value = true}
+    let wideActions = model.windowWidth.value >= DETAIL_INLINE_ACTIONS_MIN_WIDTH
+    let compactActions = model.windowWidth.value >= DETAIL_COMPACT_ACTIONS_MIN_WIDTH
+    let tankSource = sourceNamespace(t.id).size > 0
+    let moreActions = ArrayList<DetailMenuAction>()
+    if (!tankSource) {
+        moreActions.add(
+            DetailMenuAction(if (t.isfavorite) {
+                model.t("detail.unfavorite")
+            } else {
+                model.t("detail.favorite")
+            }, {=> model.setTankFavoriteOnDetail(t.id, !t.isfavorite)}))
+        moreActions.add(DetailMenuAction("编辑", {=> model.openTankMetadataEditor(t.id)}))
+        if (model.isAdmin.value) {
+            moreActions.add(DetailMenuAction(model.t("detail.delete"), {=> delOpen.value = true}, danger: true))
+        }
+    }
 
     let actionIcons: () -> Unit = {
-        =>
-            // 合集 4+1 图标（用户决定：不与档案同构；设计稿 tank 视图下载/加入合集为 only-archive）。
-            // 收藏/添加档案/删除已接（第二波）；更多动作留 TODO。矢量图标钮（28vp）。
-            GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0, active: t.isfavorite) {
-                => model.setTankFavoriteOnDetail(t.id, !t.isfavorite)
+        => if (wideActions || compactActions) {
+            if (!tankSource) {
+                GhostIconButton(GhostGlyph.Heart, "tank:fav", size: 28.0, active: t.isfavorite) {
+                    => model.setTankFavoriteOnDetail(t.id, !t.isfavorite)
+                }
+                GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {
+                    => model.openTankMetadataEditor(t.id)
+                }
+                if (model.isAdmin.value) {
+                    DangerIconButton(GhostGlyph.Named(IconName.Trash), "tank:delete", size: 28.0) {
+                        => delOpen.value = true
+                    }
+                }
             }
-            GhostIconButton(GhostGlyph.AddTank, "tank:addarchives", size: 28.0) {=> addOpen.value = true }
-            GhostIconButton(GhostGlyph.Named(IconName.Pencil), "tank:edit", size: 28.0) {
-                => model.openTankMetadataEditor(t.id)
-            }
-            DangerIconButton(GhostGlyph.Named(IconName.Trash), "tank:delete", size: 28.0) {
-                => delOpen.value = true
-            }
-            GhostIconButton(GhostGlyph.Ellipsis, "tank:more", size: 28.0) {
-                => model.todoToast(model.t("detail.moreActions"))
-            }
+        } else {
+            DetailMoreButton("tank:${t.id}", moreActions.toArray())
+        }
     }
 
     // 成员筛选 memo（#9）：仅在 (筛选词, tankMembers 代次) 变化时重算全量小写化匹配，
@@ -278,35 +582,61 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
             model.enterSelection(arcid)
     }
     let mainCards = ArrayList<() -> Unit>()
-    if (members.size > 0) {
-        mainCards.add({
-            => detailCard(model, model.t("detail.includedArchives"), count: "${members.size}", tools: {
-                => HStack {
-                    TextField(model.tankFilter, key: "tank-filter").width(130.vp)
-                    MiniSeg([model.t("detail.grid"), model.t("detail.list")], model.tankMemberViewIndex,
-                        key: "mb-seg")
-                }.spacing(8.vp).hug()
-            }) {
-                =>
-                    let shown = filteredMembers(model, filterMemo)
-                    if (shown.size == 0) {
-                        Label(model.t("detail.noMatch")).fontSize(12.fp).muted()
-                    } else if (model.tankMemberViewIndex.value == 1) {
-                        memberListContent(model, shown, onEnterMemberSelection)
+    mainCards.add({
+        => detailCard(model, model.t("detail.includedArchives"), count: "${members.size}", tools: {
+            => HStack {
+                TextField(model.tankFilter, key: "tank-filter").width(130.vp)
+                MiniSeg([model.t("detail.grid"), model.t("detail.list")], model.tankMemberViewIndex, key: "mb-seg")
+            }.spacing(8.vp).hug()
+        }) {
+            => if (model.tankMembersState.value == "loading") {
+                HStack {
+                    Spinner(16.0, if (model.isLight()) {
+                        LANLU_L_ACCENT
                     } else {
-                        memberGridContent(model, shown, onEnterMemberSelection)
-                    }
-                    // 选择模式批量栏（成员区底部）：已选计数 + 收藏/取消收藏/移除/删除/退出。
-                    if (model.selectionMode.value) {
-                        tankMemberBatchBar(model, removeOpen, batchDelOpen)
-                    }
+                        LANLU_ACCENT
+                    })
+                    Label(model.t("common.loading")).muted()
+                }.spacing(8.vp).hug().padding(12.vp)
+            } else if (model.tankMembersState.value == "error") {
+                VStack {
+                    Label(if (model.tankMembersError.value.size > 0) {
+                        model.tankMembersError.value
+                    } else {
+                        "成员加载失败"
+                    }).muted().wrap()
+                    Button("重试", {=> model.retryTank(t.id)}).style(ghostStyleOf(model))
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(12.vp)
+            } else if (members.size == 0) {
+                VStack {
+                    Label("这个合集还没有档案").fontSize(13.fp)
+                    Label("添加档案后即可阅读、排序和执行批量操作。 ").fontSize(11.fp).muted()
+                    Button("添加档案", {=> addOpen.value = true}).role(ButtonRole.Primary)
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(12.vp)
+            } else {
+                let shown = filteredMembers(model, filterMemo)
+                if (shown.size == 0) {
+                    Label(model.t("detail.noMatch")).fontSize(12.fp).muted()
+                } else if (model.tankMemberViewIndex.value == 1) {
+                    memberListContent(model, shown, onEnterMemberSelection, {
+                        id => model.removeTankMembers(t.id, oneArcid(id))
+                    })
+                } else {
+                    memberGridContent(model, shown, onEnterMemberSelection, {
+                        id => model.removeTankMembers(t.id, oneArcid(id))
+                    })
+                }
+                if (model.selectionMode.value) {
+                    tankMemberBatchBar(model, members, removeOpen, batchDelOpen, batchEditOpen)
+                }
             }
-        })
-    }
+        }
+    })
     if (model.tankRelated.value.size > 0) {
         mainCards.add({
             => detailCard(model, model.t("detail.related")) {
-                => tankCardRow(model, model.tankRelated.value, "tank-related")
+                => tankCardRow(model, model.tankRelated.value, "tank-related", recommendationScene: "tankoubon_related",
+                    seedType: "tankoubon", seedId: t.id)
             }
         })
     }
@@ -314,8 +644,10 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     // 侧栏：进度大卡（大数字 + 已读完 N 个）→ 基础信息 → 标签分组
     let done = countFinishedMembers(members)
     let sideCards = ArrayList<() -> Unit>()
-    sideCards.add({=> progressCard(model, "${pct}%", model.t("detail.collectionProgress",
-        params: [("count", "${t.archiveCount}"), ("done", "${done}")]), pct)})
+    sideCards.add({
+        => progressCard(model, "${pct}%",
+            model.t("detail.collectionProgress", params: [("count", "${t.archiveCount}"), ("done", "${done}")]), pct)
+    })
     sideCards.add({
         => detailCard(model, model.t("detail.basicInfo")) {=> infoList(model, tankInfoRows(model, t))}
     })
@@ -334,23 +666,36 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
         tank: true)
     // 弹窗与页面同根兄弟挂载（Modal 零尺寸，不占布局）。
     tankAddArchivesDialog(model, addOpen, t.id)
-    confirmModal(model, delOpen, model.t("detail.deleteCollectionTitle"), model.t("detail.deleteCollectionDetail",
-        params: [("title", t.name)]), model.t("detail.delete"), {
-        => model.deleteCurrentTank(t.id)
-    })
-    confirmModal(model, removeOpen, model.t("detail.removeTitle"), model.t("detail.removeDetail",
-        params: [("count", "${model.selectedCount()}")]), model.t("detail.remove"), {
-        =>
-            model.removeTankMembers(t.id, selectedArcidList(model))
-            model.exitSelection()
-            detailSelectionOwner = ""
-    })
-    confirmModal(model, batchDelOpen, model.t("detail.deleteSelectedTitle"), model.t("detail.deleteSelectedDetail",
-        params: [("count", "${model.selectedCount()}")]), model.t("detail.delete"), {
-        =>
-            model.batchDelete(selectedArcidList(model), ArrayList<String>())
-            detailSelectionOwner = ""
-    })
+    confirmModal(model, delOpen, model.t("detail.deleteCollectionTitle"),
+        model.t("detail.deleteCollectionDetail", params: [("title", t.name)]), model.t("detail.delete"), {
+            => model.deleteCurrentTank(t.id)
+        })
+    confirmModal(
+        model,
+        removeOpen,
+        model.t("detail.removeTitle"),
+        model.t("detail.removeDetail", params: [("count", "${model.selectedCount()}")]),
+        model.t("detail.remove"),
+        {
+            =>
+                model.removeTankMembers(t.id, selectedArcidList(model))
+                model.exitSelection()
+                detailSelectionOwner = ""
+        }
+    )
+    confirmModal(
+        model,
+        batchDelOpen,
+        model.t("detail.deleteSelectedTitle"),
+        model.t("detail.deleteSelectedDetail", params: [("count", "${model.selectedCount()}")]),
+        model.t("detail.delete"),
+        {
+            =>
+                model.batchDelete(selectedArcidList(model), ArrayList<String>())
+                detailSelectionOwner = ""
+        }
+    )
+    batchMemberEditModal(model, batchEditOpen, batchAddTags, batchRemoveTags, batchSummary)
 }
 
 // ---- 合集成员多选批量栏 ----
@@ -364,27 +709,117 @@ private func selectedArcidList(model: AppModel): ArrayList<String> {
     ids
 }
 
+private func oneArcid(id: String): ArrayList<String> {
+    let out = ArrayList<String>()
+    out.add(id)
+    out
+}
+
 // 选择模式批量操作栏：已选计数 + 收藏/取消收藏/从合集移除/删除/退出。
 // 移除/删除为 destructive 动作，先落确认框（open 状态由 tankDetailBody 持有）。
-private func tankMemberBatchBar(model: AppModel, removeOpen: State<Bool>,
-    batchDelOpen: State<Bool>): Unit {
-    let elev = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+private func tankMemberBatchBar(model: AppModel, members: ArrayList<SearchItem>, removeOpen: State<Bool>,
+    batchDelOpen: State<Bool>, batchEditOpen: State<Bool>): Unit {
+    let elev = if (model.isLight()) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_PANEL
+    }
+    let selected = selectedArcidList(model)
+    let allFavorite = selectedAll(model, members, {it => it.isfavorite})
+    let allNew = selectedAll(model, members, {it => it.isnew})
     HStack {
         Label(model.t("detail.selected", params: [("count", "${model.selectedCount()}")])).fontSize(12.fp)
         Spacer()
-        Button(model.t("detail.favorite"), {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), true) })
-            .style(ghostStyleOf(model))
-        Button(model.t("detail.unfavorite"), {=> model.batchFavorite(selectedArcidList(model), ArrayList<String>(), false) })
-            .style(ghostStyleOf(model))
-        Button(model.t("detail.removeFromCollection"), {=> removeOpen.value = true }).style(ghostStyleOf(model))
-        Button(model.t("detail.delete"), {=> batchDelOpen.value = true }).role(ButtonRole.Danger)
-        Button(model.t("detail.exit"), {
-            =>
-                model.exitSelection()
-                detailSelectionOwner = ""
+        Button(if (allFavorite) {
+            model.t("detail.unfavorite")
+        } else {
+            model.t("detail.favorite")
+        }, {
+            => model.batchFavorite(selected, ArrayList<String>(), !allFavorite)
         }).style(ghostStyleOf(model))
-    }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
-        .padding(10.vp).background(elev, 10.vp)
+        Button(if (allNew) {
+            "标为已读"
+        } else {
+            "标为未读"
+        }, {
+            => model.batchSetIsNew(selected, !allNew)
+        }).style(ghostStyleOf(model))
+        Button(
+            "下载",
+            {
+                =>
+                    let request = FileDialogs.openFolder()
+                    model.beginBatchArchiveDownloadSelection(request, selected)
+            }
+        ).style(ghostStyleOf(model))
+        Button("批量编辑", {=> batchEditOpen.value = true}).style(ghostStyleOf(model))
+        Button(model.t("detail.removeFromCollection"), {=> removeOpen.value = true}).style(ghostStyleOf(model))
+        if (model.isAdmin.value) {
+            Button(model.t("detail.delete"), {=> batchDelOpen.value = true}).role(ButtonRole.Danger)
+        }
+        Button(
+            model.t("detail.exit"),
+            {
+                =>
+                    model.exitSelection()
+                    detailSelectionOwner = ""
+            }
+        ).style(ghostStyleOf(model))
+    }
+        .spacing(8.vp)
+        .crossAxisAlignment(CrossAxisAlignment.Center)
+        .hug()
+        .fillWidth()
+        .padding(10.vp)
+        .background(elev, 10.vp)
+}
+
+private func selectedAll(model: AppModel, members: ArrayList<SearchItem>, predicate: (SearchItem) -> Bool): Bool {
+    if (model.selectedCount() == 0) {
+        return false
+    }
+    var found: Int64 = 0
+    for (item in members) {
+        if (model.isSelected(item.arcid)) {
+            found += 1
+            if (!predicate(item)) {
+                return false
+            }
+        }
+    }
+    found == model.selectedCount()
+}
+
+private func batchMemberEditModal(model: AppModel, open: State<Bool>, addTags: State<String>, removeTags: State<String>,
+    summary: State<String>): Unit {
+    Modal(open, onDismiss: {=> open.value = false}, body: {
+        => VStack {
+            Label("批量编辑 ${model.selectedCount()} 个档案").fontSize(15.fp)
+            Label("只应用填写的增量；标签使用逗号分隔。 ").fontSize(11.fp).muted()
+            Label("添加标签").fontSize(11.fp).muted()
+            TextField(addTags, key: "tank.batch-edit.add-tags").fillWidth()
+            Label("移除标签").fontSize(11.fp).muted()
+            TextField(removeTags, key: "tank.batch-edit.remove-tags").fillWidth()
+            Label("追加简介").fontSize(11.fp).muted()
+            TextField(summary, key: "tank.batch-edit.summary").fillWidth()
+            HStack {
+                Spacer()
+                Button("取消", {=> open.value = false}).style(ghostStyleOf(model))
+                Button(
+                    "应用",
+                    {
+                        =>
+                            model.batchEditTankMembers(selectedArcidList(model), addTags.value, removeTags.value,
+                                summary.value)
+                            open.value = false
+                            addTags.value = ""
+                            removeTags.value = ""
+                            summary.value = ""
+                    }
+                ).role(ButtonRole.Primary)
+            }.spacing(8.vp).hug().fillWidth()
+        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(430.vp)
+    })
 }
 
 // 成员筛选 memo 缓存（rememberState 跨帧保留）：结果仅在筛选词或成员代次变化时重算。
@@ -411,7 +846,7 @@ private func filteredMembers(model: AppModel, memo: MemberFilterMemo): Array<Sea
         let lf = filter.toAsciiLower()
         let list = ArrayList<SearchItem>()
         for (it in members) {
-            if (it.title.toAsciiLower().contains(lf)) {
+            if (it.title.toAsciiLower().contains(lf) || it.tagsCsv.toAsciiLower().contains(lf)) {
                 list.add(it)
             }
         }
@@ -468,6 +903,20 @@ private func readButtonLabel(model: AppModel, m: ArchiveMeta): String {
     model.t("detail.continueReading", params: [("page", "${m.progress + 1}")])
 }
 
+private func beginArchiveDownload(model: AppModel, m: ArchiveMeta): Unit {
+    if (sourceNamespace(m.arcid).size > 0) {
+        model.startSourceArchiveDownload(m.arcid)
+        return
+    }
+    let filename = if (m.filename.trimAscii().size > 0) {
+        m.filename.trimAscii()
+    } else {
+        m.arcid
+    }
+    let request = FileDialogs.saveFile(options: FileDialogOptions(defaultLocation: Some(filename)))
+    model.beginArchiveDownloadSelection(request, m.arcid)
+}
+
 // 档案 meta 行（原型：48 页 · 96.2 MB · 发布于 … · 更新于 …）。
 private func archiveMetaLine(model: AppModel, m: ArchiveMeta): String {
     var s = ""
@@ -488,8 +937,7 @@ private func archiveMetaLine(model: AppModel, m: ArchiveMeta): String {
 
 // 合集 meta 行（原型：12 个档案 · 共 486 页 · 更新于 …）。
 private func tankMetaLine(model: AppModel, t: TankoubonInfo): String {
-    var s = model.t("detail.collectionMeta", params: [("archives", "${t.archiveCount}"),
-        ("pages", "${t.totalPages}")])
+    var s = model.t("detail.collectionMeta", params: [("archives", "${t.archiveCount}"), ("pages", "${t.totalPages}")])
     if (t.updatedAt.size > 0) {
         s = joinMeta(s, model.t("detail.updatedAt", params: [("date", tankDate(t.updatedAt))]))
     }
@@ -505,8 +953,7 @@ private func joinMeta(a: String, b: String): String {
 
 // 档案基础信息行（原型 info-list：文件名/大小/页数/路径/来源/发布日期/添加时间/最近阅读；
 // 「更新时间」「状态」「文件类型」为保留的额外行，置尾）。路径/来源无数据即隐藏。
-private func archiveInfoRows(model: AppModel, m: ArchiveMeta,
-    pages: ArrayList<PageInfo>): Array<(String, String)> {
+private func archiveInfoRows(model: AppModel, m: ArchiveMeta, pages: ArrayList<PageInfo>): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
     if (m.filename.size > 0) {
         rows.add((model.t("detail.filename"), m.filename))

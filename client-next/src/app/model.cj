@@ -1,7 +1,7 @@
 package lanlu_client_next.app
 
-import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache, clearPixelImages, 
-    onPixelImageEvicted, stageNativePixelImage}
+import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache,
+    clearPixelImages, onPixelImageEvicted, stageNativePixelImage}
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
@@ -122,6 +122,17 @@ private func metadataTagsJson(raw: String): String {
     }
     out.append("]")
     out.toString()
+}
+
+private func metadataTagList(raw: String): ArrayList<String> {
+    let out = ArrayList<String>()
+    for (part in raw.split(",")) {
+        let tag = part.trimAscii()
+        if (tag.size > 0 && !out.contains(tag)) {
+            out.add(tag)
+        }
+    }
+    out
 }
 
 private func metadataRootBody(title: String, description: String, tags: String, releaseAt: String): String {
@@ -323,6 +334,16 @@ public class AppModel {
     public let pageViewIndex = State<Int64>(0)
     public let parentTanks = State<ArrayList<TankoubonInfo>>(ArrayList<TankoubonInfo>())
     public let relatedItems = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    // 详情主数据与辅助区各自有显式状态，失败不再永久显示 loading，空结果也可区分。
+    public let detailLoadState = State<String>("idle")
+    public let detailLoadError = State<String>("")
+    public let detailPagesState = State<String>("idle")
+    public let detailPagesError = State<String>("")
+    public let detailTagTranslations = State<HashMap<String, String>>(HashMap<String, String>())
+    private var recommendedArchiveOriginScene = ""
+    private var recommendedArchiveOriginSeedType = ""
+    private var recommendedArchiveOriginSeedId = ""
+    private var recommendedArchiveOriginId = ""
     public let detailWidth = State<Float32>(0.0)
     // 窗口逻辑宽（vp）：main.cj onTick 自 window.width 同步（变化才写），驱动详情标题字号等响应式布局。
     public let windowWidth = State<Int64>(0)
@@ -333,6 +354,16 @@ public class AppModel {
     public let tankMemberViewIndex = State<Int64>(0)
     public let tankFilter = State<String>("")
     public let tankRelated = State<ArrayList<TankoubonInfo>>(ArrayList<TankoubonInfo>())
+    public let tankLoadState = State<String>("idle")
+    public let tankLoadError = State<String>("")
+    public let tankMembersState = State<String>("idle")
+    public let tankMembersError = State<String>("")
+
+    // Archive 本地下载：系统保存/目录对话框异步完成后，由 pump 在 UI 线程合并状态，
+    // 实际网络与文件 IO 交给 worker，避免阻塞渲染线程。
+    public let archiveDownloadDialog = State<?FileDialogRequest>(None<FileDialogRequest>)
+    private var pendingDownloadArcids = ArrayList<String>()
+    private var pendingDownloadBatch = false
 
     // 多级元数据编辑器（0=合集、1=档案、2=页）。根编辑实体及下钻数据都留在
     // AppModel，避免声明式视图逐帧重建时丢失草稿；网络结果仍只在 UI 线程落 State。
@@ -341,6 +372,7 @@ public class AppModel {
     public let metadataEditorSaving = State<Bool>(false)
     public let metadataEditorDirty = State<Bool>(false)
     public let metadataPluginPreview = State<Bool>(false)
+    public let metadataPluginRunning = State<Bool>(false)
     public let metadataTitle = State<String>("")
     public let metadataDescription = State<String>("")
     public let metadataTags = State<String>("")
@@ -520,19 +552,15 @@ public class AppModel {
                 case Some(seed) =>
                     // 快照/测试种子页：离线直灌，不走网络（api 可为 None）。
                     htmlPage.htmlLoaded(key, utf8BytesOf(seed))
-                case None =>
-                    match (api) {
-                        case Some(a) =>
-                            let _ = worker.submit("html:${key}", {=> (key, a.pageBytes(arc, path))})
-                        case None =>
-                            htmlPage.htmlFailed(key, "未连接服务器")
-                    }
+                case None => match (api) {
+                    case Some(a) => let _ = worker.submit("html:${key}", {=> (key, a.pageBytes(arc, path))})
+                    case None => htmlPage.htmlFailed(key, "未连接服务器")
+                }
             }
         }
         htmlPage.fetchResource = {
             key, arc, url, path => match (api) {
-                case Some(a) =>
-                    let _ = worker.submit("htmlres:${key}:${url}", {=> (key, url, a.pageBytes(arc, path))})
+                case Some(a) => let _ = worker.submit("htmlres:${key}:${url}", {=> (key, url, a.pageBytes(arc, path))})
                 case None =>
                     // 离线（快照种子）：即时判败，避免在途计数永不自减。
                     htmlPage.resourceFailed(key, url)
@@ -574,6 +602,7 @@ public class AppModel {
         metadataEditorLevel.value = 1
         loadArchiveEditorDraft()
         metadataEditorOpen.value = true
+        loadMetadataEditorPlugins()
     }
 
     public func openTankMetadataEditor(tankid: String): Unit {
@@ -584,6 +613,7 @@ public class AppModel {
         metadataEditorLevel.value = 0
         loadTankEditorDraft()
         metadataEditorOpen.value = true
+        loadMetadataEditorPlugins()
     }
 
     public func editTankMember(item: SearchItem, volumeNo: Int64): Unit {
@@ -656,10 +686,40 @@ public class AppModel {
         metadataPluginPreview.value = false
     }
 
-    public func previewMetadataPlugin(): Unit {
-        metadataPluginPreview.value = true
-        metadataEditorDirty.value = true
-        toaster.show("插件预览已填充到当前草稿", kind: ToastKind.Info)
+    private func loadMetadataEditorPlugins(): Unit {
+        if (plugins.value.size > 0 || !isAdmin.value) {
+            return
+        }
+        let a = api ?? return
+        let _ = worker.submit("set.plugins", {=> a.plugins()})
+    }
+
+    public func runMetadataEditorPlugin(namespace: String, param: String): Unit {
+        if (metadataPluginRunning.value) {
+            return
+        }
+        let targetType = if (metadataEditorLevel.value == 0) {
+            "tankoubon"
+        } else {
+            "archive"
+        }
+        let targetId = if (targetType == "tankoubon") {
+            metadataEditorTankId
+        } else {
+            metadataEditorArchiveId
+        }
+        if (namespace.size == 0 || targetId.size == 0) {
+            showError("请选择可用的元数据插件")
+            return
+        }
+        let a = match (api) {
+            case Some(x) => x
+            case None => return
+        }
+        metadataPluginRunning.value = true
+        let _ = worker.submit("metadata-plugin:${targetType}:${targetId}", {
+            => a.runMetadataPlugin(targetType, targetId, namespace, param)
+        })
     }
 
     public func saveMetadataEditor(): Unit {
@@ -835,10 +895,8 @@ public class AppModel {
     }
 
     private func resumeProfile(p: ServerProfile): Unit {
-        let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl),
-            serverHash: fnv1a64Hex(p.baseUrl),
+        let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
             onOfflineFallback: {=> offlineNotice.mark()})
         a.setToken(p.token)
         api = a
@@ -862,10 +920,8 @@ public class AppModel {
             case Some(x) => x
             case None => return
         }
-        let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl),
-            serverHash: fnv1a64Hex(p.baseUrl),
+        let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
             onOfflineFallback: {=> offlineNotice.mark()})
         loading.value = true
         loginError.value = ""
@@ -874,20 +930,20 @@ public class AppModel {
             "login",
             {
                 =>
-                    // a 的所有权只随成功结果（含 TOTP 挑战）转交给 dispatch；
-                    // 任务抛错时 a 无人接管，必须就地 close，否则每次失败登录泄漏一个连接池（#31）。
+                // a 的所有权只随成功结果（含 TOTP 挑战）转交给 dispatch；
+                // 任务抛错时 a 无人接管，必须就地 close，否则每次失败登录泄漏一个连接池（#31）。
+                try {
+                    let _ = a.info() // 先探测：非 lanlu 服务/地址错误会在这里抛错
                     try {
-                        let _ = a.info() // 先探测：非 lanlu 服务/地址错误会在这里抛错
-                        try {
-                            let d = a.login(user, pass)
-                            return (a, d, sid, "")
-                        } catch (e: TotpRequired) {
-                            return (a, LoginData(), sid, e.challengeId)
-                        }
-                    } catch (e: Exception) {
-                        a.close()
-                        throw e
+                        let d = a.login(user, pass)
+                        return (a, d, sid, "")
+                    } catch (e: TotpRequired) {
+                        return (a, LoginData(), sid, e.challengeId)
                     }
+                } catch (e: Exception) {
+                    a.close()
+                    throw e
+                }
             }
         )
         // 同名任务在途（快速重复登录）时 submit 去重返回 false：闭包不会执行，a 就地 close（#31）。
@@ -905,10 +961,8 @@ public class AppModel {
         if (cid.size == 0) {
             return
         }
-        let a = LanluApi(p.baseUrl,
-            connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl),
-            serverHash: fnv1a64Hex(p.baseUrl),
+        let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
+            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
             onOfflineFallback: {=> offlineNotice.mark()})
         loading.value = true
         loginError.value = ""
@@ -917,14 +971,14 @@ public class AppModel {
             "login-totp",
             {
                 =>
-                    // 同 login：a 只随成功结果转交 dispatch，抛错路径就地 close（#31）。
-                    try {
-                        let d = a.verifyTotpLogin(cid, code, recoveryCode)
-                        return (a, d, sid, "")
-                    } catch (e: Exception) {
-                        a.close()
-                        throw e
-                    }
+                // 同 login：a 只随成功结果转交 dispatch，抛错路径就地 close（#31）。
+                try {
+                    let d = a.verifyTotpLogin(cid, code, recoveryCode)
+                    return (a, d, sid, "")
+                } catch (e: Exception) {
+                    a.close()
+                    throw e
+                }
             }
         )
         // 同名任务在途时 submit 去重返回 false：闭包不会执行，a 就地 close（#31）。
@@ -989,8 +1043,7 @@ public class AppModel {
             "testconn",
             {
                 =>
-                    let testApi = LanluApi(norm,
-                        connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
+                    let testApi = LanluApi(norm, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec))
                     try {
                         return testApi.info()
                     } finally {
@@ -1077,7 +1130,9 @@ public class AppModel {
         clearAutocomplete()
         navigate(Page.Shelf)
         if (shelfTab.value == 0) {
-            if (!shelfFavoritesLoaded) { loadShelfFavorites() }
+            if (!shelfFavoritesLoaded) {
+                loadShelfFavorites()
+            }
         } else if (!shelfHistoryLoaded) {
             loadShelfHistory()
         }
@@ -1095,40 +1150,64 @@ public class AppModel {
         exitSelection()
         match (page.value) {
             case Page.Detail(_) | Page.Tank(_) =>
-                if (detailReturnToShelf) { openShelf() } else { openHome() }
+                if (detailReturnToShelf) {
+                    openShelf()
+                } else {
+                    openHome()
+                }
             case _ => openHome()
         }
     }
 
     public func selectShelfTab(index: Int64): Unit {
-        let next = if (index == 1) { 1 } else { 0 }
-        if (shelfTab.value == next) { return }
+        let next = if (index == 1) {
+            1
+        } else {
+            0
+        }
+        if (shelfTab.value == next) {
+            return
+        }
         shelfTab.value = next
         if (next == 0) {
-            if (!shelfFavoritesLoaded) { loadShelfFavorites() }
+            if (!shelfFavoritesLoaded) {
+                loadShelfFavorites()
+            }
         } else if (!shelfHistoryLoaded) {
             loadShelfHistory()
         }
     }
 
     public func toggleShelfFilter(index: Int64): Unit {
-        shelfFilter.value = if (shelfFilter.value == index) { 0 } else { index }
+        shelfFilter.value = if (shelfFilter.value == index) {
+            0
+        } else {
+            index
+        }
     }
 
     public func setShelfSort(index: Int64): Unit {
         if (shelfTab.value == 0) {
-            if (shelfFavoriteSortIndex.value == index) { return }
+            if (shelfFavoriteSortIndex.value == index) {
+                return
+            }
             shelfFavoriteSortIndex.value = index
             loadShelfFavorites()
         } else {
-            if (shelfHistorySortIndex.value == index) { return }
+            if (shelfHistorySortIndex.value == index) {
+                return
+            }
             shelfHistorySortIndex.value = index
             loadShelfHistory()
         }
     }
 
     public func refreshShelf(): Unit {
-        if (shelfTab.value == 0) { loadShelfFavorites() } else { loadShelfHistory() }
+        if (shelfTab.value == 0) {
+            loadShelfFavorites()
+        } else {
+            loadShelfHistory()
+        }
     }
 
     private func loadShelfFavorites(): Unit {
@@ -1139,9 +1218,15 @@ public class AppModel {
         q.pageSize = 1000
         q.lang = language.value
         match (shelfFavoriteSortIndex.value) {
-            case 1 => q.sortby = "title"; q.order = "asc"
-            case 2 => q.sortby = "pagecount"; q.order = "desc"
-            case _ => q.sortby = "created_at"; q.order = "desc"
+            case 1 =>
+                q.sortby = "title"
+                q.order = "asc"
+            case 2 =>
+                q.sortby = "pagecount"
+                q.order = "desc"
+            case _ =>
+                q.sortby = "created_at"
+                q.order = "desc"
         }
         shelfFavoritesLoading.value = true
         shelfFavoritesFailed.value = false
@@ -1154,9 +1239,15 @@ public class AppModel {
         q.pageSize = 1000
         q.lang = language.value
         match (shelfHistorySortIndex.value) {
-            case 1 => q.sortby = "title"; q.order = "asc"
-            case 2 => q.sortby = "pagecount"; q.order = "desc"
-            case _ => q.sortby = "lastread"; q.order = "desc"
+            case 1 =>
+                q.sortby = "title"
+                q.order = "asc"
+            case 2 =>
+                q.sortby = "pagecount"
+                q.order = "desc"
+            case _ =>
+                q.sortby = "lastread"
+                q.order = "desc"
         }
         shelfHistoryLoading.value = true
         shelfHistoryFailed.value = false
@@ -1663,8 +1754,7 @@ public class AppModel {
             {
                 =>
                     let result = a.downloadFromUrl(url, categoryId, {
-                        stage, progress, message => mailbox.post("download.progress",
-                            Some((id, stage, progress, message)))
+                        stage, progress, message => mailbox.post("download.progress", Some((id, stage, progress, message)))
                     })
                     return (id, result)
             }
@@ -1944,22 +2034,24 @@ public class AppModel {
         if (entries.size == 0) {
             return
         }
-        let _ = worker.submit("offline-flush", {
-            =>
-                var anyOk = false
-                for (e in entries) {
-                    match (api) {
-                        case Some(a) =>
-                            try {
+        let _ = worker.submit(
+            "offline-flush",
+            {
+                =>
+                    var anyOk = false
+                    for (e in entries) {
+                        match (api) {
+                            case Some(a) => try {
                                 a.setProgress(e[0], e[1])
                                 c.deleteProgress(hash, e[0])
                                 anyOk = true
                             } catch (_: Exception) {}
-                        case None => ()
+                            case None => ()
+                        }
                     }
-                }
-                return anyOk
-        })
+                    return anyOk
+            }
+        )
     }
 
     // 磁盘缓存周期 sweep（#10）：启动一次之外，每小时兜底或累计新写入超阈值（512MB）时补扫。
@@ -2103,8 +2195,8 @@ public class AppModel {
         }
         // 防御：page:/thumb: 畸形 key（pagePath 缺分隔符）直接置 error 返回，
         // 避免切出空 arcid 发出必然 404 的请求（key 由内部生成，正常不会触发）。
-        if ((key.startsWith("page:") && key.removePrefix("page:").indexOf(":").isNone()) ||
-            (key.startsWith("thumb:") && key.removePrefix("thumb:").indexOf(":").isNone())) {
+        if ((key.startsWith("page:") && key.removePrefix("page:").indexOf(":").isNone()) || (key.startsWith("thumb:") &&
+            key.removePrefix("thumb:").indexOf(":").isNone())) {
             imageState(key).value = "error"
             return
         }
@@ -2132,30 +2224,33 @@ public class AppModel {
                     // 下载完成 → 提交解码阶段（解码池；队列满则阻塞下载线程产生背压）。
                     // 解码阶段使用 "img:" 命名空间（与下载阶段 "imgdl:" 分开），inflight
                     // 不冲突；UI dispatch 按 "img:" 正常处理解码结果。
-                    let ok = worker.submitDecode("img:${key}", {
-                        =>
-                            // 协作式取消点：下载完成但图片已不可见（状态被复位/取消）时
-                            // 保留磁盘缓存并跳过解码（省 CPU；重新可见时再解码）。
-                            if (!isImageWanted(key)) {
-                                return (key, Option<NativeDecodedImage>.None)
-                            }
-                            // vips 按展示 key 档位缩小解码原生 RGBA；纹理创建留给 UI 线程
-                            // 首帧惰性完成。解码失败时 decodeCachedOrEvict 会先剔除坏缓存
-                            //（原始 key 条目）再抛出，重试可重新拉取。解码期间标记引用，
-                            // sweep 不得删除正在被 vips 打开的文件（P2.9）。
-                            c.markReferenced(rawKey)
-                            let d = try {
-                                decodeCachedOrEvict(c, rawKey, path, maxDimension: decodeMaxDimension(key))
-                            } finally {
-                                c.clearReferenced(rawKey)
-                            }
-                            // 封面圆角在工作线程内完成（原生内存直改 alpha，避免 UI dispatch
-                            // 遍历整张封面像素）；阅读页（page:/thumb:）不处理。
-                            if (key.startsWith("asset:")) {
-                                roundCoverAlphaNative(d)
-                            }
-                            return (key, Some(d))
-                    })
+                    let ok = worker.submitDecode(
+                        "img:${key}",
+                        {
+                            =>
+                                // 协作式取消点：下载完成但图片已不可见（状态被复位/取消）时
+                                // 保留磁盘缓存并跳过解码（省 CPU；重新可见时再解码）。
+                                if (!isImageWanted(key)) {
+                                    return (key, Option<NativeDecodedImage>.None)
+                                }
+                                // vips 按展示 key 档位缩小解码原生 RGBA；纹理创建留给 UI 线程
+                                // 首帧惰性完成。解码失败时 decodeCachedOrEvict 会先剔除坏缓存
+                                //（原始 key 条目）再抛出，重试可重新拉取。解码期间标记引用，
+                                // sweep 不得删除正在被 vips 打开的文件（P2.9）。
+                                c.markReferenced(rawKey)
+                                let d = try {
+                                    decodeCachedOrEvict(c, rawKey, path, maxDimension: decodeMaxDimension(key))
+                                } finally {
+                                    c.clearReferenced(rawKey)
+                                }
+                                // 封面圆角在工作线程内完成（原生内存直改 alpha，避免 UI dispatch
+                                // 遍历整张封面像素）；阅读页（page:/thumb:）不处理。
+                                if (key.startsWith("asset:")) {
+                                    roundCoverAlphaNative(d)
+                                }
+                                return (key, Some(d))
+                        }
+                    )
                     if (!ok) {
                         throw Exception("解码任务提交失败: ${key}")
                     }
@@ -2193,6 +2288,10 @@ public class AppModel {
     // ---- 详情/阅读（Task 9/10 的视图调用）----
 
     public func openDetail(arcid: String): Unit {
+        recommendedArchiveOriginScene = ""
+        recommendedArchiveOriginSeedType = ""
+        recommendedArchiveOriginSeedId = ""
+        recommendedArchiveOriginId = ""
         match (page.value) {
             case Page.Shelf => detailReturnToShelf = true
             // 详情层级内继续跳转或阅读器返回时保留最初来源。
@@ -2208,6 +2307,11 @@ public class AppModel {
         detailPages.value = ArrayList<PageInfo>()
         parentTanks.value = ArrayList<TankoubonInfo>()
         relatedItems.value = ArrayList<SearchItem>()
+        detailTagTranslations.value = HashMap<String, String>()
+        detailLoadState.value = "loading"
+        detailLoadError.value = ""
+        detailPagesState.value = "loading"
+        detailPagesError.value = ""
         navigate(Page.Detail(arcid))
         let a = api ?? return
         let lang = language.value
@@ -2216,6 +2320,13 @@ public class AppModel {
         let _ = worker.submit("dfiles:${arcid}", {=> a.files(arcid)})
         let _ = worker.submitTagged("ptanks:${arcid}", lang, {=> a.listArchiveTankoubons(arcid, lang: lang)})
         let _ = worker.submitTagged("related:${arcid}", lang, {=> a.relatedArchives(arcid, 12, lang: lang)})
+        let _ = worker.submitTagged("tagtranslations:archive:${arcid}", lang, {
+            => a.tagTranslations(lang, arcid: arcid)
+        })
+    }
+
+    public func retryDetail(arcid: String): Unit {
+        openDetail(arcid)
     }
 
     // 打开合集详情：元数据 + 成员档案 + 相关合集三路并发。
@@ -2229,6 +2340,11 @@ public class AppModel {
         tankMembers.value = ArrayList<SearchItem>()
         tankRelated.value = ArrayList<TankoubonInfo>()
         tankFilter.value = ""
+        detailTagTranslations.value = HashMap<String, String>()
+        tankLoadState.value = "loading"
+        tankLoadError.value = ""
+        tankMembersState.value = "loading"
+        tankMembersError.value = ""
         navigate(Page.Tank(tankid))
         let a = api ?? return
         let lang = language.value
@@ -2245,6 +2361,13 @@ public class AppModel {
         let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
             => a.relatedTankoubons(tankid, 12, lang: lang)
         })
+        let _ = worker.submitTagged("tagtranslations:tank:${tankid}", lang, {
+            => a.tagTranslations(lang, tankid: tankid)
+        })
+    }
+
+    public func retryTank(tankid: String): Unit {
+        openTank(tankid)
     }
 
     // 重取合集详情（成员增删/收藏切换成功后刷新）：与 openTank 同三路并发，
@@ -2275,8 +2398,11 @@ public class AppModel {
     }
 
     // backdrop 模糊背景：元数据到货后，若有封面则提交 worker 任务，将封面缩到 ~256px 宽
-    // 并经 vips 高斯模糊后解码为 RGBA 像素，供 detail_view 以 PixelImageView 放大为背景。
-    // 失败静默（不 toast，不阻塞页面），backdrop 区域回退为纯色渐变。
+    // 并经 vips 渐变高斯模糊（iOS progressive blur 风：顶部 σ2 较清晰 → 底部 σ10
+    // 重糊，解码期预合成单张图；σ 按 256px 中间图计，上屏拉伸 5 倍+ 后底部等效
+    // 近原均匀 σ8 的量级，再叠 scrim 不至于奶雾）后解码为 RGBA 像素，供 detail_view
+    // 以 PixelImageView 放大为背景。失败静默（不 toast，不阻塞页面），backdrop 区域
+    // 回退为纯色渐变。
     private func requestBackdrop(arcid: String, assetId: Int64): Unit {
         let a = api ?? return
         let imgKey = "backdrop:${arcid}"
@@ -2290,7 +2416,7 @@ public class AppModel {
                     let writer = ImageWriter(this, a, "asset:${assetId}")
                     let rawKey = "asset:${assetId}"
                     let path = c.ensureCached(rawKey, writer)
-                    let d = decodeBackdrop(path, 256)
+                    let d = decodeBackdrop(path, 256, blurSigma: 2.0, progressiveMaxSigma: 10.0)
                     return (imgKey, d)
             }
         )
@@ -2322,6 +2448,14 @@ public class AppModel {
     }
 
     public func openReader(arcid: String, startPage: Int64): Unit {
+        if (recommendedArchiveOriginScene.size > 0 && recommendedArchiveOriginId == arcid) {
+            trackRecommendation(recommendedArchiveOriginScene, recommendedArchiveOriginSeedType,
+                recommendedArchiveOriginSeedId, "archive", arcid, "open_reader")
+            recommendedArchiveOriginScene = ""
+            recommendedArchiveOriginSeedType = ""
+            recommendedArchiveOriginSeedId = ""
+            recommendedArchiveOriginId = ""
+        }
         match (page.value) {
             case Page.Shelf => detailReturnToShelf = true
             case _ => ()
@@ -2450,8 +2584,7 @@ public class AppModel {
                 let pid = pages.value[idx - 1].id
                 let key = "page:${readerArcid}:${pid}"
                 next.add(key)
-                requestImage(key,
-                    "/api/archives/${readerArcid}/page?path=${percentEncode(pid)}")
+                requestImage(key, "/api/archives/${readerArcid}/page?path=${percentEncode(pid)}")
             }
         }
         // 离开预取区且尚未开始的任务取消（排队中移除；在途/已完成的跳过）。
@@ -2619,8 +2752,9 @@ public class AppModel {
     // 深浅色与排版档位统一的 UA CSS 应用出口（init / 主题切换 / 档位变更共用）。
     private func applyHtmlThemeCss(): Unit {
         htmlPage.setDoublePage(reader.doublePage)
-        htmlPage.setThemeCss(htmlThemeCss(isLight(), fontSize: reader.htmlFontSize, margin: reader.htmlMargin,
-            doublePage: reader.doublePage))
+        htmlPage.setThemeCss(
+            htmlThemeCss(isLight(), fontSize: reader.htmlFontSize, margin: reader.htmlMargin,
+                doublePage: reader.doublePage))
     }
 
     // ---- lane ⇄ 播放同步 ----
@@ -2959,6 +3093,226 @@ public class AppModel {
         )
     }
 
+    public func beginArchiveDownloadSelection(request: FileDialogRequest, arcid: String): Unit {
+        pendingDownloadArcids = ArrayList<String>()
+        pendingDownloadArcids.add(arcid)
+        pendingDownloadBatch = false
+        archiveDownloadDialog.value = Some(request)
+    }
+
+    public func beginBatchArchiveDownloadSelection(request: FileDialogRequest, arcids: ArrayList<String>): Unit {
+        pendingDownloadArcids = ArrayList<String>()
+        for (id in arcids) {
+            pendingDownloadArcids.add(id)
+        }
+        pendingDownloadBatch = true
+        archiveDownloadDialog.value = Some(request)
+    }
+
+    public func startSourceArchiveDownload(arcid: String): Unit {
+        if (!isAdmin.value) {
+            showError("source 下载需要管理员权限")
+            return
+        }
+        let ns = sourceNamespace(arcid)
+        let remoteId = sourceRemoteId(arcid)
+        if (ns.size == 0 || remoteId.size == 0) {
+            showError("无效的 source 档案 ID")
+            return
+        }
+        let category = match (selectedUploadCategory()) {
+            case Some(value) => value
+            case None =>
+                openUploadDrawer()
+                uploadTabIndex.value = 1
+                toaster.show("请先在下载抽屉选择入库分类，再重试 source 下载", kind: ToastKind.Info)
+                return
+        }
+        let _ = worker.submit(
+            "source-download:${arcid}",
+            {
+                =>
+                    let a = api ?? throw Exception("尚未连接服务器")
+                    a.downloadSourceArchive(ns, remoteId, category.id)
+                    return arcid
+            }
+        )
+    }
+
+    private func pollArchiveDownloadDialog(): Unit {
+        match (archiveDownloadDialog.value) {
+            case Some(request) => match (request.result()) {
+                case FileDialogResult.FileDialogPending => ()
+                case FileDialogResult.FileDialogCanceled =>
+                    archiveDownloadDialog.value = None<FileDialogRequest>
+                    pendingDownloadArcids = ArrayList<String>()
+                case FileDialogResult.FileDialogFailed(message) =>
+                    archiveDownloadDialog.value = None<FileDialogRequest>
+                    pendingDownloadArcids = ArrayList<String>()
+                    showError(if (message.size > 0) {
+                        "打开保存位置失败：${message}"
+                    } else {
+                        "打开保存位置失败"
+                    })
+                case FileDialogResult.FileDialogSelected(paths, _) =>
+                    archiveDownloadDialog.value = None<FileDialogRequest>
+                    if (paths.size == 0 || pendingDownloadArcids.size == 0) {
+                        pendingDownloadArcids = ArrayList<String>()
+                        return
+                    }
+                    let target = paths[0]
+                    let ids = pendingDownloadArcids
+                    let batch = pendingDownloadBatch
+                    pendingDownloadArcids = ArrayList<String>()
+                    let _ = worker.submitDownload(
+                        if (batch) {
+                            "archive-download:batch"
+                        } else {
+                            "archive-download:${ids[0]}"
+                        },
+                        {
+                            =>
+                                let a = api ?? throw Exception("尚未连接服务器")
+                                var ok: Int64 = 0
+                                for (id in ids) {
+                                    try {
+                                        if (batch) {
+                                            let _ = a.downloadArchiveToFolder(id, target)
+                                        } else {
+                                            let _ = a.downloadArchiveToPath(id, target)
+                                        }
+                                        ok += 1
+                                    } catch (_: Exception) {}
+                                }
+                                if (ok == 0) {
+                                    throw Exception("下载失败")
+                                }
+                                return (ok, ids.size, target)
+                        }
+                    )
+            }
+            case None => ()
+        }
+    }
+
+    public func batchSetIsNew(arcids: ArrayList<String>, isNew: Bool): Unit {
+        let a = api ?? return
+        let _ = worker.submit(
+            "batch.isnew",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (id in arcids) {
+                        try {
+                            a.setIsNew(id, isNew);
+                            ok += 1
+                        } catch (_: Exception) {}
+                    }
+                    return (isNew, ok, arcids.size)
+            }
+        )
+    }
+
+    public func batchEditTankMembers(arcids: ArrayList<String>, addTagsRaw: String, removeTagsRaw: String,
+        summaryAppend: String): Unit {
+        let a = api ?? return
+        let members = tankMembers.value
+        let addTags = metadataTagList(addTagsRaw)
+        let removeTags = metadataTagList(removeTagsRaw)
+        let summary = summaryAppend.trimAscii()
+        let _ = worker.submit(
+            "batch.edit",
+            {
+                =>
+                    var ok: Int64 = 0
+                    for (id in arcids) {
+                        for (item in members) {
+                            if (item.arcid != id) {
+                                continue
+                            }
+                            let tags = ArrayList<String>()
+                            for (existing in metadataTagList(item.tagsCsv)) {
+                                if (!removeTags.contains(existing)) {
+                                    tags.add(existing)
+                                }
+                            }
+                            for (added in addTags) {
+                                if (!tags.contains(added)) {
+                                    tags.add(added)
+                                }
+                            }
+                            let desc = if (summary.size == 0) {
+                                item.description
+                            } else if (item.description.trimAscii().size == 0) {
+                                summary
+                            } else {
+                                "${item.description}\n${summary}"
+                            }
+                            try {
+                                a.updateArchiveMetadata(id,
+                                    metadataRootBody(item.title, desc, String.join(tags.toArray(), delimiter: ","), ""))
+                                ok += 1
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    return (ok, arcids.size)
+            }
+        )
+    }
+
+    public func searchExactTag(displayTag: String): Unit {
+        let display = displayTag.trimAscii()
+        if (display.size == 0) {
+            return
+        }
+        var canonical = display
+        for ((raw, translated) in detailTagTranslations.value) {
+            let expected = match (raw.indexOf(":")) {
+                case Some(i) => "${raw[0..i]}:${translated}"
+                case None => translated
+            }
+            if (expected == display) {
+                canonical = raw
+                break
+            }
+        }
+        searchText.value = if (canonical.endsWith("$")) {
+            canonical
+        } else {
+            "${canonical}$"
+        }
+        submitFilter()
+        navigate(Page.Library)
+    }
+
+    public func trackRecommendation(scene: String, seedType: String, seedId: String, itemType: String, itemId: String,
+        interaction: String): Unit {
+        let a = api ?? return
+        let task = "recommendation:${scene}:${interaction}:${itemType}:${itemId}"
+        let _ = worker.submit(
+            task,
+            {
+                =>
+                    a.recordRecommendationInteraction(scene, seedType, seedId, itemType, itemId, interaction)
+                    return itemId
+            }
+        )
+    }
+
+    public func openRecommendedArchive(scene: String, seedType: String, seedId: String, arcid: String): Unit {
+        trackRecommendation(scene, seedType, seedId, "archive", arcid, "click")
+        openDetail(arcid)
+        recommendedArchiveOriginScene = scene
+        recommendedArchiveOriginSeedType = seedType
+        recommendedArchiveOriginSeedId = seedId
+        recommendedArchiveOriginId = arcid
+    }
+
+    public func openRecommendedTank(scene: String, seedType: String, seedId: String, tankid: String): Unit {
+        trackRecommendation(scene, seedType, seedId, "tankoubon", tankid, "click")
+        openTank(tankid)
+    }
+
     // ---- 多选操作 ----
 
     // 长按/右键首项进入选择模式并选中该项。
@@ -3230,8 +3584,9 @@ public class AppModel {
         settings.theme = themeRippleTarget
         persistSettings(settings)
         // html 阅读纸面同步新主题（活动会话立即重渲染，下一帧取新帧）。
-        htmlPage.setThemeCss(htmlThemeCss(themeRippleTarget == "light", fontSize: reader.htmlFontSize,
-            margin: reader.htmlMargin, doublePage: reader.doublePage))
+        htmlPage.setThemeCss(
+            htmlThemeCss(themeRippleTarget == "light", fontSize: reader.htmlFontSize, margin: reader.htmlMargin,
+                doublePage: reader.doublePage))
         if (let Some(h) <- themeChangeHandler) {
             h(themeRippleTarget)
         }
@@ -3280,8 +3635,7 @@ public class AppModel {
         }
         browseRows.value = browseRows.value
         refreshLocalizedData()
-        toaster.show(t("language.changed", params: [("language", effectiveLanguageName())]),
-            kind: ToastKind.Success)
+        toaster.show(t("language.changed", params: [("language", effectiveLanguageName())]), kind: ToastKind.Success)
     }
 
     private func refreshLocalizedData(): Unit {
@@ -3372,6 +3726,7 @@ public class AppModel {
     public func pump(): Unit {
         reader.tick() // 进度防抖周期驱动：窗口到点补发 pending 尾巴
         pollUploadFileDialog()
+        pollArchiveDownloadDialog()
         maybeSweepCache() // 磁盘缓存周期 sweep 判定（#10，判定本身零 I/O）
 
         // chrome 自动隐藏计时（T13）：autoHide 开且 READER_CHROME_AUTOHIDE_MS 无活动则隐藏
@@ -3591,6 +3946,60 @@ public class AppModel {
             showError(r.error)
             return
         }
+        if (r.name.startsWith("metadata-plugin:")) {
+            metadataPluginRunning.value = false
+            showError(r.error)
+            return
+        }
+        if (r.name.startsWith("meta:")) {
+            detailLoadState.value = "error"
+            detailLoadError.value = r.error
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            return
+        }
+        if (r.name.startsWith("tankmeta:")) {
+            tankLoadState.value = "error"
+            tankLoadError.value = r.error
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            return
+        }
+        if (r.name.startsWith("dfiles:")) {
+            detailPagesState.value = "error"
+            detailPagesError.value = r.error
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            return
+        }
+        if (r.name.startsWith("tankmembers:")) {
+            tankMembersState.value = "error"
+            tankMembersError.value = r.error
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            return
+        }
+        if (r.name.startsWith("tagtranslations:")) {
+            if (r.error.contains("失效") || r.error.contains("401")) {
+                logout()
+            }
+            return
+        }
+        if (r.name.startsWith("recommendation:")) {
+            return // 推荐反馈不影响主交互，失败静默并允许下次继续上报
+        }
+        if (r.name.startsWith("archive-download:")) {
+            showError(r.error)
+            return
+        }
+        if (r.name.startsWith("source-download:")) {
+            showError(r.error)
+            return
+        }
         // 嵌套档案的辅助元数据加载失败不关闭编辑器：保留搜索条目提供的基础草稿，
         // 页侧栏显示为空即可，避免一次非关键请求失败中断整个编辑流程。
         if (r.name.startsWith("editmeta:") || r.name.startsWith("editfiles:")) {
@@ -3621,8 +4030,7 @@ public class AppModel {
         }
         // 详情辅助卡片（页面预览/所属合集/相关推荐）失败静默：卡片无数据即隐藏；
         // 401/会话失效仍走全局 logout + 提示（同 row: 分支惯例）。
-        if (r.name.startsWith("dfiles:") || r.name.startsWith("ptanks:") || r.name.startsWith("related:") ||
-            r.name.startsWith("tankrelated:")) {
+        if (r.name.startsWith("ptanks:") || r.name.startsWith("related:") || r.name.startsWith("tankrelated:")) {
             if (r.error.contains("失效") || r.error.contains("401")) {
                 logout()
                 showError(r.error)
@@ -4041,9 +4449,16 @@ public class AppModel {
                             if (arcid == cur) {
                                 let m = (p as ArchiveMeta).getOrThrow()
                                 meta.value = Some(m)
-                                // 元数据到货后，若有封面则提交 backdrop 解码任务（模糊背景用）。
-                                if (m.coverAssetId > 0) {
-                                    requestBackdrop(arcid, m.coverAssetId)
+                                detailLoadState.value = "ready"
+                                detailLoadError.value = ""
+                                // 优先真实 backdrop，缺省才退回封面模糊背景。
+                                let backdropAsset = if (m.backdropAssetId > 0) {
+                                    m.backdropAssetId
+                                } else {
+                                    m.coverAssetId
+                                }
+                                if (backdropAsset > 0) {
+                                    requestBackdrop(arcid, backdropAsset)
                                 }
                             }
                         // 阅读器顶栏只要标题/收藏态，不请求 backdrop；
@@ -4091,6 +4506,10 @@ public class AppModel {
                 case Page.Tank(tankid) => openTank(tankid)
                 case _ => ()
             }
+        } else if (name.startsWith("metadata-plugin:")) {
+            metadataPluginRunning.value = false
+            metadataPluginPreview.value = true
+            toaster.show("元数据插件任务已创建，将在服务端写回", kind: ToastKind.Success)
         } else if (name.startsWith("dfiles:")) {
             match (r.payload) {
                 case Some(p) =>
@@ -4100,6 +4519,8 @@ public class AppModel {
                         case Page.Detail(cur) =>
                             if (arcid == cur) {
                                 detailPages.value = (p as ArrayList<PageInfo>).getOrThrow()
+                                detailPagesState.value = "ready"
+                                detailPagesError.value = ""
                             }
                         case _ => ()
                     }
@@ -4131,6 +4552,11 @@ public class AppModel {
                     }
                 case None => ()
             }
+        } else if (name.startsWith("tagtranslations:")) {
+            match (r.payload) {
+                case Some(p) => detailTagTranslations.value = (p as HashMap<String, String>).getOrThrow()
+                case None => ()
+            }
         } else if (name.startsWith("tankmeta:")) {
             match (r.payload) {
                 case Some(p) =>
@@ -4140,9 +4566,15 @@ public class AppModel {
                             if (tankid == cur) {
                                 let t = (p as TankoubonInfo).getOrThrow()
                                 tank.value = Some(t)
-                                // 合集 backdrop：复用封面资产解码（key 前缀 tank: 避免与档案冲突）。
-                                if (t.coverAssetId > 0) {
-                                    requestBackdrop("tank:${tankid}", t.coverAssetId)
+                                tankLoadState.value = "ready"
+                                tankLoadError.value = ""
+                                let backdropAsset = if (t.backdropAssetId > 0) {
+                                    t.backdropAssetId
+                                } else {
+                                    t.coverAssetId
+                                }
+                                if (backdropAsset > 0) {
+                                    requestBackdrop("tank:${tankid}", backdropAsset)
                                 }
                             }
                         case _ => ()
@@ -4157,6 +4589,8 @@ public class AppModel {
                         case Page.Tank(cur) =>
                             if (tankid == cur) {
                                 tankMembers.value = (p as SearchPage).getOrThrow().items
+                                tankMembersState.value = "ready"
+                                tankMembersError.value = ""
                             }
                         case _ => ()
                     }
@@ -4286,15 +4720,54 @@ public class AppModel {
                 case None => ()
             }
             refreshLibrary()
+        } else if (name == "batch.isnew") {
+            match (r.payload) {
+                case Some(p) =>
+                    let (isNew, ok, total) = (p as (Bool, Int64, Int64)).getOrThrow()
+                    toaster.show(if (isNew) {
+                        "已标为未读 ${ok}/${total}"
+                    } else {
+                        "已标为已读 ${ok}/${total}"
+                    }, kind: ToastKind.Success)
+                case None => ()
+            }
+            match (page.value) {
+                case Page.Tank(id) => refreshTankDetail(id)
+                case _ => refreshLibrary()
+            }
+        } else if (name == "batch.edit") {
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total) = (p as (Int64, Int64)).getOrThrow()
+                    toaster.show("已更新元数据 ${ok}/${total}", kind: ToastKind.Success)
+                case None => ()
+            }
+            match (page.value) {
+                case Page.Tank(id) => refreshTankDetail(id)
+                case _ => refreshLibrary()
+            }
+        } else if (name.startsWith("archive-download:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let (ok, total, path) = (p as (Int64, Int64, String)).getOrThrow()
+                    toaster.show("已下载 ${ok}/${total} 到 ${path}", kind: ToastKind.Success)
+                case None => ()
+            }
+        } else if (name.startsWith("source-download:")) {
+            toaster.show("source 下载任务已创建", kind: ToastKind.Success)
         } else if (name.startsWith("tank-favorite:")) {
             // 取消收藏后条目应从书架即时消失；重取同时校正乐观更新。
-            if (shelfFavoritesLoaded) { loadShelfFavorites() }
+            if (shelfFavoritesLoaded) {
+                loadShelfFavorites()
+            }
             match (page.value) {
                 case Page.Tank(tankid) => refreshTankDetail(tankid)
                 case _ => ()
             }
         } else if (name.startsWith("favorite:") || name.startsWith("isnew:")) {
-            if (name.startsWith("favorite:") && shelfFavoritesLoaded) { loadShelfFavorites() }
+            if (name.startsWith("favorite:") && shelfFavoritesLoaded) {
+                loadShelfFavorites()
+            }
             // 收藏/未读切换成功：仍在详情页/阅读页则重取元数据刷新展示
             match (page.value) {
                 case Page.Detail(arcid) => refreshMeta(arcid)
@@ -4307,7 +4780,7 @@ public class AppModel {
                 case None => ()
             }
         } else if (name.startsWith("imgdl:")) {
-            // 下载阶段成功是中间结果（解码由下载线程内提交到解码池），静默忽略。
+        // 下载阶段成功是中间结果（解码由下载线程内提交到解码池），静默忽略。
         } else if (name.startsWith("img:")) {
             finishImageTask()
             let key = name.removePrefix("img:")

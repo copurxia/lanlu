@@ -572,3 +572,38 @@ func fastBoolMatchesDecodeRawOnAllForms(): Unit {
         @Expect(fastBool(b, false), decodeRaw<Bool>(b, false))
     }
 }
+
+@Test
+func detailAssetsParseCoverBackdropAndClearlogo(): Unit {
+    let m = parseArchiveMeta("{\"arcid\":\"a1\",\"title\":\"T\",\"assets\":[" +
+        "{\"key\":\"cover\",\"value\":7},{\"key\":\"backdrop\",\"value\":8}," +
+        "{\"key\":\"clearlogo\",\"value\":9}]}")
+    @Expect(m.coverAssetId, 7)
+    @Expect(m.backdropAssetId, 8)
+    @Expect(m.clearlogoAssetId, 9)
+
+    let t = parseTankoubon("{\"tankoubon_id\":\"T1\",\"title\":\"Tank\"," +
+        "\"assets\":{\"cover\":17,\"backdrop\":18,\"clearlogo\":19},\"children\":[]}")
+    @Expect(t.coverAssetId, 17)
+    @Expect(t.backdropAssetId, 18)
+    @Expect(t.clearlogoAssetId, 19)
+}
+
+@Test
+func archiveDownloadPartsParseServerOrderAndNames(): Unit {
+    let parts = parseArchiveDownloadParts("{\"success\":1,\"multipart\":1,\"parts\":[" +
+        "{\"index\":0,\"name\":\"book.zip.001\",\"size\":10,\"url\":\"/a\"}," +
+        "{\"index\":1,\"name\":\"book.zip.002\",\"size\":20,\"url\":\"/b\"}]}")
+    @Expect(parts.size, 2)
+    @Expect(parts[0].name, "book.zip.001")
+    @Expect(parts[1].index, 1)
+    @Expect(parts[1].size, 20)
+}
+
+@Test
+func tagTranslationMapKeepsCanonicalKeys(): Unit {
+    let map = parseTagTranslationMap("{\"code\":200,\"data\":{\"lang\":\"zh\",\"map\":{" +
+        "\"artist:alice\":\"爱丽丝\",\"full color\":\"全彩\"}}}")
+    @Expect(map.get("artist:alice") ?? "", "爱丽丝")
+    @Expect(map.get("full color") ?? "", "全彩")
+}

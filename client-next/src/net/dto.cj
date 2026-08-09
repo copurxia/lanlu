@@ -1,6 +1,6 @@
 package lanlu_client_next.net
 
-import std.collection.ArrayList
+import std.collection.{ArrayList, HashMap}
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
 
@@ -44,8 +44,7 @@ func fastBool(b: Array<UInt8>, fallback: Bool): Bool {
     if (b.size == 4 && b[0] == 0x74u8 && b[1] == 0x72u8 && b[2] == 0x75u8 && b[3] == 0x65u8) {
         return true
     }
-    if (b.size == 5 && b[0] == 0x66u8 && b[1] == 0x61u8 && b[2] == 0x6Cu8 && b[3] == 0x73u8 &&
-        b[4] == 0x65u8) {
+    if (b.size == 5 && b[0] == 0x66u8 && b[1] == 0x61u8 && b[2] == 0x6Cu8 && b[3] == 0x73u8 && b[4] == 0x65u8) {
         return false
     }
     decodeRaw<Bool>(b, fallback)
@@ -473,6 +472,8 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
     public var tags: ArrayList<String> = ArrayList<String>()
     public var capabilities: ArrayList<String> = ArrayList<String>()
     public var coverAssetId: Int64 = 0
+    public var backdropAssetId: Int64 = 0
+    public var clearlogoAssetId: Int64 = 0
     public var pagecount: Int64 = 0
     public var progress: Int64 = 0
     public var size: Int64 = 0
@@ -508,7 +509,11 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
                             case "size" => res.size = fastInt64(r.readValueBytes(), 0)
                             case "isnew" => res.isnew = fastBool(r.readValueBytes(), false)
                             case "isfavorite" => res.isfavorite = fastBool(r.readValueBytes(), false)
-                            case "assets" => res.coverAssetId = parseCoverFromAssetsArray(rawText(r.readValueBytes()))
+                            case "assets" =>
+                                let assets = parseDetailAssets(r.readValueBytes())
+                                res.coverAssetId = assets[0]
+                                res.backdropAssetId = assets[1]
+                                res.clearlogoAssetId = assets[2]
                             case "release_at" => res.release_at = fastInt64(r.readValueBytes(), 0)
                             case "created_at" => res.created_at = fastInt64(r.readValueBytes(), 0)
                             case "updated_at" => res.updated_at = fastInt64(r.readValueBytes(), 0)
@@ -526,33 +531,56 @@ public class ArchiveMeta <: JsonDeserializable<ArchiveMeta> {
 }
 
 // metadata 的 assets 是 [{key,value}] 数组
-private func parseCoverFromAssetsArray(raw: String): Int64 {
-    var id: Int64 = 0
+private func parseDetailAssets(b: Array<UInt8>): (Int64, Int64, Int64) {
+    let raw = rawText(b)
+    var cover: Int64 = 0
+    var backdrop: Int64 = 0
+    var clearlogo: Int64 = 0
     if (raw.size == 0) {
-        return id
+        return (cover, backdrop, clearlogo)
     }
     let r = readerOf(raw)
     try {
-        r.startArray()
-        while (r.peek() != EndArray) {
-            r.startObject()
-            var key = ""
-            var value: Int64 = 0
-            while (r.peek() != EndObject) {
-                match (r.readName()) {
-                    case "key" => key = decodeRaw<String>(r.readValueBytes(), "")
-                    case "value" => value = fastInt64(r.readValueBytes(), 0)
-                    case _ => r.skip()
+        match (r.peek()) {
+            case Some(BeginArray) =>
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    r.startObject()
+                    var key = ""
+                    var value: Int64 = 0
+                    while (r.peek() != EndObject) {
+                        match (r.readName()) {
+                            case "key" => key = decodeRaw<String>(r.readValueBytes(), "")
+                            case "value" => value = fastInt64(r.readValueBytes(), 0)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    match (key) {
+                        case "cover" => cover = value
+                        case "backdrop" => backdrop = value
+                        case "clearlogo" => clearlogo = value
+                        case _ => ()
+                    }
                 }
-            }
-            r.endObject()
-            if (key == "cover") {
-                id = value
-            }
+                r.endArray()
+            case Some(BeginObject) =>
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let key = r.readName()
+                    let value = fastInt64(r.readValueBytes(), 0)
+                    match (key) {
+                        case "cover" => cover = value
+                        case "backdrop" => backdrop = value
+                        case "clearlogo" => clearlogo = value
+                        case _ => ()
+                    }
+                }
+                r.endObject()
+            case _ => ()
         }
-        r.endArray()
     } catch (_: Exception) {}
-    return id
+    (cover, backdrop, clearlogo)
 }
 
 public func parseArchiveMeta(body: String): ArchiveMeta {
@@ -574,6 +602,88 @@ public func sourceNamespace(arcid: String): String {
         case Some(i) => rest[0..i]
         case None => ""
     }
+}
+
+public func sourceRemoteId(arcid: String): String {
+    let ns = sourceNamespace(arcid)
+    if (ns.size == 0) {
+        return ""
+    }
+    let prefix = "source:${ns}:"
+    if (arcid.size <= prefix.size) {
+        return ""
+    }
+    arcid[prefix.size..arcid.size]
+}
+
+public class ArchiveDownloadPart {
+    public var index: Int64 = 0
+    public var name: String = ""
+    public var size: Int64 = 0
+}
+
+public func parseArchiveDownloadParts(body: String): ArrayList<ArchiveDownloadPart> {
+    let out = ArrayList<ArchiveDownloadPart>()
+    let r = readerOf(body)
+    try {
+        r.startObject()
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "parts" =>
+                    r.startArray()
+                    while (r.peek() != EndArray) {
+                        let part = ArchiveDownloadPart()
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            match (r.readName()) {
+                                case "index" => part.index = fastInt64(r.readValueBytes(), out.size)
+                                case "name" => part.name = decodeRaw<String>(r.readValueBytes(), "")
+                                case "size" => part.size = fastInt64(r.readValueBytes(), 0)
+                                case _ => r.skip()
+                            }
+                        }
+                        r.endObject()
+                        out.add(part)
+                    }
+                    r.endArray()
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+    } catch (e: Exception) {
+        throw Exception("下载分卷响应解析失败: ${e.message}")
+    }
+    out
+}
+
+// /api/tags/translations 的 data.map：canonical tag -> translated text。
+public func parseTagTranslationMap(body: String): HashMap<String, String> {
+    let out = HashMap<String, String>()
+    let raw = unwrapDataRaw(body)
+    if (raw.size == 0) {
+        return out
+    }
+    let r = readerOf(raw)
+    try {
+        r.startObject()
+        while (r.peek() != EndObject) {
+            match (r.readName()) {
+                case "map" =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let canonical = r.readName()
+                        let translated = decodeRaw<String>(r.readValueBytes(), "").trimAscii()
+                        if (canonical.size > 0 && translated.size > 0) {
+                            out[canonical] = translated
+                        }
+                    }
+                    r.endObject()
+                case _ => r.skip()
+            }
+        }
+        r.endObject()
+    } catch (_: Exception) {}
+    out
 }
 
 // Unix 时间戳（秒）→ "YYYY-MM-DD"；0 表示未知，返回 "未知"。
@@ -808,11 +918,15 @@ private func pageThumbAssetId(raw: String): Int64 {
         }
         r.endObject()
         assetId
-    } catch (_: Exception) { 0 }
+    } catch (_: Exception) {
+        0
+    }
 }
 
 private func metadataThumbAssetId(raw: String): Int64 {
-    if (raw.size == 0) { return 0 }
+    if (raw.size == 0) {
+        return 0
+    }
     let r = readerOf(raw)
     try {
         r.startObject()
@@ -825,11 +939,15 @@ private func metadataThumbAssetId(raw: String): Int64 {
         }
         r.endObject()
         assetId
-    } catch (_: Exception) { 0 }
+    } catch (_: Exception) {
+        0
+    }
 }
 
 private func pageLyricsAssetId(raw: String): Int64 {
-    if (raw.size == 0) { return 0 }
+    if (raw.size == 0) {
+        return 0
+    }
     let r = readerOf(raw)
     try {
         r.startObject()
@@ -842,11 +960,15 @@ private func pageLyricsAssetId(raw: String): Int64 {
         }
         r.endObject()
         assetId
-    } catch (_: Exception) { 0 }
+    } catch (_: Exception) {
+        0
+    }
 }
 
 private func metadataLyricsAssetId(raw: String): Int64 {
-    if (raw.size == 0) { return 0 }
+    if (raw.size == 0) {
+        return 0
+    }
     let r = readerOf(raw)
     try {
         r.startObject()
@@ -866,7 +988,9 @@ private func metadataLyricsAssetId(raw: String): Int64 {
                         }
                     }
                     r.endObject()
-                    if (assetId <= 0 && slot == "lyrics" && id > 0) { assetId = id }
+                    if (assetId <= 0 && slot == "lyrics" && id > 0) {
+                        assetId = id
+                    }
                 }
                 r.endArray()
             } else {
@@ -875,11 +999,15 @@ private func metadataLyricsAssetId(raw: String): Int64 {
         }
         r.endObject()
         assetId
-    } catch (_: Exception) { 0 }
+    } catch (_: Exception) {
+        0
+    }
 }
 
 private func pageSourcePath(raw: String): String {
-    if (raw.size == 0) { return "" }
+    if (raw.size == 0) {
+        return ""
+    }
     let r = readerOf(raw)
     try {
         r.startObject()
@@ -892,7 +1020,9 @@ private func pageSourcePath(raw: String): String {
         }
         r.endObject()
         path
-    } catch (_: Exception) { "" }
+    } catch (_: Exception) {
+        ""
+    }
 }
 
 // ===== 合集（tankoubon）=====
@@ -915,6 +1045,8 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
     public var coverArcid: String = ""
     // 封面资产 id：列表形态 assets 为 {"cover":N} 对象，metadata 形态为 [{key,value}] 数组。
     public var coverAssetId: Int64 = 0
+    public var backdropAssetId: Int64 = 0
+    public var clearlogoAssetId: Int64 = 0
     public var createdAt: String = ""
     public var updatedAt: String = ""
     public var isfavorite: Bool = false
@@ -936,7 +1068,11 @@ public class TankoubonInfo <: JsonDeserializable<TankoubonInfo> {
                             case "pagecount" => res.totalPages = fastInt64(r.readValueBytes(), 0)
                             case "progress" => res.progress = Float32(decodeRaw<Float64>(r.readValueBytes(), 0.0))
                             case "children" => res.coverArcid = firstChildArcid(r.readValueBytes())
-                            case "assets" => res.coverAssetId = parseTankCoverAssets(r.readValueBytes())
+                            case "assets" =>
+                                let assets = parseDetailAssets(r.readValueBytes())
+                                res.coverAssetId = assets[0]
+                                res.backdropAssetId = assets[1]
+                                res.clearlogoAssetId = assets[2]
                             case "created_at" => res.createdAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "updated_at" => res.updatedAt = decodeRaw<String>(r.readValueBytes(), "")
                             case "isfavorite" => res.isfavorite = fastBool(r.readValueBytes(), false)
@@ -975,19 +1111,6 @@ private func parseTankTags(b: Array<UInt8>): ArrayList<String> {
 }
 
 // 合集 assets 两形态：对象 {"cover":N}（列表/recommendations）或 [{key,value}] 数组（metadata）。
-private func parseTankCoverAssets(b: Array<UInt8>): Int64 {
-    let raw = rawText(b)
-    if (raw.size == 0) {
-        return 0
-    }
-    let probe = readerOf(raw)
-    match (probe.peek()) {
-        case Some(BeginArray) => return parseCoverFromAssetsArray(raw)
-        case _ => ()
-    }
-    parseCoverFromAssetsObject(b)
-}
-
 // children 首元素：列表形态是字符串，metadata 形态是 {"entity_id":...} 对象。
 private func firstChildArcid(b: Array<UInt8>): String {
     var id = ""
@@ -1339,8 +1462,7 @@ public func parseTotpStatus(body: String): TotpStatus {
                         case "enabled" => s.enabled = fastBool(r.readValueBytes(), false)
                         case "credentialName" => s.credentialName = decodeRaw<String>(r.readValueBytes(), "")
                         case "createdAt" => s.createdAt = decodeRaw<String>(r.readValueBytes(), "")
-                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = fastInt64(r.readValueBytes(),
-                            0)
+                        case "recoveryCodesRemaining" => s.recoveryCodesRemaining = fastInt64(r.readValueBytes(), 0)
                         case _ => r.skip()
                     }
                 }

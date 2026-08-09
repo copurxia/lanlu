@@ -1,8 +1,8 @@
 package lanlu_client_next.net
 
 import qwest.*
-import std.collection.ArrayList
-import std.fs.{File, FileInfo, OpenMode, Path}
+import std.collection.{ArrayList, HashMap}
+import std.fs.{Directory, File, FileInfo, OpenMode, Path, exists}
 import std.io.OutputStream
 import std.sync.{Mutex}
 
@@ -184,16 +184,15 @@ public class LanluApi {
             // 网络类异常：尝试回退离线缓存。
             try {
                 match (offlineCache) {
-                    case Some(c) =>
-                        match (c.getResponse(serverHash, path)) {
-                            case Some(body) =>
-                                match (onOfflineFallback) {
-                                    case Some(f) => f()
-                                    case None => ()
-                                }
-                                return body
-                            case None => ()
-                        }
+                    case Some(c) => match (c.getResponse(serverHash, path)) {
+                        case Some(body) =>
+                            match (onOfflineFallback) {
+                                case Some(f) => f()
+                                case None => ()
+                            }
+                            return body
+                        case None => ()
+                    }
                     case None => ()
                 }
             } catch (_: Exception) {}
@@ -281,7 +280,11 @@ public class LanluApi {
     }
 
     public func metadata(arcid: String, lang!: String = ""): ArchiveMeta {
-        let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
+        let suffix = if (lang.size > 0) {
+            "?lang=${percentEncode(lang)}"
+        } else {
+            ""
+        }
         parseArchiveMeta(checkedBodyCached("/api/archives/${arcid}/metadata${suffix}"))
     }
 
@@ -309,6 +312,91 @@ public class LanluApi {
         downloadChecked(client.get(pageUrl(arcid, pagePath)).send(), output)
     }
 
+    public func archiveDownloadParts(arcid: String): ArrayList<ArchiveDownloadPart> {
+        parseArchiveDownloadParts(
+            checkedBody(client.get("/api/archives/${percentEncode(arcid)}/download/parts").send()))
+    }
+
+    // 单文件写入用户选定路径；分卷档案以服务端卷名写入所选文件的同级目录。
+    public func downloadArchiveToPath(arcid: String, selectedPath: String): Int64 {
+        let parts = archiveDownloadParts(arcid)
+        if (parts.size == 0) {
+            try (file = File(Path(selectedPath), OpenMode.Write)) {
+                let _ = downloadChecked(client.get("/api/archives/${percentEncode(arcid)}/download").send(), file)
+            }
+            return 1
+        }
+        if (parts.size == 1) {
+            try (file = File(Path(selectedPath), OpenMode.Write)) {
+                let _ = downloadChecked(client.get("/api/archives/${percentEncode(arcid)}/download").send(), file)
+            }
+            return 1
+        }
+        let folder = Path(selectedPath).parent.toString()
+        for (part in parts) {
+            let name = safeDownloadName(part.name, "${arcid}.part${part.index + 1}")
+            try (file = File(Path("${folder}/${name}"), OpenMode.Write)) {
+                let _ = downloadChecked(
+                    client.get("/api/archives/${percentEncode(arcid)}/download?part=${part.index}").send(), file)
+            }
+        }
+        parts.size
+    }
+
+    // 批量下载落到用户选定目录；每个档案按服务端原始文件/分卷名保存。
+    public func downloadArchiveToFolder(arcid: String, folder: String): Int64 {
+        let archiveFolder = Path("${folder}/${safeDownloadName(arcid, "archive")}")
+        if (!exists(archiveFolder)) {
+            Directory.create(archiveFolder, recursive: true)
+        }
+        let targetFolder = archiveFolder.toString()
+        let parts = archiveDownloadParts(arcid)
+        if (parts.size == 0) {
+            let fallback = safeDownloadName(arcid, "archive")
+            try (file = File(Path("${targetFolder}/${fallback}"), OpenMode.Write)) {
+                let _ = downloadChecked(client.get("/api/archives/${percentEncode(arcid)}/download").send(), file)
+            }
+            return 1
+        }
+        for (part in parts) {
+            let name = safeDownloadName(part.name, if (parts.size > 1) {
+                "${arcid}.part${part.index + 1}"
+            } else {
+                arcid
+            })
+            let suffix = if (parts.size > 1) {
+                "?part=${part.index}"
+            } else {
+                ""
+            }
+            try (file = File(Path("${targetFolder}/${name}"), OpenMode.Write)) {
+                let _ = downloadChecked(client.get("/api/archives/${percentEncode(arcid)}/download${suffix}").send(),
+                    file)
+            }
+        }
+        parts.size
+    }
+
+    public func downloadSourceArchive(namespace: String, remoteId: String, categoryId: Int64): Unit {
+        let body = "{\"remote_id\":${jsonQuote(remoteId)},\"category_id\":${jsonQuote(categoryId.toString())}," +
+            "\"kind\":\"archive\"}"
+        let raw = checkedBody(
+            client.post("/api/admin/source-plugins/${percentEncode(namespace)}/download").json(body).send())
+        if (!raw.contains("\"success\":true") && !raw.contains("\"success\":1")) {
+            throw Exception("创建 source 下载任务失败")
+        }
+    }
+
+    public func tagTranslations(lang: String, arcid!: String = "", tankid!: String = ""): HashMap<String, String> {
+        var path = "/api/tags/translations?lang=${percentEncode(lang)}"
+        if (arcid.size > 0) {
+            path = "${path}&arcid=${percentEncode(arcid)}"
+        } else if (tankid.size > 0) {
+            path = "${path}&tankoubon_id=${percentEncode(tankid)}"
+        }
+        parseTagTranslationMap(checkedBodyCached(path))
+    }
+
     // 流式下载公共逻辑：401/状态码/错误体诊断语义与 checkedBytes 一致。
     private func downloadChecked(resp: Response, output: OutputStream): Int64 {
         if (resp.status == 401) {
@@ -321,7 +409,11 @@ public class LanluApi {
             let detail = try {
                 let buf = Array<UInt8>(65536, repeat: 0u8)
                 let n = resp.stream().read(buf)
-                if (n > 0) { String.fromUtf8(buf[0..n]) } else { "" }
+                if (n > 0) {
+                    String.fromUtf8(buf[0..n])
+                } else {
+                    ""
+                }
             } catch (_: Exception) {
                 ""
             }
@@ -338,13 +430,21 @@ public class LanluApi {
 
     // 合集列表：GET /api/tankoubons 返回裸 {"filtered":N,"result":[...],"total":N}（无包络）。
     public func listTankoubons(lang!: String = ""): ArrayList<TankoubonInfo> {
-        let path = if (lang.size > 0) { "/api/tankoubons?lang=${percentEncode(lang)}" } else { "/api/tankoubons" }
+        let path = if (lang.size > 0) {
+            "/api/tankoubons?lang=${percentEncode(lang)}"
+        } else {
+            "/api/tankoubons"
+        }
         parseTankoubonList(checkedBodyCached(path))
     }
 
     // 单个合集：GET /api/tankoubons/:id/metadata 返回裸对象（children 为 member 对象数组）。
     public func getTankoubon(id: String, lang!: String = ""): TankoubonInfo {
-        let suffix = if (lang.size > 0) { "?lang=${percentEncode(lang)}" } else { "" }
+        let suffix = if (lang.size > 0) {
+            "?lang=${percentEncode(lang)}"
+        } else {
+            ""
+        }
         parseTankoubon(checkedBodyCached("/api/tankoubons/${id}/metadata${suffix}"))
     }
 
@@ -378,7 +478,11 @@ public class LanluApi {
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。
     public func listArchiveTankoubons(arcid: String, lang!: String = ""): ArrayList<TankoubonInfo> {
         let base = "/api/archives/${arcid}/tankoubons"
-        let path = if (lang.size > 0) { "${base}?lang=${percentEncode(lang)}" } else { base }
+        let path = if (lang.size > 0) {
+            "${base}?lang=${percentEncode(lang)}"
+        } else {
+            base
+        }
         parseTankoubonList(checkedBodyCached(path))
     }
 
@@ -386,7 +490,11 @@ public class LanluApi {
     // 返回裸 {"scene":...,"data":[...]}，data 数组元素与 search 条目同构，复用 parseSearchPage；
     // 混进的合集项没有 arcid，过滤丢弃（对齐 frontend getArchiveRelated 的 isArchiveItem 过滤）。
     public func relatedArchives(arcid: String, count: Int64, lang!: String = ""): ArrayList<SearchItem> {
-        let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
+        let languageQuery = if (lang.size > 0) {
+            "&lang=${percentEncode(lang)}"
+        } else {
+            ""
+        }
         let body = checkedBodyCached(
             "/api/recommendations?scene=archive_related&archive_id=${percentEncode(arcid)}&count=${count}${languageQuery}")
         let page = parseSearchPage(body)
@@ -402,7 +510,11 @@ public class LanluApi {
     // 相关推荐（合集详情）：scene=tankoubon_related，元素为合集对象（recommendations 形态，
     // assets 为对象），复用 parseTankoubonList；过滤掉无 id 的档案项。
     public func relatedTankoubons(tankid: String, count: Int64, lang!: String = ""): ArrayList<TankoubonInfo> {
-        let languageQuery = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
+        let languageQuery = if (lang.size > 0) {
+            "&lang=${percentEncode(lang)}"
+        } else {
+            ""
+        }
         let body = checkedBodyCached(
             "/api/recommendations?scene=tankoubon_related&tankoubon_id=${percentEncode(tankid)}&count=${count}${languageQuery}")
         let all = parseTankoubonList(body)
@@ -413,6 +525,30 @@ public class LanluApi {
             }
         }
         list
+    }
+
+    public func recordRecommendationInteraction(scene: String, seedType: String, seedId: String, itemType: String,
+        itemId: String, interaction: String): Unit {
+        let body = "{\"scene\":${jsonQuote(scene)},\"seed_entity_type\":${jsonQuote(seedType)}," +
+            "\"seed_entity_id\":${jsonQuote(seedId)},\"item_type\":${jsonQuote(itemType)}," +
+            "\"item_id\":${jsonQuote(itemId)},\"interaction_type\":${jsonQuote(interaction)}}"
+        let _ = checkedBody(client.post("/api/recommendations/interactions").json(body).send())
+    }
+
+    public func runMetadataPlugin(targetType: String, targetId: String, namespace: String, param: String): Int64 {
+        let body = "{\"target_type\":${jsonQuote(targetType)},\"target_id\":${jsonQuote(targetId)}," +
+            "\"namespace\":${jsonQuote(namespace)},\"param\":${jsonQuote(param)},\"write_back\":1}"
+        let raw = checkedBody(client.post("/api/metadata_plugin").json(body).send())
+        let job = uploadResultTaskId(raw, "job")
+        if (job <= 0) {
+            let reason = uploadResultText(raw, "error")
+            throw Exception(if (reason.size > 0) {
+                reason
+            } else {
+                "元数据插件未返回任务 ID"
+            })
+        }
+        job
     }
 
     public func pageBytes(arcid: String, pagePath: String): Array<UInt8> {
@@ -627,7 +763,8 @@ public class LanluApi {
         var attempt: Int64 = 0
         while (true) {
             let response = uploadClient
-                .request(Method.PUT, "/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}")
+                .request(Method.PUT,
+                    "/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}")
                 .header("Content-Type", "application/octet-stream")
                 .body(chunk)
                 .send()
@@ -690,15 +827,22 @@ public class LanluApi {
     }
 
     public func tagCloud(limit: Int64, lang!: String = ""): ArrayList<CloudTag> {
-        let langPart = if (lang.size > 0) { "&lang=${percentEncode(lang)}" } else { "" }
+        let langPart = if (lang.size > 0) {
+            "&lang=${percentEncode(lang)}"
+        } else {
+            ""
+        }
         parseCloudTags(checkedBody(client.get("/api/tags/cloud?limit=${limit}${langPart}").send()))
     }
 
     public func tagAutocomplete(query: String, limit: Int64, lang!: String = ""): ArrayList<TagSuggestion> {
-        let effectiveLang = if (lang.size > 0) { lang } else { "zh" }
+        let effectiveLang = if (lang.size > 0) {
+            lang
+        } else {
+            "zh"
+        }
         let url = "/api/tags/autocomplete?q=${percentEncode(query.trimAscii())}" +
-            "&lang=${percentEncode(effectiveLang)}&limit=${limit}" +
-            "&require_bound=1"
+            "&lang=${percentEncode(effectiveLang)}&limit=${limit}" + "&require_bound=1"
         parseTagSuggestions(checkedBody(client.get(url).send()))
     }
 
@@ -779,7 +923,10 @@ public class LanluApi {
 
     public func adminResetUserPassword(id: Int64, newPassword: String): Unit {
         let _ = checked(
-            client.post("/api/auth/admin/users/${id}/reset-password").json("{\"password\":${jsonQuote(newPassword)}}").send())
+            client
+                .post("/api/auth/admin/users/${id}/reset-password")
+                .json("{\"password\":${jsonQuote(newPassword)}}")
+                .send())
     }
 
     // ==================== 设置区扩展：系统设置 ====================
@@ -906,7 +1053,8 @@ public class LanluApi {
     }
 
     public func setPluginEnabled(ns: String, enabled: Bool): Unit {
-        let _ = checked(client.put("/api/admin/plugins/${percentEncode(ns)}/enabled").body("{\"enabled\":${enabled}}").send())
+        let _ = checked(
+            client.put("/api/admin/plugins/${percentEncode(ns)}/enabled").body("{\"enabled\":${enabled}}").send())
     }
 
     public func deletePlugin(ns: String): Unit {
@@ -1006,5 +1154,28 @@ public class LanluApi {
             // SSE 流不读完，关闭响应即丢弃连接（不回池）；resp.close() 幂等。
             resp.close()
         }
+    }
+}
+
+private func safeDownloadName(raw: String, fallback: String): String {
+    let source = if (raw.trimAscii().size > 0) {
+        raw.trimAscii()
+    } else {
+        fallback
+    }
+    let out = StringBuilder()
+    for (r in source.runes()) {
+        if (r == r'/' || r == r'\\' || r == r'\0' || r == r':' || r == r'*' || r == r'?' || r == r'"' || r == r'<' ||
+            r == r'>' || r == r'|') {
+            out.append(r'_')
+        } else {
+            out.append(r)
+        }
+    }
+    let value = out.toString().trimAscii()
+    if (value.size > 0 && value != "." && value != "..") {
+        value
+    } else {
+        "archive"
     }
 }

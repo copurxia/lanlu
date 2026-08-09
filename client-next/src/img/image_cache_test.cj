@@ -247,3 +247,25 @@ func decodeBackdropResizesToTargetWidth(): Unit {
     d.close()
     remove(dir, recursive: true)
 }
+
+// E5: 渐变模糊分支（progressiveMaxSigma > blurSigma）：多档模糊 + 逐行混合不改变
+// 几何，输出尺寸/字节数与均匀模糊一致；纯色源图任意 σ 模糊后仍纯色，首尾行
+// 像素应相等（混合公式的凸组合性回归验证）。
+@Test
+func decodeBackdropProgressiveKeepsDimensions(): Unit {
+    let dir = Directory.createTemp(Path("."))
+    let cache = ImageCache("${dir}/cache")
+    let path = cache.ensureCached("asset:backdrop_prog", TestWriter(FetchCounter(), testPngBytes()))
+    let d = decodeBackdrop(path, 48, blurSigma: 2.0, progressiveMaxSigma: 10.0)
+    @Expect(d.width, 48)
+    @Expect(d.height, 48)
+    @Expect(d.size, 48 * 48 * 4)
+    let px = d.copyPixels()
+    // 纯色图逐行插值后首行 == 末行（RGBA 四通道逐一比对）。
+    let lastRow = 47 * 48 * 4
+    for (i in 0..48 * 4) {
+        @Expect(px[i], px[lastRow + i])
+    }
+    d.close()
+    remove(dir, recursive: true)
+}

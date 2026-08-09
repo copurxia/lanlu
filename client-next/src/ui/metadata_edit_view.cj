@@ -537,19 +537,51 @@ private func metadataPlugin(model: AppModel): Unit {
     } else {
         LANLU_FIELD
     }
+    let labels = ArrayList<String>()
+    let namespaces = ArrayList<String>()
+    for (plugin in model.plugins.value) {
+        if (plugin.pluginType == "metadata" && plugin.enabled && plugin.installed) {
+            labels.add(if (plugin.name.size > 0) {
+                plugin.name
+            } else {
+                plugin.namespace
+            })
+            namespaces.add(plugin.namespace)
+        }
+    }
+    let selected = rememberState<Int64>("metadata.plugin.index", {=> 0})
+    if (selected.value >= labels.size) {
+        selected.value = 0
+    }
+    let param = rememberState<String>("metadata.plugin.param", {=> ""})
     VStack {
         HStack {
             Label("从插件获取元数据").fontSize(11.fp).muted()
-            Label("预览仅填充表单，保存后才写回").fontSize(10.fp).muted()
+            Label("任务由服务端执行并直接写回").fontSize(10.fp).muted()
         }.spacing(8.vp).hug()
         HStack {
-            Dropdown(["nhentai 插件", "E-Hentai 插件", "文件名解析", "ComicInfo.xml"],
-                rememberState<Int64>("metadata.plugin.index", {=> 0}), key: "metadata.plugin").width(180.vp)
-            TextField(rememberState<String>("metadata.plugin.param", {=> ""}), key: "metadata.plugin.param").flex()
+            Dropdown(if (labels.size > 0) {
+                labels.toArray()
+            } else {
+                ["暂无可用插件"]
+            }, selected, key: "metadata.plugin").width(180.vp)
+            TextField(param, key: "metadata.plugin.param").flex()
             IconButton(IconName.Play, role: ButtonRole.Primary, onClick: {
-                => model.previewMetadataPlugin()
-            }).key("metadata:plugin-run")
+                => if (selected.value >= 0 && selected.value < namespaces.size) {
+                    model.runMetadataEditorPlugin(namespaces[selected.value], param.value)
+                }
+            }).key("metadata:plugin-run").enabled(namespaces.size > 0 && !model.metadataPluginRunning.value)
         }.spacing(8.vp).hug().fillWidth()
+        if (model.metadataPluginRunning.value) {
+            HStack {
+                Spinner(14.0, if (model.isLight()) {
+                    LANLU_L_ACCENT
+                } else {
+                    LANLU_ACCENT
+                })
+                Label("正在创建插件任务…").fontSize(11.fp).muted()
+            }.spacing(8.vp).hug()
+        }
         if (model.metadataPluginPreview.value) {
             HStack {
                 Icon(IconName.Sparkle, size: 14.vp).foregroundColor(if (model.isLight()) {
@@ -557,7 +589,7 @@ private func metadataPlugin(model: AppModel): Unit {
                 } else {
                     LANLU_ACCENT
                 })
-                Label("预览已填充：插件结果仅写入表单草稿，点击「保存更改」才会应用到库。")
+                Label("插件任务已提交：结果由服务端写回元数据，任务完成后重新打开详情即可查看。")
                     .fontSize(11.fp)
                     .foregroundColor(if (model.isLight()) {
                         LANLU_L_ACCENT

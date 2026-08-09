@@ -59,9 +59,10 @@ class Spinner <: Widget {
         for (i in 0..segs) {
             let a0 = start + tau * 0.75 * Float64(i) / Float64(segs)
             let a1 = start + tau * 0.75 * Float64(i + 1) / Float64(segs)
-            ctx.renderer.strokeLine(
-                cx + radius * Float32(cos(a0)), cy + radius * Float32(sin(a0)),
-                cx + radius * Float32(cos(a1)), cy + radius * Float32(sin(a1)), pen)
+            ctx
+                .renderer
+                .strokeLine(cx + radius * Float32(cos(a0)), cy + radius * Float32(sin(a0)), cx + radius * Float32(cos(
+                    a1)), cy + radius * Float32(sin(a1)), pen)
         }
     }
 
@@ -112,8 +113,10 @@ class SurfaceCard <: Widget {
         }
         let base = frame.shift(0.0, shadowOffsetY)
         let a = Int64(shadowColor.a)
-        ctx.renderer.fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3,
-            shadowColor.withAlpha(a * 3 / 5), feather: spread)
+        ctx
+            .renderer
+            .fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3, shadowColor.withAlpha(a * 3 / 5),
+                feather: spread)
         ctx.renderer.fillRoundedRectSoft(base, radius, shadowColor.withAlpha(a / 2), feather: spread * 0.5)
         ctx.renderer.fillRoundedRect(frame, radius, fill)
         if (Int64(border.a) > 0) {
@@ -219,16 +222,36 @@ class HoverSensor <: Widget {
 // Book/Pages/Disk/Box 为设置页统计卡增补（替代 ♥/▤/▣/● 文本符号，原型 .stat-card 图标）；
 // Tag/Globe/Sparkle/Monitor/Chart/Info 为设置导航图标增补（原型 #set-nav .side-item .ico）。
 public enum GhostGlyph {
-    | Named(IconName) | Gear | Theme | Search | Filter | Back | Menu | Swap | Heart | Download | AddTank | Ellipsis
-    | Book | Pages | Disk | Box | Tag | Globe | Sparkle | Monitor | Chart | Info | Home | LogOut
+    | Named(IconName)
+    | Gear
+    | Theme
+    | Search
+    | Filter
+    | Back
+    | Menu
+    | Swap
+    | Heart
+    | Download
+    | AddTank
+    | Ellipsis
+    | Book
+    | Pages
+    | Disk
+    | Box
+    | Tag
+    | Globe
+    | Sparkle
+    | Monitor
+    | Chart
+    | Info
+    | Home
+    | LogOut
 }
 
 // 绘制 GhostGlyph 图形（16×16 视觉格，中心 cx/cy）：GhostIconButton 与阅读器模式钮共用。
-public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, cy: Float32,
-    color: Color): Unit {
+public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, cy: Float32, color: Color): Unit {
     match (glyph) {
-        case GhostGlyph.Named(icon) =>
-            drawIcon(renderer, icon, Rect(cx - 8.0, cy - 8.0, 16.0, 16.0), color)
+        case GhostGlyph.Named(icon) => drawIcon(renderer, icon, Rect(cx - 8.0, cy - 8.0, 16.0, 16.0), color)
         case GhostGlyph.Gear =>
             // 齿轮：紧凑的环形轮廓 + 8 个切向圆角齿块 + 中心孔。
             // 齿块沿圆周展开，不再用放射长线；16px 下更像齿轮而不是太阳。
@@ -241,8 +264,7 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
                 let toothY = cy + radialY * 6.55
                 let tangentX = -radialY * 0.9
                 let tangentY = radialX * 0.9
-                renderer.strokeLine(toothX - tangentX, toothY - tangentY,
-                    toothX + tangentX, toothY + tangentY, toothPen)
+                renderer.strokeLine(toothX - tangentX, toothY - tangentY, toothX + tangentX, toothY + tangentY, toothPen)
             }
             renderer.strokeCircle(cx, cy, 5.35, Pen(width: 1.55, color: color))
             renderer.strokeCircle(cx, cy, 2.0, Pen(width: 1.45, color: color))
@@ -300,14 +322,27 @@ public func drawGhostGlyph(renderer: Renderer, glyph: GhostGlyph, cx: Float32, c
             // 心形使用矢量折线近似 lucide heart，避免 Linux 字体缺少 ♥ 时只剩按钮底板。
             let pen = Pen(width: 1.7, color: color)
             let points: Array<(Float32, Float32)> = [
-                (-6.5, -2.7), (-6.0, -4.5), (-4.6, -5.7), (-2.8, -6.0),
-                (-1.2, -5.3), (0.0, -3.9), (1.2, -5.3), (2.8, -6.0),
-                (4.6, -5.7), (6.0, -4.5), (6.5, -2.7), (6.1, -0.5),
-                (4.6, 1.8), (0.0, 6.4), (-4.6, 1.8), (-6.1, -0.5), (-6.5, -2.7)
+                (-6.5, -2.7),
+                (-6.0, -4.5),
+                (-4.6, -5.7),
+                (-2.8, -6.0),
+                (-1.2, -5.3),
+                (0.0, -3.9),
+                (1.2, -5.3),
+                (2.8, -6.0),
+                (4.6, -5.7),
+                (6.0, -4.5),
+                (6.5, -2.7),
+                (6.1, -0.5),
+                (4.6, 1.8),
+                (0.0, 6.4),
+                (-4.6, 1.8),
+                (-6.1, -0.5),
+                (-6.5, -2.7)
             ]
             for (i in 0..points.size - 1) {
-                renderer.strokeLine(cx + points[i][0], cy + points[i][1],
-                    cx + points[i + 1][0], cy + points[i + 1][1], pen)
+                renderer.strokeLine(cx + points[i][0], cy + points[i][1], cx + points[i + 1][0], cy + points[i + 1][1],
+                    pen)
             }
         case GhostGlyph.Download =>
             // ⤓：下箭头入盘（干线 + 箭头头 + 三边底盘，原型 .action-icons 下载钮）。
@@ -473,8 +508,8 @@ public class GhostIconButton <: Widget {
     private var frame = Rect.zero()
 
     // size：默认 34（顶栏/阅读器）；详情操作卡用 28（原型 .action-icons .icon-btn 32px 的紧凑近似）。
-    public init(glyph: GhostGlyph, hoverId: String, size!: Float32 = 34.0, active!: Bool = false,
-        color!: ?Color = None, onClick!: () -> Unit) {
+    public init(glyph: GhostGlyph, hoverId: String, size!: Float32 = 34.0, active!: Bool = false, color!: ?Color = None,
+        onClick!: () -> Unit) {
         this.glyph = glyph
         this.hoverId = hoverId
         this.onClick = onClick
@@ -494,7 +529,11 @@ public class GhostIconButton <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let hovered = ctx.isHovered(hoverId)
-        let radius: Float32 = if (size >= 34.0) { 9.0 } else { 8.0 }
+        let radius: Float32 = if (size >= 34.0) {
+            9.0
+        } else {
+            8.0
+        }
         if (active) {
             ctx.renderer.fillRoundedRect(frame, radius, ctx.theme.accentSoft)
         } else if (hovered) {
@@ -502,9 +541,14 @@ public class GhostIconButton <: Widget {
         }
         let color = match (tint) {
             case Some(c) => c
-            case None => if (active) { ctx.theme.accent }
-                         else if (hovered) { ctx.theme.text }
-                         else { ctx.theme.mutedText }
+            case None =>
+                if (active) {
+                    ctx.theme.accent
+                } else if (hovered) {
+                    ctx.theme.text
+                } else {
+                    ctx.theme.mutedText
+                }
         }
         drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(), color)
     }
@@ -539,16 +583,24 @@ public class ThemeToggleButton <: Widget {
         emit(this)
     }
 
-    public func measure(_: UiContext, _: Size): Size { Size(34.0, 34.0) }
+    public func measure(_: UiContext, _: Size): Size {
+        Size(34.0, 34.0)
+    }
 
-    public func layout(_: UiContext, rect: Rect): Unit { frame = rect }
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
 
     public func draw(ctx: UiContext): Unit {
         let hovered = ctx.isHovered(hoverId)
         if (hovered) {
             ctx.renderer.fillRoundedRect(frame, 9.0, ctx.theme.overlayHover)
         }
-        let color = if (hovered) { ctx.theme.text } else { ctx.theme.mutedText }
+        let color = if (hovered) {
+            ctx.theme.text
+        } else {
+            ctx.theme.mutedText
+        }
         let cx = frame.centerX()
         let cy = frame.centerY()
         if (model.isLight()) {
@@ -556,25 +608,35 @@ public class ThemeToggleButton <: Widget {
             let pen = Pen(width: 1.4, color: color)
             for (i in 0..8) {
                 let a = Float64(i) * 0.7853982
-                ctx.renderer.strokeLine(cx + Float32(cos(a)) * 6.0, cy + Float32(sin(a)) * 6.0,
-                    cx + Float32(cos(a)) * 8.0, cy + Float32(sin(a)) * 8.0, pen)
+                ctx
+                    .renderer
+                    .strokeLine(cx + Float32(cos(a)) * 6.0, cy + Float32(sin(a)) * 6.0, cx + Float32(cos(a)) * 8.0,
+                        cy + Float32(sin(a)) * 8.0, pen)
             }
         } else {
             // 月牙：主色圆上用当前面板色挖去右上区域。
             ctx.renderer.fillCircle(cx, cy, 6.5, color)
-            ctx.renderer.fillCircle(cx + 3.2, cy - 2.8, 6.0,
-                if (hovered) { ctx.theme.overlayHover } else { ctx.theme.panel })
+            ctx.renderer.fillCircle(cx + 3.2, cy - 2.8, 6.0, if (hovered) {
+                ctx.theme.overlayHover
+            } else {
+                ctx.theme.panel
+            })
         }
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
         match (event) {
             case UiEvent.MouseMove(x, y) =>
-                if (frame.contains(x, y)) { ctx.claimHover(hoverId, CursorShape.Interactive) }
+                if (frame.contains(x, y)) {
+                    ctx.claimHover(hoverId, CursorShape.Interactive)
+                }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (frame.contains(x, y)) {
-                    model.setThemeFromToggle(if (model.settings.theme == "dark") { "light" } else { "dark" },
-                        x, y, frame.centerX(), frame.centerY())
+                    model.setThemeFromToggle(if (model.settings.theme == "dark") {
+                        "light"
+                    } else {
+                        "dark"
+                    }, x, y, frame.centerX(), frame.centerY())
                     return true
                 }
             case _ => ()
@@ -632,37 +694,39 @@ public class MiniSeg <: Widget {
             let tw = ctx.renderer.textWidth(items[i], pointSize: 11.0)
             if (Int64(i) == selected.value) {
                 ctx.renderer.fillRoundedRect(item, 6.0, ctx.theme.accentSoft)
-                ctx.renderer.text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0,
-                    ctx.theme.accent, pointSize: 11.0)
+                ctx
+                    .renderer
+                    .text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0, ctx.theme.accent,
+                        pointSize: 11.0)
             } else {
-                let fg = if (ctx.isHovered("${segId}:${i}")) { ctx.theme.text } else { ctx.theme.mutedText }
-                ctx.renderer.text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0,
-                    fg, pointSize: 11.0)
+                let fg = if (ctx.isHovered("${segId}:${i}")) {
+                    ctx.theme.text
+                } else {
+                    ctx.theme.mutedText
+                }
+                ctx.renderer.text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0, fg, pointSize: 11.0)
             }
         }
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
         match (event) {
-            case UiEvent.MouseMove(x, y) =>
-                for (i in 0..items.size) {
-                    if (itemRect(ctx, i).contains(x, y)) {
-                        ctx.claimHover("${segId}:${i}", CursorShape.Interactive)
-                    }
+            case UiEvent.MouseMove(x, y) => for (i in 0..items.size) {
+                if (itemRect(ctx, i).contains(x, y)) {
+                    ctx.claimHover("${segId}:${i}", CursorShape.Interactive)
                 }
-            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
-                for (i in 0..items.size) {
-                    if (itemRect(ctx, i).contains(x, y)) {
-                        selected.value = Int64(i)
-                        return true
-                    }
+            }
+            case UiEvent.MouseUp(MouseButton.Left, x, y) => for (i in 0..items.size) {
+                if (itemRect(ctx, i).contains(x, y)) {
+                    selected.value = Int64(i)
+                    return true
                 }
+            }
             case _ => ()
         }
         false
     }
 }
-
 
 // 封面描边层：叠在封面（remoteImage 或圆角占位色块）顶层的透明绘制件。
 // 成品封面的圆角由像素 alpha 烘焙（model.roundCoverCorners），占位色块用
@@ -686,7 +750,11 @@ class CoverBorder <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let edge = if (ctx.isHovered(hoverId)) { ctx.theme.accent } else { ctx.theme.panelEdge }
+        let edge = if (ctx.isHovered(hoverId)) {
+            ctx.theme.accent
+        } else {
+            ctx.theme.panelEdge
+        }
         // 圆角半径与 model.roundCoverCorners 的烘焙比例（短边 7.2%）保持一致：
         // 首页 168vp 封面 ≈ 12（原型 .card .cover border-radius:12px）。
         let radius = min(frame.w, frame.h) * 0.072 - 0.5
@@ -749,8 +817,7 @@ class SelectionDot <: Widget {
         let cy = frame.centerY()
         if (selected) {
             ctx.renderer.fillCircle(cx, cy, 9.0, ctx.theme.accent)
-            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 6.0, cy - 6.0, 12.0, 12.0),
-                Color.rgb(255, 255, 255))
+            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 6.0, cy - 6.0, 12.0, 12.0), Color.rgb(255, 255, 255))
         } else {
             ctx.renderer.fillCircle(cx, cy, 9.0, Color.rgba(0, 0, 0, 110))
             ctx.renderer.strokeCircle(cx, cy, 9.0, Pen(width: 1.4, color: Color.rgba(255, 255, 255, 170)))
@@ -802,7 +869,11 @@ public class NavItem <: Widget {
             ctx.renderer.fillRoundedRect(frame, 9.0, ctx.theme.overlayHover)
         }
         // 激活金文字（.side-item.on color: var(--accent)）；hover/常态均主文字色。
-        let labelColor = if (active) { ctx.theme.accent } else { ctx.theme.text }
+        let labelColor = if (active) {
+            ctx.theme.accent
+        } else {
+            ctx.theme.text
+        }
         var textX = frame.x + 12.0
         match (glyph) {
             case Some(g) =>
@@ -817,8 +888,7 @@ public class NavItem <: Widget {
         if (count.size > 0) {
             // 原型 .side-item .cnt：11px、低透明（muted 即低对比语义）。
             let cw = ctx.renderer.textWidth(count, pointSize: 11.0)
-            ctx.renderer.text(count, frame.right() - 12.0 - cw, ty, ctx.theme.mutedText,
-                pointSize: 11.0)
+            ctx.renderer.text(count, frame.right() - 12.0 - cw, ty, ctx.theme.mutedText, pointSize: 11.0)
         }
     }
 
@@ -843,19 +913,27 @@ public class NavItem <: Widget {
 // 圆角随封面规格（短边 7.2%，对齐原型 .card .cover 的 12px），与 alpha 烘焙的成品封面圆角一致。
 // 构建期拿不到 ctx.theme，底色按 model.isLight() 在 palette 明/暗常量间二选一。
 private func imagePlaceholder(model: AppModel, w: Length, h: Length, text: String): Unit {
-    let field = if (model.isLight()) { LANLU_L_FIELD } else { LANLU_FIELD }
+    let field = if (model.isLight()) {
+        LANLU_L_FIELD
+    } else {
+        LANLU_FIELD
+    }
     let radius = Length(min(w.value, h.value) * 0.072, w.unit)
     VStack {
         Label(text).fontSize(12.fp).muted()
-    }.mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
-        .width(w).height(h).background(field, radius)
+    }
+        .mainAxisAlignment(MainAxisAlignment.Center)
+        .crossAxisAlignment(CrossAxisAlignment.Center)
+        .width(w)
+        .height(h)
+        .background(field, radius)
 }
 
 // 远程图片：三态（占位/错误可点击重试/成品）。key 形如 asset:42、page:arc:path。
 // 首次构建（状态 ""）时经 model.requestImage 发起加载（并发上限由 model 保证）。
 // zoom >1 时成品图绕中心放大并裁回框内（卡片 hover 缩放动画用；占位/错误态不缩放）。
-public func remoteImage(model: AppModel, key: String, url: String, w: Length, h: Length,
-    zoom!: Float32 = 1.0, radius!: Float32 = 0.0): Unit {
+public func remoteImage(model: AppModel, key: String, url: String, w: Length, h: Length, zoom!: Float32 = 1.0,
+    radius!: Float32 = 0.0, fit!: ImageFit = ImageFit.Cover, startAligned!: Bool = false): Unit {
     let st = model.imageState(key)
     if (st.value == "") {
         model.requestImage(key, url)
@@ -869,14 +947,59 @@ public func remoteImage(model: AppModel, key: String, url: String, w: Length, h:
     } else {
         // 状态为 "ready"：像素已 stage 进 cui 像素纹理缓存，PixelImageView 首帧惰性建纹理。
         // 封面用 Cover 裁满卡片；width/height 为首选尺寸；zoom 仅作用在成品图上。
-        PixelImageView(key, w, h, fit: ImageFit.Cover).zoom(zoom).rounded(radius)
+        if (startAligned) {
+            StartAlignedPixelImage(key, w, h)
+        } else {
+            PixelImageView(key, w, h, fit: fit).zoom(zoom).rounded(radius)
+        }
     }
 }
 
+// clearlogo 通常带大块透明画布。普通 Contain 会把可见内容居中，导致它与下一行
+// 元数据错位；这里保持等比缩放，只把目标矩形贴到布局框左侧。
+private class StartAlignedPixelImage <: Widget {
+    private let key: String
+    private let preferredWidth: Length
+    private let preferredHeight: Length
+    private var frame = Rect.zero()
+
+    init(key: String, width: Length, height: Length) {
+        this.key = key
+        preferredWidth = width
+        preferredHeight = height
+        emit(this)
+    }
+
+    public func measure(ctx: UiContext, available: Size): Size {
+        Size(min(available.w, max(0.0, ctx.resolve(preferredWidth))),
+            min(available.h, max(0.0, ctx.resolve(preferredHeight))))
+    }
+
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
+
+    public func draw(ctx: UiContext): Unit {
+        match (pixelTexture(ctx.renderer, key)) {
+            case Some(image) =>
+                let fitted = fittedRect(Size(image.width, image.height), frame, ImageFit.Contain)
+                ctx.renderer.texture(image, Rect(frame.x, fitted.y, fitted.w, fitted.h))
+            case None => ()
+        }
+    }
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
+}
 
 // 描边色（明/暗双主题；原 login_view 私有件，提升为设置区/登录页共享）。
 func edgeOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_PANEL_EDGE } else { LANLU_PANEL_EDGE }
+    if (model.isLight()) {
+        LANLU_L_PANEL_EDGE
+    } else {
+        LANLU_PANEL_EDGE
+    }
 }
 
 // 幽灵按钮样式（设计稿 .btn-ghost：透明底 + 1px 描边），次要动作用——
@@ -923,7 +1046,11 @@ class HoverLift <: Widget {
         if (hovered.value != isHovered) {
             hovered.value = isHovered
         }
-        let goal: Float32 = if (isHovered) { 1.0 } else { 0.0 }
+        let goal: Float32 = if (isHovered) {
+            1.0
+        } else {
+            0.0
+        }
         let _ = spring.animate(ctx, target: goal)
         let _ = overlayTween.animate(ctx, target: goal)
     }
@@ -950,13 +1077,21 @@ class CoverClipStart <: Widget {
         emit(this)
     }
 
-    public func measure(_: UiContext, _: Size): Size { Size.zero() }
+    public func measure(_: UiContext, _: Size): Size {
+        Size.zero()
+    }
 
-    public func layout(_: UiContext, rect: Rect): Unit { frame = rect }
+    public func layout(_: UiContext, rect: Rect): Unit {
+        frame = rect
+    }
 
-    public func draw(ctx: UiContext): Unit { ctx.renderer.pushClip(frame) }
+    public func draw(ctx: UiContext): Unit {
+        ctx.renderer.pushClip(frame)
+    }
 
-    public func handle(_: UiContext, _: UiEvent): Bool { false }
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
 }
 
 class CoverClipEnd <: Widget {
@@ -964,13 +1099,19 @@ class CoverClipEnd <: Widget {
         emit(this)
     }
 
-    public func measure(_: UiContext, _: Size): Size { Size.zero() }
+    public func measure(_: UiContext, _: Size): Size {
+        Size.zero()
+    }
 
     public func layout(_: UiContext, _: Rect): Unit {}
 
-    public func draw(ctx: UiContext): Unit { ctx.renderer.popClip() }
+    public func draw(ctx: UiContext): Unit {
+        ctx.renderer.popClip()
+    }
 
-    public func handle(_: UiContext, _: UiEvent): Bool { false }
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
+    }
 }
 
 // 封面底部进度条（原型 .cover .prog）：3vp 高，轨道走 ctx.theme.overlayTrack（明暗自适），
@@ -996,7 +1137,9 @@ class CoverProgress <: Widget {
         // 两端内缩 5vp：封面圆角为短边 7.2%（168vp 宽 ≈ 12vp），内缩 5 可保证
         // 3vp 高的贴底条始终落在圆角弧内（原型 .cover .prog 为全宽贴底条）。
         let track = Rect(frame.x + 5.0, frame.y, frame.w - 10.0, 3.0)
-        if (track.w <= 0.0) { return }
+        if (track.w <= 0.0) {
+            return
+        }
         ctx.renderer.fillRoundedRect(track, 1.5, ctx.theme.overlayTrack)
         let clamped = min(max(pct, 0), 100)
         let fw = track.w * Float32(clamped) / 100.0
@@ -1024,8 +1167,8 @@ class CardHoverActions <: Widget {
     private let onSelect: () -> Unit
     private var frame = Rect.zero()
 
-    public init(key: String, visible: State<Bool>, progress: Float32, favorited: Bool,
-        onDetails: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit) {
+    public init(key: String, visible: State<Bool>, progress: Float32, favorited: Bool, onDetails: () -> Unit,
+        onFavorite: () -> Unit, onSelect: () -> Unit) {
         this.key = key
         this.hoverVisible = visible
         this.progress = progress
@@ -1057,10 +1200,11 @@ class CardHoverActions <: Widget {
         Rect(frame.x + 88.0, frame.y + frame.h - 42.0, 32.0, 32.0)
     }
 
-    private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph,
-        active: Bool, reveal: Float32): Unit {
+    private func drawButton(ctx: UiContext, baseRect: Rect, glyph: GhostGlyph, active: Bool, reveal: Float32): Unit {
         let t = max(0.0, min(1.0, reveal))
-        if (t <= 0.0) { return }
+        if (t <= 0.0) {
+            return
+        }
         let rect = baseRect.shift(0.0, (1.0 - t) * 6.0)
         // 操作钮与封面必须共享同一个 hover ID，否则上层按钮先认领 MouseMove 后会让
         // 封面 HoverLift 误判为移出并收起整层。按钮自身的高亮直接按实际绘制热区判断。
@@ -1070,7 +1214,11 @@ class CardHoverActions <: Widget {
             Color.rgba(255, 255, 255, Int64(38.0 * t))
         }
         ctx.renderer.fillRoundedRect(rect, 8.0, bg)
-        let iconColor = if (active) { ctx.theme.accent } else { LANLU_ON_MEDIA }
+        let iconColor = if (active) {
+            ctx.theme.accent
+        } else {
+            LANLU_ON_MEDIA
+        }
         drawGhostGlyph(ctx.renderer, glyph, rect.centerX(), rect.centerY(),
             iconColor.withAlpha(Int64(Float32(Int64(iconColor.a)) * t)))
     }
@@ -1090,8 +1238,7 @@ class CardHoverActions <: Widget {
         }
         match (event) {
             case UiEvent.MouseMove(x, y) =>
-                if (detailsRect().contains(x, y) || favoriteRect().contains(x, y) ||
-                    selectRect().contains(x, y)) {
+                if (detailsRect().contains(x, y) || favoriteRect().contains(x, y) || selectRect().contains(x, y)) {
                     // ZStack 从上到下派发，操作层会先于 HoverLift 收到事件。继续认领封面
                     // hoverId，保证指针从图片移入按钮时浮层不会因 ID 切换而消失。
                     ctx.claimHover("cover:${key}", CursorShape.Interactive)
@@ -1143,12 +1290,10 @@ class TankBackdrop <: Widget {
         let pen = Pen(width: 1.0, color: edge)
         // 圆角同封面（短边 7.2%，原型 .card.tank .stack 与 .cover 同为 12px）。
         let radius = min(frame.w, frame.h) * 0.072
-        let far = Rect(frame.x + frame.w * 0.04 + 10.0, frame.y + frame.h * 0.04 - 10.0,
-            frame.w * 0.92, frame.h * 0.92)
+        let far = Rect(frame.x + frame.w * 0.04 + 10.0, frame.y + frame.h * 0.04 - 10.0, frame.w * 0.92, frame.h * 0.92)
         ctx.renderer.fillRoundedRect(far, radius, lo)
         ctx.renderer.strokeRoundedRect(far, radius, pen)
-        let near = Rect(frame.x + frame.w * 0.02 + 5.0, frame.y + frame.h * 0.02 - 5.0,
-            frame.w * 0.96, frame.h * 0.96)
+        let near = Rect(frame.x + frame.w * 0.02 + 5.0, frame.y + frame.h * 0.02 - 5.0, frame.w * 0.96, frame.h * 0.96)
         ctx.renderer.fillRoundedRect(near, radius, hi)
         ctx.renderer.strokeRoundedRect(near, radius, pen)
     }
@@ -1209,28 +1354,25 @@ public func searchItemCard(model: AppModel, item: SearchItem, coverW: Float32): 
 // 封面下标题 1 行截断 + meta 行 muted。
 public func archiveCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
-        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
-        {=> model.enterSelection(item.arcid) },
-        isNew: item.isnew, tank: false, favorited: item.isfavorite,
+        {=> model.openDetail(item.arcid)}, {=> model.toggleFavoriteOnCard(item.arcid)},
+        {=> model.enterSelection(item.arcid)}, isNew: item.isnew, tank: false, favorited: item.isfavorite,
         pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 书架历史卡片复用同一封面骨架，但 meta 改为“相对阅读时间 · 页数”。
 public func archiveCardWithMeta(model: AppModel, item: SearchItem, coverW: Float32, meta: String): Unit {
-    homeCoverCard(model, item.arcid, item.title, meta, coverW, item.coverAssetId,
-        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
-        {=> model.enterSelection(item.arcid) },
-        isNew: item.isnew, tank: false, favorited: item.isfavorite,
-        pct: progressPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+    homeCoverCard(model, item.arcid, item.title, meta, coverW, item.coverAssetId, {=> model.openDetail(item.arcid)},
+        {=> model.toggleFavoriteOnCard(item.arcid)}, {=> model.enterSelection(item.arcid)}, isNew: item.isnew,
+        tank: false, favorited: item.isfavorite, pct: progressPct(item.pagecount, item.progress),
+        summary: item.description, tagsCsv: item.tagsCsv)
 }
 
 // 合集卡片（原型 .card.tank）：同骨架 + 封面后两层错位堆栈 + 左上开书图标「合集」角标，
 // meta 为「N 个档案 · X%」。点击进合集详情（T11 接通路由）。
 public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit {
-    homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%",
-        coverW, item.coverAssetId, {=> model.openTank(item.id) }, {=> model.toggleTankFavoriteOnCard(item.id) },
-        {=> model.enterSelection(item.id) },
-        isNew: false, tank: true, favorited: item.isfavorite, pct: item.readPct,
+    homeCoverCard(model, item.id, item.title, "${item.archiveCount} 个档案 · ${item.readPct}%", coverW,
+        item.coverAssetId, {=> model.openTank(item.id)}, {=> model.toggleTankFavoriteOnCard(item.id)},
+        {=> model.enterSelection(item.id)}, isNew: false, tank: true, favorited: item.isfavorite, pct: item.readPct,
         summary: item.description, tagsCsv: item.tagsCsv)
 }
 
@@ -1238,11 +1380,14 @@ public func tankCard(model: AppModel, item: TankCardItem, coverW: Float32): Unit
 // onSelect 为 hover 浮层「多选」入口（frontend hover 菜单的 multiselect 项）：进入选择模式
 // 并选中本卡；tank 详情成员卡由调用方在回调里顺带记录 detailSelectionOwner（见 detail_view）。
 private func homeCoverCard(model: AppModel, id: String, title: String, meta: String, coverW: Float32,
-    coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit,
-    isNew!: Bool, tank!: Bool,
+    coverAssetId: Int64, onClick: () -> Unit, onFavorite: () -> Unit, onSelect: () -> Unit, isNew!: Bool, tank!: Bool,
     favorited!: Bool, pct!: Int64, summary!: String = "", tagsCsv!: String = ""): Unit {
     let coverH = coverW * 4.0 / 3.0
-    let cardKey = if (tank) { "tank:${id}" } else { "arc:${id}" }
+    let cardKey = if (tank) {
+        "tank:${id}"
+    } else {
+        "arc:${id}"
+    }
     let hoverId = "cover:${cardKey}"
     // Spring 0→1 驱动封面缩放（HoverLift 传感器在 draw 里推进弹簧）。
     let zoomSpring = rememberState<Spring>("zoom:${cardKey}", {=> Spring(0.0)}).value
@@ -1257,19 +1402,30 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
     let selecting = model.selectionMode.value
     let selected = model.isSelected(id)
     ClickArea(onClick: {
-        =>
-            if (selecting) {
-                model.toggleSelected(id)
-            } else {
-                onClick()
-            }
+        => if (selecting) {
+            model.toggleSelected(id)
+        } else {
+            onClick()
+        }
     }) {
         VStack {
             ZStack {
                 if (tank) {
-                    let hi = if (model.isLight()) { LANLU_L_TANK_STACK_HI } else { LANLU_TANK_STACK_HI }
-                    let lo = if (model.isLight()) { LANLU_L_TANK_STACK_LO } else { LANLU_TANK_STACK_LO }
-                    let edge = if (model.isLight()) { LANLU_L_PANEL_EDGE } else { LANLU_PANEL_EDGE }
+                    let hi = if (model.isLight()) {
+                        LANLU_L_TANK_STACK_HI
+                    } else {
+                        LANLU_TANK_STACK_HI
+                    }
+                    let lo = if (model.isLight()) {
+                        LANLU_L_TANK_STACK_LO
+                    } else {
+                        LANLU_TANK_STACK_LO
+                    }
+                    let edge = if (model.isLight()) {
+                        LANLU_L_PANEL_EDGE
+                    } else {
+                        LANLU_PANEL_EDGE
+                    }
                     TankBackdrop(hi, lo, edge)
                 }
                 HoverLift(hoverId, zoomSpring, overlayTween, overlayHovered)
@@ -1292,13 +1448,14 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                 // 命中层始终留在封面树中，避免按下后即时重建移除浮层、MouseUp 穿透到卡片主体。
                 // 选择模式下不挂载：浮层按钮的详情/收藏语义与 toggle 选中冲突。
                 if (!selecting) {
-                    CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite,
-                        onSelect)
+                    CardHoverActions(cardKey, overlayHovered, overlayT, favorited, onClick, onFavorite, onSelect)
                 }
                 // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）；
                 // 选择模式下 NEW 让位给勾选圆点（选择态比「新到」更需要一目了然）。
                 HStack {
-                    if (tank) { tankBadge(model) }
+                    if (tank) {
+                        tankBadge(model)
+                    }
                     Spacer()
                     if (selecting) {
                         SelectionDot(selected)
@@ -1325,7 +1482,11 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
 // 选择模式的 toggle 由 homeCoverCard 的 ClickArea 分派，本浮层及其操作层仅在非选择模式挂载。
 private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32, progress: Float32): Unit {
     let tags = cardHoverTags(tagsCsv)
-    let maxTags: Int64 = if (summary.size > 0) { 5 } else { 8 }
+    let maxTags: Int64 = if (summary.size > 0) {
+        5
+    } else {
+        8
+    }
     let t = max(0.0, min(1.0, progress))
     ZStack {
         GradientScrim(direction: GradientDirection.Bottom,
@@ -1338,26 +1499,33 @@ private func cardHoverOverlay(summary: String, tagsCsv: String, coverH: Float32,
                 FlowRow {
                     let shown = min(tags.size, maxTags)
                     for (i in 0..shown) {
-                        Label(tags[i]).fontSize(10.fp)
-                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t))).tight()
+                        Label(tags[i])
+                            .fontSize(10.fp)
+                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t)))
+                            .tight()
                             .padding(6.vp, 2.vp)
                             .background(Color.rgba(255, 255, 255, Int64(38.0 * t)), 5.vp)
                     }
                     if (tags.size > shown) {
-                        Label("+${tags.size - shown}").fontSize(10.fp)
-                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t))).tight()
+                        Label("+${tags.size - shown}")
+                            .fontSize(10.fp)
+                            .foregroundColor(LANLU_ON_MEDIA.withAlpha(Int64(255.0 * t)))
+                            .tight()
                             .padding(6.vp, 2.vp)
                             .background(Color.rgba(255, 255, 255, Int64(38.0 * t)), 5.vp)
                     }
                 }.spacing(4.vp)
             }
             if (summary.size > 0) {
-                Label(summary).fontSize(10.5.fp)
+                Label(summary)
+                    .fontSize(10.5.fp)
                     .foregroundColor(Color.rgba(255, 255, 255, Int64(230.0 * t)))
-                    .maxLines(3).tight().fillWidth()
+                    .maxLines(3)
+                    .tight()
+                    .fillWidth()
             }
-        }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Start)
-            .padding(10.vp, 10.vp, 10.vp, 48.vp).maxHeight(coverH)
+        }.spacing(6.vp).crossAxisAlignment(CrossAxisAlignment.Start).padding(10.vp, 10.vp, 10.vp, 48.vp).maxHeight(
+            coverH)
     }.alignment(Alignment.BottomLeading).offset(x: 0.0, y: (1.0 - t) * 8.0)
 }
 
@@ -1383,7 +1551,9 @@ private func cardHoverTags(tagsCsv: String): ArrayList<String> {
 
 // 阅读进度百分比（0..100；无进度返回 0）。
 private func progressPct(pagecount: Int64, progress: Int64): Int64 {
-    if (pagecount <= 0 || progress <= 0) { return 0 }
+    if (pagecount <= 0 || progress <= 0) {
+        return 0
+    }
     min(100, progress * 100 / pagecount)
 }
 
@@ -1397,28 +1567,47 @@ private func cardMeta(item: SearchItem): String {
 }
 
 private func noCoverBox(model: AppModel, w: Float32, h: Float32): Unit {
-    let field = if (model.isLight()) { LANLU_L_FIELD } else { LANLU_FIELD }
+    let field = if (model.isLight()) {
+        LANLU_L_FIELD
+    } else {
+        LANLU_FIELD
+    }
     VStack {
         Label("无封面").fontSize(12.fp).muted()
-    }.mainAxisAlignment(MainAxisAlignment.Center).crossAxisAlignment(CrossAxisAlignment.Center)
-        .width(w).height(h).background(field, Length(min(w, h) * 0.072, LengthUnit.Vp))
+    }
+        .mainAxisAlignment(MainAxisAlignment.Center)
+        .crossAxisAlignment(CrossAxisAlignment.Center)
+        .width(w)
+        .height(h)
+        .background(field, Length(min(w, h) * 0.072, LengthUnit.Vp))
 }
 
 // NEW 角标（原型 .badge-new）：danger 红 pill（两主题共用），白字 10fp，圆角 6。
 private func newBadge(): Unit {
-    Label("NEW").fontSize(10.fp).foregroundColor(Color.rgb(255, 255, 255))
-        .padding(7.vp, 2.vp).background(LANLU_NEW_RED, 6.vp)
+    Label("NEW")
+        .fontSize(10.fp)
+        .foregroundColor(Color.rgb(255, 255, 255))
+        .padding(7.vp, 2.vp)
+        .background(LANLU_NEW_RED, 6.vp)
 }
 
 // 合集类型角标（原型 .badge-type.tank）：accent 色字 + rgba(0,0,0,.65) 底
 // （叠在封面上不随主题翻转，仅文字色随主题 accent）。
 private func tankBadge(model: AppModel): Unit {
-    let accent = if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT }
+    let accent = if (model.isLight()) {
+        LANLU_L_ACCENT
+    } else {
+        LANLU_ACCENT
+    }
     HStack {
         GlyphIcon(GhostGlyph.Book, size: 13.0, color: accent)
         Label("合集").fontSize(10.5.fp).foregroundColor(accent)
-    }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-        .padding(8.vp, 3.vp).background(Color.rgba(0, 0, 0, 165), 6.vp)
+    }
+        .spacing(3.vp)
+        .crossAxisAlignment(CrossAxisAlignment.Center)
+        .hug()
+        .padding(8.vp, 3.vp)
+        .background(Color.rgba(0, 0, 0, 165), 6.vp)
 }
 
 // 行头（原型 .row-head）：16fp 标题 + 右侧操作位（换一批/查看更多，由调用方给）。
@@ -1434,11 +1623,37 @@ public func sectionHeader(title: String, trailing: () -> Unit): Unit {
 // 间距 14vp，行高由调用方按卡片规格给定。子项 key/卡片按条目类型分派（聚合合辑
 // 条目的 arcid 为空，直接用会撞 key 闪退，见 searchItemKey）。
 // items 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
-public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem>, coverW: Float32,
-    stripH: Float32): Unit {
-    LazyRow(items.size, coverW, spacing: 14.0, key: {i => searchItemKey(items[i])},
-        id: "browse:${rowKey}") { i =>
-        searchItemCard(model, items[i], coverW)
+public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem>, coverW: Float32, stripH: Float32,
+    recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
+    LazyRow(items.size, coverW, spacing: 14.0, key: {i => searchItemKey(items[i])}, id: "browse:${rowKey}") {
+        i =>
+            let item = items[i]
+            if (recommendationScene.size > 0 && item.arcid.size > 0) {
+                homeCoverCard(
+                    model,
+                    item.arcid,
+                    item.title,
+                    cardMeta(item),
+                    coverW,
+                    item.coverAssetId,
+                    {=> model.openRecommendedArchive(recommendationScene, seedType, seedId, item.arcid)},
+                    {
+                        =>
+                            model.trackRecommendation(recommendationScene, seedType, seedId, "archive", item.arcid,
+                                "favorite")
+                            model.toggleFavoriteOnCard(item.arcid)
+                    },
+                    {=> model.enterSelection(item.arcid)},
+                    isNew: item.isnew,
+                    tank: false,
+                    favorited: item.isfavorite,
+                    pct: progressPct(item.pagecount, item.progress),
+                    summary: item.description,
+                    tagsCsv: item.tagsCsv
+                )
+            } else {
+                searchItemCard(model, item, coverW)
+            }
     }.height(stripH)
 }
 
@@ -1478,7 +1693,11 @@ public func splitSelection(model: AppModel): (ArrayList<String>, ArrayList<Strin
 // 「加入合集」仅档案可加入，无档案选中时禁用。胶囊造型同阅读器页码 pill（panel 底 +
 // 全圆角 + StaticBorder 描边）。
 public func batchActionBar(model: AppModel, onAddToTank: () -> Unit, onDelete: () -> Unit): Unit {
-    let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    let panel = if (model.isLight()) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_PANEL
+    }
     let (arcids, tankIds) = splitSelection(model)
     ZStack {
         HStack {
@@ -1488,8 +1707,12 @@ public func batchActionBar(model: AppModel, onAddToTank: () -> Unit, onDelete: (
             Button("加入合集", onAddToTank).style(ghostStyleOf(model)).enabled(arcids.size > 0)
             Button("删除", onDelete).role(ButtonRole.Danger)
             Button("退出", {=> model.exitSelection()}).style(ghostStyleOf(model))
-        }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-            .padding(14.vp, 8.vp).background(panel, 999.vp)
+        }
+            .spacing(8.vp)
+            .crossAxisAlignment(CrossAxisAlignment.Center)
+            .hug()
+            .padding(14.vp, 8.vp)
+            .background(panel, 999.vp)
         StaticBorder(999.0)
     }
 }
@@ -1505,6 +1728,8 @@ private let HERO_COVER_W: Float32 = 200.0
 private let HERO_COVER_H: Float32 = HERO_COVER_W * 3.0 / 2.0
 // 玻璃操作卡宽（原型 .action-card 176px 列）。
 private let ACTION_CARD_W: Float32 = 176.0
+// 2xl 直出态容纳 6 × 28vp 图标、5 × 4vp 间距及左右内边距。
+private let ACTION_CARD_W_INLINE: Float32 = 216.0
 // 主侧双列间距与侧栏宽（原型 .detail-grid：1fr : 300px，gap 22）。
 private let DETAIL_SIDE_W: Float32 = 300.0
 private let DETAIL_COL_GAP: Float32 = 22.0
@@ -1517,16 +1742,17 @@ private let MEMBER_TEXT_H: Float32 = 50.0
 // hero 数据（档案/合集共用；badge 首个渲染为金色 pill，其余为普通 pill）。
 public class DetailHeroData {
     public var badges: Array<String> = []
-    public var isNew: Bool = false          // 档案 NEW 红 pill（合集恒 false）
+    public var isNew: Bool = false // 档案 NEW 红 pill（合集恒 false）
     public var title: String = ""
+    public var clearlogoAssetId: Int64 = 0
     public var metaLine: String = ""
-    public var progressPct: Int64 = 0       // 0..100；<=0 隐藏内联进度条
-    public var progressText: String = ""    // 如 "已读 64%"
-    public var summary: String = ""         // 3 行截断
-    public var tags = ArrayList<String>()   // 超 10 个折叠为 "+N"
+    public var progressPct: Int64 = 0 // 0..100；<=0 隐藏内联进度条
+    public var progressText: String = "" // 如 "已读 64%"
+    public var summary: String = "" // 3 行截断
+    public var tags = ArrayList<String>() // 超 10 个折叠为 "+N"
     public var primaryLabel: String = ""
     public var primaryEnabled: Bool = true
-    public var onPrimary: () -> Unit = {=> () }
+    public var onPrimary: () -> Unit = {=> ()}
 }
 
 // 无 hover 态圆角描边：详情 d-card / hero 封面 / 操作卡的 1px panelEdge 描边
@@ -1584,13 +1810,18 @@ class CoverShadow <: Widget {
         // 原型 blur 48px → spread 取 20（feather 渐隐带的视觉等效，目检微调）；
         // y-offset 18 直接平移。暗色 alpha 140≈.55（原型）、亮色 26≈.10。
         let spread: Float32 = 20.0
-        let alpha: Int64 = if (light) { 26 } else { 140 }
+        let alpha: Int64 = if (light) {
+            26
+        } else {
+            140
+        }
         let base = frame.shift(0.0, 18.0)
         let shadow = Color.rgba(0, 0, 0, alpha)
-        ctx.renderer.fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3,
-            shadow.withAlpha(alpha * 3 / 5), feather: spread)
-        ctx.renderer.fillRoundedRectSoft(base, radius, shadow.withAlpha(alpha / 2),
-            feather: spread * 0.5)
+        ctx
+            .renderer
+            .fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3, shadow.withAlpha(alpha * 3 / 5),
+                feather: spread)
+        ctx.renderer.fillRoundedRectSoft(base, radius, shadow.withAlpha(alpha / 2), feather: spread * 0.5)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -1619,7 +1850,11 @@ class HoverBorder <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let edge = if (ctx.isHovered(hoverId)) { ctx.theme.accent } else { ctx.theme.panelEdge }
+        let edge = if (ctx.isHovered(hoverId)) {
+            ctx.theme.accent
+        } else {
+            ctx.theme.panelEdge
+        }
         ctx.renderer.strokeRoundedRect(frame.inset(0.5), radius - 0.5, Pen(width: 1.0, color: edge))
     }
 
@@ -1696,7 +1931,9 @@ public class ProgressTrack <: Widget {
 
 // 合集已读百分比：对齐 frontend tankoubon/page.tsx :1619（AVG(成员页码) / 总页数，钳制 0..100）。
 public func tankReadPct(t: TankoubonInfo): Int64 {
-    if (t.totalPages <= 0 || t.progress <= 0.0) { return 0 }
+    if (t.totalPages <= 0 || t.progress <= 0.0) {
+        return 0
+    }
     let pct = Int64(t.progress * 100.0 / Float32(t.totalPages) + 0.5)
     min(100, max(0, pct))
 }
@@ -1704,19 +1941,28 @@ public func tankReadPct(t: TankoubonInfo): Int64 {
 // 成员档案已读百分比（成员页码/pagecount，对齐 frontend tankoubon/page.tsx :289
 // Math.round：+0.5 取整，同本文件 tankReadPct 做法）。
 public func memberReadPct(pagecount: Int64, progress: Int64): Int64 {
-    if (pagecount <= 0 || progress <= 0) { return 0 }
+    if (pagecount <= 0 || progress <= 0) {
+        return 0
+    }
     min(100, Int64(Float32(progress) * 100.0 / Float32(pagecount) + 0.5))
 }
 
 // 详情共用骨架：backdrop（模糊大图 + 双层 scrim，主题自适应）→ 返回钮 + hero grid
 // （封面 200vp 2:3 ｜ 中列 ｜ 176vp 玻璃操作卡）→ 1fr : 300vp 双列卡片流。
 // backdropKey 空串表示无封面（纯色底 + scrim）。
-public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHeroData,
-    coverAssetId: Int64, actionIcons: () -> Unit,
-    mainCards: Array<() -> Unit>, sideCards: Array<() -> Unit>, tank!: Bool): Unit {
+public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHeroData, coverAssetId: Int64,
+    actionIcons: () -> Unit, mainCards: Array<() -> Unit>, sideCards: Array<() -> Unit>, tank!: Bool): Unit {
     let light = model.isLight()
-    let panel = if (light) { LANLU_L_PANEL } else { LANLU_PANEL }
-    let bg = if (light) { LANLU_L_BG } else { LANLU_BG }
+    let panel = if (light) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_PANEL
+    }
+    let bg = if (light) {
+        LANLU_L_BG
+    } else {
+        LANLU_BG
+    }
     ScrollView {
         VStack {
             // backdrop 带（高 300，顶对齐）+ hero 上叠 128（原型 .backdrop 300px / .hero margin-top:-128px）：
@@ -1726,16 +1972,18 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
                     // 底色兜底（backdrop 像素未就绪/无封面时可见）
                     VStack {}.fillWidth().height(DETAIL_BACKDROP_H).background(panel)
                     if (backdropKey.size > 0) {
-                        PixelImageView(backdropKey, Length(0.0, LengthUnit.Vp),
-                            Length(DETAIL_BACKDROP_H, LengthUnit.Vp), fit: ImageFit.Cover).fillWidth()
+                        PixelImageView(backdropKey, Length(0.0, LengthUnit.Vp), Length(DETAIL_BACKDROP_H, LengthUnit.Vp),
+                            fit: ImageFit.Cover).fillWidth()
                     }
                     // 双层 scrim（原型 .backdrop .scrim；明暗两组）：横向左侧压暗 + 底部融入页面底。
+                    // 亮色底部 scrim 起点 alpha 115→60、全不透明点 0.92→0.98：配合渐变模糊后
+                    // 白纱叠加过重（奶雾），把融底渐变压低并下移，让 backdrop 中上部多露封面色彩。
                     if (light) {
                         GradientScrim(direction: GradientDirection.Right,
                             stops: [(0.0, Color.rgba(244, 244, 246, 140)), (0.4, Color.rgba(244, 244, 246, 0)),
                                 (1.0, Color.rgba(244, 244, 246, 0))])
                         GradientScrim(direction: GradientDirection.Bottom,
-                            stops: [(0.0, Color.rgba(244, 244, 246, 115)), (0.92, bg), (1.0, bg)])
+                            stops: [(0.0, Color.rgba(244, 244, 246, 60)), (0.98, bg), (1.0, bg)])
                     } else {
                         GradientScrim(direction: GradientDirection.Right,
                             stops: [(0.0, Color.rgba(11, 11, 13, 128)), (0.4, Color.rgba(11, 11, 13, 0)),
@@ -1760,14 +2008,22 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
             HStack {
                 SizeProbe(width: model.detailWidth) {
                     VStack {
-                        for (c in mainCards) { c() }
+                        for (c in mainCards) {
+                            c()
+                        }
                     }.spacing(20.vp)
                 }.flex()
                 VStack {
-                    for (c in sideCards) { c() }
+                    for (c in sideCards) {
+                        c()
+                    }
                 }.spacing(20.vp).hug().width(DETAIL_SIDE_W)
-            }.spacing(DETAIL_COL_GAP).crossAxisAlignment(CrossAxisAlignment.Start)
-                .hug().fillWidth().padding(32.vp, 26.vp, 32.vp, 48.vp)
+            }
+                .spacing(DETAIL_COL_GAP)
+                .crossAxisAlignment(CrossAxisAlignment.Start)
+                .hug()
+                .fillWidth()
+                .padding(32.vp, 26.vp, 32.vp, 48.vp)
         }.spacing(0.0)
     }
 }
@@ -1775,90 +2031,146 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
 // hero grid（原型 .hero）：封面（200vp 2:3，合集带双层堆栈垫底，顶对齐横跨模糊带）｜
 // 中列（顶对齐 + 96vp 顶距：badges/标题/meta/内联进度/3 行简介/标签 chips）｜
 // 玻璃操作卡（底对齐，主按钮 + 图标行）。
-public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int64,
-    actionIcons: () -> Unit, tank!: Bool): Unit {
+public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int64, actionIcons: () -> Unit, tank!: Bool): Unit {
     let light = model.isLight()
     // 标题字号（原型 clamp(24px,3vw,36px)）：windowWidth 未就绪时回退 30。
     let w = model.windowWidth.value
-    let titleSize: Float32 = if (w <= 0) { 30.0 } else { Float32(min(36, max(24, w * 3 / 100))) }
-    // 中列宽 = 窗口 - 左右 32 - 封面 200 - 卡 176 - 间距 26（封面↔中列，真实）- 26
+    let titleSize: Float32 = if (w <= 0) {
+        30.0
+    } else {
+        Float32(min(36, max(24, w * 3 / 100)))
+    }
+    let inlineActions = w >= 1536
+    let actionCardW = if (inlineActions) {
+        ACTION_CARD_W_INLINE
+    } else {
+        ACTION_CARD_W
+    }
+    // 中列宽 = 窗口 - 左右 32 - 封面 200 - 操作卡 - 两段 26vp 间距。
     // （操作卡虚拟预留：卡片在 ZStack 覆盖层、不占 HStack 子位）（windowWidth 未就绪按 1440 估）。
     // 必须显式定宽：框架 HStack 量测给 flex 子列喂全宽、布局却按实际宽约束，
     // 文本换行不一致会把中列尾块（标签 chips）挤出 hero 框架。
-    let midW = Float32((if (w <= 0) { 1440 } else { w }) - 492)
+    let midW = max(160.0, Float32((if (w <= 0) {
+        1440
+    } else {
+        w
+    })) - 316.0 - actionCardW)
     ZStack {
-    HStack {
-        // 封面（2:3，圆角 14，1px 描边；合集叠两层错位垫底面板）
-        ZStack {
-            // 软投影恒有（无封面时占位色块同样有卡片感）；设计稿投影仅 .cover-big，操作卡不加
-            CoverShadow(14.0, light)
-            if (tank) {
-                let hi = if (light) { LANLU_L_TANK_STACK_HI } else { LANLU_TANK_STACK_HI }
-                let lo = if (light) { LANLU_L_TANK_STACK_LO } else { LANLU_TANK_STACK_LO }
-                let edge = if (light) { LANLU_L_PANEL_EDGE } else { LANLU_PANEL_EDGE }
-                TankBackdrop(hi, lo, edge)
-            }
-            if (coverAssetId > 0) {
-                remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
-                    Length(HERO_COVER_W, LengthUnit.Vp), Length(HERO_COVER_H, LengthUnit.Vp))
-            } else {
-                noCoverBox(model, HERO_COVER_W, HERO_COVER_H)
-            }
-            StaticBorder(14.0)
-        }.alignment(Alignment.TopLeading)
-
-        // 中列（顶对齐；节奏 = badge 下 10 / 标题下 8 / 进度·简介·标签各上 12）
-        VStack {
-            // 徽标行：首个金 pill，其余普通 pill；档案可带 NEW 红 pill
-            HStack {
-                ForEachIndexed(data.badges) { i, b =>
-                    if (i == 0) {
-                        let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
-                        let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-                        Label(b).fontSize(11.fp).foregroundColor(accent)
-                            .padding(10.vp, 3.vp).background(accentSoft, 12.vp)
+        HStack {
+            // 封面（2:3，圆角 14，1px 描边；合集叠两层错位垫底面板）
+            ZStack {
+                // 软投影恒有（无封面时占位色块同样有卡片感）；设计稿投影仅 .cover-big，操作卡不加
+                CoverShadow(14.0, light)
+                if (tank) {
+                    let hi = if (light) {
+                        LANLU_L_TANK_STACK_HI
                     } else {
-                        let elev = if (light) { LANLU_L_PANEL } else { LANLU_PANEL }
-                        Label(b).fontSize(11.fp).foregroundColor(
-                                if (light) { LANLU_L_MUTED } else { LANLU_MUTED })
-                            .padding(10.vp, 3.vp).background(elev, 12.vp)
+                        LANLU_TANK_STACK_HI
                     }
+                    let lo = if (light) {
+                        LANLU_L_TANK_STACK_LO
+                    } else {
+                        LANLU_TANK_STACK_LO
+                    }
+                    let edge = if (light) {
+                        LANLU_L_PANEL_EDGE
+                    } else {
+                        LANLU_PANEL_EDGE
+                    }
+                    TankBackdrop(hi, lo, edge)
                 }
-                if (data.isNew) { newBadge() }
-                Spacer()
-            }.spacing(8.vp).hug().padding(0.0, 0.0, 0.0, 10.0)
+                if (coverAssetId > 0) {
+                    remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
+                        Length(HERO_COVER_W, LengthUnit.Vp), Length(HERO_COVER_H, LengthUnit.Vp))
+                } else {
+                    noCoverBox(model, HERO_COVER_W, HERO_COVER_H)
+                }
+                StaticBorder(14.0)
+            }.alignment(Alignment.TopLeading)
 
-            // 大标题（最多 2 行；字号 clamp(24,3vw,36)）
-            Label(data.title).fontSize(titleSize).maxLines(2).padding(0.0, 0.0, 0.0, 8.0)
-
-            // meta 行
-            if (data.metaLine.size > 0) {
-                Label(data.metaLine).fontSize(13.fp).muted().maxLines(2)
-            }
-
-            // 内联进度条 + 百分比（原型 .hero-prog；有进度才显示）
-            if (data.progressPct > 0) {
+            // 中列（顶对齐；节奏 = badge 下 10 / 标题下 8 / 进度·简介·标签各上 12）
+            VStack {
+                // 徽标行：首个金 pill，其余普通 pill；档案可带 NEW 红 pill
                 HStack {
-                    ProgressTrack(data.progressPct, 5.0).width(320.vp)
-                    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-                    Label(data.progressText).fontSize(12.fp).foregroundColor(accent)
-                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-                    .padding(0.0, 12.0, 0.0, 0.0)
-            }
+                    ForEachIndexed(data.badges) {
+                        i, b => if (i == 0) {
+                            let accentSoft = if (light) {
+                                LANLU_L_ACCENT_SOFT
+                            } else {
+                                LANLU_ACCENT_SOFT
+                            }
+                            let accent = if (light) {
+                                LANLU_L_ACCENT
+                            } else {
+                                LANLU_ACCENT
+                            }
+                            Label(b)
+                                .fontSize(11.fp)
+                                .foregroundColor(accent)
+                                .padding(10.vp, 3.vp)
+                                .background(accentSoft, 12.vp)
+                        } else {
+                            let elev = if (light) {
+                                LANLU_L_PANEL
+                            } else {
+                                LANLU_PANEL
+                            }
+                            Label(b)
+                                .fontSize(11.fp)
+                                .foregroundColor(if (light) {
+                                    LANLU_L_MUTED
+                                } else {
+                                    LANLU_MUTED
+                                })
+                                .padding(10.vp, 3.vp)
+                                .background(elev, 12.vp)
+                        }
+                    }
+                    if (data.isNew) {
+                        newBadge()
+                    }
+                    Spacer()
+                }.spacing(8.vp).hug().padding(0.0, 0.0, 0.0, 10.0)
 
-            // 简介（3 行截断）
-            if (data.summary.size > 0) {
-                Label(data.summary).fontSize(13.fp).muted().maxLines(3).padding(0.0, 12.0, 0.0, 0.0)
-            }
+                // 标识区固定为两行：第一行 clearlogo/文字标题，第二行页数、大小等 meta。
+                // clearlogo 使用左对齐 Contain，避免透明画布把可见 logo 推到中间。
+                VStack {
+                    if (data.clearlogoAssetId > 0 && model.imageState("asset:${data.clearlogoAssetId}").value != "error") {
+                        remoteImage(model, "asset:${data.clearlogoAssetId}", "/api/assets/${data.clearlogoAssetId}",
+                            Length(min(midW, 360.0), LengthUnit.Vp), Length(72.0, LengthUnit.Vp), fit: ImageFit.Contain,
+                            startAligned: true)
+                    } else {
+                        Label(data.title).fontSize(titleSize).maxLines(2)
+                    }
+                    if (data.metaLine.size > 0) {
+                        Label(data.metaLine).fontSize(13.fp).muted().maxLines(1)
+                    }
+                }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 
-            // 标签 chips（超 10 个折叠 "+N"）
-            if (data.tags.size > 0) {
-                VStack { tagFlow(model, data.tags) }.padding(0.0, 12.0, 0.0, 0.0)
-            }
-        }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).width(midW)
-            .padding(0.0, 96.0, 0.0, 4.0)
-        }.spacing(26.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-            .padding(32.vp, 0.vp, 32.vp, 0.vp)
+                // 内联进度条 + 百分比（原型 .hero-prog；有进度才显示）
+                if (data.progressPct > 0) {
+                    HStack {
+                        ProgressTrack(data.progressPct, 5.0).width(320.vp)
+                        let accent = if (light) {
+                            LANLU_L_ACCENT
+                        } else {
+                            LANLU_ACCENT
+                        }
+                        Label(data.progressText).fontSize(12.fp).foregroundColor(accent)
+                    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(0.0, 12.0, 0.0, 0.0)
+                }
+
+                // 简介（3 行截断）
+                if (data.summary.size > 0) {
+                    Label(data.summary).fontSize(13.fp).muted().maxLines(3).padding(0.0, 12.0, 0.0, 0.0)
+                }
+
+                // 标签 chips（超 10 个折叠 "+N"）
+                if (data.tags.size > 0) {
+                    VStack {tagFlow(model, data.tags)}.padding(0.0, 12.0, 0.0, 0.0)
+                }
+            }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).width(midW).padding(0.0, 96.0, 0.0, 4.0)
+        }.spacing(26.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(32.vp, 0.vp, 32.vp, 0.vp)
 
         // 玻璃操作卡（176vp，半透明 capsule 底 + 1px 描边）：ZStack 默认拉伸子元素，
         // 用 Spacer 把卡片压到右下（右 32 底 4，原型 .action-card margin-bottom:4px）。
@@ -1871,15 +2183,17 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 ZStack {
                     VStack {
                         IconButton(IconName.Play, label: Some(data.primaryLabel), role: ButtonRole.Primary,
-                            onClick: data.onPrimary)
-                            .enabled(data.primaryEnabled)
+                            onClick: data.onPrimary).enabled(data.primaryEnabled)
                         HStack {
                             actionIcons()
                         }.spacing(4.vp).mainAxisAlignment(MainAxisAlignment.SpaceBetween).hug()
                     }.spacing(9.vp).padding(14.vp)
                     StaticBorder(14.0)
-                }.width(ACTION_CARD_W).background(
-                    if (light) { LANLU_L_OVERLAY_SURFACE } else { LANLU_OVERLAY_SURFACE }, 14.vp)
+                }.width(actionCardW).background(if (light) {
+                    LANLU_L_OVERLAY_SURFACE
+                } else {
+                    LANLU_OVERLAY_SURFACE
+                }, 14.vp)
             }.hug()
         }.padding(0.0, 0.0, 32.0, 4.0)
     }.alignment(Alignment.TopLeading)
@@ -1887,11 +2201,19 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
 
 // 详情卡片容器（原型 .d-card）：bg-card + 1px 描边 + 圆角 14 + 18vp 内边距；
 // 头部 = 标题 + 可选计数 pill + 右侧工具位（mini-seg/筛选框等）。
-public func detailCard(model: AppModel, title: String, count!: String = "",
-    tools!: () -> Unit = {=> () }, body!: () -> Unit): Unit {
+public func detailCard(model: AppModel, title: String, count!: String = "", tools!: () -> Unit = {=> ()},
+    body!: () -> Unit): Unit {
     let light = model.isLight()
-    let bg = if (light) { LANLU_L_PANEL } else { LANLU_FIELD }
-    let elev = if (light) { LANLU_L_PANEL_RAISED } else { LANLU_PANEL }
+    let bg = if (light) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_FIELD
+    }
+    let elev = if (light) {
+        LANLU_L_PANEL_RAISED
+    } else {
+        LANLU_PANEL
+    }
     ZStack {
         VStack {
             HStack {
@@ -1901,28 +2223,33 @@ public func detailCard(model: AppModel, title: String, count!: String = "",
                 }
                 Spacer()
                 tools()
-            }.crossAxisAlignment(CrossAxisAlignment.Center).hug()
+            }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth()
             body()
         }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Start).padding(18.vp)
         StaticBorder(14.0)
-        // fillWidth：卡片须撑满所在内容列（设置区 640/900 列、详情页列均如此），
-        // 缺省自然宽会让卡片只按内容宽度收缩，右侧留出空档。
+    // fillWidth：卡片须撑满所在内容列（设置区 640/900 列、详情页列均如此），
+    // 缺省自然宽会让卡片只按内容宽度收缩，右侧留出空档。
     }.background(bg, 14.vp).fillWidth()
 }
 
 // 字段列表（原型 .info-list .info-row）：k 76vp muted 定宽 + v 单行截断，行间细分隔线。
 public func infoList(model: AppModel, rows: Array<(String, String)>): Unit {
-    let sep = if (model.isLight()) { Color.rgba(0, 0, 0, 15) } else { Color.rgba(255, 255, 255, 10) }
+    let sep = if (model.isLight()) {
+        Color.rgba(0, 0, 0, 15)
+    } else {
+        Color.rgba(255, 255, 255, 10)
+    }
     VStack {
-        ForEachIndexed(rows) { i, row =>
-            let (k, v) = row
-            HStack {
-                Label(k).fontSize(12.fp).muted().width(76.vp)
-                Label(v).fontSize(12.fp).maxLines(1)
-            }.spacing(12.vp).hug().padding(0.vp, 7.vp)
-            if (i + 1 < rows.size) {
-                Divider(color: sep)
-            }
+        ForEachIndexed(rows) {
+            i, row =>
+                let (k, v) = row
+                HStack {
+                    Label(k).fontSize(12.fp).muted().width(76.vp)
+                    Label(v).fontSize(12.fp).maxLines(1)
+                }.spacing(12.vp).hug().padding(0.vp, 7.vp)
+                if (i + 1 < rows.size) {
+                    Divider(color: sep)
+                }
         }
     }.spacing(0.0).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }
@@ -1945,8 +2272,7 @@ class TagChip <: Widget {
     }
 
     public func measure(ctx: UiContext, _: Size): Size {
-        Size(ctx.renderer.textWidth(text, pointSize: 11.0) + 22.0,
-            ctx.renderer.textHeight(pointSize: 11.0) + 8.0) // 原型 padding:4px 11px
+        Size(ctx.renderer.textWidth(text, pointSize: 11.0) + 22.0, ctx.renderer.textHeight(pointSize: 11.0) + 8.0) // 原型 padding:4px 11px
     }
 
     public func layout(_: UiContext, rect: Rect): Unit {
@@ -1955,17 +2281,27 @@ class TagChip <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let hovered = ctx.isHovered(hoverId)
-        let bg = if (light) { Color.rgba(0, 0, 0, 13) } else { Color.rgba(255, 255, 255, 15) }
+        let bg = if (light) {
+            Color.rgba(0, 0, 0, 13)
+        } else {
+            Color.rgba(255, 255, 255, 15)
+        }
         ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, bg)
         let accent = ctx.theme.accent
-        let edge = if (hovered) { accent.withAlpha(102) } else { ctx.theme.panelEdge }
-        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5,
-            Pen(width: 1.0, color: edge))
-        let fg = if (hovered) { accent } else { ctx.theme.mutedText }
+        let edge = if (hovered) {
+            accent.withAlpha(102)
+        } else {
+            ctx.theme.panelEdge
+        }
+        ctx.renderer.strokeRoundedRect(frame.inset(0.5), frame.h / 2.0 - 0.5, Pen(width: 1.0, color: edge))
+        let fg = if (hovered) {
+            accent
+        } else {
+            ctx.theme.mutedText
+        }
         let tw = ctx.renderer.textWidth(text, pointSize: 11.0)
         let th = ctx.renderer.textHeight(pointSize: 11.0)
-        ctx.renderer.text(text, frame.centerX() - tw / 2.0, frame.centerY() - th / 2.0, fg,
-            pointSize: 11.0)
+        ctx.renderer.text(text, frame.centerX() - tw / 2.0, frame.centerY() - th / 2.0, fg, pointSize: 11.0)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -1987,7 +2323,11 @@ class TagChip <: Widget {
 
 // 标签 chips 流（原型 .tag-row .tag）：1px 描边 pill、hover 变金、点击携 tag 跳搜索，自动换行。
 public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
-    let chipBg = if (model.isLight()) { Color.rgba(0, 0, 0, 13) } else { Color.rgba(255, 255, 255, 15) }
+    let chipBg = if (model.isLight()) {
+        Color.rgba(0, 0, 0, 13)
+    } else {
+        Color.rgba(255, 255, 255, 15)
+    }
     FlowRow {
         // 最多展示前 10 个，每个以 tag 串为 Keyed 身份（同 ForEach(key: {t => t}) 语义）。
         let shown = min(tags.size, 10)
@@ -1995,17 +2335,14 @@ public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
         while (i < shown) {
             let t = tags[i]
             Keyed(t) {
-                TagChip(t, model.isLight(), "tf:${t}") {=>
-                    model.searchText.value = t
-                    model.submitFilter()
-                    model.navigate(Page.Library)
+                TagChip(t, model.isLight(), "tf:${t}") {
+                    => model.searchExactTag(t)
                 }
             }
             i += 1
         }
         if (tags.size > 10) {
-            Label("+${tags.size - 10}").fontSize(11.fp).muted().padding(11.vp, 4.vp)
-                .background(chipBg, 12.vp)
+            Label("+${tags.size - 10}").fontSize(11.fp).muted().padding(11.vp, 4.vp).background(chipBg, 12.vp)
         }
     }.spacing(7.vp)
 }
@@ -2014,18 +2351,17 @@ public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
 public func tagGroups(model: AppModel, tags: ArrayList<String>): Unit {
     let groups = groupTagsByNamespace(tags)
     VStack {
-        ForEachIndexed(groups) { _, g =>
-            let (gk, values) = g
-            Label(gk).fontSize(11.fp).muted().padding(0.vp, 8.vp, 0.vp, 2.vp)
-            FlowRow {
-                ForEach(values, key: { v: (String, String) => v[1] }) { v =>
-                    TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}") {=>
-                        model.searchText.value = v[1]
-                        model.submitFilter()
-                        model.navigate(Page.Library)
+        ForEachIndexed(groups) {
+            _, g =>
+                let (gk, values) = g
+                Label(gk).fontSize(11.fp).muted().padding(0.vp, 8.vp, 0.vp, 2.vp)
+                FlowRow {
+                    ForEach(values, key: {v: (String, String) => v[1]}) {
+                        v => TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}") {
+                            => model.searchExactTag(v[1])
+                        }
                     }
-                }
-            }.spacing(7.vp)
+                }.spacing(7.vp)
         }
     }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }
@@ -2083,8 +2419,16 @@ private func tagGroupLabel(ns: String): String {
 // 侧栏进度大卡（原型 .prog-card）：居中大数字 + 说明行 + 6vp 轨道条。
 public func progressCard(model: AppModel, big: String, ofText: String, pct: Int64): Unit {
     let light = model.isLight()
-    let bg = if (light) { LANLU_L_PANEL } else { LANLU_FIELD }
-    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
+    let bg = if (light) {
+        LANLU_L_PANEL
+    } else {
+        LANLU_FIELD
+    }
+    let accent = if (light) {
+        LANLU_L_ACCENT
+    } else {
+        LANLU_ACCENT
+    }
     ZStack {
         VStack {
             Label(big).fontSize(38.fp).foregroundColor(accent)
@@ -2097,7 +2441,8 @@ public func progressCard(model: AppModel, big: String, ofText: String, pct: Int6
 
 // 合集 mini 卡横排行（原型 .rel-row 的合集版）：132vp tankCard + 横向滚动。
 // tanks 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
-public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId: String): Unit {
+public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId: String,
+    recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
     let items = ArrayList<TankCardItem>()
     for (t in tanks) {
         let c = TankCardItem()
@@ -2119,9 +2464,35 @@ public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId:
         c.isfavorite = t.isfavorite
         items.add(c)
     }
-    LazyRow(items.size, REL_COVER_W, spacing: 14.0, key: {i => items[i].id},
-        id: rowId) { i =>
-        tankCard(model, items[i], REL_COVER_W)
+    LazyRow(items.size, REL_COVER_W, spacing: 14.0, key: {i => items[i].id}, id: rowId) {
+        i =>
+            let item = items[i]
+            if (recommendationScene.size > 0) {
+                homeCoverCard(
+                    model,
+                    item.id,
+                    item.title,
+                    "${item.archiveCount} 个档案 · ${item.readPct}%",
+                    REL_COVER_W,
+                    item.coverAssetId,
+                    {=> model.openRecommendedTank(recommendationScene, seedType, seedId, item.id)},
+                    {
+                        =>
+                            model.trackRecommendation(recommendationScene, seedType, seedId, "tankoubon", item.id,
+                                "favorite")
+                            model.toggleTankFavoriteOnCard(item.id)
+                    },
+                    {=> model.enterSelection(item.id)},
+                    isNew: false,
+                    tank: true,
+                    favorited: item.isfavorite,
+                    pct: item.readPct,
+                    summary: item.description,
+                    tagsCsv: item.tagsCsv
+                )
+            } else {
+                tankCard(model, item, REL_COVER_W)
+            }
     }.height(REL_STRIP_H)
 }
 
@@ -2149,7 +2520,9 @@ public func pageTypeIcon(pageType: String): ?IconName {
 // pages 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
 public func pagePreview(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
-    if (pages.size == 0) { return }
+    if (pages.size == 0) {
+        return
+    }
     if (model.pageViewIndex.value == 1) {
         pvList(model, pages, readUpTo, onOpenPage)
     } else if (model.pageViewIndex.value == 2) {
@@ -2164,17 +2537,27 @@ public func pagePreview(model: AppModel, arcid: String, pages: ArrayList<PageInf
 private func pvGrid(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0 // 减去 d-card 两侧 18vp 内边距
-    var cols = if (w <= 0.0) { 6 } else { Int64((w + 10.0) / 106.0) }
-    if (cols < 2) { cols = 2 }
-    let cellW = if (w <= 0.0) { Float32(96.0) } else { (w - Float32(cols - 1) * 10.0) / Float32(cols) }
+    var cols = if (w <= 0.0) {
+        6
+    } else {
+        Int64((w + 10.0) / 106.0)
+    }
+    if (cols < 2) {
+        cols = 2
+    }
+    let cellW = if (w <= 0.0) {
+        Float32(96.0)
+    } else {
+        (w - Float32(cols - 1) * 10.0) / Float32(cols)
+    }
     let cellH = cellW * 10.0 / 16.0
     let rows = (pages.size + cols - 1) / cols
     let gridH = Float32(rows) * cellH + Float32(rows - 1) * 10.0
     // (count, itemAt) 形式按需取页：不再为配对页码每帧新建 indexed 中间表。
-    LazyGrid(pages.size, cols, cellH, spacing: 10.0, columnSpacing: 10.0,
-        id: "pv-grid", itemAt: {i => (i + 1, pages[i])}) { item =>
-        let (no, p) = item
-        pvThumb(model, arcid, no, p, no <= readUpTo, cellW, cellH) {=> onOpenPage(no) }
+    LazyGrid(pages.size, cols, cellH, spacing: 10.0, columnSpacing: 10.0, id: "pv-grid", itemAt: {i => (i + 1, pages[i])}) {
+        item =>
+            let (no, p) = item
+            pvThumb(model, arcid, no, p, no <= readUpTo, cellW, cellH) {=> onOpenPage(no)}
     }.height(pagePreviewViewportHeight(gridH))
 }
 
@@ -2206,14 +2589,38 @@ private func pvThumb(model: AppModel, arcid: String, no: Int64, page: PageInfo, 
     onOpen: () -> Unit): Unit {
     let light = model.isLight()
     // 原型 .pv-thumb 渐变近色（扁平近似），明暗两组。
-    let thumbBg = if (light) { Color.rgb(0xD0, 0xD9, 0xE6) } else { Color.rgb(0x1D, 0x26, 0x35) }
-    let badgeBg = if (light) { Color.rgba(255, 255, 255, 179) } else { Color.rgba(0, 0, 0, 153) }
-    let badgeFg = if (light) { LANLU_L_TEXT } else { LANLU_ON_MEDIA }
+    let thumbBg = if (light) {
+        Color.rgb(0xD0, 0xD9, 0xE6)
+    } else {
+        Color.rgb(0x1D, 0x26, 0x35)
+    }
+    let badgeBg = if (light) {
+        Color.rgba(255, 255, 255, 179)
+    } else {
+        Color.rgba(0, 0, 0, 153)
+    }
+    let badgeFg = if (light) {
+        LANLU_L_TEXT
+    } else {
+        LANLU_ON_MEDIA
+    }
     // 已读变淡：ZStack.opacity 只淡 surface（色块/pill 底），页码与图标是纯 Label——
     // 文字色显式换 45% 透明度色（115≈0.45*255），未读色保持原值。
-    let badgeFgRead = if (light) { Color.rgba(0x1D, 0x1D, 0x21, 115) } else { Color.rgba(0xF2, 0xF2, 0xF4, 115) }
-    let iconFg = if (light) { LANLU_L_TEXT } else { LANLU_TEXT }
-    let iconFgRead = if (light) { Color.rgba(0x1D, 0x1D, 0x21, 115) } else { Color.rgba(0xE8, 0xE8, 0xEA, 115) }
+    let badgeFgRead = if (light) {
+        Color.rgba(0x1D, 0x1D, 0x21, 115)
+    } else {
+        Color.rgba(0xF2, 0xF2, 0xF4, 115)
+    }
+    let iconFg = if (light) {
+        LANLU_L_TEXT
+    } else {
+        LANLU_TEXT
+    }
+    let iconFgRead = if (light) {
+        Color.rgba(0x1D, 0x1D, 0x21, 115)
+    } else {
+        Color.rgba(0xE8, 0xE8, 0xEA, 115)
+    }
     let icon = pageTypeIcon(page.pageType)
     let thumbKey = pagePreviewThumbKey(arcid, page)
     let thumbUrl = pagePreviewThumbUrl(arcid, page)
@@ -2226,36 +2633,49 @@ private func pvThumb(model: AppModel, arcid: String, no: Int64, page: PageInfo, 
                 // pvGrid 由 LazyGrid 虚拟化：只有当前视口和少量 overscan 行会构建到这里，
                 // 因而 remoteImage 的构建期请求天然是可见项按需加载；普通优先级确保
                 // 阅读器当前页的 highPriority 请求仍可插队。
-                remoteImage(model, thumbKey, thumbUrl, Length(w, LengthUnit.Vp), Length(h, LengthUnit.Vp),
-                    radius: 9.0)
+                remoteImage(model, thumbKey, thumbUrl, Length(w, LengthUnit.Vp), Length(h, LengthUnit.Vp), radius: 9.0)
             }
             VStack {
                 HStack {
-                    Label("${no}").fontSize(9.fp).foregroundColor(if (read) { badgeFgRead } else { badgeFg })
-                        .padding(6.vp, 1.vp).background(badgeBg, 5.vp)
+                    Label("${no}")
+                        .fontSize(9.fp)
+                        .foregroundColor(if (read) {
+                            badgeFgRead
+                        } else {
+                            badgeFg
+                        })
+                        .padding(6.vp, 1.vp)
+                        .background(badgeBg, 5.vp)
                     Spacer()
                     match (icon) {
-                        case Some(value) => Icon(value, size: 10.vp,
-                            color: if (read) { iconFgRead } else { iconFg })
+                        case Some(value) => Icon(value, size: 10.vp, color: if (read) {
+                            iconFgRead
+                        } else {
+                            iconFg
+                        })
                         case None => ()
                     }
                 }.hug()
             }.padding(5.vp)
             HoverBorder(9.0, "pv:${no}")
-        }.opacity(if (read) { 0.45 } else { 1.0 })
+        }.opacity(if (read) {
+            0.45
+        } else {
+            1.0
+        })
     }
 }
 
 // 列表态（原型 .pv-list .pv-row）：页码右对齐定宽 + 文件名截断 + 类型图标，已读半透明。
-private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
-    onOpenPage: (Int64) -> Unit): Unit {
+private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
     let contentH = Float32(pages.size) * PAGE_PREVIEW_ROW_H
-    LazyList(pages.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-list", key: {i => "page:${i}"}) { i =>
-        let no = i + 1
-        let p = pages[i]
-        pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo, 0.0) {=>
-            onOpenPage(no)
-        }
+    LazyList(pages.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-list", key: {i => "page:${i}"}) {
+        i =>
+            let no = i + 1
+            let p = pages[i]
+            pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo, 0.0) {
+                => onOpenPage(no)
+            }
     }.height(pagePreviewViewportHeight(contentH))
 }
 
@@ -2266,8 +2686,7 @@ private class PagePreviewTreeRow {
     var pageIndex: Int64 = 0
 }
 
-private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64,
-    onOpenPage: (Int64) -> Unit): Unit {
+private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
     // 预分组：目录 → 页码列表（保持原顺序）。
     let dirs = ArrayList<String>()
     let grouped = HashMap<String, ArrayList<Int64>>()
@@ -2290,7 +2709,11 @@ private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
             case Some(list) =>
                 let header = PagePreviewTreeRow()
                 header.isHeader = true
-                let dirName = if (d.size > 0) { d } else { "（根目录）" }
+                let dirName = if (d.size > 0) {
+                    d
+                } else {
+                    "（根目录）"
+                }
                 header.title = "${dirName}（${list.size}）"
                 rows.add(header)
                 for (i in list) {
@@ -2302,40 +2725,60 @@ private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64
         }
     }
     let contentH = Float32(rows.size) * PAGE_PREVIEW_ROW_H
-    LazyList(rows.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-tree", key: { i =>
-        if (rows[i].isHeader) { "dir:${rows[i].title}" } else { "page:${rows[i].pageIndex}" }
-    }) { i =>
-        let row = rows[i]
-        if (row.isHeader) {
-            let _ = HStack {
-                Icon(IconName.ChevronDown, size: 12.vp)
-                Label(row.title).fontSize(12.fp)
-            }.spacing(5.vp).hug().padding(8.vp, 4.vp)
+    LazyList(rows.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-tree", key: {
+        i => if (rows[i].isHeader) {
+            "dir:${rows[i].title}"
         } else {
-            let no = row.pageIndex + 1
-            let p = pages[row.pageIndex]
-            pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo,
-                20.0) {=> onOpenPage(no) }
+            "page:${rows[i].pageIndex}"
         }
+    }) {
+        i =>
+            let row = rows[i]
+            if (row.isHeader) {
+                let _ = HStack {
+                    Icon(IconName.ChevronDown, size: 12.vp)
+                    Label(row.title).fontSize(12.fp)
+                }.spacing(5.vp).hug().padding(8.vp, 4.vp)
+            } else {
+                let no = row.pageIndex + 1
+                let p = pages[row.pageIndex]
+                pvRow(model, no, pageFileName(p), pageTypeIcon(p.pageType), no <= readUpTo, 20.0) {=> onOpenPage(no)}
+            }
     }.height(pagePreviewViewportHeight(contentH))
 }
 
 // 列表/树共用行：indent 为左侧额外缩进（树态成员行用）；点击进阅读器对应页。
-private func pvRow(model: AppModel, no: Int64, name: String, icon: ?IconName, read: Bool,
-    indent: Float32, onOpen: () -> Unit): Unit {
+private func pvRow(model: AppModel, no: Int64, name: String, icon: ?IconName, read: Bool, indent: Float32,
+    onOpen: () -> Unit): Unit {
     let light = model.isLight()
     // 已读变淡：整行是纯 Label，opacity 修饰器只作用 surface 填充（对行是死代码）——
     // 改为显式 45% 透明度文字色（115≈0.45*255），对齐原型 .pv-row.read{opacity:.45}；
     // 未读色与主题 text/muted token 同值，明暗两套随 isLight() 二选一。
     let fg = if (read) {
-        if (light) { Color.rgba(0x6D, 0x6D, 0x76, 115) } else { Color.rgba(0x9A, 0x9A, 0xA2, 115) }
+        if (light) {
+            Color.rgba(0x6D, 0x6D, 0x76, 115)
+        } else {
+            Color.rgba(0x9A, 0x9A, 0xA2, 115)
+        }
     } else {
-        if (light) { LANLU_L_MUTED } else { LANLU_MUTED }
+        if (light) {
+            LANLU_L_MUTED
+        } else {
+            LANLU_MUTED
+        }
     }
     let iconFg = if (read) {
-        if (light) { Color.rgba(0x1D, 0x1D, 0x21, 115) } else { Color.rgba(0xE8, 0xE8, 0xEA, 115) }
+        if (light) {
+            Color.rgba(0x1D, 0x1D, 0x21, 115)
+        } else {
+            Color.rgba(0xE8, 0xE8, 0xEA, 115)
+        }
     } else {
-        if (light) { LANLU_L_TEXT } else { LANLU_TEXT }
+        if (light) {
+            LANLU_L_TEXT
+        } else {
+            LANLU_TEXT
+        }
     }
     ClickArea(onClick: onOpen) {
         ZStack {
@@ -2366,7 +2809,9 @@ private func pageDir(id: String): String {
 
 // 页展示名：title 优先，缺省取 id 末段文件名。
 private func pageFileName(p: PageInfo): String {
-    if (p.title.size > 0) { return p.title }
+    if (p.title.size > 0) {
+        return p.title
+    }
     match (p.id.lastIndexOf("/")) {
         case Some(i) => p.id[(i + 1)..p.id.size]
         case None => p.id
@@ -2378,44 +2823,75 @@ private func pageFileName(p: PageInfo): String {
 // 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格，悬停提供详情/收藏/多选图标按钮。
 // onEnterSelection：hover 浮层「多选」入口回调（进入选择模式并选中该项；tank 详情由
 // 调用方顺带记录选择归属，见 detail_view.detailSelectionOwner）。
-public func memberGridContent(model: AppModel, members: Array<SearchItem>,
-    onEnterSelection: (String) -> Unit): Unit {
+public func memberGridContent(model: AppModel, members: Array<SearchItem>, onEnterSelection: (String) -> Unit,
+    onRemove: (String) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0
-    var cols = if (w <= 0.0) { 4 } else { Int64((w + 12.0) / 152.0) }
-    if (cols < 2) { cols = 2 }
-    let cellW = if (w <= 0.0) { Float32(140.0) } else { (w - Float32(cols - 1) * 12.0) / Float32(cols) }
+    var cols = if (w <= 0.0) {
+        4
+    } else {
+        Int64((w + 12.0) / 152.0)
+    }
+    if (cols < 2) {
+        cols = 2
+    }
+    let cellW = if (w <= 0.0) {
+        Float32(140.0)
+    } else {
+        (w - Float32(cols - 1) * 12.0) / Float32(cols)
+    }
     let coverH = cellW * 4.0 / 3.0
     let rows = (members.size + cols - 1) / cols
     let gridH = Float32(rows) * (coverH + MEMBER_TEXT_H) + Float32(rows - 1) * 16.0
-    LazyGrid(members, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0,
-        id: "member-grid") { item =>
-        if (model.selectionMode.value) {
+    LazyGrid(members, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0, id: "member-grid") {
+        item => if (model.selectionMode.value) {
             memberSelectCard(model, item, cellW)
         } else {
-            memberCard(model, item, cellW, onEnterSelection)
+            memberCard(model, item, cellW, onEnterSelection, onRemove)
         }
     }.height(gridH)
 }
 
 // 成员卡：复用首页卡骨架，悬停提供详情/收藏/多选图标按钮。
-private func memberCard(model: AppModel, item: SearchItem, coverW: Float32,
-    onEnterSelection: (String) -> Unit): Unit {
-    homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
-        {=> model.openDetail(item.arcid) }, {=> model.toggleFavoriteOnCard(item.arcid) },
-        {=> onEnterSelection(item.arcid) },
-        isNew: item.isnew, tank: false, favorited: item.isfavorite,
-        pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+private func memberCard(model: AppModel, item: SearchItem, coverW: Float32, onEnterSelection: (String) -> Unit,
+    onRemove: (String) -> Unit): Unit {
+    ContextMenu(
+        items: [
+            MenuItem("打开详情", {=> model.openDetail(item.arcid)}),
+            MenuItem(if (item.isfavorite) {
+                "取消收藏"
+            } else {
+                "收藏"
+            }, {=> model.toggleFavoriteOnCard(item.arcid)}),
+            MenuItem("标为已读", {=> model.toggleIsNew(item.arcid, false)}),
+            MenuItem.separator(),
+            MenuItem("从合集移除", {=> onRemove(item.arcid)})
+        ],
+        key: "member:${item.arcid}"
+    ) {
+        homeCoverCard(model, item.arcid, item.title, cardMeta(item), coverW, item.coverAssetId,
+            {=> model.openDetail(item.arcid)}, {=> model.toggleFavoriteOnCard(item.arcid)},
+            {=> onEnterSelection(item.arcid)}, isNew: item.isnew, tank: false, favorited: item.isfavorite,
+            pct: memberReadPct(item.pagecount, item.progress), summary: item.description, tagsCsv: item.tagsCsv)
+    }
 }
 
 // 选择模式成员卡（网格态）：不走 homeCoverCard（该卡归书库多选改造），用简化卡——
 // 封面 + 标题/meta，点击 = 切换选中；选中态为 accentSoft 高亮底 + 标题行勾选图标。
 private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
     let light = model.isLight()
-    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-    let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
+    let accent = if (light) {
+        LANLU_L_ACCENT
+    } else {
+        LANLU_ACCENT
+    }
+    let accentSoft = if (light) {
+        LANLU_L_ACCENT_SOFT
+    } else {
+        LANLU_ACCENT_SOFT
+    }
     let selected = model.isSelected(item.arcid)
     let coverH = coverW * 4.0 / 3.0
-    ClickArea(onClick: {=> model.toggleSelected(item.arcid) }) {
+    ClickArea(onClick: {=> model.toggleSelected(item.arcid)}) {
         VStack {
             if (item.coverAssetId > 0) {
                 remoteImage(model, "asset:${item.coverAssetId}", "/api/assets/${item.coverAssetId}",
@@ -2429,10 +2905,12 @@ private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32
                 }
                 Label(item.title).fontSize(12.fp).maxLines(1).flex()
             }.spacing(4.vp).hug()
-            Label(memberMeta(item, memberReadPct(item.pagecount, item.progress))).fontSize(11.fp)
-                .muted().maxLines(1)
-        }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
-            .background(if (selected) { accentSoft } else { Color.rgba(0, 0, 0, 0) }, 10.vp)
+            Label(memberMeta(item, memberReadPct(item.pagecount, item.progress))).fontSize(11.fp).muted().maxLines(1)
+        }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().background(if (selected) {
+            accentSoft
+        } else {
+            Color.rgba(0, 0, 0, 0)
+        }, 10.vp)
     }
 }
 
@@ -2448,48 +2926,81 @@ private let MEMBER_LIST_MAX_H: Float32 = 736.0
 // 选择模式：行首勾选图标位、点击 = 切换选中（而非打开详情）、选中行铺 accentSoft 高亮底。
 // 非选择模式：序号位让位给行首勾选圆圈（frontend 列表项 hover 勾选入口），点击 = 进入
 // 选择模式并选中本行（onEnterSelection，tank 详情由调用方记录选择归属）。
-public func memberListContent(model: AppModel, members: Array<SearchItem>,
-    onEnterSelection: (String) -> Unit): Unit {
+public func memberListContent(model: AppModel, members: Array<SearchItem>, onEnterSelection: (String) -> Unit,
+    onRemove: (String) -> Unit): Unit {
     let light = model.isLight()
-    let accent = if (light) { LANLU_L_ACCENT } else { LANLU_ACCENT }
-    let accentSoft = if (light) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
+    let accent = if (light) {
+        LANLU_L_ACCENT
+    } else {
+        LANLU_ACCENT
+    }
+    let accentSoft = if (light) {
+        LANLU_L_ACCENT_SOFT
+    } else {
+        LANLU_ACCENT_SOFT
+    }
     let contentH = Float32(members.size) * MEMBER_ROW_H + Float32(max(0, members.size - 1)) * 2.0
-    LazyList(members.size, {_ => MEMBER_ROW_H}, spacing: 2.0,
-        key: {i => members[i].arcid}, id: "member-list") { i =>
-        let it = members[i]
-        let pct = memberReadPct(it.pagecount, it.progress)
-        let selecting = model.selectionMode.value
-        let selected = selecting && model.isSelected(it.arcid)
-        ClickArea(onClick: {=>
-            if (model.selectionMode.value) {
-                model.toggleSelected(it.arcid)
-            } else {
-                model.openDetail(it.arcid)
+    LazyList(members.size, {_ => MEMBER_ROW_H}, spacing: 2.0, key: {i => members[i].arcid}, id: "member-list") {
+        i =>
+            let it = members[i]
+            let pct = memberReadPct(it.pagecount, it.progress)
+            let selecting = model.selectionMode.value
+            let selected = selecting && model.isSelected(it.arcid)
+            ContextMenu(
+                items: [
+                    MenuItem("打开详情", {=> model.openDetail(it.arcid)}),
+                    MenuItem(if (it.isfavorite) {
+                        "取消收藏"
+                    } else {
+                        "收藏"
+                    }, {=> model.toggleFavoriteOnCard(it.arcid)}),
+                    MenuItem("标为已读", {=> model.toggleIsNew(it.arcid, false)}),
+                    MenuItem.separator(),
+                    MenuItem("从合集移除", {=> onRemove(it.arcid)})
+                ],
+                key: "member-row:${it.arcid}"
+            ) {
+                ClickArea(onClick: {
+                    => if (model.selectionMode.value) {
+                        model.toggleSelected(it.arcid)
+                    } else {
+                        model.openDetail(it.arcid)
+                    }
+                }) {
+                    HStack {
+                        if (selecting) {
+                            VStack {
+                                if (selected) {
+                                    Icon(IconName.Check, size: 12.vp, color: accent)
+                                }
+                            }.crossAxisAlignment(CrossAxisAlignment.Center).width(18.vp)
+                        } else {
+                            MemberRowSelectEntry(it.arcid, {=> onEnterSelection(it.arcid)})
+                        }
+                        Label("${i + 1}").fontSize(11.fp).muted().width(30.vp)
+                        if (it.coverAssetId > 0) {
+                            remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}",
+                                Length(40.0, LengthUnit.Vp), Length(56.0, LengthUnit.Vp))
+                        } else {
+                            noCoverBox(model, 40.0, 56.0)
+                        }
+                        VStack {
+                            Label(it.title).fontSize(13.fp).maxLines(1)
+                            Label(memberMeta(it, pct)).fontSize(11.fp).muted().maxLines(1)
+                        }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
+                        ProgressTrack(pct, 4.0).width(90.vp)
+                    }
+                        .spacing(12.vp)
+                        .crossAxisAlignment(CrossAxisAlignment.Center)
+                        .hug()
+                        .padding(8.vp)
+                        .background(if (selected) {
+                            accentSoft
+                        } else {
+                            Color.rgba(0, 0, 0, 0)
+                        }, 8.vp)
+                }
             }
-        }) {
-            HStack {
-                if (selecting) {
-                    VStack {
-                        if (selected) { Icon(IconName.Check, size: 12.vp, color: accent) }
-                    }.crossAxisAlignment(CrossAxisAlignment.Center).width(18.vp)
-                } else {
-                    MemberRowSelectEntry(it.arcid, {=> onEnterSelection(it.arcid) })
-                }
-                Label("${i + 1}").fontSize(11.fp).muted().width(30.vp)
-                if (it.coverAssetId > 0) {
-                    remoteImage(model, "asset:${it.coverAssetId}", "/api/assets/${it.coverAssetId}",
-                        Length(40.0, LengthUnit.Vp), Length(56.0, LengthUnit.Vp))
-                } else {
-                    noCoverBox(model, 40.0, 56.0)
-                }
-                VStack {
-                    Label(it.title).fontSize(13.fp).maxLines(1)
-                    Label(memberMeta(it, pct)).fontSize(11.fp).muted().maxLines(1)
-                }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-                ProgressTrack(pct, 4.0).width(90.vp)
-            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(8.vp)
-                .background(if (selected) { accentSoft } else { Color.rgba(0, 0, 0, 0) }, 8.vp)
-        }
     }.height(min(contentH, MEMBER_LIST_MAX_H))
 }
 
@@ -2519,8 +3030,7 @@ class MemberRowSelectEntry <: Widget {
         let cy = frame.centerY()
         if (ctx.isHovered(hoverId)) {
             ctx.renderer.fillCircle(cx, cy, 8.0, ctx.theme.accent)
-            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 5.0, cy - 5.0, 10.0, 10.0),
-                Color.rgb(255, 255, 255))
+            drawIcon(ctx.renderer, IconName.Check, Rect(cx - 5.0, cy - 5.0, 10.0, 10.0), Color.rgb(255, 255, 255))
         } else {
             ctx.renderer.strokeCircle(cx, cy, 8.0, Pen(width: 1.2, color: ctx.theme.mutedText))
         }
