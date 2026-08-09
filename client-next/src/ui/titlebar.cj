@@ -87,6 +87,13 @@ private let USER_MENU_ROW_HEIGHT: Float32 = 36.0
 private let USER_MENU_PADDING: Float32 = 6.0
 private let USER_MENU_GROUP_GAP: Float32 = 9.0
 private let USER_MENU_ITEM_COUNT: Int64 = 4
+private let USER_MENU_ANIMATION_MS: Int64 = 180
+private let USER_MENU_ENTER_OFFSET_Y: Float32 = 4.0
+private let USER_MENU_ENTER_SCALE: Float32 = 0.97
+private let USER_SERVER_MENU_WIDTH: Float32 = 228.0
+private let USER_SERVER_MENU_ROW_HEIGHT: Float32 = 46.0
+private let USER_SERVER_MENU_ANIMATION_MS: Int64 = 160
+private let USER_SERVER_MENU_OVERLAP: Float32 = 2.0
 private let USER_MENU_LIGHT_SURFACE = Color.rgb(255, 255, 255)
 private let USER_MENU_LIGHT_BORDER = Color.rgba(0, 0, 0, 28)
 private let USER_MENU_LIGHT_TEXT = Color.rgb(0x1D, 0x1D, 0x21)
@@ -569,13 +576,25 @@ private class UserMenuChip <: Widget {
     private let logoutOpen: State<Bool>
     private let open: State<Bool>
     private let highlight: State<Int64>
+    private let popupAnim: Tween
+    private let serverMenuOpen: State<Bool>
+    private let serverHighlight: State<Int64>
+    private let serverMenuAnim: Tween
     private var frame = Rect.zero()
 
     public init(model: AppModel, logoutOpen: State<Bool>) {
         this.model = model
         this.logoutOpen = logoutOpen
         this.open = rememberState<Bool>("${USER_MENU_OWNER}:open", {=> false})
-        this.highlight = rememberState<Int64>("${USER_MENU_OWNER}:highlight", {=> 0})
+        this.highlight = rememberState<Int64>("${USER_MENU_OWNER}:highlight", {=> -1})
+        this.popupAnim = rememberState<Tween>("${USER_MENU_OWNER}:anim", {
+            => Tween(USER_MENU_ANIMATION_MS, {t => Easing.easeOutCubic(t)})
+        }).value
+        this.serverMenuOpen = rememberState<Bool>("${USER_MENU_OWNER}:server-open", {=> false})
+        this.serverHighlight = rememberState<Int64>("${USER_MENU_OWNER}:server-highlight", {=> -1})
+        this.serverMenuAnim = rememberState<Tween>("${USER_MENU_OWNER}:server-anim", {
+            => Tween(USER_SERVER_MENU_ANIMATION_MS, {t => Easing.easeOutCubic(t)})
+        }).value
         emit(this)
     }
 
@@ -599,6 +618,7 @@ private class UserMenuChip <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
+        let _ = model.serversVersion.value
         let hovered = ctx.isHovered(USER_MENU_OWNER)
         ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, if (hovered || open.value) {
             ctx.theme.overlayHover
@@ -626,11 +646,16 @@ private class UserMenuChip <: Widget {
         drawIcon(ctx.renderer, IconName.ChevronDown, Rect(arrowX - 6.0, frame.centerY() - 6.0, 12.0, 12.0),
             ctx.theme.mutedText)
 
-        if (open.value) {
+        // 关闭后保留浮层直至反向动画归零；快速再次点击可从当前进度平滑反转。
+        if (open.value || popupAnim.value > 0.0) {
             let menu = popupRect(ctx)
-            ctx.setOverlay(
-                Overlay(owner: USER_MENU_OWNER, handleEvent: {c, event => handlePopup(c, event, menu)},
-                    render: {c => drawPopup(c, menu)}))
+            ctx.setOverlay(Overlay(owner: USER_MENU_OWNER, handleEvent: {
+                c, event => if (open.value) {
+                    handlePopup(c, event, menu)
+                } else {
+                    handleClosingPopup(c, event)
+                }
+            }, render: {c => drawPopup(c, menu)}))
         }
     }
 
@@ -651,13 +676,20 @@ private class UserMenuChip <: Widget {
                 }
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
                 if (frame.contains(x, y)) {
-                    open.value = true
-                    highlight.value = 0
+                    openPopup(ctx)
                     return true
                 }
             case _ => ()
         }
         false
+    }
+
+    private func openPopup(ctx: UiContext): Unit {
+        open.value = true
+        // 动作菜单没有已选值；鼠标打开时保持无高亮，避免首行色块突现。
+        highlight.value = -1
+        closeServerMenu(ctx)
+        ctx.requestFrame()
     }
 
     private func popupRect(ctx: UiContext): Rect {
@@ -706,7 +738,42 @@ private class UserMenuChip <: Widget {
         }
     }
 
+    private func serverMenuRect(ctx: UiContext, menu: Rect): Rect {
+        let height = USER_MENU_PADDING * 2.0 + USER_SERVER_MENU_ROW_HEIGHT * Float32(model.settings.servers.size)
+        let trigger = rowRect(menu, 2)
+        let leftX = menu.x - USER_SERVER_MENU_WIDTH + USER_SERVER_MENU_OVERLAP
+        let rightX = menu.right() - USER_SERVER_MENU_OVERLAP
+        let x = if (leftX >= 4.0) {
+            leftX
+        } else {
+            min(rightX, ctx.viewportWidth - USER_SERVER_MENU_WIDTH - 4.0)
+        }
+        let y = max(4.0, min(trigger.y - USER_MENU_PADDING, ctx.viewportHeight - height - 4.0))
+        Rect(x, y, USER_SERVER_MENU_WIDTH, height)
+    }
+
+    private func serverRowRect(menu: Rect, index: Int64): Rect {
+        Rect(menu.x + 5.0, menu.y + USER_MENU_PADDING + Float32(index) * USER_SERVER_MENU_ROW_HEIGHT, menu.w - 10.0,
+            USER_SERVER_MENU_ROW_HEIGHT)
+    }
+
+    private func serverAt(menu: Rect, x: Float32, y: Float32): Int64 {
+        for (i in 0..model.settings.servers.size) {
+            if (serverRowRect(menu, i).contains(x, y)) {
+                return i
+            }
+        }
+        -1
+    }
+
     private func drawPopup(ctx: UiContext, menu: Rect): Unit {
+        let target: Float32 = if (open.value) {
+            1.0
+        } else {
+            0.0
+        }
+        let progress = popupAnim.animate(ctx, target: target)
+        let shell = animatedPopupRect(menu, progress)
         let surface = if (model.isLight()) {
             USER_MENU_LIGHT_SURFACE
         } else {
@@ -727,19 +794,24 @@ private class UserMenuChip <: Widget {
         } else {
             ctx.theme.overlayHover
         }
-        ctx.renderer.fillRoundedRect(menu, 10.0, surface)
-        ctx.renderer.strokeRoundedRect(menu.inset(0.5), 9.5, Pen(width: 1.0, color: border))
-        let separatorY = menu.y + USER_MENU_PADDING + USER_MENU_ROW_HEIGHT * 2.0 + USER_MENU_GROUP_GAP / 2.0
-        ctx.renderer.fill(Rect(menu.x + 10.0, separatorY, menu.w - 20.0, 1.0), border)
+        // 与普通 Dropdown 一样，表面和阴影随进度渐入；右上角保持锚定，避免横向漂移。
+        ctx
+            .renderer
+            .fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0, userMenuAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRect(shell, 10.0, userMenuAlpha(surface, progress))
+        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5, Pen(width: 1.0, color: userMenuAlpha(border, progress)))
+        ctx.renderer.pushClip(shell)
+        let separatorY = shell.y + USER_MENU_PADDING + USER_MENU_ROW_HEIGHT * 2.0 + USER_MENU_GROUP_GAP / 2.0
+        ctx.renderer.fill(Rect(shell.x + 10.0, separatorY, shell.w - 20.0, 1.0), userMenuAlpha(border, progress))
 
         for (i in 0..USER_MENU_ITEM_COUNT) {
-            let row = rowRect(menu, i)
+            let row = rowRect(shell, i)
             let selected = i == highlight.value
             if (selected) {
                 ctx.renderer.fillRoundedRect(row, 7.0, if (i == 3) {
-                    LANLU_DANGER.withAlpha(28)
+                    userMenuAlpha(LANLU_DANGER.withAlpha(28), progress)
                 } else {
-                    hover
+                    userMenuAlpha(hover, progress)
                 })
             }
             let color = if (i == 3) {
@@ -747,27 +819,155 @@ private class UserMenuChip <: Widget {
             } else {
                 textColor
             }
-            drawGhostGlyph(ctx.renderer, itemGlyph(i), row.x + 17.0, row.centerY(), color)
+            let animatedColor = userMenuAlpha(color, progress)
+            drawGhostGlyph(ctx.renderer, itemGlyph(i), row.x + 17.0, row.centerY(), animatedColor)
             let label = itemLabel(i)
             let textHeight = ctx.renderer.textHeight(pointSize: 12.0)
-            ctx.renderer.text(label, row.x + 34.0, row.centerY() - textHeight / 2.0, color, pointSize: 12.0)
+            ctx.renderer.text(label, row.x + 34.0, row.centerY() - textHeight / 2.0, animatedColor, pointSize: 12.0)
+            if (i == 2) {
+                drawIcon(ctx.renderer, IconName.ChevronRight, Rect(row.right() - 18.0, row.centerY() - 6.0, 12.0, 12.0),
+                    animatedColor)
+            }
+        }
+        ctx.renderer.popClip()
+        if (serverMenuOpen.value || serverMenuAnim.value > 0.0) {
+            drawServerPopup(ctx, menu, serverMenuRect(ctx, menu))
+        }
+        if (!open.value && progress <= 0.0) {
+            // 再请求一帧，让不可见的关闭浮层从 overlay 栈彻底移除。
+            ctx.requestFrame()
+        }
+    }
+
+    private func animatedPopupRect(menu: Rect, progress: Float32): Rect {
+        let scale = USER_MENU_ENTER_SCALE + (1.0 - USER_MENU_ENTER_SCALE) * progress
+        let width = menu.w * scale
+        let height = menu.h * scale
+        Rect(menu.right() - width, menu.y - USER_MENU_ENTER_OFFSET_Y * (1.0 - progress), width, height)
+    }
+
+    private func drawServerPopup(ctx: UiContext, parent: Rect, menu: Rect): Unit {
+        let target: Float32 = if (serverMenuOpen.value && open.value) {
+            1.0
+        } else {
+            0.0
+        }
+        let progress = serverMenuAnim.animate(ctx, target: target)
+        let shell = animatedServerPopupRect(parent, menu, progress)
+        let surface = if (model.isLight()) {
+            USER_MENU_LIGHT_SURFACE
+        } else {
+            ctx.theme.panelRaised
+        }
+        let border = if (model.isLight()) {
+            USER_MENU_LIGHT_BORDER
+        } else {
+            ctx.theme.panelEdge
+        }
+        let textColor = if (model.isLight()) {
+            USER_MENU_LIGHT_TEXT
+        } else {
+            ctx.theme.text
+        }
+        let hover = if (model.isLight()) {
+            USER_MENU_LIGHT_HOVER
+        } else {
+            ctx.theme.overlayHover
+        }
+        ctx
+            .renderer
+            .fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0, userMenuAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRect(shell, 10.0, userMenuAlpha(surface, progress))
+        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5, Pen(width: 1.0, color: userMenuAlpha(border, progress)))
+        ctx.renderer.pushClip(shell)
+        for (i in 0..model.settings.servers.size) {
+            let server = model.settings.servers[i]
+            let row = serverRowRect(shell, i)
+            let current = server.id == model.settings.activeServerId
+            if (i == serverHighlight.value && !current) {
+                ctx.renderer.fillRoundedRect(row, 7.0, userMenuAlpha(hover, progress))
+            }
+            let primary = userMenuAlpha(if (current) {
+                ctx.theme.accent
+            } else {
+                textColor
+            }, progress)
+            let secondary = userMenuAlpha(ctx.theme.mutedText, progress)
+            drawIcon(ctx.renderer, IconName.Server, Rect(row.x + 11.0, row.centerY() - 7.0, 14.0, 14.0), primary)
+            let hasName = server.name.trimAscii().size > 0
+            let name = if (hasName) {
+                server.name.trimAscii()
+            } else {
+                server.baseUrl
+            }
+            let textX = row.x + 34.0
+            let textRight = row.right() - 28.0
+            ctx.renderer.pushClip(Rect(textX, row.y, max(0.0, textRight - textX), row.h))
+            if (hasName) {
+                ctx.renderer.text(name, textX, row.y + 7.0, primary, pointSize: 12.0)
+                ctx.renderer.text(server.baseUrl, textX, row.y + 25.0, secondary, pointSize: 10.0)
+            } else {
+                let th = ctx.renderer.textHeight(pointSize: 11.0)
+                ctx.renderer.text(name, textX, row.centerY() - th / 2.0, primary, pointSize: 11.0)
+            }
+            ctx.renderer.popClip()
+            if (current) {
+                drawIcon(ctx.renderer, IconName.Check, Rect(row.right() - 20.0, row.centerY() - 6.0, 12.0, 12.0),
+                    primary)
+            }
+        }
+        ctx.renderer.popClip()
+    }
+
+    private func animatedServerPopupRect(parent: Rect, menu: Rect, progress: Float32): Rect {
+        let scale = USER_MENU_ENTER_SCALE + (1.0 - USER_MENU_ENTER_SCALE) * progress
+        let width = menu.w * scale
+        let height = menu.h * scale
+        if (menu.x < parent.x) {
+            Rect(menu.right() - width + USER_MENU_ENTER_OFFSET_Y * (1.0 - progress), menu.y, width, height)
+        } else {
+            Rect(menu.x - USER_MENU_ENTER_OFFSET_Y * (1.0 - progress), menu.y, width, height)
         }
     }
 
     private func handlePopup(ctx: UiContext, event: UiEvent, menu: Rect): Bool {
+        let servers = serverMenuRect(ctx, menu)
         match (event) {
             case UiEvent.MouseMove(x, y) =>
-                if (menu.contains(x, y)) {
+                if ((serverMenuOpen.value || serverMenuAnim.value > 0.0) && servers.contains(x, y)) {
+                    // 关闭动画尚未结束时重新移入，直接从当前进度反向展开。
+                    openServerMenu(ctx, false)
+                    highlight.value = 2
+                    let index = serverAt(servers, x, y)
+                    if (index >= 0) {
+                        serverHighlight.value = index
+                    }
+                    ctx.claimHover(USER_MENU_OWNER, CursorShape.Interactive)
+                } else if (menu.contains(x, y)) {
                     let index = itemAt(menu, x, y)
                     if (index >= 0) {
                         highlight.value = index
                     }
+                    if (index == 2) {
+                        openServerMenu(ctx, false)
+                    } else {
+                        closeServerMenu(ctx)
+                    }
                     ctx.claimHover(USER_MENU_OWNER, CursorShape.Interactive)
+                } else {
+                    closeServerMenu(ctx)
                 }
                 false
             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
-                if (menu.contains(x, y)) {
-                    runItem(ctx, itemAt(menu, x, y))
+                if (serverMenuOpen.value && servers.contains(x, y)) {
+                    runServer(ctx, serverAt(servers, x, y))
+                } else if (menu.contains(x, y)) {
+                    let index = itemAt(menu, x, y)
+                    if (index == 2) {
+                        openServerMenu(ctx, true)
+                    } else {
+                        runItem(ctx, index)
+                    }
                 } else {
                     close(ctx)
                 }
@@ -776,27 +976,152 @@ private class UserMenuChip <: Widget {
                 close(ctx)
                 true
             case UiEvent.KeyDown(Key.Escape, _) =>
-                close(ctx)
+                if (serverMenuOpen.value) {
+                    closeServerMenu(ctx)
+                } else {
+                    close(ctx)
+                }
                 true
             case UiEvent.KeyDown(Key.Enter, _) =>
-                runItem(ctx, highlight.value)
+                if (serverMenuOpen.value) {
+                    runServer(ctx, serverHighlight.value)
+                } else if (highlight.value == 2) {
+                    openServerMenu(ctx, true)
+                } else {
+                    runItem(ctx, highlight.value)
+                }
                 true
             case UiEvent.KeyDown(Key.Down, _) =>
-                highlight.value = (highlight.value + 1) % USER_MENU_ITEM_COUNT
+                if (serverMenuOpen.value) {
+                    moveServerHighlight(1)
+                } else {
+                    moveHighlight(1)
+                }
                 true
             case UiEvent.KeyDown(Key.Up, _) =>
-                highlight.value = (highlight.value + USER_MENU_ITEM_COUNT - 1) % USER_MENU_ITEM_COUNT
+                if (serverMenuOpen.value) {
+                    moveServerHighlight(-1)
+                } else {
+                    moveHighlight(-1)
+                }
+                true
+            case UiEvent.KeyDown(Key.Right, _) =>
+                if (highlight.value == 2) {
+                    openServerMenu(ctx, true)
+                }
+                true
+            case UiEvent.KeyDown(Key.Left, _) =>
+                closeServerMenu(ctx)
                 true
             case _ => false
         }
     }
 
+    private func handleClosingPopup(ctx: UiContext, event: UiEvent): Bool {
+        match (event) {
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                if (frame.contains(x, y)) {
+                    openPopup(ctx)
+                }
+                true
+            case _ => true
+        }
+    }
+
+    private func moveHighlight(delta: Int64): Unit {
+        closeServerMenuWithoutFrame()
+        if (highlight.value < 0) {
+            highlight.value = if (delta > 0) {
+                0
+            } else {
+                USER_MENU_ITEM_COUNT - 1
+            }
+        } else {
+            highlight.value = (highlight.value + USER_MENU_ITEM_COUNT + delta) % USER_MENU_ITEM_COUNT
+        }
+    }
+
+    private func openServerMenu(ctx: UiContext, selectFirst: Bool): Unit {
+        if (!serverMenuOpen.value) {
+            serverMenuOpen.value = true
+            serverHighlight.value = if (selectFirst) {
+                firstSwitchableServer()
+            } else {
+                -1
+            }
+            ctx.requestFrame()
+        } else if (selectFirst && serverHighlight.value < 0) {
+            serverHighlight.value = firstSwitchableServer()
+        }
+    }
+
+    private func closeServerMenu(ctx: UiContext): Unit {
+        closeServerMenuWithoutFrame()
+        let _ = serverMenuAnim.animate(ctx, target: 0.0)
+    }
+
+    private func closeServerMenuWithoutFrame(): Unit {
+        serverMenuOpen.value = false
+        serverHighlight.value = -1
+    }
+
+    private func firstSwitchableServer(): Int64 {
+        for (i in 0..model.settings.servers.size) {
+            if (model.settings.servers[i].id != model.settings.activeServerId) {
+                return i
+            }
+        }
+        -1
+    }
+
+    private func moveServerHighlight(delta: Int64): Unit {
+        let count = model.settings.servers.size
+        if (count <= 1) {
+            serverHighlight.value = firstSwitchableServer()
+            return
+        }
+        var next = serverHighlight.value
+        for (_ in 0..count) {
+            next = if (next < 0) {
+                if (delta > 0) {
+                    0
+                } else {
+                    count - 1
+                }
+            } else {
+                (next + count + delta) % count
+            }
+            if (model.settings.servers[next].id != model.settings.activeServerId) {
+                serverHighlight.value = next
+                return
+            }
+        }
+    }
+
+    private func runServer(ctx: UiContext, index: Int64): Unit {
+        if (index < 0 || index >= model.settings.servers.size) {
+            return
+        }
+        let server = model.settings.servers[index]
+        if (server.id == model.settings.activeServerId) {
+            return
+        }
+        close(ctx)
+        // 没有已保存会话时停在目标服务器的登录表单；有会话则 selectServer 静默恢复。
+        model.navigate(Page.Login)
+        model.selectServer(server.id)
+    }
+
     private func runItem(ctx: UiContext, index: Int64): Unit {
+        if (index == 2) {
+            openServerMenu(ctx, true)
+            return
+        }
         close(ctx)
         match (index) {
             case 0 => model.openUploadDrawer()
             case 1 => model.navigate(Page.Settings)
-            case 2 => model.navigate(Page.Login)
+            case 2 => ()
             case 3 => logoutOpen.value = true
             case _ => ()
         }
@@ -804,8 +1129,15 @@ private class UserMenuChip <: Widget {
 
     private func close(ctx: UiContext): Unit {
         open.value = false
+        closeServerMenu(ctx)
+        // 从当前进度反向播放；不直接销毁动画状态。
+        let _ = popupAnim.animate(ctx, target: 0.0)
         ctx.removeOverlay(USER_MENU_OWNER)
     }
+}
+
+private func userMenuAlpha(color: Color, progress: Float32): Color {
+    color.withAlpha(Int64(Float32(Int64(color.a)) * max(0.0, min(1.0, progress))))
 }
 
 private func titleBarLogoutConfirmModal(model: AppModel, logoutOpen: State<Bool>): Unit {
