@@ -262,8 +262,10 @@ public class Client {
         throw HttpException("unreachable")
     }
 
-    // 单次收发（带池化连接透明重试）：复用的空闲连接可能已被对端关闭，写请求/读状态行
-    // 阶段的连接级失败重试一次新连接；v1 请求体全在内存，重发安全。
+    // 单次收发（带池化连接透明重试）：复用的空闲连接可能已被对端关闭（EOF），也可能
+    // 残留上个响应的脏字节（状态行读到垃圾）——两者都关连接换一条重试。每次失败都会
+    // 消耗掉一条池化连接（take 已出池 + close），池有限，最终必然落到新建连接；新建
+    // 连接上的失败原样抛出。v1 请求体全在内存，重发安全。
     private func doRequest(
         method: Method,
         target: HttpTarget,
@@ -273,7 +275,6 @@ public class Client {
     ): Response {
         let readT = pickTimeout(timeoutOverride, readTimeout)
         let writeT = pickTimeout(timeoutOverride, writeTimeout)
-        var attempt = 0
         while (true) {
             var reused = true
             let conn = match (pool.take(target.poolKey())) {
@@ -308,18 +309,27 @@ public class Client {
                 return buildResponse(method, head, conn)
             } catch (e: ConnectionClosedException) {
                 conn.close()
-                if (reused && attempt == 0) {
-                    attempt++
+                if (reused) {
                     continue
                 }
                 throw HttpException("连接已被对端关闭")
             } catch (e: SocketTimeoutException) {
                 conn.close()
                 throw HttpTimeoutException("read", "等待响应超时: ${e.message}")
+            } catch (e: ProtocolException) {
+                // 复用连接上响应头解析失败 = 脏连接：上游在上个响应之后多写了字节
+                //（典型残留是 chunked 终止块，状态行读到 "0"）。丢弃这条连接换新
+                // 连接重试，而不是把连接池污染变成调用方可见的硬错误——浏览器对
+                // 复用连接的坏首行同样是静默丢弃重试。新建连接上的协议错误是真
+                // 错误，原样抛出。
+                conn.close()
+                if (reused) {
+                    continue
+                }
+                throw e
             } catch (e: SocketException) {
                 conn.close()
-                if (reused && attempt == 0) {
-                    attempt++
+                if (reused) {
                     continue
                 }
                 throw HttpException("网络错误: ${e.message}")
@@ -333,8 +343,14 @@ public class Client {
 
     // 按响应头选定 body 分帧，组装 Response。
     private func buildResponse(method: Method, head: ResponseHead, conn: Connection): Response {
-        let body: HttpBody = if (method == Method.HEAD || head.status == 204 || head.status == 304) {
-            // 语义上无 body（即使带 Content-Length 也不允许读）。
+        let body: HttpBody = if (method == Method.HEAD) {
+            // HEAD 语义上无 body（即使带 Content-Length 也不读），且用后即关不回池：
+            // 部分上游/反代会对 HEAD 误写残留字节（如 chunked 终止块 "0\r\n\r\n"），
+            // 回池会污染后续请求的状态行解析；HEAD 频率低，不值得为省一次建连去赌。
+            HeadBody()
+        } else if (head.status == 204 || head.status == 304) {
+            // 语义上无 body（即使带 Content-Length 也不允许读）；304 走缓存再验证
+            // 高频路径，保持回池。
             FixedLenBody(conn, 0)
         } else if (isChunked(head.headers)) {
             ChunkedBody(conn)

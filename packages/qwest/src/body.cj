@@ -60,6 +60,33 @@ class FixedLenBody <: HttpBody {
     }
 }
 
+// HEAD 响应的空 body：语义上无 body（即使头里带 Content-Length/Transfer-Encoding）。
+// reusable=false —— 连接用后即关不回池，防上游对 HEAD 误写残留字节污染连接池
+//（见 Client.buildResponse）。
+class HeadBody <: HttpBody {
+    public func read(_: Array<Byte>): Int64 {
+        0
+    }
+
+    public prop reusable: Bool {
+        get() {
+            false
+        }
+    }
+
+    public prop exhausted: Bool {
+        get() {
+            true
+        }
+    }
+
+    public prop knownRemaining: ?Int64 {
+        get() {
+            Some(0)
+        }
+    }
+}
+
 // chunked 分帧解码：size 行（hex[;扩展]）+ 数据 + CRLF，0 块后消费 trailer 到空行。
 class ChunkedBody <: HttpBody {
     private let conn: Connection

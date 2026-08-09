@@ -242,6 +242,66 @@ func retryOnClosedIdleConnection(): Unit {
     }
 }
 
+// 脏连接透明重试：上游在响应体之后多写了 chunked 终止块，连接带残留字节回池；
+// 下一个请求在这条连接上把 "0" 读成状态行，应丢连接换新连接重试成功而非报错。
+@Test
+func retryOnDirtyPooledConnection(): Unit {
+    let connIndex = AtomicInt64(0)
+    try (server = MockServer(2) {
+        conn =>
+            let idx = connIndex.fetchAdd(1)
+            while (readRequest(conn).isSome()) {
+                if (idx == 0) {
+                    // 响应本身完整（Content-Length 对齐），但线上多写 "0\r\n\r\n"。
+                    writeText(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok0\r\n\r\n")
+                } else {
+                    writeText(conn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                }
+            }
+    }) {
+        let client = ClientBuilder().build()
+        try (r1 = client.get(server.url("/1")).send()) {
+            @Expect(r1.text(), "ok") // 残留字节不影响本次，但连接带脏回池
+        }
+        try (r2 = client.get(server.url("/2")).send()) {
+            @Expect(r2.text(), "ok")
+        }
+        client.close()
+        @Expect(server.acceptCount.load(), 2)
+    }
+}
+
+// HEAD 用后即关不回池：后续 GET 必须新建连接（accept 次数 = 2），
+// 防上游对 HEAD 误写残留字节污染连接池。
+@Test
+func headConnectionNotPooled(): Unit {
+    try (server = MockServer(2) {
+        conn => while (true) {
+            let req = match (readRequest(conn)) {
+                case Some(r) => r
+                case None => break
+            }
+            if (req.startsWith("HEAD")) {
+                writeText(conn, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
+            } else {
+                writeText(conn, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello")
+            }
+        }
+    }) {
+        let client = ClientBuilder().build()
+        try (r1 = client.head(server.url("/h")).send()) {
+            @Expect(r1.status, 200u16)
+            @Expect(r1.contentLength ?? -1, 5)
+            @Expect(r1.bytes().size, 0) // HEAD 不读 body
+        }
+        try (r2 = client.get(server.url("/g")).send()) {
+            @Expect(r2.text(), "hello")
+        }
+        client.close()
+        @Expect(server.acceptCount.load(), 2)
+    }
+}
+
 // ===== 重定向 =====
 
 // 重定向链 POST /submit → 303 → GET /step2 → 302 → GET /final；303 转 GET。
