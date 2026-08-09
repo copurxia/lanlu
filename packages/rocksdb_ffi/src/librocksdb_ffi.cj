@@ -116,7 +116,6 @@ foreign func rocksdb_options_set_db_write_buffer_size(options: CPointer<rocksdb_
 foreign func rocksdb_options_set_max_open_files(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 foreign func rocksdb_options_set_max_write_buffer_number(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 foreign func rocksdb_options_set_min_write_buffer_number_to_merge(options: CPointer<rocksdb_options_t>, value: Int32): Unit
-foreign func rocksdb_options_set_max_write_buffer_number_to_maintain(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 foreign func rocksdb_options_set_max_background_jobs(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 foreign func rocksdb_options_set_keep_log_file_num(options: CPointer<rocksdb_options_t>, value: UIntNative): Unit
 foreign func rocksdb_options_set_use_fsync(options: CPointer<rocksdb_options_t>, value: UInt8): Unit
