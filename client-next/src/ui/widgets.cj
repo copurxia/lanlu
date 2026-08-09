@@ -2261,13 +2261,15 @@ class TagChip <: Widget {
     private let light: Bool
     private let hoverId: String
     private let onTap: () -> Unit
+    private let interactive: Bool
     private var frame = Rect.zero()
 
-    public init(text: String, light: Bool, hoverId: String, onTap: () -> Unit) {
+    public init(text: String, light: Bool, hoverId: String, onTap: () -> Unit, interactive!: Bool = true) {
         this.text = text
         this.light = light
         this.hoverId = hoverId
         this.onTap = onTap
+        this.interactive = interactive
         emit(this)
     }
 
@@ -2280,7 +2282,7 @@ class TagChip <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        let hovered = ctx.isHovered(hoverId)
+        let hovered = interactive && ctx.isHovered(hoverId)
         let bg = if (light) {
             Color.rgba(0, 0, 0, 13)
         } else {
@@ -2305,6 +2307,9 @@ class TagChip <: Widget {
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
+        if (!interactive) {
+            return false
+        }
         match (event) {
             case UiEvent.MouseMove(x, y) =>
                 if (frame.contains(x, y)) {
@@ -2323,11 +2328,6 @@ class TagChip <: Widget {
 
 // 标签 chips 流（原型 .tag-row .tag）：1px 描边 pill、hover 变金、点击携 tag 跳搜索，自动换行。
 public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
-    let chipBg = if (model.isLight()) {
-        Color.rgba(0, 0, 0, 13)
-    } else {
-        Color.rgba(255, 255, 255, 15)
-    }
     FlowRow {
         // 最多展示前 10 个，每个以 tag 串为 Keyed 身份（同 ForEach(key: {t => t}) 语义）。
         let shown = min(tags.size, 10)
@@ -2335,14 +2335,12 @@ public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
         while (i < shown) {
             let t = tags[i]
             Keyed(t) {
-                TagChip(t, model.isLight(), "tf:${t}") {
-                    => model.searchExactTag(t)
-                }
+                TagChip(t, model.isLight(), "tf:${t}", {=> model.searchExactTag(t)}, interactive: true)
             }
             i += 1
         }
         if (tags.size > 10) {
-            Label("+${tags.size - 10}").fontSize(11.fp).muted().padding(11.vp, 4.vp).background(chipBg, 12.vp)
+            TagChip("+${tags.size - 10}", model.isLight(), "tf:overflow", {=> ()}, interactive: false)
         }
     }.spacing(7.vp)
 }
@@ -2357,9 +2355,8 @@ public func tagGroups(model: AppModel, tags: ArrayList<String>): Unit {
                 Label(gk).fontSize(11.fp).muted().padding(0.vp, 8.vp, 0.vp, 2.vp)
                 FlowRow {
                     ForEach(values, key: {v: (String, String) => v[1]}) {
-                        v => TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}") {
-                            => model.searchExactTag(v[1])
-                        }
+                        v => TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}", {=> model.searchExactTag(v[1])},
+                            interactive: true)
                     }
                 }.spacing(7.vp)
         }
