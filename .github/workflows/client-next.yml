@@ -7,6 +7,7 @@ on:
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
       - "packages/fontkit_ffi/**"
+      - "packages/webview/**"
       - "cangjie-repo.toml"
       - ".github/workflows/client-next.yml"
   pull_request:
@@ -15,6 +16,7 @@ on:
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
       - "packages/fontkit_ffi/**"
+      - "packages/webview/**"
       - "cangjie-repo.toml"
       - ".github/workflows/client-next.yml"
   workflow_dispatch:
@@ -130,6 +132,7 @@ jobs:
             packages/vips_ffi/cjpm.toml
             packages/libvlc_ffi/cjpm.toml
             packages/fontkit_ffi/native/Cargo.lock
+            packages/webview/native/Cargo.lock
           )
           for required_file in "${required_files[@]}"; do
             if [ ! -f "${required_file}" ]; then
@@ -175,7 +178,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+            packages/webview/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Configure native library path
         run: |
@@ -343,7 +347,8 @@ jobs:
             "packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.dll",
             "packages/vips_ffi/cjpm.toml",
             "packages/libvlc_ffi/cjpm.toml",
-            "packages/fontkit_ffi/native/Cargo.lock"
+            "packages/fontkit_ffi/native/Cargo.lock",
+            "packages/webview/native/Cargo.lock"
           )
           foreach ($requiredFile in $requiredFiles) {
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
@@ -388,7 +393,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-cui-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock') }}
+            packages/webview/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Configure Windows native paths
         env:
@@ -409,9 +415,9 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Add GNU Rust target for fontkit native
-        # build.cj 的 pre-build 在 Windows 上用 x86_64-pc-windows-gnu 构建 fontkit_native
-        # （cjpm 的 x86_64-w64-mingw32 目标用 MinGW 链接器，需 GNU 格式的 libfontkit_native.a）。
+      - name: Add GNU Rust target for native FFI libraries
+        # build.cj 的 pre-build 在 Windows 上用 x86_64-pc-windows-gnu 构建
+        # fontkit_native 和 webview_native，cjpm 的 MinGW 链接器需要 GNU 格式的 .a 产物。
         run: rustup target add x86_64-pc-windows-gnu
 
       - name: Build client-next on Windows

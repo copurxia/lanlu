@@ -42,6 +42,31 @@ private func buildFontkitNative(): Int64 {
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 
+// webview native 与 fontkit native 遵循同一套 FFI 产物约定：Windows 下必须生成
+// GNU 格式静态库，并暂存到 packages/webview/cjpm.toml 的 ffi.c 搜索目录。
+@When[os == "Windows"]
+private func buildWebviewNative(): Int64 {
+    let exitCode = execute("cargo",
+        ["build", "--release", "--target", "x86_64-pc-windows-gnu", "--manifest-path",
+            "../packages/webview/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+    if (exitCode != 0) {
+        return exitCode
+    }
+    let built = Path("../packages/webview/native/target/x86_64-pc-windows-gnu/release/libwebview_native.a")
+    let stagedDir = Path("../packages/webview/native/target/release")
+    if (!exists(stagedDir)) {
+        Directory.create(stagedDir, recursive: true)
+    }
+    copy(built, to: stagedDir.join("libwebview_native.a"), overwrite: true)
+    0
+}
+
+@When[os != "Windows"]
+private func buildWebviewNative(): Int64 {
+    execute("cargo", ["build", "--release", "--manifest-path", "../packages/webview/native/Cargo.toml"],
+        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+}
+
 main(args: Array<String>): Int64 {
     if (args.size == 0) {
         return 0
@@ -51,6 +76,10 @@ main(args: Array<String>): Int64 {
             let exitCode = buildFontkitNative()
             if (exitCode != 0) {
                 return exitCode
+            }
+            let webviewExitCode = buildWebviewNative()
+            if (webviewExitCode != 0) {
+                return webviewExitCode
             }
             // 源资源缺失或复制失败都属于打包错误，直接让构建失败。
             stageDesktopAssets()
