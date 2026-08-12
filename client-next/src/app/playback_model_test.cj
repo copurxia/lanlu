@@ -2,6 +2,7 @@ package lanlu_client_next.app
 
 import std.collection.ArrayList
 import lanlu_client_next.net.SubtitleAttachment
+import libavformat_ffi.SubtitleStreamInfo
 
 // PlaybackModel 单测：注入假时钟/假 runner/假下载，覆盖 load→downloaded→play→pause→
 // seek→skip→位置推进→mute→stop 全链路，以及重复 load 忽略与 error 路径。
@@ -23,9 +24,15 @@ class FakeRunner <: ProcessRunner {
         lastOffset = offsetSec
         lastMuted = muted
     }
-    public func pause(): Unit { log.add("pause") }
-    public func resume(): Unit { log.add("resume") }
-    public func stop(): Unit { log.add("stop") }
+    public func pause(): Unit {
+        log.add("pause")
+    }
+    public func resume(): Unit {
+        log.add("resume")
+    }
+    public func stop(): Unit {
+        log.add("stop")
+    }
 
     func label(): String {
         String.join(log.toArray(), delimiter: ",")
@@ -47,10 +54,14 @@ class PbFixture {
 
     init() {
         let c = clockBox
-        model.clock = { => c.now }
+        model.clock = {=> c.now}
         model.processRunner = Some(runner)
         let d = downloads
-        model.onDownload = { arc, pid => d.calls.add("${arc}|${pid}"); d.count++ }
+        model.onDownload = {
+            arc, pid =>
+                d.calls.add("${arc}|${pid}");
+                d.count++
+        }
     }
 
     // 推进假时钟（毫秒）。
@@ -264,56 +275,21 @@ func playbackLoadStopsPrevious(): Unit {
 @Test
 func formatMediaClockCases(): Unit {
     @Expect(formatMediaClock(0.0), "00:00")
-    @Expect(formatMediaClock(-3.0), "00:00")   // 未知/负值按 0
-    @Expect(formatMediaClock(8.9), "00:08")    // 向下取整
+    @Expect(formatMediaClock(-3.0), "00:00") // 未知/负值按 0
+    @Expect(formatMediaClock(8.9), "00:08") // 向下取整
     @Expect(formatMediaClock(68.0), "01:08")
     @Expect(formatMediaClock(202.0), "03:22")
 }
 
 @Test
 func playbackLoadResetsDuration(): Unit {
-    // 换媒体时旧时长不得带入：load 复位为 0（未知），等 ffprobe 探测回填。
+    // 换媒体时旧时长不得带入：load 复位为 0（未知），等 libVLC 轮询回填。
     let f = PbFixture()
     f.model.load("arc1", 4, "p4")
     f.model.onDownloaded("arc1:4", "/cache/p4")
     f.model.durationSec = 122.0
     f.model.load("arc1", 7, "p7")
     @Expect(f.model.durationSec, 0.0)
-}
-
-
-// ---- 字幕直接设轨 ----
-
-@Test
-func setSubtitleTrackIgnoredWhenNotStarted(): Unit {
-    let f = PbFixture()
-    f.model.loadRemote("arc1", 4, "http://server/movie.mkv", "token")
-    f.model.subtitleTrackId = 0
-    // 已加载但未开始播放：vlcRunner 尚未建立，直接设轨必须是空操作
-    f.model.setSubtitleTrack(2)
-    @Expect(f.model.subtitleTrackId, 0)
-}
-
-@Test
-func setSubtitleTrackIgnoredWhenNotVideo(): Unit {
-    let f = PbFixture()
-    f.model.load("arc1", 4, "p4") // 音频
-    f.model.onDownloaded("arc1:4", "/cache/p4")
-    f.model.play()
-    f.model.subtitleTrackId = 1
-    f.model.setSubtitleTrack(3)
-    @Expect(f.model.subtitleTrackId, 1)
-}
-
-@Test
-func setSubtitleTrackIgnoredWithoutVlcRunner(): Unit {
-    let f = PbFixture()
-    f.model.load("arc1", 4, "p4", video: true)
-    f.model.onDownloaded("arc1:4", "/cache/p4")
-    f.model.play() // started=true，但注入的是 FakeRunner（无 vlcRunner）
-    f.model.subtitleTrackId = 1
-    f.model.setSubtitleTrack(3)
-    @Expect(f.model.subtitleTrackId, 1)
 }
 
 // ---- 歌词当前行：二分 + 单调前进缓存 ----
@@ -397,14 +373,17 @@ func subtitleCueParsersCoverSrtVttAss(): Unit {
     @Expect(vtt[0].text, "hello")
 
     // ASS：Format 行定位列 + override 块剔除 + 正文内逗号保留
-    let ass = parseAssCues("[Script Info]\nTitle: t\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}台詞,含む\n")
+    let ass = parseAssCues(
+        "[Script Info]\nTitle: t\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\an8}台詞,含む\n")
     @Expect(ass.size, 1)
     @Expect(ass[0].start, 1.0)
     @Expect(ass[0].end, 2.0)
     @Expect(ass[0].text, "台詞,含む")
 
     // 内容嗅探：无 kind 时 [Script Info] 头进 ASS 解析，BOM 剔除
-    let sniffed = parseSubtitleText("\u{FEFF}[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n", "")
+    let sniffed = parseSubtitleText(
+        "\u{FEFF}[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,x\n",
+        "")
     @Expect(sniffed.size, 1)
     @Expect(sniffed[0].text, "x")
 }
@@ -414,7 +393,7 @@ func subtitleMultiSelectToggleAndCueQuery(): Unit {
     let f = PbFixture()
     let requests = ArrayList<String>()
     let req = requests
-    f.model.onSubtitleDownload = { key, assetId => req.add("${key}|${assetId}") }
+    f.model.onSubtitleDownload = {key, assetId => req.add("${key}|${assetId}")}
     f.model.loadRemote("arc1", 2, "http://s/v.mkv", "token")
     let atts = ArrayList<SubtitleAttachment>()
     atts.add(subAtt(101, "srt"))
@@ -457,4 +436,30 @@ func subtitleMultiSelectToggleAndCueQuery(): Unit {
     // 换媒体：选项与选中一并重置
     f.model.loadRemote("arc1", 3, "http://s/v2.mkv", "token")
     @Expect(f.model.subtitleAttachments.size, 0)
+}
+
+@Test
+func embeddedProbePrefetchesWithoutSelectingAndIgnoresUnsupported(): Unit {
+    let f = PbFixture()
+    let scans = ArrayList<String>()
+    f.model.onSubtitleScan = {
+        key, generation, url, bearer, stableKey => scans.add("${key}|${generation}|${url}|${bearer}|${stableKey}")
+    }
+    f
+        .model
+        .loadRemote("arc1", 2, "http://proxy/v.mkv", "", stableCacheKey: "arc1:movie.mkv", subtitleUrl: "http://s/v.mkv",
+            subtitleBearer: "token")
+    let streams = ArrayList<SubtitleStreamInfo>()
+    streams.add(
+        SubtitleStreamInfo(2, 0, "hdmv_pgs_subtitle", "Signs", "eng", false, false, false, false,
+            "bitmap subtitle codec is not supported"))
+    streams.add(SubtitleStreamInfo(4, 0, "ass", "Main", "jpn", true, false, true, true, ""))
+    f.model.onEmbeddedSubtitleProbed("arc1:2", f.model.mediaGeneration, streams)
+    @Expect(scans.size, 1)
+    @Expect(scans[0], "arc1:2|1|http://s/v.mkv|token|arc1:movie.mkv")
+    @Expect(f.model.activeEmbeddedStreamIndexes.size, 0)
+    f.model.toggleEmbeddedSubtitle(2)
+    @Expect(f.model.activeEmbeddedStreamIndexes.size, 0)
+    f.model.toggleEmbeddedSubtitle(4)
+    @Expect(f.model.activeEmbeddedStreamIndexes.size, 1)
 }

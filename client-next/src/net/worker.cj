@@ -42,6 +42,7 @@ public class ApiWorker {
     private static let API_THREADS: Int64 = 2
     private static let DOWNLOAD_THREADS: Int64 = 4
     private static let DECODE_THREADS: Int64 = 2
+    private static let SUBTITLE_THREADS: Int64 = 1
 
     private let mutex = Mutex()
     // 结果信箱：无锁并发队列（P2.8）——drain 循环取到空，不再每次新建并复制结果列表。
@@ -52,23 +53,27 @@ public class ApiWorker {
     private let apiQueue = LinkedBlockingQueue<WorkItem>(4096, ArrayList<WorkItem>())
     private let downloadQueue = LinkedBlockingQueue<WorkItem>(4096, ArrayList<WorkItem>())
     private let decodeQueue = LinkedBlockingQueue<WorkItem>(32, ArrayList<WorkItem>())
+    private let subtitleQueue = LinkedBlockingQueue<WorkItem>(8, ArrayList<WorkItem>())
     /*
      * 结果落地回调：每次有结果进入信箱后、于工作线程上下文调用。主循环用它唤醒可能正
      * 阻塞在 SDL_WaitEventTimeout 的 UI 线程（DesktopApp.requestWake）——drain 只在
      * onTick 发生，没有唤醒注入的话到货结果要等下一个输入事件/定时器才被泵回。
      * 实现必须轻量且不得抛异常（异常会逃出工作线程主循环）。
      */
-    public var onResult: () -> Unit = { => }
+    public var onResult: () -> Unit = {=>}
 
     public init() {
         for (_ in 0..API_THREADS) {
-            let _ = spawn { workLoop(apiQueue) }
+            let _ = spawn {workLoop(apiQueue)}
         }
         for (_ in 0..DOWNLOAD_THREADS) {
-            let _ = spawn { workLoop(downloadQueue) }
+            let _ = spawn {workLoop(downloadQueue)}
         }
         for (_ in 0..DECODE_THREADS) {
-            let _ = spawn { workLoop(decodeQueue) }
+            let _ = spawn {workLoop(decodeQueue)}
+        }
+        for (_ in 0..SUBTITLE_THREADS) {
+            let _ = spawn {workLoop(subtitleQueue)}
         }
     }
 
@@ -102,7 +107,9 @@ public class ApiWorker {
 
     private func submitInternal(name: String, inflightKey: String, tag: String, job: () -> Any): Bool {
         synchronized(mutex) {
-            if (inflight.contains(inflightKey)) { return false }
+            if (inflight.contains(inflightKey)) {
+                return false
+            }
             inflight[inflightKey] = true
         }
         apiQueue.add(WorkItem(name, inflightKey, tag, job))
@@ -124,10 +131,17 @@ public class ApiWorker {
         submitTo(name, name, "", job, decodeQueue)
     }
 
+    /** Dedicated single-thread lane for blocking full-container subtitle scans. */
+    public func submitSubtitle(name: String, job: () -> Any): Bool {
+        submitTo(name, name, "", job, subtitleQueue)
+    }
+
     private func submitTo(name: String, inflightKey: String, tag: String, job: () -> Any,
         queue: LinkedBlockingQueue<WorkItem>): Bool {
         synchronized(mutex) {
-            if (inflight.contains(inflightKey)) { return false }
+            if (inflight.contains(inflightKey)) {
+                return false
+            }
             inflight[inflightKey] = true
         }
         queue.add(WorkItem(name, inflightKey, tag, job))

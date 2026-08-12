@@ -6,6 +6,8 @@ on:
       - "client-next/**"
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
+      - "packages/libavformat_ffi/**"
+      - "packages/libass_ffi/**"
       - "packages/fontkit_ffi/**"
       - "packages/webview/**"
       - "cangjie-repo.toml"
@@ -15,6 +17,8 @@ on:
       - "client-next/**"
       - "packages/vips_ffi/**"
       - "packages/libvlc_ffi/**"
+      - "packages/libavformat_ffi/**"
+      - "packages/libass_ffi/**"
       - "packages/fontkit_ffi/**"
       - "packages/webview/**"
       - "cangjie-repo.toml"
@@ -131,6 +135,8 @@ jobs:
             packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so.0.2.2
             packages/vips_ffi/cjpm.toml
             packages/libvlc_ffi/cjpm.toml
+            packages/libavformat_ffi/cjpm.toml
+            packages/libass_ffi/cjpm.toml
             packages/fontkit_ffi/native/Cargo.lock
             packages/webview/native/Cargo.lock
           )
@@ -165,6 +171,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb libvulkan1 \
             libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev librocksdb-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libass-dev \
             libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
             libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
             libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6
@@ -201,6 +208,7 @@ jobs:
               exit 1
             fi
           done
+          pkg-config --modversion libavformat libavcodec libavutil libass
 
       - name: Show compiler version
         run: cjc -v
@@ -283,7 +291,7 @@ jobs:
             "Architecture: ${arch}" \
             "Maintainer: lanlu <lanlu@localhost>" \
             "Installed-Size: ${installed_size}" \
-            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6, librocksdb9.11 | librocksdb8.9" \
+            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6, librocksdb9.11 | librocksdb8.9, libavformat62, libavcodec62, libavutil60, libass9" \
             "Section: graphics" \
             "Priority: optional" \
             "Description: Lanlu desktop client built on CangjieGUI" \
@@ -347,6 +355,8 @@ jobs:
             "packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.dll",
             "packages/vips_ffi/cjpm.toml",
             "packages/libvlc_ffi/cjpm.toml",
+            "packages/libavformat_ffi/cjpm.toml",
+            "packages/libass_ffi/cjpm.toml",
             "packages/fontkit_ffi/native/Cargo.lock",
             "packages/webview/native/Cargo.lock"
           )
@@ -382,6 +392,8 @@ jobs:
             mingw-w64-x86_64-libvips
             mingw-w64-x86_64-libheif
             mingw-w64-x86_64-vlc
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-libass
             mingw-w64-x86_64-dlfcn
             mingw-w64-x86_64-rocksdb
 

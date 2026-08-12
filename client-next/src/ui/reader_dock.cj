@@ -104,8 +104,8 @@ class ReaderDock <: Widget {
     private var active: LaneId = LaneId.Book
     private var displayed: LaneId = LaneId.Book
     private var tabRects = ArrayList<Rect>()
-    private var bodyRect = Rect.zero()       // active lane 的 body 裁切框（已乘展开度）
-    private var bodyFullRect = Rect.zero()   // body 全宽框（内容定位用）
+    private var bodyRect = Rect.zero() // active lane 的 body 裁切框（已乘展开度）
+    private var bodyFullRect = Rect.zero() // body 全宽框（内容定位用）
     private var prevRect = Rect.zero()
     private var nextRect = Rect.zero()
     private var bookSeekRect = Rect.zero()
@@ -140,8 +140,8 @@ class ReaderDock <: Widget {
                 // spread 切换后旧媒体 lane 已不存在，没有可绘制的退出态。
                 st.displayedLane = active
                 st.pendingLane = None
-            st.body.reset(0.0)
-        }
+                st.body.reset(0.0)
+            }
         }
         displayed = st.displayedLane
         emit(this)
@@ -278,7 +278,7 @@ class ReaderDock <: Widget {
         ctx
             .renderer
             .strokeRoundedRect(f.inset(0.5), f.h / 2.0 - 0.5,
-            Pen(width: 1.0, color: fadeColor(ctx.theme.overlayBorder, alpha)))
+                Pen(width: 1.0, color: fadeColor(ctx.theme.overlayBorder, alpha)))
         for (i in 0..lanes.size) {
             let lane = lanes[Int64(i)]
             drawLaneTab(ctx, lane, tabRects[Int64(i)].shift(0.0, dy), a255)
@@ -291,13 +291,14 @@ class ReaderDock <: Widget {
         // 字幕/音量弹出面板（Overlay 浮层，事件优先于树，绘制在最顶层）
         if (st.subtitleOpen || st.subtitleAnim.value > 0.0) {
             let popup = subtitlePopupRect(ctx)
-            ctx.setOverlay(Overlay(owner: SUBTITLE_POPUP_OWNER, handleEvent: {
-                c, e => if (st.subtitleOpen) {
-                    handleSubtitleOverlay(c, e, popup)
-                } else {
-                    handleClosingPopup(c, e)
-                }
-            }, render: {c => drawSubtitlePopup(c, popup)}))
+            ctx.setOverlay(
+                Overlay(owner: SUBTITLE_POPUP_OWNER, handleEvent: {
+                    c, e => if (st.subtitleOpen) {
+                        handleSubtitleOverlay(c, e, popup)
+                    } else {
+                        handleClosingPopup(c, e)
+                    }
+                }, render: {c => drawSubtitlePopup(c, popup)}))
         }
         if (st.volumeOpen || st.volumeAnim.value > 0.0) {
             let popup = volumePopupRect(ctx)
@@ -367,7 +368,7 @@ class ReaderDock <: Widget {
             ctx
                 .renderer
                 .fillCircle(rect.centerX(), rect.centerY() + dy, rect.w / 2.0,
-                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+                    fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
         }
         hovered
     }
@@ -402,7 +403,7 @@ class ReaderDock <: Widget {
         ctx
             .renderer
             .fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w, 4.0), 2.0,
-            fadeColor(ctx.theme.overlayTrack, Float32(a) / 255.0))
+                fadeColor(ctx.theme.overlayTrack, Float32(a) / 255.0))
         ctx.renderer.fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w * amount, 4.0), 2.0,
             ctx.theme.accent.withAlpha(a))
         ctx.renderer.fillCircle(sr.x + sr.w * amount, sr.centerY(), 5.0, ctx.theme.accent.withAlpha(a))
@@ -425,11 +426,15 @@ class ReaderDock <: Widget {
     private func drawHtmlBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
         let hp = model.htmlPage
         let sr = htmlSeekRect.shift(0.0, dy)
-        let amount = if (hp.state == "ready") { hp.htmlPageProgress01() } else { 0.0f32 }
+        let amount = if (hp.state == "ready") {
+            hp.htmlPageProgress01()
+        } else {
+            0.0f32
+        }
         ctx
             .renderer
             .fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w, 4.0), 2.0,
-            fadeColor(ctx.theme.overlayTrack, Float32(a) / 255.0))
+                fadeColor(ctx.theme.overlayTrack, Float32(a) / 255.0))
         ctx.renderer.fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w * amount, 4.0), 2.0,
             ctx.theme.accent.withAlpha(a))
         ctx.renderer.fillCircle(sr.x + sr.w * amount, sr.centerY(), 5.0, ctx.theme.accent.withAlpha(a))
@@ -445,16 +450,20 @@ class ReaderDock <: Widget {
             pointSize: 12.0)
 
         let divider = fadeColor(ctx.theme.overlayBorder, Float32(a) / 255.0)
-        ctx.renderer.strokeLine(sr.right() + 62.0, sr.centerY() - 8.0, sr.right() + 62.0, sr.centerY() + 8.0,
-            Pen(width: 1.0, color: divider))
+        ctx
+            .renderer
+            .strokeLine(sr.right() + 62.0, sr.centerY() - 8.0, sr.right() + 62.0, sr.centerY() + 8.0,
+                Pen(width: 1.0, color: divider))
         drawHtmlValue(ctx, htmlFontValueRect, dy, "${model.reader.htmlFontSize}", a)
         drawHtmlAdjust(ctx, htmlFontDownRect, dy, "reader:dock:htmlFontDown", "A-",
             htmlFontTierIndex(model.reader.htmlFontSize) > 0, a)
         drawHtmlAdjust(ctx, htmlFontUpRect, dy, "reader:dock:htmlFontUp", "A+",
             htmlFontTierIndex(model.reader.htmlFontSize) < 3, a)
 
-        ctx.renderer.strokeLine(htmlFontUpRect.right() + 3.0, sr.centerY() - 8.0,
-            htmlFontUpRect.right() + 3.0, sr.centerY() + 8.0, Pen(width: 1.0, color: divider))
+        ctx
+            .renderer
+            .strokeLine(htmlFontUpRect.right() + 3.0, sr.centerY() - 8.0, htmlFontUpRect.right() + 3.0,
+                sr.centerY() + 8.0, Pen(width: 1.0, color: divider))
         drawHtmlValue(ctx, htmlMarginValueRect, dy, "${model.reader.htmlMargin}", a)
         drawHtmlAdjust(ctx, htmlMarginDownRect, dy, "reader:dock:htmlMarginDown", "M-",
             htmlMarginTierIndex(model.reader.htmlMargin) > 0, a)
@@ -470,8 +479,10 @@ class ReaderDock <: Widget {
         a: Int64): Unit {
         let shifted = rect.shift(0.0, dy)
         if (enabled && ctx.isHovered(id)) {
-            ctx.renderer.fillCircle(shifted.centerX(), shifted.centerY(), shifted.w / 2.0,
-                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+            ctx
+                .renderer
+                .fillCircle(shifted.centerX(), shifted.centerY(), shifted.w / 2.0,
+                    fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
         }
         let color = if (enabled) {
             dimColor(ctx, a)
@@ -506,16 +517,17 @@ class ReaderDock <: Widget {
                 dimColor(ctx, a), pointSize: 12.0)
         // 音量按钮：面板打开时保持高亮底色
         if (st.volumeOpen) {
-            ctx.renderer.fillCircle(muteRect.centerX(), muteRect.centerY() + dy, muteRect.w / 2.0,
-                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+            ctx
+                .renderer
+                .fillCircle(muteRect.centerX(), muteRect.centerY() + dy, muteRect.w / 2.0,
+                    fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
         }
         let _ = drawBodyButton(ctx, muteRect, dy, "reader:dock:mute", a)
-        drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY() + dy, pb.muted,
-            if (st.volumeOpen) {
-                mainColor(ctx, a)
-            } else {
-                dimColor(ctx, a)
-            })
+        drawMuteGlyph(ctx.renderer, muteRect.centerX(), muteRect.centerY() + dy, pb.muted, if (st.volumeOpen) {
+            mainColor(ctx, a)
+        } else {
+            dimColor(ctx, a)
+        })
     }
 
     private func drawVideoBody(ctx: UiContext, dy: Float32, a: Int64): Unit {
@@ -523,12 +535,14 @@ class ReaderDock <: Widget {
         let pb = model.playback
         // 面板打开时按钮保持高亮底色
         if (st.subtitleOpen) {
-            ctx.renderer.fillCircle(subtitleRect.centerX(), subtitleRect.centerY() + dy, subtitleRect.w / 2.0,
-                fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
+            ctx
+                .renderer
+                .fillCircle(subtitleRect.centerX(), subtitleRect.centerY() + dy, subtitleRect.w / 2.0,
+                    fadeColor(ctx.theme.overlayHover, Float32(a) / 255.0))
         }
         let hover = drawBodyButton(ctx, subtitleRect, dy, "reader:dock:subtitle", a)
         // 有内嵌轨或有外挂字幕选中都算"字幕开"（同 frontend 计数徽标语义）。
-        let enabled = pb.subtitleTrackId >= 0 || !pb.activeSubtitleIndexes.isEmpty()
+        let enabled = !pb.activeEmbeddedStreamIndexes.isEmpty() || !pb.activeSubtitleIndexes.isEmpty()
         let color = if (enabled) {
             ctx.theme.accent.withAlpha(a)
         } else if (hover || st.subtitleOpen) {
@@ -631,42 +645,69 @@ class ReaderDock <: Widget {
         let language = a.language
         let kind = a.kind.toAsciiLower()
         let name = a.name
-        if (language.size > 0 && kind.size > 0) { return "${language} · ${kind}" }
-        if (language.size > 0) { return language }
+        if (language.size > 0 && kind.size > 0) {
+            return "${language} · ${kind}"
+        }
+        if (language.size > 0) {
+            return language
+        }
         if (name.size > 0 && kind.size > 0 && !name.toAsciiLower().endsWith(".${kind}")) {
             return "${name} · ${kind}"
         }
-        if (name.size > 0) { return name }
-        if (kind.size > 0) { return kind }
+        if (name.size > 0) {
+            return name
+        }
+        if (kind.size > 0) {
+            return kind
+        }
         "Subtitle ${index + 1}"
     }
 
     private func isSubtitleIndexActive(index: Int64): Bool {
         for (i in model.playback.activeSubtitleIndexes) {
-            if (i == index) { return true }
+            if (i == index) {
+                return true
+            }
+        }
+        false
+    }
+
+    private func isEmbeddedSubtitleActive(streamIndex: Int32): Bool {
+        for (index in model.playback.activeEmbeddedStreamIndexes) {
+            if (index == streamIndex) {
+                return true
+            }
         }
         false
     }
 
     // 外挂与内嵌两段都存在时，中间插一行分隔标题（占一行高，不可点）。
     private func subtitleHasSeparator(pb: PlaybackModel): Bool {
-        !pb.subtitleAttachments.isEmpty() && !pb.subtitleTracks.isEmpty()
+        !pb.subtitleAttachments.isEmpty() && !pb.embeddedSubtitleStreams.isEmpty()
     }
 
     // 字幕面板内容行数（Off + 外挂 + 分隔行 + 内嵌轨）。
     private func subtitleItemCount(): Int64 {
         let pb = model.playback
-        1 + pb.subtitleAttachments.size +
-            (if (subtitleHasSeparator(pb)) {
-                1
-            } else {
-                0
-            }) + pb.subtitleTracks.size
+        1 + pb.subtitleAttachments.size + (if (subtitleHasSeparator(pb)) {
+            1
+        } else {
+            0
+        }) + pb.embeddedSubtitleStreams.size
+    }
+
+    private func subtitleStatusRows(): Int64 {
+        let pb = model.playback
+        if (pb.subtitleProbeLoading || pb.subtitleScanLoading || pb.subtitleError.size > 0) {
+            1
+        } else {
+            0
+        }
     }
 
     private func subtitlePopupRect(ctx: UiContext): Rect {
         let itemCount = subtitleItemCount()
-        let contentH = SUBTITLE_TITLE_H + Float32(itemCount) * SUBTITLE_ROW_H
+        let contentH = SUBTITLE_TITLE_H + Float32(itemCount + subtitleStatusRows()) * SUBTITLE_ROW_H
         let h = SUBTITLE_POPUP_PAD * 2.0 + contentH
         // 从 subtitleRect 向上弹出，水平右对齐 subtitleRect 右缘
         let x = max(4.0, min(subtitleRect.right() - SUBTITLE_POPUP_W, ctx.viewportWidth - SUBTITLE_POPUP_W - 4.0))
@@ -705,14 +746,14 @@ class ReaderDock <: Widget {
                     }
                     let idx = subtitleItemAt(popup, y)
                     if (idx == 0) {
-                        // Off：外挂多选与内嵌轨一并关闭
                         pb.clearSubtitles()
-                        pb.setSubtitleTrack(-1)
                     } else if (idx > 0 && idx <= extCount) {
                         pb.toggleSubtitleIndex(idx - 1)
                     } else if (idx > extCount + sep) {
-                        let track = pb.subtitleTracks[idx - 1 - extCount - sep]
-                        pb.setSubtitleTrack(track.id)
+                        let stream = pb.embeddedSubtitleStreams[idx - 1 - extCount - sep]
+                        if (stream.supported) {
+                            pb.toggleEmbeddedSubtitle(stream.streamIndex)
+                        }
                     }
                     // 多选语义：点选保持面板打开（外部点击/Esc 关闭）。
                     ctx.requestFrame()
@@ -743,11 +784,12 @@ class ReaderDock <: Widget {
         let progress = st.subtitleAnim.animate(ctx, target: target)
         let shell = animatedPopupRect(popup, progress)
         // 表面与阴影
-        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0,
-            popupAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0, popupAlpha(ctx.theme.shadow, progress),
+            feather: 8.0)
         ctx.renderer.fillRoundedRect(shell, 10.0, popupAlpha(ctx.theme.panelRaised, progress))
-        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5,
-            Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
+        ctx
+            .renderer
+            .strokeRoundedRect(shell.inset(0.5), 9.5, Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
         ctx.renderer.pushClip(shell)
         // 标题行
         let titleY = shell.y + SUBTITLE_POPUP_PAD
@@ -756,10 +798,10 @@ class ReaderDock <: Widget {
         // 分隔线
         let sepY = titleY + SUBTITLE_TITLE_H
         ctx.renderer.fill(Rect(shell.x + 8.0, sepY, shell.w - 16.0, 1.0), popupAlpha(ctx.theme.panelEdge, progress))
-        // 字幕列表：Off + 外挂（多选）+ [分隔] + 内嵌轨（单选）
+        // 字幕列表：Off + 外挂（多选）+ [分隔] + 内嵌轨（多选）
         let pb = model.playback
         let extCount = pb.subtitleAttachments.size
-        let trkCount = pb.subtitleTracks.size
+        let trkCount = pb.embeddedSubtitleStreams.size
         let sep = if (subtitleHasSeparator(pb)) {
             1
         } else {
@@ -776,24 +818,32 @@ class ReaderDock <: Widget {
                 let row = subtitleRowRect(shell, i)
                 if (sep > 0 && i == extCount + 1) {
                     // 分隔行：内嵌轨小标题
-                    ctx.renderer.text("Embedded", row.x + 8.0,
-                        row.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
-                        popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
+                    ctx
+                        .renderer
+                        .text("Embedded", row.x + 8.0, row.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
+                            popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
                     continue
                 }
                 let isSelected = if (i == 0) {
-                    pb.activeSubtitleIndexes.isEmpty() && pb.subtitleTrackId < 0
+                    pb.activeSubtitleIndexes.isEmpty() && pb.activeEmbeddedStreamIndexes.isEmpty()
                 } else if (i <= extCount) {
                     isSubtitleIndexActive(i - 1)
                 } else {
-                    pb.subtitleTracks[i - 1 - extCount - sep].id == pb.subtitleTrackId
+                    isEmbeddedSubtitleActive(pb.embeddedSubtitleStreams[i - 1 - extCount - sep].streamIndex)
                 }
                 // hover 高亮
                 if (row.contains(ctx.mouseX, ctx.mouseY) && !isSelected) {
                     ctx.renderer.fillRoundedRect(row, 6.0, popupAlpha(ctx.theme.overlayHover, progress))
                 }
                 // 选中标记（对勾）
-                let textColor = if (isSelected) {
+                let supported = if (i > extCount + sep) {
+                    pb.embeddedSubtitleStreams[i - 1 - extCount - sep].supported
+                } else {
+                    true
+                }
+                let textColor = if (!supported) {
+                    popupAlpha(ctx.theme.mutedText, progress * 0.65)
+                } else if (isSelected) {
                     popupAlpha(ctx.theme.accent, progress)
                 } else {
                     popupAlpha(ctx.theme.text, progress)
@@ -807,11 +857,18 @@ class ReaderDock <: Widget {
                 } else if (i <= extCount) {
                     subtitleAttachmentLabel(pb.subtitleAttachments[i - 1], i - 1)
                 } else {
-                    let track = pb.subtitleTracks[i - 1 - extCount - sep]
-                    if (track.name.size > 0) {
-                        track.name
+                    let stream = pb.embeddedSubtitleStreams[i - 1 - extCount - sep]
+                    let base = if (stream.title.size > 0) {
+                        stream.title
+                    } else if (stream.language.size > 0) {
+                        "${stream.language} · ${stream.codecName}"
                     } else {
-                        "Track ${track.id}"
+                        "${stream.codecName} · #${stream.streamIndex}"
+                    }
+                    if (stream.supported) {
+                        base
+                    } else {
+                        "${base} · Unsupported"
                     }
                 }
                 let textX = row.x + 24.0 // 留对勾位置
@@ -821,6 +878,24 @@ class ReaderDock <: Widget {
                 ctx.renderer.text(label, textX, textY, textColor, pointSize: 12.0)
                 ctx.renderer.popClip()
             }
+        }
+        let status = if (pb.subtitleProbeLoading) {
+            "Probing embedded subtitles…"
+        } else if (pb.subtitleScanLoading) {
+            "Extracting subtitles…"
+        } else if (pb.subtitleError.size > 0) {
+            "Subtitle error: ${pb.subtitleError}"
+        } else {
+            ""
+        }
+        if (status.size > 0) {
+            let statusRow = subtitleRowRect(shell, subtitleItemCount())
+            ctx.renderer.pushClip(statusRow)
+            ctx
+                .renderer
+                .text(status, statusRow.x + 8.0, statusRow.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
+                    popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
+            ctx.renderer.popClip()
         }
         ctx.renderer.popClip()
         if (!st.subtitleOpen && progress <= 0.0) {
@@ -842,14 +917,11 @@ class ReaderDock <: Widget {
 
     // 音量面板内各区域
     private func volumeSliderRect(popup: Rect): Rect {
-        Rect(popup.centerX() - VOLUME_SLIDER_W / 2.0,
-            popup.y + VOLUME_POPUP_PAD,
-            VOLUME_SLIDER_W, VOLUME_SLIDER_H)
+        Rect(popup.centerX() - VOLUME_SLIDER_W / 2.0, popup.y + VOLUME_POPUP_PAD, VOLUME_SLIDER_W, VOLUME_SLIDER_H)
     }
 
     private func volumeTextRect(popup: Rect): Rect {
-        Rect(popup.x, popup.y + VOLUME_POPUP_PAD + VOLUME_SLIDER_H + 4.0,
-            popup.w, VOLUME_TEXT_H)
+        Rect(popup.x, popup.y + VOLUME_POPUP_PAD + VOLUME_SLIDER_H + 4.0, popup.w, VOLUME_TEXT_H)
     }
 
     private func handleVolumeOverlay(ctx: UiContext, event: UiEvent, popup: Rect): Bool {
@@ -907,11 +979,12 @@ class ReaderDock <: Widget {
         let progress = st.volumeAnim.animate(ctx, target: target)
         let shell = animatedPopupRect(popup, progress)
         // 表面与阴影
-        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0,
-            popupAlpha(ctx.theme.shadow, progress), feather: 8.0)
+        ctx.renderer.fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0, popupAlpha(ctx.theme.shadow, progress),
+            feather: 8.0)
         ctx.renderer.fillRoundedRect(shell, 10.0, popupAlpha(ctx.theme.panelRaised, progress))
-        ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5,
-            Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
+        ctx
+            .renderer
+            .strokeRoundedRect(shell.inset(0.5), 9.5, Pen(width: 1.0, color: popupAlpha(ctx.theme.panelEdge, progress)))
         ctx.renderer.pushClip(shell)
         let pb = model.playback
         // 音量滑条
@@ -925,8 +998,10 @@ class ReaderDock <: Widget {
         }
         ctx.renderer.fillRoundedRect(Rect(slider.x, cy - 2.0, slider.w, 4.0), 2.0, trackColor)
         if (amount > 0.0 && !pb.muted) {
-            ctx.renderer.fillRoundedRect(Rect(slider.x, cy - 2.0, slider.w * amount, 4.0), 2.0,
-                popupAlpha(ctx.theme.accent, progress))
+            ctx
+                .renderer
+                .fillRoundedRect(Rect(slider.x, cy - 2.0, slider.w * amount, 4.0), 2.0,
+                    popupAlpha(ctx.theme.accent, progress))
             ctx.renderer.fillCircle(slider.x + slider.w * amount, cy, 5.0, popupAlpha(ctx.theme.accent, progress))
         } else if (pb.muted) {
             // 静音时画灰色圆头在 0 位置
@@ -1121,10 +1196,8 @@ class ReaderDock <: Widget {
             ctx.claimHover("reader:dock:htmlSeek", CursorShape.Interactive)
         }
         if (isHtmlActive()) {
-            let htmlSpots = [("reader:dock:htmlFontDown", htmlFontDownRect),
-                ("reader:dock:htmlFontUp", htmlFontUpRect),
-                ("reader:dock:htmlMarginDown", htmlMarginDownRect),
-                ("reader:dock:htmlMarginUp", htmlMarginUpRect)]
+            let htmlSpots = [("reader:dock:htmlFontDown", htmlFontDownRect), ("reader:dock:htmlFontUp", htmlFontUpRect),
+                ("reader:dock:htmlMarginDown", htmlMarginDownRect), ("reader:dock:htmlMarginUp", htmlMarginUpRect)]
             for ((id, rect) in htmlSpots) {
                 if (rect.contains(x, y)) {
                     ctx.claimHover(id, CursorShape.Interactive)
@@ -1141,10 +1214,9 @@ class ReaderDock <: Widget {
                     ctx.claimHover("reader:dock:next", CursorShape.Interactive)
                 }
         }
-        let spots = [("reader:dock:back", backRect), ("reader:dock:play", playRect),
-            ("reader:dock:fwd", fwdRect), ("reader:dock:mute", muteRect),
-            ("reader:dock:subtitle", subtitleRect), ("reader:dock:bookSeek", bookSeekRect),
-            ("reader:dock:audioSeek", audioSeekRect)]
+        let spots = [("reader:dock:back", backRect), ("reader:dock:play", playRect), ("reader:dock:fwd", fwdRect),
+            ("reader:dock:mute", muteRect), ("reader:dock:subtitle", subtitleRect),
+            ("reader:dock:bookSeek", bookSeekRect), ("reader:dock:audioSeek", audioSeekRect)]
         for ((id, rect) in spots) {
             if (rect.contains(x, y)) {
                 ctx.claimHover(id, CursorShape.Interactive)

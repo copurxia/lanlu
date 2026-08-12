@@ -1,0 +1,17 @@
+[package]
+cjc-version = "1.1.0"
+name = "libass_ffi"
+version = "0.1.0"
+description = "Memory-safe Cangjie wrapper for libass subtitle rendering"
+output-type = "static"
+[dependencies]
+
+[ffi.c]
+lanlu_ass_bridge = { path = "./native" }
+
+[target.x86_64-unknown-linux-gnu]
+# Ubuntu runtime images may only contain the soname link, without libass-dev's libass.so symlink.
+link-option = "-llanlu_ass_bridge -l:libass.so.9"
+
+[target.x86_64-w64-mingw32]
+link-option = "-llanlu_ass_bridge -lass"

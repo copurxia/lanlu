@@ -26,6 +26,8 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 | 仓颉工具链 (cjc) | 1.1+（本机验证 1.1.3，含 cjpm） |
 | libvips | 图片转码（`vips_ffi` 本地包依赖，链接 `-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0`） |
 | libVLC 3+ | 应用内视频解码（`libvlc_ffi` 本地包依赖，Linux 包通常为 `libvlc-dev` + `vlc-plugin-base`） |
+| FFmpeg 开发库 | 内嵌字幕探测与抽取（`libavformat-dev libavcodec-dev libavutil-dev`；不调用 ffmpeg/ffprobe 命令） |
+| libass | ASS/SSA/SRT/WebVTT/mov_text 多轨字幕排版与透明 RGBA 渲染（Linux `libass-dev`，Windows MSYS2 `mingw-w64-x86_64-libass`） |
 | SDL3 动态库 | 位于 `../packages/cangjie-gui/sdl/.sdl3/`，运行时必须加入 `LD_LIBRARY_PATH` |
 | libRocksDB | 设置与离线缓存存储（`rocksdb_ffi` 本地包依赖；Linux 包为 `librocksdb-dev`，Windows 为 MSYS2 `mingw-w64-x86_64-rocksdb`） |
 | stdx | 以二进制依赖引入（`CANGJIE_STDX_PATH`，与根项目同款配置） |
@@ -121,6 +123,7 @@ SDL_VIDEODRIVER=dummy \
 |------|------|
 | 客户端设置（RocksDB 单键 JSON 快照，服务器、会话、主题、阅读选项） | `~/.config/lanlu-client-next/kv/` |
 | 图片磁盘缓存（按服务器地址哈希分目录） | `~/.cache/lanlu-client-next/` |
+| 内嵌字幕缓存（版本化、校验、原子写，按服务器隔离） | `~/.cache/lanlu-client-next/<server-hash>/subtitles/` |
 | 离线响应/阅读进度缓存（RocksDB，按服务器哈希分前缀；离线阅读回退 + 进度补报） | `~/.cache/lanlu-client-next/offline-kv/` |
 
 ## 项目结构
@@ -140,6 +143,8 @@ client-next/
 
 ## 已知限制（v1）
 
+- 视频支持同时选择外挂与多条内嵌文本字幕；支持 ASS/SSA、SubRip、WebVTT、mov_text。PGS、DVB、DVD 等位图字幕会列出但禁用，不做 OCR。
+- 内嵌字体附件尚未抽取，缺失字体由 fontconfig（Linux）或系统字体（Windows）回退；清理缓存会同时删除图片与字幕缓存。
 - 密码输入框为明文显示（CUI 暂无密码掩码控件）
 - 仅 http 官方支持（https 未验证）
 - 不支持开启了 TOTP 两步验证的账号

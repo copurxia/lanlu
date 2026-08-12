@@ -10,7 +10,7 @@ import std.math.abs
 // 自绘而非 PixelImageView 组合：方向性翻页动画（旧页滑出+淡出 / 新页反向滑入，原型
 // pg-in/out-r/l/b/t）需要对纹理做位移+alpha 绘制，固定控件路径表达不了。
 // 内容分派：图片 spread（单页/双页并排）→ 纹理舞台；音频页/activeLane=Audio →
-// 黑胶音频舞台（#page-audio）；video/html 等 → 诚实占位（视频播放后续接入）。
+// 黑胶音频舞台（#page-audio）；video → libVLC 帧与 libass RGBA 同矩形合成；html → Blitz 纹理。
 // 动画状态经 rememberState 跨帧保留（每帧重建的只是构建期声明，Tween 对象不重置）。
 
 // ── 长图滚动（frontend .long-page-scroll-container 简化版）──
@@ -149,7 +149,11 @@ private let HTML_PAPER_DOCK_BOTTOM: Float32 = 80.0
 
 func htmlPaperFrame(frame: Rect, chromeVisible: Bool): Rect {
     let top = min(HTML_PAPER_TOP, max(0.0, frame.h))
-    let wantedBottom = if (chromeVisible) { HTML_PAPER_DOCK_BOTTOM } else { HTML_PAPER_BOTTOM }
+    let wantedBottom = if (chromeVisible) {
+        HTML_PAPER_DOCK_BOTTOM
+    } else {
+        HTML_PAPER_BOTTOM
+    }
     let bottom = min(wantedBottom, max(0.0, frame.h - top))
     Rect(frame.x, frame.y + top, frame.w, max(0.0, frame.h - top - bottom))
 }
@@ -912,10 +916,20 @@ class ReaderStage <: Widget {
         }
         match (pixelTexture(ctx.renderer, key)) {
             case Some(texture) =>
-                ctx
-                    .renderer
-                    .texture(texture, fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain))
-                drawSubtitleOverlay(ctx)
+                let videoRect = fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain)
+                ctx.renderer.texture(texture, videoRect)
+                match (pb.takeSubtitleBitmap(Int32(texture.width), Int32(texture.height))) {
+                    case Some(bitmap) =>
+                        let subtitleKey = "subtitle-bitmap:${pb.mediaKey}"
+                        if (bitmap.changed != 0 || pixelTexture(ctx.renderer, subtitleKey).isNone()) {
+                            registerPixelImage(ctx.renderer, subtitleKey, bitmap.width, bitmap.height, bitmap.rgba)
+                        }
+                        match (pixelTexture(ctx.renderer, subtitleKey)) {
+                            case Some(subtitleTexture) => ctx.renderer.texture(subtitleTexture, videoRect)
+                            case None => ()
+                        }
+                    case None => ()
+                }
             case None =>
                 var title = model.t("reader.video")
                 match (model.reader.pageAt(pageIdx)) {
@@ -947,57 +961,6 @@ class ReaderStage <: Widget {
             } else {
                 ctx.requestFrameAfter(33)
             }
-        }
-    }
-
-    // 外挂字幕 overlay（多条同时命中自下而上堆叠，同 frontend activeCues 气泡）：
-    // 半透明黑底圆角 + 白字居中，chrome 可见时抬高避开 dock。
-    private func drawSubtitleOverlay(ctx: UiContext): Unit {
-        let texts = model.playback.activeSubtitleTexts()
-        if (texts.isEmpty()) { return }
-        let ps: Float32 = 13.0
-        let lineH = ctx.renderer.textHeight(pointSize: ps)
-        let padX: Float32 = 12.0
-        let padY: Float32 = 8.0
-        let gap: Float32 = 6.0
-        let maxW = frame.w * 0.92
-        // 逐气泡分行并量宽（cue 文本含 \n 时拆多行，单行超宽由裁切兜底）。
-        let bubbleLines = ArrayList<Array<String>>()
-        let bubbleWidths = ArrayList<Float32>()
-        var totalH: Float32 = 0.0
-        for (text in texts) {
-            let lines = text.split("\n")
-            var w: Float32 = 0.0
-            for (line in lines) {
-                let lw = ctx.renderer.textWidth(line, pointSize: ps)
-                if (lw > w) { w = lw }
-            }
-            bubbleLines.add(lines)
-            bubbleWidths.add(min(maxW, w + padX * 2.0))
-            totalH += padY * 2.0 + Float32(lines.size) * lineH
-        }
-        totalH += gap * Float32(texts.size - 1)
-        let bottomMargin: Float32 = if (model.reader.chromeVisible) {
-            84.0
-        } else {
-            20.0
-        }
-        var y = frame.y + frame.h - bottomMargin - totalH
-        for (i in 0..texts.size) {
-            let lines = bubbleLines[Int64(i)]
-            let w = bubbleWidths[Int64(i)]
-            let h = padY * 2.0 + Float32(lines.size) * lineH
-            let x = frame.centerX() - w / 2.0
-            ctx.renderer.fillRoundedRect(Rect(x, y, w, h), 10.0, Color.rgba(0, 0, 0, 173))
-            var ty = y + padY
-            for (line in lines) {
-                let lw = ctx.renderer.textWidth(line, pointSize: ps)
-                ctx.renderer.pushClip(Rect(x + 2.0, ty - 2.0, w - 4.0, lineH + 4.0))
-                ctx.renderer.text(line, frame.centerX() - lw / 2.0, ty, Color.rgb(255, 255, 255), pointSize: ps)
-                ctx.renderer.popClip()
-                ty += lineH
-            }
-            y += h + gap
         }
     }
 

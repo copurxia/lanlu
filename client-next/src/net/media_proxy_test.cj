@@ -115,7 +115,79 @@ func mediaProxyStreamsThroughQwestAndForwardsHeaders(): Unit {
         let request = captured.get()
         @Expect(request.startsWith("GET /media?q=%20 HTTP/1.1\r\n"))
         @Expect(request.contains("Authorization: Bearer secret\r\n"))
-        @Expect(request.contains("Range: bytes=7-33554438\r\n"))
+        @Expect(request.contains("Range: bytes=7-\r\n"))
         @Expect(request.contains("User-Agent: MediaProxyTest/1\r\n"))
+    }
+}
+
+@Test
+func mediaProxyRoutesRemainBoundToTheirOriginalMedia(): Unit {
+    try (first = MediaProxyTestServer {
+        connection =>
+            let _ = readMediaProxyTestRequest(connection)
+            connection.write("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst".toArray())
+    }, second = MediaProxyTestServer {
+        connection =>
+            let _ = readMediaProxyTestRequest(connection)
+            connection.write("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond".toArray())
+    }, proxy = MediaProxy()) {
+        let firstRoute = proxy.open(first.url("/first"), "token-one")
+        let secondRoute = proxy.open(second.url("/second"), "token-two")
+        @Expect(firstRoute != secondRoute)
+        let client = ClientBuilder().build()
+        try (response = client.get(firstRoute).send()) {
+            @Expect(response.text(), "first")
+        }
+        try (response = client.get(secondRoute).send()) {
+            @Expect(response.text(), "second")
+        }
+        client.close()
+    }
+}
+
+@Test
+func mediaProxyStreamsPastFormerThirtyTwoMegabyteBoundary(): Unit {
+    let totalSize: Int64 = 64 * 1024 * 1024 + 1
+    try (upstream = MediaProxyTestServer {
+        connection =>
+            let request = readMediaProxyTestRequest(connection)
+            @Expect(!request.contains("Range:"))
+            connection.write(("HTTP/1.1 200 OK\r\nContent-Length: ${totalSize}\r\n\r\n").toArray())
+            let chunk = Array<UInt8>(64 * 1024, {index => UInt8(index % 251)})
+            var remaining = totalSize
+            while (remaining > 0) {
+                let size = if (remaining < chunk.size) {
+                    remaining
+                } else {
+                    chunk.size
+                }
+                connection.write(chunk[..size])
+                remaining -= size
+            }
+    }, proxy = MediaProxy()) {
+        let client = ClientBuilder().build()
+        try (response = client.get(proxy.open(upstream.url("/large"), "")).send()) {
+            let stream = response.stream()
+            let buffer = Array<UInt8>(128 * 1024, repeat: 0u8)
+            var received: Int64 = 0
+            while (true) {
+                let count = stream.read(buffer)
+                if (count <= 0) {
+                    break
+                }
+                // Sample each transport chunk; per-byte @Expect is prohibitively slow under the
+                // unittest macro and obscures the actual cross-boundary assertion.
+                let stride = max(1, count / 16)
+                var index: Int64 = 0
+                while (index < count) {
+                    @Expect(buffer[index], UInt8(((received + index) % (64 * 1024)) % 251))
+                    index += stride
+                }
+                @Expect(buffer[count - 1], UInt8(((received + count - 1) % (64 * 1024)) % 251))
+                received += count
+            }
+            @Expect(received, totalSize)
+        }
+        client.close()
     }
 }

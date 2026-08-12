@@ -20,9 +20,9 @@ private func stageDesktopAssets(): Unit {
 @When[os == "Windows"]
 private func buildFontkitNative(): Int64 {
     let exitCode = execute("cargo",
-        ["build", "--release", "--target", "x86_64-pc-windows-gnu",
-         "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
-        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+        ["build", "--release", "--target", "x86_64-pc-windows-gnu", "--manifest-path",
+            "../packages/fontkit_ffi/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
     if (exitCode != 0) {
         return exitCode
     }
@@ -37,8 +37,7 @@ private func buildFontkitNative(): Int64 {
 
 @When[os != "Windows"]
 private func buildFontkitNative(): Int64 {
-    execute("cargo",
-        ["build", "--release", "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
+    execute("cargo", ["build", "--release", "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 
@@ -61,6 +60,66 @@ private func buildWebviewNative(): Int64 {
     0
 }
 
+@When[os == "Windows"]
+private func buildSubtitleNative(): Int64 {
+    let avStatus = execute("x86_64-w64-mingw32-gcc",
+        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-c",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+    if (avStatus != 0) {
+        return avStatus
+    }
+    let avArchive = execute("x86_64-w64-mingw32-ar",
+        ["rcs", "../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+    if (avArchive != 0) {
+        return avArchive
+    }
+    let assStatus = execute("x86_64-w64-mingw32-gcc",
+        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-c", "../packages/libass_ffi/native/lanlu_ass_bridge.c",
+            "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+    if (assStatus != 0) {
+        return assStatus
+    }
+    execute("x86_64-w64-mingw32-ar",
+        ["rcs", "../packages/libass_ffi/native/liblanlu_ass_bridge.a",
+            "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+}
+
+@When[os != "Windows"]
+private func buildSubtitleNative(): Int64 {
+    let avStatus = execute("cc",
+        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC", "-c",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+    if (avStatus != 0) {
+        return avStatus
+    }
+    let avArchive = execute("ar",
+        ["rcs", "../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
+            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+    if (avArchive != 0) {
+        return avArchive
+    }
+    let assStatus = execute("cc",
+        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC", "-c",
+            "../packages/libass_ffi/native/lanlu_ass_bridge.c", "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"],
+        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+    if (assStatus != 0) {
+        return assStatus
+    }
+    execute("ar",
+        ["rcs", "../packages/libass_ffi/native/liblanlu_ass_bridge.a",
+            "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
+}
+
 @When[os != "Windows"]
 private func buildWebviewNative(): Int64 {
     execute("cargo", ["build", "--release", "--manifest-path", "../packages/webview/native/Cargo.toml"],
@@ -80,6 +139,10 @@ main(args: Array<String>): Int64 {
             let webviewExitCode = buildWebviewNative()
             if (webviewExitCode != 0) {
                 return webviewExitCode
+            }
+            let subtitleExitCode = buildSubtitleNative()
+            if (subtitleExitCode != 0) {
+                return subtitleExitCode
             }
             // 源资源缺失或复制失败都属于打包错误，直接让构建失败。
             stageDesktopAssets()

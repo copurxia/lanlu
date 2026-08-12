@@ -13,11 +13,13 @@ webview = { path = "../packages/webview" }
 rocksdb_ffi = { path = "../packages/rocksdb_ffi" }
 fontkit_ffi = { path = "../packages/fontkit_ffi" }
 qwest = { path = "../packages/qwest" }
+libavformat_ffi = { path = "../packages/libavformat_ffi" }
+libass_ffi = { path = "../packages/libass_ffi" }
 
 [target.x86_64-unknown-linux-gnu]
 # vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
 # rocksdb_ffi 需要 librocksdb（与服务端同款）。
-link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s"
+link-option = "-L ../packages/libass_ffi/native -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s -lavformat -lavcodec -lavutil -llanlu_ass_bridge -l:libass.so.9"
 # 仅当出现 undefined reference to ...@PCRE2_10.47 时取消注释：
 # link-option = "/usr/lib/x86_64-linux-gnu/libpcre2-8.so"
   [target.x86_64-unknown-linux-gnu.bin-dependencies]
@@ -28,6 +30,6 @@ link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc+
 # MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 MINGW64 的 import libraries。
 # -lgcc_s：fontkit_native 以 x86_64-pc-windows-gnu 构建，Rust std/panic_unwind 需要 libgcc_s 提供 _Unwind_* / _GCC_specific_handler。
 # -lcrypt32：stdx.crypto.x509 通过 CryptoAPI 读取系统根证书（CertOpenSystemStoreA 等）。
-link-option = "-L \"${MINGW_LIBRARY_PATH}\" -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s"
+link-option = "-L \"${MINGW_LIBRARY_PATH}\" -L ../packages/libass_ffi/native -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lavformat -lavcodec -lavutil -llanlu_ass_bridge -lass -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s"
   [target.x86_64-w64-mingw32.bin-dependencies]
     path-option = [ "${CANGJIE_STDX_PATH}" ]

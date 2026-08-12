@@ -1,14 +1,13 @@
 package lanlu_client_next.net
 
 import std.io.InputStream
-import std.sync.{Mutex, SyncCounter}
-import std.convert.Parsable
+import std.sync.SyncCounter
 import stdx.crypto.crypto.SecureRandom
 import stdx.net.http.{HttpContext, HttpResponseBuilder, Server, ServerBuilder}
 import qwest.{Client, ClientBuilder, Headers, RequestBuilder, Response}
 
 // libVLC 3 无法为普通 HTTP 媒体注入自定义 Authorization 请求头。这个回环代理只暴露
-// 一个随机路径，把 VLC 的 Range/HEAD 请求转给当前兰鹿媒体 URL，并在出站请求上补 Bearer。
+// 每次 open 创建一个不可变随机路径，把 Range/HEAD 请求转给对应媒体并补 Bearer。
 //
 // 上游抓取走 qwest 的流式响应（stdx Client 会先把整个响应体缓冲进托管堆）。Response
 // 持有 HTTP/HTTPS 连接，响应体作为 InputStream 交给 stdx server 分块写出，端到端 O(1) 内存。
@@ -51,24 +50,17 @@ private class UpstreamBody <: InputStream & Resource {
 }
 
 public class MediaProxy <: Resource {
-    private let mutex = Mutex()
     private let server: Server
     private let client: Client
-    private let route: String
-    private var upstream: String = ""
-    private var token: String = ""
     private var closed = false
 
     public init() {
-        let random = SecureRandom()
-        route = "/media/${random.nextInt64()}-${random.nextInt64()}"
         client = ClientBuilder()
             .connectTimeout(Duration.second * 10)
             .tlsHandshakeTimeout(Duration.second * 10)
             .redirect(5)
             .build()
         server = ServerBuilder().addr("127.0.0.1").port(0u16).build()
-        server.distributor.register(route, {ctx => forward(ctx)})
         let ready = SyncCounter(1)
         server.afterBind({=> ready.dec()})
         spawn {server.serve()}
@@ -76,22 +68,27 @@ public class MediaProxy <: Resource {
     }
 
     public func open(url: String, bearerToken: String): String {
-        synchronized(mutex) {
-            upstream = url
-            token = bearerToken
+        if (closed || url.size == 0) {
+            throw Exception("media proxy is closed or URL is empty")
         }
+        let random = SecureRandom()
+        let route = "/media/${random.nextInt64()}-${random.nextInt64()}"
+        let target = url
+        let bearer = bearerToken
+        server.distributor.register(route, {ctx => forward(ctx, target, bearer)})
         "http://127.0.0.1:${server.port}${route}"
     }
 
-    private func forward(ctx: HttpContext): Unit {
+    private func forward(ctx: HttpContext, target: String, bearer: String): Unit {
         try {
-            doForward(ctx)
-        } catch (e: Exception) {
-            println("[MediaProxy] forward failed: ${e}")
+            doForward(ctx, target, bearer)
+        } catch (_: Exception) {
+            // qwest 错误文本可能包含完整上游 URL；这里只记录分类，避免泄漏 query/token。
+            println("[MediaProxy] upstream request failed")
             respondBadGateway(ctx)
-        } catch (e: Error) {
+        } catch (_: Error) {
             // OutOfMemoryError 等 Error 也不能放出去，否则会杀死引擎线程、拖死连接池。
-            println("[MediaProxy] forward failed with error: ${e}")
+            println("[MediaProxy] upstream request failed with fatal error")
             respondBadGateway(ctx)
         }
     }
@@ -105,21 +102,12 @@ public class MediaProxy <: Resource {
         }
     }
 
-    private func doForward(ctx: HttpContext): Unit {
-        let (target, bearer) = synchronized(mutex) {
-            (upstream, token)
-        }
+    private func doForward(ctx: HttpContext, target: String, bearer: String): Unit {
         if (target.size == 0 || (ctx.request.method != "GET" && ctx.request.method != "HEAD")) {
             ctx.responseBuilder.status(404u16).body("Not found")
             return
         }
-        // VLC 常用 bytes=N- 的开放区间。兰鹿会据此声明从 N 到文件末尾的巨大
-        // Content-Length；把开放区间切成 32 MiB 窗口，VLC 会依据 Content-Range
-        // 继续请求下一段。流式转发下窗口大小不再占用堆内存。
-        let range = match (ctx.request.headers.getFirst("Range")) {
-            case Some(value) => boundedRange(value)
-            case None => "bytes=0-33554431"
-        }
+        let range = ctx.request.headers.getFirst("Range")
         let ua = ctx.request.headers.getFirst("User-Agent")
         let (status, headers, body) = fetchUpstream(ctx.request.method, target, bearer, range, ua)
         let out = ctx.responseBuilder.status(status)
@@ -140,7 +128,7 @@ public class MediaProxy <: Resource {
         method: String,
         url0: String,
         bearer: String,
-        range: String,
+        range: ?String,
         ua: ?String
     ): (UInt16, Headers, ?UpstreamBody) {
         let request: RequestBuilder = if (method == "HEAD") {
@@ -151,7 +139,11 @@ public class MediaProxy <: Resource {
         if (bearer.size > 0) {
             request.header("Authorization", "Bearer ${bearer}")
         }
-        request.header("Range", range).header("Accept", "*/*")
+        match (range) {
+            case Some(value) => request.header("Range", value)
+            case None => ()
+        }
+        request.header("Accept", "*/*")
         match (ua) {
             case Some(value) => request.header("User-Agent", value)
             case None => ()
@@ -169,22 +161,6 @@ public class MediaProxy <: Resource {
         match (headers.get(name)) {
             case Some(value) => let _ = out.header(name, value)
             case None => ()
-        }
-    }
-
-    private func boundedRange(value: String): String {
-        if (!value.startsWith("bytes=") || !value.endsWith("-")) {
-            return value
-        }
-        let rawStart = value[6..value.size - 1]
-        try {
-            let start = Int64.parse(rawStart)
-            if (start < 0) {
-                return "bytes=0-33554431"
-            }
-            return "bytes=${start}-${start + 33554431}"
-        } catch (_: Exception) {
-            "bytes=0-33554431"
         }
     }
 

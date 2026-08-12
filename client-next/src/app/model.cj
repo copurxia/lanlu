@@ -11,6 +11,7 @@ import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.io.OutputStream
 import std.sync.Mutex
 import std.time.MonoTime
+import libavformat_ffi.{ExtractedSubtitleTrack, SubtitleCancelToken, SubtitleStreamInfo, probeSubtitleStreams}
 
 // 排序字段映射：与 ui 层 SORT_LABELS 按下标一一对应（改动须两边同步）。
 public let SEARCH_SORT_FIELDS = ["title", "created_at", "updated_at", "lastread", "pagecount", "release_at"]
@@ -504,8 +505,6 @@ public class AppModel {
                                     Directory.create(dirPath, recursive: true)
                                 }
                                 File.writeTo(Path(path), bytes)
-                                // 音频缓存完成后预探测时长，让首次播放前进度条即可用。
-                                // 在 worker 线程跑 ffprobe（UI 线程不能阻塞），失败/缺失保持 0（未知）。
                                 let lyrics = if (lyricAsset > 0) {
                                     try {
                                         let lyricBytes = a.assetBytes(lyricAsset)
@@ -520,7 +519,7 @@ public class AppModel {
                                 } else {
                                     ""
                                 }
-                                (key, path, probeMediaDuration(path), lyrics)
+                                (key, path, lyrics)
                         }
                     )
                 case None => ()
@@ -564,6 +563,46 @@ public class AppModel {
                 )
                 case None => ()
             }
+        }
+        playback.onSubtitleProbe = {
+            key, generation, url, bearer =>
+                let taskName = "subprobe:${generation}:${key}"
+                match (registerSubtitleToken(taskName)) {
+                    case Some(token) =>
+                        let accepted = worker.submitSubtitle(taskName, {
+                            => try {
+                                (key, generation, probeSubtitleStreams(url, bearer: bearer, cancel: token))
+                            } finally {
+                                releaseSubtitleToken(taskName, token)
+                            }
+                        })
+                        if (!accepted) {
+                            releaseSubtitleToken(taskName, token)
+                        }
+                    case None => ()
+                }
+        }
+        playback.onSubtitleScan = {
+            key, generation, url, bearer, stableKey =>
+                let cache = subtitleCache()
+                let taskName = "subscan:${generation}:${key}"
+                match (registerSubtitleToken(taskName)) {
+                    case Some(token) =>
+                        let accepted = worker.submitSubtitle(taskName, {
+                            => try {
+                                (key, generation, cache.loadOrExtract(stableKey, url, bearer: bearer, cancel: token))
+                            } finally {
+                                releaseSubtitleToken(taskName, token)
+                            }
+                        })
+                        if (!accepted) {
+                            releaseSubtitleToken(taskName, token)
+                        }
+                    case None => ()
+                }
+        }
+        playback.onSubtitleCancel = {
+            key, generation => cancelSubtitleTokens(generation, key)
         }
         // html 离屏渲染出口：正文/子资源都由 worker 拉字节（Blitz 不碰网络），
         // 任务名带 pageKey 去重；完成经 pump 的 drain 分发回填 htmlPage。
@@ -1991,6 +2030,9 @@ public class AppModel {
 
     // key → 原始编码字节的磁盘缓存（按服务器地址分目录），首次使用时创建。
     private var imageCache: ?ImageCache = None
+    private var subtitleDiskCache: ?SubtitleCache = None
+    private let subtitleTokenMutex = Mutex()
+    private let subtitleTokens = HashMap<String, SubtitleCancelToken>()
 
     // 缓存目录按当前 active 服务器地址派生；无 active 时退化为选中服务器/空串。
     private func activeBaseUrl(): String {
@@ -2021,6 +2063,45 @@ public class AppModel {
                     }
                 )
                 return c
+        }
+    }
+
+    private func subtitleCache(): SubtitleCache {
+        match (subtitleDiskCache) {
+            case Some(c) => return c
+            case None =>
+                let c = SubtitleCache(defaultCacheRoot(activeBaseUrl()))
+                subtitleDiskCache = Some(c)
+                return c
+        }
+    }
+
+    private func registerSubtitleToken(taskName: String): ?SubtitleCancelToken {
+        synchronized(subtitleTokenMutex) {
+            if (subtitleTokens.contains(taskName)) {
+                return None
+            }
+            let token = SubtitleCancelToken()
+            subtitleTokens[taskName] = token
+            Some(token)
+        }
+    }
+
+    private func releaseSubtitleToken(taskName: String, token: SubtitleCancelToken): Unit {
+        synchronized(subtitleTokenMutex) {
+            subtitleTokens.remove(taskName)
+        }
+        token.close()
+    }
+
+    private func cancelSubtitleTokens(generation: UInt64, key: String): Unit {
+        let suffix = ":${generation}:${key}"
+        synchronized(subtitleTokenMutex) {
+            for ((name, token) in subtitleTokens) {
+                if (name.endsWith(suffix)) {
+                    token.cancel()
+                }
+            }
         }
     }
 
@@ -2890,7 +2971,9 @@ public class AppModel {
                     playback.loadRemote(arc, i, proxy.open(url, token), "", video: false)
                     playback.loadLyrics(p.lyricsAssetId)
                     // 进入音频页自动播放：已加载且未在播放时启动
-                    if (playback.loaded && !playback.playing) { playback.play() }
+                    if (playback.loaded && !playback.playing) {
+                        playback.play()
+                    }
                 case None => ()
             }
             case Book => playback.stop()
@@ -2914,10 +2997,13 @@ public class AppModel {
                             mediaProxy = Some(created)
                             created
                     }
-                    playback.loadRemote(arc, i, proxy.open(url, token), "")
+                    playback.loadRemote(arc, i, proxy.open(url, token), "", stableCacheKey: "${arc}:${p.sourcePath}",
+                        subtitleUrl: url, subtitleBearer: token)
                     playback.loadSubtitles(p.subtitleAttachments)
                     // 进入视频页自动播放：已加载且未在播放时启动
-                    if (playback.loaded && !playback.playing) { playback.play() }
+                    if (playback.loaded && !playback.playing) {
+                        playback.play()
+                    }
                 case None => ()
             }
         }
@@ -3691,6 +3777,7 @@ public class AppModel {
     // 注意命名：cui 有全局 clearImageCache()（路径纹理缓存），model 方法起名 clearCache 避免遮蔽歧义。
     public func clearCache(): Unit {
         cache().clear()
+        subtitleCache().clear()
         clearImageCache() // cui 路径纹理缓存（按文件路径解码的 GPU 纹理）
         clearPixelImages() // cui 像素纹理缓存（含已建纹理与 staged 像素）
         synchronized(imageMutex) {
@@ -4874,10 +4961,9 @@ public class AppModel {
             // 媒体下载到货：回填 PlaybackModel（key 对号入座，迟到结果由模型内丢弃）。
             match (r.payload) {
                 case Some(p) =>
-                    // 载荷包含音频缓存路径、时长及可选 LRC 歌词文本。
-                    let (key, path, dur, lyrics) = (p as (String, String, Float64, String)).getOrThrow()
+                    // 载荷包含音频缓存路径及可选 LRC 歌词文本；时长开播后由 libVLC 回填。
+                    let (key, path, lyrics) = (p as (String, String, String)).getOrThrow()
                     playback.onDownloaded(key, path, lyrics: lyrics)
-                    playback.durationSec = dur
                     readerVersion.value += 1
                 case None => ()
             }
@@ -4897,6 +4983,29 @@ public class AppModel {
                     playback.onSubtitleDownloaded(key, assetId, text)
                     readerVersion.value += 1
                 case None => ()
+            }
+        } else if (name.startsWith("subprobe:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, generation, streams) = (p as (String, UInt64, ArrayList<SubtitleStreamInfo>)).getOrThrow()
+                    playback.onEmbeddedSubtitleProbed(key, generation, streams)
+                    readerVersion.value += 1
+                case None =>
+                    if (name == "subprobe:${playback.mediaGeneration}:${playback.mediaKey}") {
+                        playback.onEmbeddedSubtitleFailed(playback.mediaKey, playback.mediaGeneration, r.error)
+                    }
+            }
+        } else if (name.startsWith("subscan:")) {
+            match (r.payload) {
+                case Some(p) =>
+                    let (key, generation, tracks) = (p as (String, UInt64, ArrayList<ExtractedSubtitleTrack>))
+                        .getOrThrow()
+                    playback.onEmbeddedSubtitleScanned(key, generation, tracks)
+                    readerVersion.value += 1
+                case None =>
+                    if (name == "subscan:${playback.mediaGeneration}:${playback.mediaKey}") {
+                        playback.onEmbeddedSubtitleFailed(playback.mediaKey, playback.mediaGeneration, r.error)
+                    }
             }
         } else if (name == "next.resolve") {
             // 候选解析到货：无候选 → 失败态；有候选 → 记录（卡片展示）；
