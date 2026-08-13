@@ -12,7 +12,7 @@ private func compileBridge(): Int64 {
     if (compileStatus != 0) {
         return compileStatus
     }
-    execute("x86_64-w64-mingw32-ar", ["rcs", LIBRARY, OBJECT], stdOut: ProcessRedirect.Inherit,
+    execute("ar", ["rcs", LIBRARY, OBJECT], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
 }
 

@@ -70,7 +70,7 @@ private func buildSubtitleNative(): Int64 {
     if (avStatus != 0) {
         return avStatus
     }
-    let avArchive = execute("x86_64-w64-mingw32-ar",
+    let avArchive = execute("ar",
         ["rcs", "../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
             "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
@@ -84,7 +84,7 @@ private func buildSubtitleNative(): Int64 {
     if (assStatus != 0) {
         return assStatus
     }
-    execute("x86_64-w64-mingw32-ar",
+    execute("ar",
         ["rcs", "../packages/libass_ffi/native/liblanlu_ass_bridge.a",
             "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)

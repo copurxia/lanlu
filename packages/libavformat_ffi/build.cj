@@ -16,7 +16,7 @@ private func compileBridge(): Int64 {
         return compileStatus
     }
     execute(
-        "x86_64-w64-mingw32-ar",
+        "ar",
         ["rcs", LIBRARY, OBJECT],
         stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit
