@@ -391,6 +391,10 @@ jobs:
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-libvips
             mingw-w64-x86_64-libheif
+            mingw-w64-x86_64-libjxl
+            mingw-w64-x86_64-imagemagick
+            mingw-w64-x86_64-openslide
+            mingw-w64-x86_64-poppler
             mingw-w64-x86_64-vlc
             mingw-w64-x86_64-ffmpeg
             mingw-w64-x86_64-libass
@@ -448,7 +452,7 @@ jobs:
       - name: Collect Windows runtime DLLs
         # 从 main.exe 出发用 objdump 递归解析 DLL Name，在候选目录里查找并
         # 逐个展开（传递依赖如 libarchive-13/libffi-8/SDL3_ttf 都会收录）；
-        # 候选目录找不到的才视为 Windows 系统库跳过。不依赖 ldd/PATH，
+        # libvips 与 ImageMagick 的运行时模块也作为递归根加入。不依赖 ldd/PATH，
         # 仓颉 runtime 目录（libcangjie-runtime.dll）直接列入候选。
         shell: msys2 {0}
         run: |
@@ -466,11 +470,17 @@ jobs:
             exit 1
           fi
           runtime_dir="$(find "${CANGJIE_HOME}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
+          mingw_prefix="${MINGW_LIBRARY_PATH%/lib}"
+          system_dir="$(cygpath -u "${WINDIR}")/System32"
+          if [ ! -d "${system_dir}" ]; then
+            echo "::error::Windows system directory could not be resolved: ${system_dir}"
+            exit 1
+          fi
 
           search_dirs=(
             "$PWD/client-next/target/release/bin"
             "$PWD/packages/cangjie-gui/sdl/.sdl3"
-            "${MINGW_LIBRARY_PATH%/lib}/bin"
+            "${mingw_prefix}/bin"
             "${runtime_dir}"
           )
           echo "sdl dir listing:"; ls "$PWD/packages/cangjie-gui/sdl/.sdl3" || true
@@ -487,12 +497,9 @@ jobs:
 
           needed() { objdump -p "$1" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'; }
 
-          # libvips 的 HEIF/AVIF 等解码器在 MSYS2 打包为运行时模块（GModule 动态加载，
-          # 不在 PE import 表里，递归收集发现不了）；服务器封面资产统一 AVIF，
-          # 缺模块则 Windows 上所有封面解码失败。按 libvips Windows 的 prefix 推断
-          # 规则（以 libvips DLL 所在目录为 prefix，libdir=<prefix>/lib），模块须落在
-          # <stage>/lib/vips-modules-8.x/；模块自身的依赖（libheif 及其传递依赖）
-          # 随后入队递归收集，落到 stage 根目录（loader 按应用目录解析）。
+          # libvips 解码器由 GModule 动态加载，不在 main.exe 的 PE import 表里。
+          # 保留 MSYS2 的 <prefix>/lib/vips-modules-8.x 布局，并将每个模块作为
+          # 递归扫描根，覆盖 HEIF/JXL/ImageMagick/OpenSlide/Poppler 后端。
           queue=("main.exe")
           modules_src="$(find "${MINGW_LIBRARY_PATH}" -maxdepth 1 -type d -name 'vips-modules-*' -print -quit)"
           if [ -z "${modules_src}" ]; then
@@ -505,6 +512,33 @@ jobs:
             cp -L "$mod" "${stage}/${modules_rel}/"
             queue+=("${modules_rel}/$(basename "$mod")")
             echo "collect (vips module): ${modules_rel}/$(basename "$mod")"
+          done
+
+          # ImageMagick 的 coder/filter 也是运行时动态模块。只收集 MagickCore DLL
+          # 仍会导致常见格式在实际读取时失败，因此保留其 lib、etc、share 布局，
+          # 并把所有模块 DLL 加入同一 PE 依赖闭包。
+          magick_modules_src="$(find "${MINGW_LIBRARY_PATH}" -mindepth 2 -maxdepth 2 -type d -name 'modules-*' \
+            -path '*/ImageMagick-*/*' -print -quit)"
+          if [ -z "${magick_modules_src}" ]; then
+            echo "::error::ImageMagick runtime modules were not installed."
+            exit 1
+          fi
+          magick_lib_src="$(dirname "${magick_modules_src}")"
+          magick_lib_rel="lib/$(basename "${magick_lib_src}")"
+          while IFS= read -r -d '' mod_src; do
+            module_rel="${mod_src#"${magick_lib_src}/"}"
+            rel="${magick_lib_rel}/${module_rel}"
+            mkdir -p "$(dirname "${stage}/${rel}")"
+            cp -L "${mod_src}" "${stage}/${rel}"
+            queue+=("${rel}")
+            echo "collect (ImageMagick module): ${rel}"
+          done < <(find "${magick_lib_src}" -type f -name '*.dll' -print0)
+          for resource in "${mingw_prefix}/etc/ImageMagick-7" "${mingw_prefix}/share/ImageMagick-7"; do
+            if [ -d "${resource}" ]; then
+              resource_parent="$(basename "$(dirname "${resource}")")"
+              mkdir -p "${stage}/${resource_parent}"
+              cp -aL "${resource}" "${stage}/${resource_parent}/"
+            fi
           done
 
           declare -A seen=()
@@ -540,10 +574,25 @@ jobs:
               fi
               if [ -n "$found" ]; then
                 echo "collect: ${dll} <- ${found}"
-                cp -L "$found" "${stage}/"
+                if [ "$found" != "${stage}/${dll}" ]; then
+                  cp -L "$found" "${stage}/${dll}"
+                fi
                 queue+=("${dll}")
               else
-                echo "skip (system): ${dll}"
+                system_dll="$(find "${system_dir}" -maxdepth 1 -iname "$dll" -print -quit)"
+                case "$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')" in
+                  api-ms-win-*.dll|ext-ms-win-*.dll)
+                    echo "skip (Windows API set): ${dll}"
+                    ;;
+                  *)
+                    if [ -n "${system_dll}" ]; then
+                      echo "skip (Windows system): ${dll}"
+                    else
+                      echo "::error::Non-system runtime DLL ${dll} required by ${current} was not found."
+                      exit 1
+                    fi
+                    ;;
+                esac
               fi
             done < <(needed "${stage}/${current}")
           done
@@ -557,13 +606,24 @@ jobs:
               exit 1
             fi
           done
-          # AVIF 封面硬依赖：heif 模块与其直接依赖 libheif 必须同时在包里。
-          if ! ls "${stage}"/lib/vips-modules-*/vips-heif.dll >/dev/null 2>&1; then
-            echo "::error::vips-heif.dll module was not collected (AVIF covers would fail to decode)."
-            exit 1
-          fi
-          if ! ls "${stage}"/libheif*.dll >/dev/null 2>&1; then
-            echo "::error::libheif runtime DLL was not collected (AVIF covers would fail to decode)."
+          # Reader 依赖完整的 libvips 可选后端；任一插件、直接运行库或 ImageMagick
+          # coder 集缺失都中止打包，避免发布启动时才出现 GModule 警告。
+          for module in vips-heif.dll vips-jxl.dll vips-magick.dll vips-openslide.dll vips-poppler.dll; do
+            if ! ls "${stage}"/lib/vips-modules-*/"${module}" >/dev/null 2>&1; then
+              echo "::error::Required libvips module ${module} was not collected."
+              exit 1
+            fi
+          done
+          for runtime_pattern in 'libheif*.dll' 'libjxl.dll' 'libMagickCore*.dll' 'libopenslide*.dll' \
+            'libpoppler-glib*.dll'; do
+            if ! compgen -G "${stage}/${runtime_pattern}" >/dev/null; then
+              echo "::error::Required image runtime ${runtime_pattern} was not collected."
+              exit 1
+            fi
+          done
+          if ! find "${stage}"/lib/ImageMagick-*/modules-*/coders -maxdepth 1 -type f -name '*.dll' -print -quit \
+            | grep -q .; then
+            echo "::error::ImageMagick coder modules were not collected."
             exit 1
           fi
           for pair in "libSDL3.dll SDL3.dll" "libSDL3_ttf.dll SDL3_ttf.dll"; do
