@@ -9,7 +9,7 @@
 - 已完成产品主链路：安全 FFmpeg/libass FFI、一次扫描、协作取消、版本化原子缓存、不可变
   media proxy route、独立字幕 worker、PlaybackModel 多选状态、VLC 字幕强制关闭、reader dock
   与视频同矩形 RGBA 合成。
-- 已完成 Linux 本机验收：`libavformat_ffi` 7/7、`libass_ffi` 5/5、`client-next` 196/196，
+- 已完成 Linux 本机验收：`libavformat_ffi` 7/7、`libass_ffi` 6/6、`client-next` 196/196，
   无临时 include/library 环境变量的 `cjpm clean && cjpm build -V` 成功；通过 Linux Computer Use
   在终端执行 `cjpm run`，启动日志进入 main loop，真实窗口可交互。
 - 真实大文件 E2E 使用“复仇公主斯嘉丽”第 6 页（档案详情显示 6 页、15.2 GB）执行：字幕扫描
@@ -24,7 +24,14 @@
   换行和定位正确，未显示原始 ASS 标签。P8 本地 E2E 条目据此完成。
 - CI 已接入 Linux/Windows 原生依赖、构建和 DLL 收集，但本轮没有 Windows runner，因此相关
   条目仍保持未完成。
-- 尚需专项迭代/验收：播放帧时间与纹理上传计数、Windows CI 实跑、
+- 2026-08-13 继续以 Linux Computer Use 从真实终端执行 `cjpm run`，在“复仇公主斯嘉丽”
+  第 6 页 3840×1600 原始视频上同时启用 `chs[NEST][SDR]`、`cht[NEST][SDR]`。视频保持原始
+  RGBA 尺寸，UI 仍使用 Vulkan 与 2× 超采样；没有降低源分辨率、采样或字幕精度。引入原生帧
+  借用上传后，托管视频帧复制稳定为 0；libass 仍按完整视频坐标渲染，但只上传字幕非透明像素
+  的无损包围盒。连续对白段中字幕每 5 秒上传 2–3 次时，`ui-fps` 与 `decoded-fps` 分别稳定在
+  23.93/23.93、23.96/23.96 fps，`skipped=0`。网络/解码供帧短暂降至 18–20 fps 时二者仍相等且
+  `skipped=0`，确认 UI 和字幕链路没有额外丢帧。
+- 尚需专项迭代/验收：Windows CI 实跑、峰值托管堆专项统计、
   位图字幕二进制夹具、媒体验证器与字幕缓存 LRU、视频 SAR、完整字幕状态 UI 快照矩阵。
 
 ## 1. 结论与一期边界

@@ -24,11 +24,20 @@ func rendersPlainSubtitleIntoTransparentRgba(): Unit {
         events.add(PlainSubtitleEvent(500, 1500, "Hello subtitle"))
         let track = renderer.newPlainTrack(events)
         let empty = renderer.render(0, [track])
+        @Expect(empty.canvasWidth, 320)
+        @Expect(empty.canvasHeight, 180)
+        @Expect(empty.width, 0)
+        @Expect(empty.height, 0)
         @Expect(nonTransparentPixels(empty), 0)
         let visible = renderer.render(1000, [track])
-        @Expect(visible.width, 320)
-        @Expect(visible.height, 180)
+        @Expect(visible.canvasWidth, 320)
+        @Expect(visible.canvasHeight, 180)
+        @Expect(visible.width > 0 && visible.width < visible.canvasWidth)
+        @Expect(visible.height > 0 && visible.height < visible.canvasHeight)
         @Expect(nonTransparentPixels(visible) > 0)
+        let unchanged = renderer.render(1000, [track])
+        @Expect(unchanged.changed, 0)
+        @Expect(unchanged.rgba.size, 0)
     } finally {
         renderer.close()
     }
@@ -43,6 +52,32 @@ func readsStyledAssAndHonoursTopAlignment(): Unit {
         let bitmap = renderer.render(1000, [track])
         @Expect(nonTransparentPixels(bitmap) > 0)
         @Expect(firstVisibleRow(bitmap) < 90)
+    } finally {
+        renderer.close()
+    }
+}
+
+@Test
+func unchangedMultiTrackCompositionSkipsRgbaCopy(): Unit {
+    let renderer = AssRenderer(320, 180)
+    try {
+        let firstEvents = ArrayList<PlainSubtitleEvent>()
+        firstEvents.add(PlainSubtitleEvent(500, 1500, "First"))
+        let secondEvents = ArrayList<PlainSubtitleEvent>()
+        secondEvents.add(PlainSubtitleEvent(500, 1500, "Second"))
+        let first = renderer.newPlainTrack(firstEvents)
+        let second = renderer.newPlainTrack(secondEvents)
+        let visible = renderer.render(1000, [first, second])
+        @Expect(visible.changed, 1)
+        @Expect(nonTransparentPixels(visible) > 0)
+        let unchanged = renderer.render(1000, [first, second])
+        @Expect(unchanged.changed, 0)
+        @Expect(unchanged.rgba.size, 0)
+        let cleared = renderer.render(2500, [first, second])
+        @Expect(cleared.changed, 1)
+        @Expect(cleared.width, 0)
+        @Expect(cleared.height, 0)
+        @Expect(nonTransparentPixels(cleared), 0)
     } finally {
         renderer.close()
     }
@@ -71,11 +106,11 @@ private func firstVisibleRow(bitmap: SubtitleBitmap): Int64 {
     for (y in 0..Int64(bitmap.height)) {
         for (x in 0..Int64(bitmap.width)) {
             if (bitmap.rgba[(y * Int64(bitmap.width) + x) * 4 + 3] != 0u8) {
-                return y
+                return Int64(bitmap.y) + y
             }
         }
     }
-    Int64(bitmap.height)
+    Int64(bitmap.y + bitmap.height)
 }
 
 private func styledAssDocument(): String {

@@ -4,7 +4,7 @@ import std.time.MonoTime
 import std.convert.Parsable
 import std.collection.{ArrayList, HashMap}
 import std.sort.sort
-import libvlc_ffi.{VideoFrame, VlcPlayer}
+import libvlc_ffi.{NativeVideoFrame, VideoFrame, VlcPlayer}
 import libavformat_ffi.{ExtractedSubtitleTrack, SubtitlePayloadKind, SubtitleStreamInfo}
 import libass_ffi.{AssRenderer, AssTrack, PlainSubtitleEvent, SubtitleBitmap, escapeAssText}
 import lanlu_client_next.net.SubtitleAttachment
@@ -385,6 +385,28 @@ public class PlaybackModel {
         }
     }
 
+    // 生产视频舞台使用的零额外托管复制路径：帧保持影片原始尺寸，调用方必须在同步
+    // SDL 纹理上传完成后立即 close。旧 takeVideoFrame 保留给兼容调用和测试。
+    public func takeNativeVideoFrame(): ?NativeVideoFrame {
+        if (!isVideo) {
+            return None
+        }
+        match (vlcRunner) {
+            case Some(r) =>
+                let duration = r.durationSec()
+                if (duration > 0.0) {
+                    durationSec = duration
+                }
+                disableVlcSubtitlesThrottled(r)
+                let frame = r.takeNativeFrame()
+                if (frame.isSome()) {
+                    videoGeneration += 1
+                }
+                frame
+            case None => None
+        }
+    }
+
     // VLC 可能在播放开始后延迟发现并自动选择字幕轨，因此播放中每秒重申关闭一次。
     // 用注入时钟计时，测试可驱动。
     private var lastSubtitleRefreshMs: Int64 = -10000
@@ -547,6 +569,7 @@ public class PlaybackModel {
         }
         activeEmbeddedStreamIndexes.add(streamIndex)
         sort(activeEmbeddedStreamIndexes, lessThan: {a, b => a < b}, stable: true)
+        SubtitlePerf.spanStart("subtitle_switch")
         if (!embeddedAssTracks.contains(streamIndex) && !subtitleScanLoading) {
             subtitleScanLoading = true
             match (onSubtitleScan) {
@@ -564,6 +587,22 @@ public class PlaybackModel {
         subtitleScanLoading = false
         subtitleError = ""
         extractedSubtitleTracks = tracks
+        if (SubtitlePerf.enabled()) {
+            var managed: Int64 = 0
+            for (track in tracks) {
+                managed += Int64(track.codecPrivate.size)
+                for (event in track.events) {
+                    managed += Int64(event.payload.size)
+                }
+            }
+            SubtitlePerf.gauge("managed_subtitle_bytes", managed)
+            SubtitlePerf.gauge("subtitle_track_count", Int64(tracks.size))
+            var eventTotal: Int64 = 0
+            for (track in tracks) {
+                eventTotal += Int64(track.events.size)
+            }
+            SubtitlePerf.gauge("subtitle_event_count", eventTotal)
+        }
         prepareEmbeddedTracks(tracks)
     }
 
@@ -593,9 +632,16 @@ public class PlaybackModel {
         }
         match (assRenderer) {
             case Some(renderer) =>
+                let renderStart = MonoTime.now()
                 let bitmap = renderer.render(Int64(positionSec * 1000.0), active.toArray())
+                if (SubtitlePerf.enabled()) {
+                    SubtitlePerf.sampleUs("subtitle_render", (MonoTime.now() - renderStart).toMicroseconds())
+                    SubtitlePerf.countAdd("subtitle_render_count", 1)
+                }
                 if (bitmap.changed != 0) {
                     subtitleBitmapGeneration += 1
+                    SubtitlePerf.countAdd("subtitle_bitmap_changed_count", 1)
+                    SubtitlePerf.spanEnd("subtitle_switch")
                 }
                 Some(bitmap)
             case None => None
@@ -628,6 +674,7 @@ public class PlaybackModel {
         }
         activeSubtitleIndexes.add(index)
         sort(activeSubtitleIndexes, lessThan: {a, b => a < b}, stable: true)
+        SubtitlePerf.spanStart("subtitle_switch")
         let assetId = subtitleAttachments[index].assetId
         // cue 缓存命中（本会话内已下过）不重复下载。
         if (subtitleCuesByAsset.contains(assetId)) {
@@ -877,6 +924,9 @@ public class LibVlcRunner <: ProcessRunner {
     }
     public func takeFrame(): ?VideoFrame {
         player.takeFrame()
+    }
+    public func takeNativeFrame(): ?NativeVideoFrame {
+        player.takeNativeFrame()
     }
     public func durationSec(): Float64 {
         player.durationSec()

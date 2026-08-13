@@ -18,6 +18,10 @@ struct NativeAssTrack {
 
 @C
 struct NativeAssBitmap {
+    var canvasWidth: Int32 = 0
+    var canvasHeight: Int32 = 0
+    var x: Int32 = 0
+    var y: Int32 = 0
     var width: Int32 = 0
     var height: Int32 = 0
     var changed: Int32 = 0
@@ -69,29 +73,56 @@ public class AssNativeException <: Exception {
 }
 
 public class SubtitleBitmap {
+    public let canvasWidth: Int32
+    public let canvasHeight: Int32
+    public let x: Int32
+    public let y: Int32
     public let width: Int32
     public let height: Int32
     public let changed: Int32
     public let rgba: Array<UInt8>
 
     init(native: NativeAssBitmap) {
+        let nativeCanvasWidth = native.canvasWidth
+        let nativeCanvasHeight = native.canvasHeight
+        let nativeX = native.x
+        let nativeY = native.y
         let nativeWidth = native.width
         let nativeHeight = native.height
         let nativeSize = native.rgbaSize
         let nativeRgba = native.rgba
         let nativeChanged = native.changed
-        if (nativeWidth <= 0 || nativeHeight <= 0 || Int64(nativeWidth) > MAX_DIMENSION || Int64(nativeHeight) >
-            MAX_DIMENSION) {
-            throw AssNativeException("invalid native subtitle bitmap dimensions")
+        if (nativeCanvasWidth <= 0 || nativeCanvasHeight <= 0 || Int64(nativeCanvasWidth) > MAX_DIMENSION ||
+            Int64(nativeCanvasHeight) > MAX_DIMENSION || nativeX < 0 || nativeY < 0 || nativeWidth < 0 ||
+            nativeHeight < 0 || Int64(nativeX) + Int64(nativeWidth) > Int64(nativeCanvasWidth) ||
+            Int64(nativeY) + Int64(nativeHeight) > Int64(nativeCanvasHeight) ||
+            (nativeWidth == 0) != (nativeHeight == 0)) {
+            throw AssNativeException("invalid native subtitle bitmap geometry")
         }
         let expectedSize = Int64(nativeWidth) * Int64(nativeHeight) * 4
-        if (nativeSize != expectedSize || nativeRgba.isNull()) {
-            throw AssNativeException("invalid native subtitle bitmap size ${nativeSize}")
-        }
+        canvasWidth = nativeCanvasWidth
+        canvasHeight = nativeCanvasHeight
+        x = nativeX
+        y = nativeY
         width = nativeWidth
         height = nativeHeight
         changed = nativeChanged
-        rgba = Array<UInt8>(expectedSize, {index => unsafe { nativeRgba.read(index) }})
+        if (nativeChanged == 0) {
+            if (nativeSize != 0 || !nativeRgba.isNull()) {
+                throw AssNativeException("unchanged subtitle bitmap must not carry pixels")
+            }
+            rgba = Array<UInt8>(0, repeat: 0u8)
+        } else if (expectedSize == 0) {
+            if (nativeSize != 0 || !nativeRgba.isNull()) {
+                throw AssNativeException("empty subtitle bitmap must not carry pixels")
+            }
+            rgba = Array<UInt8>(0, repeat: 0u8)
+        } else {
+            if (nativeSize != expectedSize || nativeRgba.isNull()) {
+                throw AssNativeException("invalid native subtitle bitmap size ${nativeSize}")
+            }
+            rgba = Array<UInt8>(expectedSize, {index => unsafe { nativeRgba.read(index) }})
+        }
     }
 }
 

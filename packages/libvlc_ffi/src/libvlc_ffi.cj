@@ -195,6 +195,47 @@ public class VideoFrame {
     }
 }
 
+/**
+ * A decoded frame borrowed directly from libVLC's RGBA callback buffer.
+ *
+ * The frame keeps the callback mutex locked so VLC cannot overwrite or resize the buffer while
+ * the UI uploads it. Callers must close it immediately after the synchronous texture upload and
+ * must not retain pointer() beyond that scope.
+ */
+public class NativeVideoFrame <: Resource {
+    public let width: Int32
+    public let height: Int32
+    public let generation: UInt64
+    private var pixels: CPointer<UInt8>
+    private var locked = true
+
+    init(width: Int32, height: Int32, generation: UInt64, pixels: CPointer<UInt8>) {
+        this.width = width
+        this.height = height
+        this.generation = generation
+        this.pixels = pixels
+    }
+
+    public func pointer(): CPointer<UInt8> {
+        if (!locked || pixels.isNull()) {
+            throw Exception("native video frame is closed")
+        }
+        pixels
+    }
+
+    public func close(): Unit {
+        if (locked) {
+            pixels = CPointer<UInt8>()
+            locked = false
+            FRAME_MUTEX.unlock()
+        }
+    }
+
+    public func isClosed(): Bool {
+        !locked
+    }
+}
+
 public class SubtitleTrack {
     public let id: Int32
     public let name: String
@@ -361,6 +402,21 @@ public class VlcPlayer <: Resource {
             lastFrameGeneration = frameGeneration
             Some(VideoFrame(frameWidth, frameHeight, frameGeneration, framePixels))
         }
+    }
+
+    /**
+     * Borrows a new decoded frame without copying its full RGBA buffer into the managed heap.
+     * The returned Resource owns FRAME_MUTEX until close(); this deliberately bounds the critical
+     * section to the UI's synchronous SDL_UpdateTexture call.
+     */
+    public func takeNativeFrame(): ?NativeVideoFrame {
+        FRAME_MUTEX.lock()
+        if (frameGeneration == lastFrameGeneration || frameBuffer.isNull()) {
+            FRAME_MUTEX.unlock()
+            return None
+        }
+        lastFrameGeneration = frameGeneration
+        Some(NativeVideoFrame(frameWidth, frameHeight, frameGeneration, frameBuffer))
     }
 
     public func stop(): Unit {

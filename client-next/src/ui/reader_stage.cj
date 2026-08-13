@@ -5,6 +5,7 @@ import lanlu_client_next.app.*
 import lanlu_client_next.net.percentEncode
 import std.collection.ArrayList
 import std.math.abs
+import std.time.MonoTime
 
 // ── 阅读页舞台（reader-redesign #stage，T2）──
 // 自绘而非 PixelImageView 组合：方向性翻页动画（旧页滑出+淡出 / 新页反向滑入，原型
@@ -192,6 +193,22 @@ class ReaderStageState {
     var webtoonZoomOriginY: Float32 = 0.5
     var lastLyricIndex: Int64 = -2
     var lastVideoGeneration: UInt64 = 0 // 视频舞台已见的帧代际（新帧驱动续帧用）
+    var videoTexture: ?Texture = None
+    var videoTextureKey = ""
+    var videoTextureWidth: Int32 = 0
+    var videoTextureHeight: Int32 = 0
+    var subtitleTextureKey = ""
+    var subtitleCanvasWidth: Int32 = 0
+    var subtitleCanvasHeight: Int32 = 0
+    var subtitlePatchX: Int32 = 0
+    var subtitlePatchY: Int32 = 0
+    var subtitlePatchWidth: Int32 = 0
+    var subtitlePatchHeight: Int32 = 0
+    var videoPerfStartMs: Int64 = 0
+    var videoPerfFrames: Int64 = 0
+    var videoPerfSkippedFrames: Int64 = 0
+    var videoPerfLastGeneration: UInt64 = 0
+    var subtitleUploads: Int64 = 0
     var lastHtmlGeneration: UInt64 = 0 // html 舞台已见的帧代际（新帧驱动续帧用）
     var lastHtmlOverflowMs: Int64 = -10000 // html 滚动边界外溢翻页的冷却基准
 
@@ -210,6 +227,90 @@ class ReaderStageState {
     let lyricFocusTween = Tween(220, {t: Float32 => Easing.easeOutCubic(t)})
     let outTween = Tween(TURN_OUT_MS, {t: Float32 => Easing.easeInOutCubic(t)})
     let inTween = Tween(TURN_IN_MS, {t: Float32 => Easing.easeOutCubic(t)})
+
+    func updateVideoTexture(renderer: Renderer, key: String, width: Int32, height: Int32,
+        pixels: CPointer<UInt8>): ?Texture {
+        if (key != videoTextureKey || width != videoTextureWidth || height != videoTextureHeight) {
+            releaseVideoTexture()
+            videoTextureKey = key
+            videoTextureWidth = width
+            videoTextureHeight = height
+        }
+        match (videoTexture) {
+            case Some(texture) =>
+                renderer.updateStreamingTextureNativeRgba(texture, width, height, pixels)
+                return Some(texture)
+            case None =>
+                // SDL 暂无“从原生指针直接创建 streaming texture”的公开构造；仅首次按
+                // 原始尺寸创建零画布，随后立即用本帧原生指针覆盖。连续帧不再创建托管数组。
+                let empty = Array<UInt8>(Int64(width) * Int64(height) * 4, repeat: 0u8)
+                let texture = renderer.streamingTextureFromPixelsRgba(width, height, empty)
+                texture.setBlendMode(TextureBlendMode.Blend)
+                texture.setScaleMode(TextureScaleMode.Linear)
+                try {
+                    renderer.updateStreamingTextureNativeRgba(texture, width, height, pixels)
+                } catch (error: Exception) {
+                    texture.close()
+                    throw error
+                }
+                videoTexture = Some(texture)
+                Some(texture)
+        }
+    }
+
+    func releaseVideoTexture(): Unit {
+        match (videoTexture) {
+            case Some(texture) => texture.close()
+            case None => ()
+        }
+        videoTexture = None
+        videoTextureKey = ""
+        videoTextureWidth = 0
+        videoTextureHeight = 0
+        releaseSubtitleTexture()
+        videoPerfStartMs = 0
+        videoPerfFrames = 0
+        videoPerfSkippedFrames = 0
+        videoPerfLastGeneration = 0
+        subtitleUploads = 0
+    }
+
+    func releaseSubtitleTexture(): Unit {
+        if (subtitleTextureKey.size > 0) {
+            invalidatePixelImage(subtitleTextureKey)
+        }
+        subtitleTextureKey = ""
+        subtitleCanvasWidth = 0
+        subtitleCanvasHeight = 0
+        subtitlePatchX = 0
+        subtitlePatchY = 0
+        subtitlePatchWidth = 0
+        subtitlePatchHeight = 0
+    }
+
+    func recordVideoFrame(nowMs: Int64, width: Int32, height: Int32, generation: UInt64): Unit {
+        if (videoPerfStartMs == 0) {
+            videoPerfStartMs = nowMs
+            videoPerfFrames = 0
+        }
+        if (videoPerfLastGeneration > 0 && generation > videoPerfLastGeneration + 1) {
+            videoPerfSkippedFrames += Int64(generation - videoPerfLastGeneration - 1)
+        }
+        videoPerfLastGeneration = generation
+        videoPerfFrames++
+        let elapsed = nowMs - videoPerfStartMs
+        if (elapsed >= 5000) {
+            let fps = Float64(videoPerfFrames) * 1000.0 / Float64(elapsed)
+            let decodedFps = Float64(videoPerfFrames + videoPerfSkippedFrames) * 1000.0 / Float64(elapsed)
+            println("[video-perf] source=${width}x${height} ui-fps=${fps} decoded-fps=${decodedFps} " +
+                "delivered=${videoPerfFrames} skipped=${videoPerfSkippedFrames} " +
+                "managed-frame-copies=0 subtitle-uploads=${subtitleUploads}")
+            videoPerfStartMs = nowMs
+            videoPerfFrames = 0
+            videoPerfSkippedFrames = 0
+            subtitleUploads = 0
+        }
+    }
 }
 
 // 音频舞台只在这里决定区域关系。各绘制函数只使用自己的 Rect，避免封面、歌词、
@@ -633,6 +734,7 @@ class ReaderStage <: Widget {
     public func draw(ctx: UiContext): Unit {
         match (model.reader.mode) {
             case ReadingMode.Webtoon =>
+                st.releaseVideoTexture()
                 drawWebtoonStage(ctx)
                 if (model.readerShowInfo.value) {
                     drawMediaInfo(ctx)
@@ -643,6 +745,7 @@ class ReaderStage <: Widget {
         // 虚拟结束页：绘制结束卡片（替代图片/音频舞台，对齐 frontend
         // ReaderCollectionEndPage，单栏卡片简化版）。
         if (model.reader.onVirtualEnd) {
+            st.releaseVideoTexture()
             ctx.renderer.fill(frame, ctx.theme.stageBg)
             drawCollectionEnd(ctx)
             return
@@ -651,7 +754,9 @@ class ReaderStage <: Widget {
             case Some(i) =>
                 ctx.renderer.fill(frame, Color.rgb(0, 0, 0))
                 drawVideoStage(ctx, i)
-            case None => match (audioPage) {
+            case None =>
+                st.releaseVideoTexture()
+                match (audioPage) {
                 case Some(i) => drawAudioStage(ctx, i)
                 case None => match (htmlPage) {
                     case Some(i) =>
@@ -661,7 +766,7 @@ class ReaderStage <: Widget {
                         ctx.renderer.fill(frame, ctx.theme.stageBg)
                         drawImageStage(ctx)
                 }
-            }
+                }
         }
         if (model.readerShowInfo.value) {
             drawMediaInfo(ctx)
@@ -910,25 +1015,63 @@ class ReaderStage <: Widget {
     private func drawVideoStage(ctx: UiContext, pageIdx: Int64): Unit {
         let pb = model.playback
         let key = "video:${pb.mediaKey}"
-        match (pb.takeVideoFrame()) {
-            case Some(video) => registerPixelImage(ctx.renderer, key, video.width, video.height, video.rgba)
+        var currentTexture = st.videoTexture
+        let frameStart = MonoTime.now()
+        match (pb.takeNativeVideoFrame()) {
+            case Some(video) =>
+                try {
+                    currentTexture = st.updateVideoTexture(ctx.renderer, key, video.width, video.height, video.pointer())
+                    st.recordVideoFrame(pb.clock(), video.width, video.height, video.generation)
+                } finally {
+                    video.close()
+                }
             case None => ()
         }
-        match (pixelTexture(ctx.renderer, key)) {
+        if (SubtitlePerf.enabled()) {
+            SubtitlePerf.sampleUs("playback_frame", (MonoTime.now() - frameStart).toMicroseconds())
+        }
+        match (currentTexture) {
             case Some(texture) =>
                 let videoRect = fittedRect(Size(texture.width, texture.height), frame, ImageFit.Contain)
                 ctx.renderer.texture(texture, videoRect)
                 match (pb.takeSubtitleBitmap(Int32(texture.width), Int32(texture.height))) {
                     case Some(bitmap) =>
                         let subtitleKey = "subtitle-bitmap:${pb.mediaKey}"
-                        if (bitmap.changed != 0 || pixelTexture(ctx.renderer, subtitleKey).isNone()) {
-                            registerPixelImage(ctx.renderer, subtitleKey, bitmap.width, bitmap.height, bitmap.rgba)
+                        if (bitmap.changed != 0) {
+                            if (st.subtitleTextureKey.size > 0 && st.subtitleTextureKey != subtitleKey) {
+                                invalidatePixelImage(st.subtitleTextureKey)
+                            }
+                            st.subtitleTextureKey = subtitleKey
+                            st.subtitleCanvasWidth = bitmap.canvasWidth
+                            st.subtitleCanvasHeight = bitmap.canvasHeight
+                            st.subtitlePatchX = bitmap.x
+                            st.subtitlePatchY = bitmap.y
+                            st.subtitlePatchWidth = bitmap.width
+                            st.subtitlePatchHeight = bitmap.height
+                            if (bitmap.width > 0 && bitmap.height > 0) {
+                                registerPixelImage(ctx.renderer, subtitleKey, bitmap.width, bitmap.height, bitmap.rgba)
+                                st.subtitleUploads++
+                            } else {
+                                invalidatePixelImage(subtitleKey)
+                            }
                         }
-                        match (pixelTexture(ctx.renderer, subtitleKey)) {
-                            case Some(subtitleTexture) => ctx.renderer.texture(subtitleTexture, videoRect)
-                            case None => ()
+                        if (st.subtitlePatchWidth > 0 && st.subtitlePatchHeight > 0 &&
+                            st.subtitleCanvasWidth > 0 && st.subtitleCanvasHeight > 0) {
+                            let scaleX = videoRect.w / Float32(st.subtitleCanvasWidth)
+                            let scaleY = videoRect.h / Float32(st.subtitleCanvasHeight)
+                            let patchRect = Rect(videoRect.x + Float32(st.subtitlePatchX) * scaleX,
+                                videoRect.y + Float32(st.subtitlePatchY) * scaleY,
+                                Float32(st.subtitlePatchWidth) * scaleX,
+                                Float32(st.subtitlePatchHeight) * scaleY)
+                            match (pixelTexture(ctx.renderer, st.subtitleTextureKey)) {
+                                case Some(subtitleTexture) => ctx.renderer.texture(subtitleTexture, patchRect)
+                                case None => ()
+                            }
                         }
-                    case None => ()
+                    case None =>
+                        if (pb.activeSubtitleIndexes.isEmpty() && pb.activeEmbeddedStreamIndexes.isEmpty()) {
+                            st.releaseSubtitleTexture()
+                        }
                 }
             case None =>
                 var title = model.t("reader.video")
@@ -951,15 +1094,15 @@ class ReaderStage <: Widget {
                 }
                 ctx.renderer.textCenter(status, frame, ctx.theme.onMediaDim, pointSize: 14.0)
         }
-        // 视频续帧由新帧驱动：takeVideoFrame 拿到新帧（videoGeneration 前进）时立即
-        // requestFrame 拉下一帧，高帧率视频满速跟上；无新帧时 33ms 兜底轮询等解码产出，
-        // 不再固定 60fps 全树重建。
+        // 视频续帧由新帧驱动：takeNativeVideoFrame 拿到新帧（videoGeneration 前进）时立即
+        // requestFrame 拉下一帧，高帧率视频满速跟上；无新帧时按一帧显示刷新周期兜底轮询，
+        // 避免 24fps 片源与低频轮询错相后持续漏帧。
         if (pb.playing) {
             if (pb.videoGeneration != st.lastVideoGeneration) {
                 st.lastVideoGeneration = pb.videoGeneration
                 ctx.requestFrame()
             } else {
-                ctx.requestFrameAfter(33)
+                ctx.requestFrameAfter(16)
             }
         }
     }

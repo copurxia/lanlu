@@ -566,12 +566,16 @@ public class AppModel {
         }
         playback.onSubtitleProbe = {
             key, generation, url, bearer =>
+                SubtitlePerf.spanStart("subtitle_probe_e2e")
                 let taskName = "subprobe:${generation}:${key}"
                 match (registerSubtitleToken(taskName)) {
                     case Some(token) =>
                         let accepted = worker.submitSubtitle(taskName, {
                             => try {
-                                (key, generation, probeSubtitleStreams(url, bearer: bearer, cancel: token))
+                                SubtitlePerf.spanStart("subtitle_probe_ffi")
+                                let streams = probeSubtitleStreams(url, bearer: bearer, cancel: token)
+                                SubtitlePerf.spanEnd("subtitle_probe_ffi")
+                                (key, generation, streams)
                             } finally {
                                 releaseSubtitleToken(taskName, token)
                             }
@@ -584,6 +588,7 @@ public class AppModel {
         }
         playback.onSubtitleScan = {
             key, generation, url, bearer, stableKey =>
+                SubtitlePerf.spanStart("subtitle_scan_e2e")
                 let cache = subtitleCache()
                 let taskName = "subscan:${generation}:${key}"
                 match (registerSubtitleToken(taskName)) {
@@ -2074,6 +2079,20 @@ public class AppModel {
                 subtitleDiskCache = Some(c)
                 return c
         }
+    }
+
+    // ---- 字幕缓存诊断/清理（性能基准用）----
+
+    public func clearSubtitleCache(): Unit {
+        subtitleCache().clear()
+    }
+
+    public func subtitleCacheBytes(): Int64 {
+        subtitleCache().totalBytes()
+    }
+
+    public func subtitleCacheFileCount(): Int64 {
+        subtitleCache().fileCount()
     }
 
     private func registerSubtitleToken(taskName: String): ?SubtitleCancelToken {
@@ -4987,10 +5006,12 @@ public class AppModel {
         } else if (name.startsWith("subprobe:")) {
             match (r.payload) {
                 case Some(p) =>
+                    SubtitlePerf.spanEnd("subtitle_probe_e2e")
                     let (key, generation, streams) = (p as (String, UInt64, ArrayList<SubtitleStreamInfo>)).getOrThrow()
                     playback.onEmbeddedSubtitleProbed(key, generation, streams)
                     readerVersion.value += 1
                 case None =>
+                    SubtitlePerf.spanEnd("subtitle_probe_e2e")
                     if (name == "subprobe:${playback.mediaGeneration}:${playback.mediaKey}") {
                         playback.onEmbeddedSubtitleFailed(playback.mediaKey, playback.mediaGeneration, r.error)
                     }
@@ -4998,11 +5019,13 @@ public class AppModel {
         } else if (name.startsWith("subscan:")) {
             match (r.payload) {
                 case Some(p) =>
+                    SubtitlePerf.spanEnd("subtitle_scan_e2e")
                     let (key, generation, tracks) = (p as (String, UInt64, ArrayList<ExtractedSubtitleTrack>))
                         .getOrThrow()
                     playback.onEmbeddedSubtitleScanned(key, generation, tracks)
                     readerVersion.value += 1
                 case None =>
+                    SubtitlePerf.spanEnd("subtitle_scan_e2e")
                     if (name == "subscan:${playback.mediaGeneration}:${playback.mediaKey}") {
                         playback.onEmbeddedSubtitleFailed(playback.mediaKey, playback.mediaGeneration, r.error)
                     }

@@ -148,6 +148,10 @@ main(): Int64 {
         model.tryResumeSession()
     }
     println("[boot] 3 model ready, creating DesktopApp")
+    // 脚本化字幕性能基准（LANLU_BENCH_ARCID 设置时启用）：复用真实 AppModel/PlaybackModel/
+    // libVLC/libass 全链路，按阶段状态机驱动冷扫描→播放→切换→seek→缓存命中并输出 @@RESULT。
+    let bench = SubtitleBench()
+    let benchEnabled = bench.isEnabled()
     // 启动时一次性缩放适配（ADR：不做运行时动态缩放）：seedMode 钉死 1.0 保证
     // CI 快照像素确定性；正常启动取主显示器 contentScale（Windows 高 DPI 下 >1，
     // primaryDisplayInfo 内部自带 SDL_Init(VIDEO) 引用计数，建窗前调用安全），
@@ -211,6 +215,9 @@ main(): Int64 {
                 model.windowWidth.value = ww
             }
             syncTitleBarDragRegion(app.sdlWindow, model)
+            if (benchEnabled) {
+                let _ = bench.step(model)
+            }
     }
     app.run {
         ZStack {
