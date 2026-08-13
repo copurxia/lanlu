@@ -1,7 +1,7 @@
 package lanlu_client_next
 
 import lanlu_client_next.app.*
-import cui.pixelCacheDiagnosticsPublic
+import cui.media.pixelCacheDiagnosticsPublic
 import std.collection.ArrayList
 import std.convert.Parsable
 import std.env.{exit, getVariable}
