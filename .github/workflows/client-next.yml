@@ -452,8 +452,8 @@ jobs:
       - name: Collect Windows runtime DLLs
         # 从 main.exe 出发用 objdump 递归解析 DLL Name，在候选目录里查找并
         # 逐个展开（传递依赖如 libarchive-13/libffi-8/SDL3_ttf 都会收录）；
-        # libvips 与 ImageMagick 的运行时模块也作为递归根加入。不依赖 ldd/PATH，
-        # 仓颉 runtime 目录（libcangjie-runtime.dll）直接列入候选。
+        # libvips、ImageMagick 与 LibVLC 的运行时模块也作为递归根加入。不依赖
+        # ldd/PATH，仓颉 runtime 目录（libcangjie-runtime.dll）直接列入候选。
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -541,6 +541,30 @@ jobs:
             fi
           done
 
+          # libvlc.dll/libvlccore.dll 只是插件宿主；访问、解封装、解码、音频输出和
+          # 视频输出都由动态插件提供。Windows 便携版约定 plugins 目录与 DLL/EXE
+          # 同级，因此从 MSYS2 的 lib/vlc/plugins 复制完整目录（含 plugins.dat），
+          # 并把每个插件 DLL 作为递归扫描根收集其 FFmpeg 等传递依赖。
+          vlc_plugins_src="${mingw_prefix}/lib/vlc/plugins"
+          if [ ! -d "${vlc_plugins_src}" ]; then
+            echo "::error::LibVLC plugins directory was not installed: ${vlc_plugins_src}"
+            exit 1
+          fi
+          mkdir -p "${stage}/plugins"
+          cp -aL "${vlc_plugins_src}/." "${stage}/plugins/"
+          while IFS= read -r -d '' plugin; do
+            rel="${plugin#"${stage}/"}"
+            queue+=("${rel}")
+            echo "collect (LibVLC plugin): ${rel}"
+          done < <(find "${stage}/plugins" -type f -iname '*.dll' -print0)
+
+          # Lua 播放列表解析器和服务发现脚本不参与 PE 依赖扫描，但属于 VLC 的
+          # 完整运行时资源；存在时按 MSYS2 的 share/vlc 布局一并发布。
+          if [ -d "${mingw_prefix}/share/vlc" ]; then
+            mkdir -p "${stage}/share"
+            cp -aL "${mingw_prefix}/share/vlc" "${stage}/share/"
+          fi
+
           declare -A seen=()
           while ((${#queue[@]} > 0)); do
             current="${queue[0]}"
@@ -600,7 +624,7 @@ jobs:
           # 关键库校验：任一缺失直接失败，避免打出跑不起来的 zip。
           # SDL3/SDL3_ttf 磁盘与 PE import 表的名字可能是带/不带 lib 前缀的任一形态，
           # 收集时已按 PE 记录名落盘（必要时经变体别名），这里按"对内任一存在"判定。
-          for required in libcangjie-runtime.dll librocksdb.dll; do
+          for required in libcangjie-runtime.dll librocksdb.dll libvlc.dll libvlccore.dll; do
             if ! ls "${stage}"/"${required}" >/dev/null 2>&1; then
               echo "::error::Required runtime DLL ${required} was not collected."
               exit 1
@@ -626,6 +650,19 @@ jobs:
             echo "::error::ImageMagick coder modules were not collected."
             exit 1
           fi
+          # 音视频播放链路的关键插件类别必须全部存在。插件的具体文件名会随 VLC
+          # 版本变化，因此按功能目录校验，而不硬编码版本相关的模块名。
+          if [ ! -f "${stage}/plugins/plugins.dat" ]; then
+            echo "::error::LibVLC plugin cache plugins.dat was not collected."
+            exit 1
+          fi
+          for category in access audio_output codec demux video_output; do
+            if ! find "${stage}/plugins/${category}" -maxdepth 1 -type f -iname '*.dll' -print -quit \
+              | grep -q .; then
+              echo "::error::LibVLC ${category} plugins were not collected."
+              exit 1
+            fi
+          done
           for pair in "libSDL3.dll SDL3.dll" "libSDL3_ttf.dll SDL3_ttf.dll"; do
             present=0
             for name in $pair; do
