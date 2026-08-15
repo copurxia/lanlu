@@ -393,6 +393,7 @@ jobs:
             mingw-w64-x86_64-libheif
             mingw-w64-x86_64-libjxl
             mingw-w64-x86_64-imagemagick
+            mingw-w64-x86_64-graphviz
             mingw-w64-x86_64-openslide
             mingw-w64-x86_64-poppler
             mingw-w64-x86_64-vlc
@@ -541,6 +542,22 @@ jobs:
             fi
           done
 
+          # ImageMagick 的 DOT coder 依赖 Graphviz。libgvc 会在运行时动态加载
+          # libgvplugin_*.dll，这些模块不会出现在 dot.dll 的 PE import 表中，
+          # 因此显式复制并作为递归根，避免只收集 libcgraph/libgvc 后仍无法渲染。
+          graphviz_plugin_count=0
+          while IFS= read -r -d '' graphviz_plugin; do
+            name="$(basename "${graphviz_plugin}")"
+            cp -L "${graphviz_plugin}" "${stage}/${name}"
+            queue+=("${name}")
+            graphviz_plugin_count=$((graphviz_plugin_count + 1))
+            echo "collect (Graphviz plugin): ${name}"
+          done < <(find "${mingw_prefix}/bin" -maxdepth 1 -type f -iname 'libgvplugin_*.dll' -print0)
+          if [ "${graphviz_plugin_count}" -eq 0 ]; then
+            echo "::error::Graphviz runtime plugins were not installed."
+            exit 1
+          fi
+
           # libvlc.dll/libvlccore.dll 只是插件宿主；访问、解封装、解码、音频输出和
           # 视频输出都由动态插件提供。Windows 便携版约定 plugins 目录与 DLL/EXE
           # 同级，因此从 MSYS2 的 lib/vlc/plugins 复制完整目录（含 plugins.dat），
@@ -639,7 +656,7 @@ jobs:
             fi
           done
           for runtime_pattern in 'libheif*.dll' 'libjxl.dll' 'libMagickCore*.dll' 'libopenslide*.dll' \
-            'libpoppler-glib*.dll'; do
+            'libpoppler-glib*.dll' 'libcgraph*.dll' 'libgvc*.dll' 'libgvplugin_core*.dll'; do
             if ! compgen -G "${stage}/${runtime_pattern}" >/dev/null; then
               echo "::error::Required image runtime ${runtime_pattern} was not collected."
               exit 1
