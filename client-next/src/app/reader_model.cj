@@ -1,6 +1,6 @@
 package lanlu_client_next.app
 
-import lanlu_client_next.net.PageInfo
+import lanlu_client_next.net.{ArchivePageView, PageInfo}
 import std.collection.ArrayList
 import std.time.MonoTime
 
@@ -108,6 +108,48 @@ public class ReaderSegment {
     }
 }
 
+// Reader keeps archive views instead of flattening every PageInfo into another long-lived array.
+private class ReaderPageSequence {
+    private let views = ArrayList<ArchivePageView>()
+    private var total: Int64 = 0
+
+    prop size: Int64 {
+        get() {
+            return total
+        }
+    }
+
+    func clear(): Unit {
+        views.clear()
+        total = 0
+    }
+
+    func reset(view: ArchivePageView): Unit {
+        clear()
+        views.add(view)
+        total = view.size
+    }
+
+    func append(view: ArchivePageView): Unit {
+        views.add(view)
+        total += view.size
+    }
+
+    operator func [](index: Int64): PageInfo {
+        if (index < 0 || index >= total) {
+            throw IndexOutOfBoundsException("reader page index is out of range")
+        }
+        var offset = index
+        for (view in views) {
+            if (offset < view.size) {
+                return view[offset]
+            }
+            offset -= view.size
+        }
+        throw IndexOutOfBoundsException("reader page view is incomplete")
+    }
+}
+
 public class ReaderModel {
     private let settings: AppSettings
 
@@ -126,7 +168,7 @@ public class ReaderModel {
 
     // ---- 档案状态（只读暴露，内部写）----
     private var _arcid: String = ""
-    private var pageList = ArrayList<PageInfo>()
+    private let pageList = ReaderPageSequence()
     private var _index: Int64 = 0
     // ---- 无缝续读：segment 流与拼接状态 ----
     private let segments = ArrayList<ReaderSegment>()
@@ -394,7 +436,7 @@ public class ReaderModel {
             fireProgress()
         }
         _arcid = arcid
-        pageList = ArrayList<PageInfo>()
+        pageList.clear()
         segments.clear()
         segments.add(ReaderSegment(arcid, "", 0, 0))
         _appendedArcids.clear()
@@ -413,9 +455,9 @@ public class ReaderModel {
     }
 
     // 页表到货（首 segment；拼接走 appendArchive）：钳制起始页并吸附 spread 首页，重算 lane。
-    public func setPages(list: ArrayList<PageInfo>): Unit {
-        pageList = list
-        segments[0] = ReaderSegment(segments[0].arcid, segments[0].title, 0, list.size)
+    public func setPages(view: ArchivePageView): Unit {
+        pageList.reset(view)
+        segments[0] = ReaderSegment(segments[0].arcid, segments[0].title, 0, view.size)
         let total = pageList.size
         if (total == 0) {
             _index = 0
@@ -428,6 +470,11 @@ public class ReaderModel {
         _index = snapToSpreadStart(_index)
         refreshLaneForSpread()
         firePrefetch() // 页表到货补一次预取（open 时没有 moveTo，邻居页全靠这次）
+    }
+
+    // 测试和快照装置兼容入口；产品路径直接传 RocksDB-backed ArchivePageView。
+    public func setPages(list: ArrayList<PageInfo>): Unit {
+        setPages(ArchivePageView.memory(_arcid, list))
     }
 
     // ---- 翻页 ----
@@ -1084,17 +1131,20 @@ public class ReaderModel {
 
     // 追加下一档案：segment 追加到流尾并重建映射（当前位置不变，末尾虚拟页顺延）。
     // appendedArcids 去重——同一档案重复回调静默忽略。
-    public func appendArchive(arcid: String, title: String, pages: ArrayList<PageInfo>): Unit {
+    public func appendArchive(arcid: String, title: String, pages: ArchivePageView): Unit {
         if (arcid.size == 0 || _appendedArcids.contains(arcid)) {
             return
         }
         _appendedArcids.add(arcid)
         let start = pageList.size
-        for (p in pages) {
-            pageList.add(p)
-        }
+        pageList.append(pages)
         segments.add(ReaderSegment(arcid, title, start, pages.size))
         _appendError = ""
+    }
+
+    // 测试兼容入口；不会再复制为扁平 PageInfo 数组。
+    public func appendArchive(arcid: String, title: String, pages: ArrayList<PageInfo>): Unit {
+        appendArchive(arcid, title, ArchivePageView.memory(arcid, pages))
     }
 
     // 拼接失败/无候选回填（结束页卡片「没有下一档案」态）。

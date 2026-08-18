@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.SearchItem
+import lanlu_client_next.net.{SearchItem, SearchItemView}
 import std.collection.ArrayList
 import std.time.DateTime
 
@@ -140,7 +140,7 @@ private func shelfToolbar(model: AppModel, count: Int64): Unit {
     }.spacing(10.vp).hug().padding(SHELF_PADDING, 14.0)
 }
 
-private func activeShelfItems(model: AppModel): ArrayList<SearchItem> {
+private func activeShelfItems(model: AppModel): SearchItemView {
     if (model.shelfTab.value == 0) {
         model.shelfFavorites.value
     } else {
@@ -164,7 +164,7 @@ private func activeShelfFailed(model: AppModel): Bool {
     }
 }
 
-private func historyCount(items: ArrayList<SearchItem>): Int64 {
+private func historyCount(items: SearchItemView): Int64 {
     var count: Int64 = 0
     for (item in items) {
         if (item.lastreadtime > 0 && !isTankItem(item)) {
@@ -278,7 +278,7 @@ private func historyContent(model: AppModel, items: ArrayList<SearchItem>): Unit
     }.padding(SHELF_PADDING, 4.0, SHELF_PADDING, 30.0)
 }
 
-private func mostRecentHistory(items: ArrayList<SearchItem>): ?SearchItem {
+private func mostRecentHistory(items: SearchItemView): ?SearchItem {
     var latest: ?SearchItem = None
     var latestTime: Int64 = 0
     for (item in items) {

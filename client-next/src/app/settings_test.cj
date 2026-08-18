@@ -1,6 +1,8 @@
 package lanlu_client_next.app
 
 import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM}
+import rocksdb_ffi.RocksDbOperationResult
+import std.convert.Parsable
 import std.fs.{Directory, Path}
 
 private var testStoreReady = false
@@ -78,7 +80,7 @@ func settingsRoundTripThroughStore(): Unit {
     @Expect(back.readerHtmlFontSize, 19)
     @Expect(back.readerHtmlMargin, 72)
     @Expect(back.servers.size, 1)
-    @Expect(back.servers[0].baseUrl, "http://a:8082")
+    @Expect(back.servers.at(0).baseUrl, "http://a:8082")
     @Expect(back.serverUrl, "http://a:8082")
     @Expect(back.token, "tok")
     @Expect(back.username, "alice")
@@ -113,6 +115,70 @@ func serverEditingPreservesSession(): Unit {
     @Expect(a2.name, "A2")
     @Expect(a2.baseUrl, "http://a2")
     @Expect(a2.token, "tok-a")
+}
+
+@Test
+func loadedServerIdsAdvancePersistentSequence(): Unit {
+    resetTestStore()
+    let existingId = "srv-01234567-9000000000"
+    let body = "{\"schema_version\":2,\"servers\":{\"active_id\":\"\",\"list\":[{" +
+        "\"id\":\"${existingId}\",\"name\":\"old\",\"base_url\":\"http://a\",\"token\":\"\"," +
+        "\"username\":\"\",\"last_used_at\":\"\"}]}}"
+    let _ = store().putResult("settings", body)
+    let settings = loadSettings()
+    let added = settings.upsertServer("", "new", "http://a")
+    @Expect(added.id != existingId, true)
+    let parts = added.id.split("-")
+    @Expect(Int64.parse(parts[parts.size - 1]) > 9000000000, true)
+}
+
+@Test
+func legacyServerArrayMigratesToColumnFamiliesAndReopens(): Unit {
+    flushPendingSave()
+    closeSettingsStore()
+    let dir = Directory.createTemp(Path("/tmp"))
+    let root = dir.toString()
+    initializeSettingsStore(root)
+    testStoreReady = true
+    clearSettings()
+    let body = "{\"schema_version\":2,\"appearance\":{\"theme\":\"light\"}," +
+        "\"servers\":{\"active_id\":\"srv-old-10\",\"list\":[" +
+        "{\"id\":\"srv-old-10\",\"name\":\"A\",\"base_url\":\"http://a/\",\"token\":\"secret-a\"," +
+        "\"username\":\"alice\",\"last_used_at\":\"now\"}," +
+        "{\"id\":\"srv-old-11\",\"name\":\"B\",\"base_url\":\"http://b\",\"token\":\"secret-b\"," +
+        "\"username\":\"bob\",\"last_used_at\":\"then\"}]}}"
+    let _ = store().putResult("settings", body)
+
+    let migrated = loadSettings()
+    @Expect(migrated.servers.size, 2)
+    @Expect(migrated.servers.at(0).id, "srv-old-10")
+    @Expect(migrated.servers.at(1).token, "secret-b")
+    @Expect(migrated.activeServerId, "srv-old-10")
+    let scalar = match (store().getResult("settings")) {
+        case RocksDbOperationResult<String>.Ok(value) => value
+        case _ => throw Exception("migrated scalar settings are missing")
+    }
+    @Expect(scalar.contains("\"schema_version\":3"), true)
+    @Expect(scalar.contains("\"list\""), false)
+    @Expect(scalar.contains("secret-a"), false)
+
+    closeSettingsStore()
+    initializeSettingsStore(root)
+    let reopened = loadSettings()
+    @Expect(reopened.servers.size, 2)
+    @Expect(reopened.servers.at(0).username, "alice")
+    @Expect(reopened.servers.at(1).baseUrl, "http://b")
+    @Expect(reopened.serverUrl, "http://a")
+}
+
+@Test
+func offlineAccountScopeTracksAccountIdentity(): Unit {
+    let alice = offlineAccountScope("srv-1", "alice", "token-a")
+    let aliceRotated = offlineAccountScope("srv-1", "alice", "token-b")
+    let bob = offlineAccountScope("srv-1", "bob", "token-a")
+    @Expect(alice, aliceRotated)
+    @Expect(alice == bob, false)
+    @Expect(offlineAccountScope("srv-1", "", "token-a") == offlineAccountScope("srv-1", "", "token-b"), false)
 }
 
 @Test

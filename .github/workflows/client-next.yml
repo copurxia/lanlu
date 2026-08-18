@@ -442,6 +442,13 @@ jobs:
         working-directory: client-next
         run: cjpm build -V
 
+      - name: Run rocksdb_ffi minimal FFI tests on Windows
+        # §4.6 Linux/Windows 最小 FFI 测试：rocksdb_ffi 编译期版本门槛 + 全部 FFI 用例
+        #（含 NUL/非法 UTF-8/0B/1B/1MiB/上限拒绝、CF、快照、cursor、事务 rollback-on-close、
+        #  多线程并发读写）。bridge 由 build.cj pre-build 用 mingw g++ 编译。
+        working-directory: packages/rocksdb_ffi
+        run: cjpm test
+
       - name: Verify Windows executable
         run: |
           $executable = "client-next/target/release/bin/main.exe"

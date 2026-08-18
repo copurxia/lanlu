@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{SearchItem, SearchQuery, TankoubonInfo}
+import lanlu_client_next.net.{SearchItem, SearchItemView, SearchQuery, TankoubonInfo}
 import std.collection.{ArrayList, HashSet}
 import std.sync.Mutex
 
@@ -222,8 +222,8 @@ private func submitAddToTankList(model: AppModel, cell: DialogCell<ArrayList<Tan
 // ---- 合集详情「添加档案」----
 
 func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): Unit {
-    let cell = rememberState<DialogCell<ArrayList<SearchItem>>>("dlg.tankadd.cell:${tankId}",
-        {=> DialogCell<ArrayList<SearchItem>>()}).value
+    let cell = rememberState<DialogCell<SearchItemView>>("dlg.tankadd.cell:${tankId}",
+        {=> DialogCell<SearchItemView>()}).value
     let query = rememberState<String>("dlg.tankadd.q:${tankId}", {=> ""})
     let picked = rememberState<HashSet<String>>("dlg.tankadd.picked:${tankId}", {=> HashSet<String>()})
     // 关闭后复位（下次打开重拉并清空已选/搜索词）。
@@ -363,7 +363,7 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
 }
 
 // 发起一轮对话框内搜索：结果直接写格（worker 去重兜底，连点搜索只跑一个在途）。
-private func submitTankAddSearch(model: AppModel, cell: DialogCell<ArrayList<SearchItem>>, tankId: String,
+private func submitTankAddSearch(model: AppModel, cell: DialogCell<SearchItemView>, tankId: String,
     filter: String): Unit {
     cell.begin()
     match (model.api) {

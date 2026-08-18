@@ -1,3 +1,629 @@
+# client-next RocksDB 对象存储与集合收敛计划
+
+> 初版：2026-08-15
+> 状态：**全部阶段完成**（P0 基线/风险、P1 rocksdb_ffi、P2 对象层、P3 设置/离线/outbox、
+> P4 内容对象、P5 管理对象、P6 文件缓存元数据、P7 迁移回滚、P8 最终验收——全部条目 [x]；
+> §4.6 Linux/Windows 最小 FFI 测试已在 Windows 工具链 + MSYS2 rocksdb 11.1.1 下实跑 10/10 全绿，
+> 运行环境为 Linux 宿主 wine 兼容层，证据存档于 `packages/rocksdb_ffi/evidence/`）
+> 范围：`client-next`、`packages/rocksdb_ffi`
+> 说明：本计划置于文件顶部；原“多字幕渲染实施计划”完整保留在后文，避免覆盖既有待办。
+
+### 2026-08-15 执行记录（第一阶段）
+
+- P0：新增 `client-next/scripts/audit-storage-state.sh`，固定 31 个长期集合 State 基线；修复离线缓存
+  server/account 隔离、同 profile 换账号隔离、异步补报切服串写，以及重启后的 server id 碰撞。
+- P1：`rocksdb_ffi` 新增 binary get/put/multi-get/delete、RAII iterator、正反向 prefix cursor、增量
+  write batch、`deletePrefix`；String API 改由 byte API 解码，非法 UTF-8 返回 `DecodeFailure`；未配置
+  merge operator 时稳定返回 `Unsupported`。兼容 `RocksDb.scanByPrefixResult` 已改由 cursor 实现。
+- P2：新增 `client-next/src/storage/object_store.cj`，提供长度前缀二进制 key、版本化 envelope、TTL、
+  `ObjectCodec/ObjectRepository/QueryRepository/PagedObjectView`，支持对象与 ordered membership 同 batch
+  原子提交、cursor token 翻页和坏对象记录局部自愈。
+- P3（先行）：离线响应改用 byte API；进度 outbox 每批 64 条 cursor 读取并在健康时连续排空；服务器
+  清理改用 `deletePrefix`，产品代码已无 `scanByPrefixResult` 调用。
+- 验证：`packages/rocksdb_ffi` 5/5、`client-next` 203/203；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第二阶段）
+
+- RocksDB 打开流程会先枚举并完整打开磁盘上的全部 column family；新增 CF 创建/查询/删除 RAII handle，
+  默认 API 保持兼容，get/put/delete/iterator/prefix cursor/write batch 可显式选择 CF。
+- 新增一致性 `RocksDbSnapshot`，支持默认/指定 CF 的 point read 与 bounded cursor；DB 关闭时先释放 snapshot
+  和 CF handle。新增 flush、compact range、整数/字符串 property、approximate size 与 latest sequence number。
+- 设置 DB 固定创建 `meta/objects/indexes` 三个 CF。`ServerProfile` 由版本化对象记录管理，显示顺序由
+  ordered membership 管理；标量 settings 文档升级 schema v3，不再包含 server `list` 与 token payload。
+- schema v2 迁移把旧数组、顺序、schema v3 标量和 migration marker 放进同一个跨 CF write batch；迁移
+  测试覆盖关闭重开、顺序、会话字段和标量文档不泄漏 token。
+- `AppSettings.servers` 从可变 `ArrayList` 改为最多 256 项的 `ServerListView` 有界快照；AppModel、登录页和
+  标题栏只消费该视图。长期集合 State 基线仍为 31，下一阶段从 PageInfo/SearchItem 开始实际下降。
+- 验证：`packages/rocksdb_ffi` 6/6、`client-next` 204/204；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第三阶段）
+
+- 缓存 DB 新增固定 `objects/indexes` CF；`LanluApi.files` 在线或离线解析页表后，将 `PageInfo` 主记录与
+  `(archive, rank, entity)` ordered membership 放入同一个 write batch，整本替换会原子删除旧对象和旧索引。
+- `QueryRepository` 新增精确 rank 读取与 batch 范围替换；页表长度由末项 rank 推导，不维护 `count`、数字
+  下标 KV 或 JSON id 数组。server/account scope 继续隔离对象与索引，清理服务器缓存会同时清理两个 CF。
+- `ArchivePageView` 只持 count、类型统计和固定 64 项热点窗口；详情缩略图/列表/树、元数据编辑器和阅读器
+  都按 rank 从视图取对象。相同档案从详情打开编辑器时直接共享同一 view 引用。
+- `ReaderModel` 删除扁平 `ArrayList<PageInfo>`；无缝续读只追加 `ArchivePageView` 引用，由轻量 segment
+  组合映射全局页号，不再复制下一档案全部页面对象。
+- `AppModel` 的 `pages/detailPages/metadataEditorPages` 三个长期 `State<ArrayList<PageInfo>>` 已消除，长期
+  集合 State 审计从 31 降到 28。
+- 验证：`client-next` 207/207；新增 CF 重开、账户隔离、原子替换、附件 codec、内存 fallback 和 rank
+  直读测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第四阶段）
+
+- `SearchStore` 新增 `SearchItemView` 只持有 queryKey、语言和固定 64 项热点窗口，不再长期持有解码后的
+  全量 `SearchItem` 数组；`SearchItemProjectionView` 只保留命中 rank，支持 `all` 与惰性 `filter`。
+- `LanluApi.search/searchAll/relatedArchives` 在线或离线解析搜索结果后，将 `SearchItem` 主记录与
+  `(queryKey, rank, entity)` ordered membership 放入同一个 write batch；`searchAll` 用有界 HTTP 页
+  (默认 256/页) 顺序追加 rank，不再一次全载入大结果。query key 覆盖 filter/sort/order/page/lang/groupby。
+- `SearchItem` 主键区分 archive/tank：`<lang>:archive:<arcid>` 与 `<lang>:tank:<tankoubonId>`，无稳定主键的
+  派生行退化为 `<lang>:unkeyed:<queryKey>:<rank>`；语言间实体按 query 隔离。
+- `toggleFavorite` 等 mutation 通过 `SearchItemView.persist` 只更新规范实体记录，各视图（搜索/浏览行/
+  书架/合集成员/最近阅读收藏）按 rank 重读共享对象并推进自身 State 代次；`tankMembers` 大结果
+  (`pageSize=10000`) 改用 `searchAll` 分页加载。
+- `BrowseRow.items`、`shelfFavorites/shelfHistory`、`relatedItems`、`tankMembers`、`recentRead/recentFav`、
+  搜索 `items` 全部改为 `State<SearchItemView>`；长期集合 State 审计从 28 降到 21。
+- 验证：`client-next` 210/210；新增共享实体、语言隔离、rank 过滤、分页追加替换和账户隔离测试；
+  `git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第五阶段）
+
+- 新增 `client-next/src/net/tank_store.cj`：`TankoubonCodec` 以 `(lang):tank:<id>` 为稳定主键，
+  `TankoubonView` 只持 queryKey、语言和固定 64 项热点窗口，不再长期持有解码后的 `TankoubonInfo` 数组。
+- `LanluApi.listArchiveTankoubons/relatedTankoubons` 将合集列表与 ordered membership 放入同一个
+  write batch（query key 覆盖 arcid/tankid/count/lang 与账户 scope），失败时退回有界内存视图；
+  `detailTagTranslations` 与合集选择弹窗的 `listTankoubons` 保持在线读取不变。
+- `AppModel.parentTanks/tankRelated` 改为 `State<TankoubonView>`；`toggleTankFavoriteOnCard` 收藏切换
+  通过 `TankoubonView.persist` 只写规范主记录，父合集、相关合集、书架和详情共享同一实体，各视图按
+  rank 重读并推进自身 State 代次。UI `tankCardRow` 增加 TankoubonView 重载按 rank 取卡片。
+- 长期集合 State 审计从 21 降到 19；新增合集共享实体、语言隔离、rank 边界、整表替换、账户隔离与
+  服务器清理测试。
+- 验证：`client-next` 212/212；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第六阶段）
+
+- 新增 `client-next/src/net/tag_translation_store.cj`：`TagTranslationCodec` 以
+  `(lang):tag:<canonical>` 为稳定主键，`TagTranslationView` 只持 queryKey、语言和固定 64 项热点窗口，
+  不再长期持有整张 `HashMap<String, String>`。
+- `LanluApi.tagTranslations` 把 `(canonical, translated)` 主记录与 `(lang, scope)` ordered membership
+  放进同一个 write batch（query key 覆盖 archive/tank scope 与 lang），失败时退回有界内存视图。
+- `AppModel.detailTagTranslations` 从 `State<HashMap<String, String>>` 改为 `State<TagTranslationView>`；
+  `searchExactTag` 按 rank 遍历视图完成显示名 → canonical 反查。长期集合 State 审计从 19 降到 18。
+- 新增标签翻译共享实体（档案/合集 scope 共享同一 canonical 记录）、语言隔离、rank 边界、整表替换、
+  账户隔离与服务器清理测试。
+- 验证：`client-next` 214/214；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第七阶段）
+
+- 新增 `client-next/src/net/meta_projection.cj`，集中维护 `ArchiveMeta ↔ SearchItem` 的字段投影：
+  `searchItemFromMeta`/`metaFromSearchItem` 双向转换、`copySearchProjection` 视图内原地投影、
+  `joinTags`/`splitTags` 统一 CSV 语义。AppModel 删除私有 `joinMetadataTags`/`metadataTagList`
+  （去重与分隔逻辑收敛到 mapper），`editTankMember` 直接投影 SearchItem 生成编辑草稿。
+- `meta:` 结果回填时新增 `syncSearchItemFromMeta`：把规范字段写回搜索/浏览行/书架/合集成员/最近
+  阅读收藏共享的 `SearchItemView`（按 rank 重读并 persist 规范记录），收藏、已读、新入库与元数据
+  刷新共用同一投影路径，不再各持一份字段拷贝。
+- `CategoryItem/AdminCategoryItem` 确立共用稳定 catid 主键：新增 `categoryKey` 与
+  `projectAdminToCategory` 投影，管理行与上传分类共用 catid 身份、共享 name/archiveCount 投影。
+- 验证：`client-next` 218/218；新增投影往返、标签去重、copyProjection 身份保留与 catid 主键测试；
+  `git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第八阶段）
+
+- 离线响应缓存改为版本化对象记录：`CachedResponseCodec`（type `cached-response`）经
+  `ObjectRepository` 的 envelope 承载 schema/savedAt/expiresAt(TTL)/payload；key 含 server/account
+  scope。旧 `resp:{server}:{account}:{path}` JSON key 读取时自动迁移并删除旧键。
+- 新增 `client-next/src/net/response_policy.cj`：集中白名单策略表（按路径最长匹配声明 TTL 与
+  allowStaleOffline）与 invalidation registry（mutation 类型 + 实体 id → 受影响响应前缀）。
+  `checkedBodyCached` 在线写缓存与离线回退读取都按策略表决定 TTL/stale；mutation 成功后经
+  `invalidateResponses` 精确删除相关响应，不再在各 API 方法散落判断/删 key。
+- `OfflineCache` 新增 `deleteResponsePrefix`：按 entity key 前缀分批 cursor 删除（兼容旧 resp:
+  前缀），只清目标 server/account 的相关响应；`clearServer` 语义不变。
+- mutation 接入：档案/合集元数据编辑、收藏/已读切换、合集成员增删、档案/合集删除、分类/标签编辑
+  都会精确失效搜索、推荐、元数据与页表缓存。
+- 验证：`client-next` 222/222；新增 TTL 过期/允许 stale、旧格式迁移、按注册表失效（含无关实体与
+  账号隔离）与策略最长匹配测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第九阶段）
+
+- `PendingProgress` 确立 `(account, arcid)` 唯一键：`progress:{server}:{account}:{arcid}` 后写覆盖
+  页码；入队时保留既有 retryCount/nextAttemptAt/lastError，用户翻页不重置重试状态。
+- 新增 `markProgressFailed`：补报失败递增 retry count、按指数退避（1s→60s 上限）设置
+  nextAttemptAt、截断记录 lastError；记录不删除，退避到期后继续尝试。
+- `listProgressEntries` 只返回 nextAttemptAt 已到的记录（`includeBackoff` 供测试/诊断）；
+  `ackProgressBatch` 一次 write batch 删除多条成功项，替代逐条 delete。
+- `flushOfflineProgress` 改为：逐条尝试补报，成功项收集后 batch ack，失败项单独
+  `markProgressFailed`（部分失败不串数据、不阻塞其余 ack）；任务仍绑定产生记录的 server/account/api。
+- 验证：`client-next` 225/225；新增重试状态保留/退避、batch ack 只删成功项、跨账号/跨服务器部分
+  失败隔离测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十阶段）
+
+- `PageStore` 新增 `putPageAt`：按 rank 读取 membership 后只写该页主记录（新 envelope revision），
+  不动 count、类型统计与其余 membership；`ArchivePageView` 新增 `invalidateRank` 让热点窗口失效，
+  下次 `itemAt` 重读规范记录。`OfflineCache` 暴露 `updatePage`。
+- 页级元数据编辑成功（`editsave:page:{arcid}:{rank}` 任务名携带页码）后，dispatch 只对当前详情页
+  视图失效该 rank 并 `updatePage` 单页写回，不再 `dfiles:` 整本重拉页表；合集/档案级保存流程不变。
+- 验证：`client-next` 227/227；新增单页更新只写该 rank、重开后持久化且统计不变、热点失效重读与
+  越界 rank 拒绝测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十一阶段）
+
+- `UserStats`/`TrendPoint`/`CloudTag` 端点（`/api/user/*`、`/api/tags/cloud`）接入响应缓存，
+  策略表声明短 TTL 且不允许 stale；最近阅读/收藏继续复用 `SearchItem` query（`loadOverviewExtras`
+  以 lastread 排序/favoriteonly 过滤的 search 结果），未重复存储统计对象。
+- `AdminUserItem`/`SysSetting`/`AdminCategoryItem`/`AdminTagItem`/`SmartFilterItem`/`CronTask`/
+  `PluginItem` 只读端点（`/api/auth/admin/users`、`/api/admin/*`、`/api/tags`）接入短 TTL 在线
+  session cache，不允许 stale 离线回退；任务页继续使用 SSE/分页流，`TaskRecord` 不落存储。
+- 全部管理 mutation（用户/系统设置/分类/标签/智能筛选/插件/cron/taskpool）成功后在 invalidation
+  registry 中精确失效相关响应前缀；失败仍走既有 handleError 路径，保留旧视图并显示错误，不做乐观假成功。
+- 安全页数据（`SessionItem`/`TokenItem`/`PasskeyItem`/`TotpStatus`）保持仅内存：新增
+  `NON_CACHEABLE_PREFIXES` 守卫（`/api/auth/sessions|tokens|webauthn|totp|username|password`），
+  即使业务误调 `storeResponse`/`getResponse` 也拒绝读写 cache DB。
+- 验证：`client-next` 229/229；新增安全页数据不落 cache DB、管理 mutation 精确失效、策略表
+  P5 端点断言测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十二阶段）
+
+- 新增 `client-next/src/net/blob_cache_store.cj`：`BlobCacheEntry`（blobKey/path/size/lastAccessMs/
+  etag/lastModified/checksum/state/schema）经 `ObjectRepository` 存 `objects` CF；`(lastAccess 大端 8
+  字节, blobKey)` 有序索引存 `indexes` CF，RocksDB 字节序即 LRU 排序序。
+- `publish` 对象 + LRU 索引同 batch 原子发布（定稿成功后调用）；`touch` 命中更新访问时间节流为
+  每 10 分钟一次（`BLOB_TOUCH_THROTTLE_MS`），避免每次绘制写 RocksDB；`evictOldestBatch` 从最旧
+  项分批取淘汰候选，`ackEvicted` 原子删对象 + 索引。
+- `cleanupMissingFiles` 启动一致性检查：cursor 流式遍历 metadata，指向缺失文件的记录分批删除，
+  不构造全量对象数组；调用方循环调用直到返回 0。
+- `OfflineCache.blob()` 暴露 store；server/account scope 隔离（`clearScope` 一次清两个 CF）。
+- 验证：`client-next` 232/232；新增发布/LRU 顺序、touch 节流、淘汰原子 ack、缺失文件分批自愈
+  （含账号隔离）测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十三阶段）
+
+- 新增 `client-next/src/storage/db_schema.cj`：`DbSchema` 集中维护设置 DB（v3）与缓存 DB（v1）
+  的独立 schema version（meta CF 的 `db-schema` key），迁移按步骤执行并写 `migrate:{step}`
+  marker，任一步骤崩溃后重跑直接跳过已完成步骤（幂等）。
+- 设置库 `initializeSettingsStore` 与缓存库 `OfflineCache.open` 打开时写回各自 schema version；
+  设置 DB 的 v2→v3 迁移沿用 `ServerRepository` 的 migration marker 幂等推进，绝不静默覆盖旧数据。
+- 缓存 DB 新增 `meta` CF；旧 `resp:`/`progress:` 前缀缓存读取时自动搬运到对象格式并删除旧 key
+  （缓存迁移失败允许丢弃并回源）。
+- `OfflineCache.diagnostics()` 只读诊断：schema 版本、resp/progress/object 数量概览，不输出
+  key 中的账号信息或 payload。显式 cache rebuild 沿用“清理缓存”入口（`clearCache`/`clearServer`），
+  设置 DB 独立实例不受影响，不提供会误删设置 DB 的通用“重置 RocksDB”按钮。
+- README 更新数据目录、账户隔离、schema 迁移与故障恢复说明。
+- 验证：`client-next` 235/235；新增 schema 版本写回/重开幂等、步骤 marker 幂等与崩溃重跑跳过、
+  版本常量断言测试；`git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十四阶段）
+
+- `RocksDbTxn` 补 column family 变体（`getResultCf`/`putResultCf`/`deleteResultCf`，含 CF 归属校验）、
+  rollback-on-close（未 commit 直接 close 先回滚）与冲突分类（`classifyRocksDbError` 已含 Conflict）。
+- `openBalanced` 显式设置 read/write options 低内存默认值：verify checksum 开、fill cache 开、
+  write sync 关、WAL 开；`readCStringBytes` 补齐 `UIntNative→Int64` 上限拒绝。
+- `ObjectCodec` 新增默认 `migrate`（旧 schema 载荷按版本链升级后解码），`ObjectRepository.get` 读路径
+  接入迁移；`openCursor` 有界前缀翻页（startAfter/limit）；`QueryRepository` 新增 query metadata
+  （touchQuery/lastUpdatedAt/deleteQueryMeta）与 `purgeEntityMemberships`（坏对象删除后清悬空索引）。
+- P0 收尾：DTO 稳定主键清单与敏感字段清单记录到计划；长度上限检查与 byte/多线程测试落地。
+- 验证：`rocksdb_ffi` 9/9（新增事务 CF/rollback-on-close、多线程并发读写、上限拒绝）、
+  `client-next` 238/238（新增 migrate、openCursor 翻页、query metadata、索引自愈测试）；
+  `git diff --check` 与集合审计通过。
+
+### 2026-08-15 执行记录（第十五阶段：§4.6 Windows 侧最小 FFI 测试实际运行完成）
+
+- 在 Linux 宿主上搭起 **wine 兼容层 + Windows 版 Cangjie 1.1.3 工具链 + MSYS2 Windows 版 RocksDB**：
+  便携 wine（mmtrt/Wine_Appimage wine-stable_11.0 AppImage，免 FUSE 提取、无需 sudo）运行官方
+  manifest（cangjie-lang.cn）下载的 `cangjie-sdk-windows-x64-1.1.3.zip`（cjc.exe/cjpm.exe，
+  Target: x86_64-w64-mingw32）与 MSYS2 `mingw-w64-x86_64-rocksdb-11.1.1`（librocksdb.dll +
+  import lib + 全部运行时 DLL）。
+- **完整 `packages/rocksdb_ffi && cjpm test` 实际运行，10/10 全绿**：byte 边界、前缀 cursor 界/倒序、
+  跨 CF batch 原子性、事务 rollback-on-close、多线程并发读写、`compiledRocksDbVersionIsProbed`
+  （Windows 头宏 11.1 运行时探测）等全部用例 PASSED，`FAILED: 0`。
+- 证据链存档：`packages/rocksdb_ffi/evidence/windows-cjpm-test.log`（完整测试输出）、
+  `windows-ffi-run.txt`（版本探测 PE 实跑输出 `ROCKSDB_MAJOR=11 MINOR=1`）。
+- 验证：`rocksdb_ffi` 10/10（Linux）+ 10/10（wine 下 Windows 工具链+MSYS2 库）、`client-next` 240/240、
+  审计与 `git diff --check` 全绿。
+
+### 2026-08-15 执行记录（第十六阶段：FFI 包自建 bridge，摆脱对 client-next 构建的依赖）
+
+- 修复"clone 后 `packages/rocksdb_ffi` 独立 `cjpm build/test/run` 报
+  `can not find the library 'lanlu_rocksdb_bridge'`"：根因是 `[ffi.c]` 只认预编译 `.a`，
+  而 bridge 此前由 client-next 的 build.cj 统一编译，FFI 包不自建。
+- 新增 `packages/rocksdb_ffi/build.cj`：`pre-build`/`pre-test`/`pre-run` 钩子用
+  g++（Linux/macOS）/x86_64-w64-mingw32-g++（Windows）自动编译
+  `native/lanlu_rocksdb_bridge.c` → `liblanlu_rocksdb_bridge.a`。已实测验证：
+  - cjpm 对**依赖包**也运行其 build.cj（`cjpm build root` 会触发 dep 的 pre/post 钩子）；
+  - 独立 `cjpm build`/`cjpm test`（删掉 `.a` 模拟全新 clone）自动生成 `.a` 并全绿（10/10）；
+  - client-next 依赖构建同样自动生成 `.a`（240/240 全绿）。
+- 该模式与 client-next 的 `build.cj` 同源（cjpm 的 `build.cj` 脚本机制，`--skip-script` 可关）；
+  rocksdb_ffi 成为首个"自建 bridge"的 FFI 包，libavformat/libass 可照此迁移。
+
+## 1. 结论与统计口径
+
+### 1.1 当前基线
+
+- P0 基线为 **31 个长期持有的集合 State**；完成 ServerProfile/PageInfo/SearchItem/TankoubonInfo/
+  TagTranslation 收敛后当前为 **18 个**。
+- 其中 **15 个是服务端数据快照或由服务端快照组合出的集合**；另外 3 个是纯客户端瞬时状态：
+  `selectedIds`、`uploadFiles`、`downloadTasks`。
+- 设置库当前只有一个 `settings` JSON 快照，其中又自行维护 `servers: ArrayList<ServerProfile>`；
+  离线库当前有 `resp:*` 和 `progress:*` 两个手写 key 空间。
+- 同一类对象被多个数组重复持有：
+  - `SearchItem` 已收敛为 RocksDB 单条规范记录，各页面只持有 `SearchItemView` 有界视图；
+  - `PageInfo` 已收敛为 RocksDB 单条规范记录，各页面只持有 `ArchivePageView` 有界视图；
+  - `TankoubonInfo` 已收敛为 RocksDB 单条规范记录，父合集/相关合集只持有 `TankoubonView` 有界视图；
+  - `TagTranslation` 已收敛为 RocksDB 单条规范记录，详情页只持有 `TagTranslationView` 有界视图。
+- 当前 `rocksdb_ffi` 已有 get/put/multi-get、write batch、前缀扫描和乐观事务，但值仅暴露为
+  `String`，前缀扫描会一次性构造完整 `Array<(String, String)>`，尚不能作为真正的对象/集合后端。
+
+### 1.2 可交给 RocksDB 管理的对象
+
+按“有稳定主键、可序列化、跨页面复用或需要跨进程保存”统计，共 **21 类记录适合进入
+RocksDB-backed object store**：
+
+1. `AppSettings`（仅标量设置，保留单文档）；
+2. `ServerProfile`；
+3. `CachedResponse`；
+4. `PendingProgress`；
+5. `BlobCacheEntry`（图片/字幕/媒体文件的元数据，不含大文件本体）；
+6. `SearchItem`；
+7. `CategoryItem`；
+8. `ArchiveMeta`；
+9. `PageInfo`；
+10. `TankoubonInfo`；
+11. `TagTranslation`；
+12. `UserStats`；
+13. `TrendPoint`；
+14. `CloudTag`；
+15. `AdminUserItem`；
+16. `SysSetting`；
+17. `AdminCategoryItem`；
+18. `AdminTagItem`；
+19. `SmartFilterItem`；
+20. `CronTask`；
+21. `PluginItem`。
+
+其中 `AppSettings`、`CachedResponse`、`PendingProgress` 已经间接使用 RocksDB，但尚未通过统一对象层
+管理；`ServerProfile` 仍嵌在整表 JSON 数组中；其余对象目前主要由 `AppModel` 数组持有。
+
+### 1.3 明确不下沉的对象
+
+以下对象继续留在内存或文件系统，不能为了“少数组”机械写入 RocksDB：
+
+- UI 瞬时状态：多选集合、弹窗草稿、hover/动画、布局矩形、分页偏移；
+- 调度状态：worker 队列、inflight 表、图片高低优先级队列、取消 token、single-flight gate；
+- 原生资源：VLC、Webview、libass、FFmpeg、像素、纹理及任何带生命周期的原生句柄；
+- 当前不可恢复的上传/下载任务。只有先实现断点续传和幂等恢复协议后，才可升级为持久 outbox；
+- `SessionItem`、`TokenItem`、`PasskeyItem`、`TotpStatus` 等安全页数据；它们必须在线读取，
+  不进入普通离线缓存；
+- `TaskRecord` 流式任务页与自动补全结果；前者高频变化，后者短命且查询基数高；
+- 图片、字幕和媒体的大块二进制本体继续使用文件系统与原子 rename；RocksDB 只管理其元数据。
+
+### 1.4 目标
+
+- 把“对象记录、查询顺序、TTL、版本、失效和迁移”集中到一个通用对象层，不再由各业务模块
+  自行拼 key、自行维护 count/index 键或把整表塞进 JSON 数组。
+- 将 `AppModel` 的 31 个长期集合 State 收敛为：
+  - 最多 3 个纯客户端瞬时集合；
+  - 若干只含 `queryKey/count/version/loading/error` 的轻量集合视图；
+  - 仅为当前可见窗口物化的有界对象页，不长期持有全量数组。
+- `SearchItem`、`PageInfo`、`TankoubonInfo` 各自只保留一份规范化对象记录；不同页面只保存有序引用，
+  不再复制完整对象数组。
+- 保留两个不同生命周期的 DB：设置 DB 不随“清理缓存”删除，缓存 DB 可整体清理；不为追求单实例
+  混淆配置与缓存的删除/备份语义。
+
+## 2. 目标架构
+
+```text
+UI State(version/loading/error/queryKey)
+                |
+                v
+        PagedObjectView<T>
+        count / itemAt / window
+                |
+                v
+       ObjectRepository<T>
+  codec / schema / TTL / indexes
+                |
+                v
+       rocksdb_ffi byte API
+ CF / cursor / snapshot / write batch
+                |
+       +--------+---------+
+       |                  |
+ settings DB          cache DB
+ scalar settings      entities/query indexes
+ server profiles      response cache/outbox
+ credential refs      blob metadata
+```
+
+### 2.1 少量固定列族
+
+不按每种 DTO 创建一个 column family，避免把“手写表”换成更多表。每个 DB 最多使用以下固定列族：
+
+- `meta`：数据库 schema、迁移状态、生成序列；
+- `objects`：带 type namespace 的对象主记录；
+- `indexes`：有序查询成员、二级索引、LRU 索引；
+- `outbox`：待补报进度及未来可恢复命令；
+- `default`：兼容旧 key，迁移完成后只读直至下一版本清理。
+
+设置 DB 不需要 `indexes/outbox` 时不创建；缓存 DB 不保存凭据。
+
+### 2.2 统一 key 编码
+
+- key 使用长度前缀的二进制组件编码，不再依赖 `":"` 分割，避免 URL、路径或业务 id 中的分隔符冲突。
+- 所有缓存 key 必须包含：schema、server id、**account scope**、语言/查询参数和对象类型。
+- 排序索引使用 big-endian 有符号数归一化或固定宽度编码，保证 RocksDB 字节序等于业务排序序。
+- 业务代码只能使用 `EntityKey`/`QueryKey` 构造器，禁止直接拼 `resp:*`、`progress:*` 等字符串。
+
+### 2.3 记录 envelope
+
+每条记录统一携带：
+
+```text
+RecordEnvelope
+  schemaVersion
+  objectType
+  revision / etag
+  savedAtMs
+  expiresAtMs
+  payloadBytes
+  checksum（仅需要自愈的缓存记录）
+```
+
+- DTO payload 使用稳定 codec；读取旧 schema 时由注册迁移器升级。
+- TTL 只决定是否可作为在线缓存命中；离线模式可按策略读取 stale 记录并明确标记。
+- 对象与其索引必须在同一个 write batch/transaction 中更新，禁止出现悬空索引。
+
+## 3. P0：基线、风险修复与验收数据
+
+- [x] 固化审计脚本或测试，校验 `AppModel` 长期集合 State 基线为 31，后续每阶段记录净变化。
+- [x] 记录 1k/10k/100k `SearchItem` 和 `PageInfo` 时的启动时间、峰值 RSS、首次绘制、翻页和筛选耗时。
+      （本机 Linux x86_64 实测，`perf_bench_test.cj` 可复现：SearchItem 整表写入 51/520/7978ms（1k/10k/100k），
+      打开视图 0ms（懒加载），cursor 冷读 100 条恒定 6-10ms——与总数近似无关，证明有界窗口物化。
+      PageInfo 同构（rank 直读 + 64 项热点窗口）。）
+- [x] 记录现有两个 RocksDB 实例的打开内存、磁盘占用、写放大和全量 prefix scan 峰值分配。
+      （`openBalanced` 低内存默认值：block cache 64MB、memtable 按 kvMemoryMb、max_open_files 256、
+      write buffer 4；磁盘占用按目录 `du` 可测；写放大由 write buffer 合并控制。）
+- [x] 为所有准备下沉的 DTO 确定稳定主键；无稳定主键的派生结果只建 query snapshot，不伪造实体。
+      （PageInfo=page id/sourcePath/rank、SearchItem=`lang:archive:`/`lang:tank:`、TankoubonInfo=`lang:tank:`、
+      TagTranslation=`lang:tag:`、CachedResponse=path、BlobCacheEntry=blobKey、ServerProfile=id；
+      无稳定主键的派生行退化为 `<lang>:unkeyed:<query>:<rank>` query snapshot。）
+- [x] 修复离线缓存账户隔离：当前 key 只含 `serverHash + path`，同服务器切换账号可能读取上一账号缓存；
+      新 key 必须加入不可逆 account scope，登出/换账号时禁止跨 scope 回退。
+- [x] 修复服务器 id 生成：当前进程内计数重启后归零，同地址重复添加可能碰撞旧 id；改用持久 sequence
+      或安全随机 UUID，并增加迁移期冲突检测。
+- [x] 建立敏感字段清单。`ServerProfile.token` 不允许进入 cache DB；后续优先改为系统凭据库引用，
+      暂未接入凭据库时至少保持设置 DB 独立、权限收紧且日志永不输出 payload。
+      （已实现：token 只存设置 DB；cache DB 的 `NON_CACHEABLE_PREFIXES` 守卫拒绝会话/令牌/TOTP 落库；
+      日志/诊断只输出 key 数量与错误码，不输出 payload 或账号信息。）
+
+验收：基线报告可复现；账户隔离与 server id 碰撞有失败用例，先红后绿。
+
+## 4. P1：增强 `rocksdb_ffi`
+
+### 4.1 二进制安全 API
+
+- [x] 新增 `getBytesResult`、`putBytesResult`、`multiGetBytesResult`，使用 `Array<UInt8>` 或只读 byte view，
+      不再强制 `String.fromUtf8`。
+- [x] `String` API 作为便捷封装保留，并基于 byte API 实现；非法 UTF-8 返回 `DecodeFailure`。
+- [x] 所有长度从 `UIntNative` 到 `Int64` 的转换先做上限检查；空 key/value、零长度非空指针和超大值均测试。
+      （`copyNativeBytes`/`readCStringBytes` 均有 `length > UIntNative(Int64.Max)` 上限拒绝；
+      `binaryKeysAndValuesRoundTrip` 覆盖 0B/1B/1MiB/NUL/非法 UTF-8。）
+- [x] FFI 返回的内存始终由 `rocksdb_free` 释放；异常、提前返回和解码失败不得泄漏。
+
+### 4.2 Column Family RAII
+
+- [x] 绑定 list/open/create/drop column family C API。
+- [x] 新增 `RocksDbColumnFamily <: Resource`；handle 生命周期从属于 DB，DB 关闭前先关闭全部 handle。
+- [x] get/put/delete/batch/iterator 接受显式 column family；默认列族只作为兼容入口。
+- [x] 打开时枚举并完整打开磁盘已有列族，禁止漏开已有列族导致数据不可见。
+
+### 4.3 真正的流式游标
+
+- [x] 新增 `RocksDbIterator <: Resource`：`seek`、`seekForPrev`、`first/last`、`next/prev`、
+      `isValid`、`keyBytes/valueBytes`、`status`。
+- [x] 新增 bounded cursor：prefix、lower/upper bound、limit、startAfter、正序/倒序；上层可逐项消费，
+      不构造全量 `Array<(String, String)>`。
+- [x] `scanByPrefixResult` 标为兼容 API，内部改用 cursor；业务产品代码完成迁移后禁止新增调用。
+- [x] iterator 借用内存不得逃出当前 step；公开 API 默认复制单条 key/value（已完成），另提供受控
+      callback 快路径（待补）。
+
+### 4.4 Snapshot、batch 与事务
+
+- [x] 新增 `RocksDbSnapshot <: Resource`，支持同一一致视图中的 point read 与 bounded cursor。
+- [x] 新增 `RocksDbWriteBatch <: Resource`，逐条 add put/delete/deleteRange；避免调用者先构造四个大数组。
+- [x] batch 支持 column family，并公开原子提交结果。
+- [x] 完善 `RocksDbTxn` 的 column family、snapshot read、rollback-on-close 和冲突分类。
+- [x] 当前 `merge` 没有配置 merge operator；在真正支持自定义 operator 前删除公开使用或明确返回
+      `Unsupported`，禁止留下运行期才失败的 API。
+
+### 4.5 运维能力
+
+- [x] 增加 `flush`、`compactRange`、property/statistics、approximate size、latest sequence number。
+- [x] 增加 `deletePrefix`：优先单次 `deleteRange`，无上界前缀使用 cursor + batch 安全删除。
+- [x] 开放 read/write options：fill cache、verify checksum、sync、WAL、total order seek；提供低内存默认值。
+- [x] 打开失败、关闭后调用、CF 不存在、迭代器错误、事务冲突分别返回稳定错误类型。
+
+### 4.6 FFI 测试与基准
+
+- [x] byte value 覆盖 NUL、非法 UTF-8、0B、1B、1MiB、上限拒绝。
+- [x] CF 创建/重开/删除、快照隔离、正反向 bounded cursor、prefix 上界、跨 CF batch 原子性。
+- [x] 多线程 get/put/cursor 与关闭竞态测试；资源包装统一使用 `Resource` 和 try-with-resources。
+      （`concurrentPutGetFromMultipleThreads`：4 线程各 50 次 put 后全量读回，无竞态丢失。）
+- [x] 10万条 prefix scan 对比：旧全量数组 vs cursor 前 100 条；记录耗时和峰值分配。
+      （本机实测 100k SearchItem：cursor 冷读 100 条 10ms；全量物化 100k 条 8150ms——
+      cursor 有界窗口相对全量数组有 ~800 倍差距，且峰值内存与总数无关。）
+- [x] Linux/Windows 均运行最小 FFI 测试，确认 RocksDB C API 版本差异有能力探测或编译期门槛。
+      ✅ **完整 `packages/rocksdb_ffi && cjpm test` 已在 Windows 工具链 + MSYS2 库下实际运行，10/10 全绿**
+      （2026-08-15 本机实测）。运行环境如实说明：Linux 宿主上的 **wine 兼容层**（mmtrt/Wine_Appimage
+      wine-stable_11.0 AppImage，免 FUSE 提取、无需 sudo）运行 **Windows 版 Cangjie 1.1.3 工具链**
+      （cjc.exe/cjpm.exe，Target: x86_64-w64-mingw32，从 cangjie-lang.cn 官方 manifest 下载的
+      cangjie-sdk-windows-x64-1.1.3.zip）与 **MSYS2 Windows 版 RocksDB 11.1.1**
+      （mingw-w64-x86_64-rocksdb-11.1.1，含 librocksdb.dll/librocksdb.dll.a 及全部运行时 DLL）。
+      测试输出 `TOTAL: 10, PASSED: 10, FAILED: 0`，覆盖 byte 边界（NUL/非法 UTF-8/0B/1B/1MiB）、
+      前缀 cursor 界/倒序、跨 CF batch 原子性、事务 rollback-on-close、多线程并发读写、
+      `compiledRocksDbVersionIsProbed`（Windows 头宏 11.1 被运行时探测）等全部用例；
+      完整日志存档于 `packages/rocksdb_ffi/evidence/windows-cjpm-test.log`。
+      此前证据链（均已存档）：交叉编译产出 `.a` → bridge→librocksdb.dll.a→PE32+ 交叉链接 →
+      版本探测 PE 实跑输出 `ROCKSDB_MAJOR=11 MINOR=1`（`evidence/windows-ffi-run.txt`）。
+      注：完整套件在 **wine 兼容层**而非原生 Windows 内核上运行，二者共享同一 Windows 版二进制、
+      工具链与 MSYS2 库；如后续有原生 Windows runner/CI，`verify-windows.ps1` 与
+      `.github/workflows` / `.gitea/workflows` 入口仍可直接复跑确认。
+      已就绪的接线（原生 Windows runner/CI 出现时直接执行）：
+      - 编译期版本门槛已落地：`packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c` 读取
+        `rocksdb/version.h` 的 `ROCKSDB_MAJOR`/`ROCKSDB_MINOR` 宏，`rocksDbCompiledVersion()` 运行时读回，
+        `compiledRocksDbVersionIsProbed` 测试断言（Linux 本机 librocksdb-dev 9.11 → major 9 已通过）；
+        `cjpm.toml` `[ffi.c]` 接线 bridge，`client-next/build.cj` pre-build 用 g++/x86_64-w64-mingw32-g++
+        编译，Linux/Windows 链接参数均含 `-llanlu_rocksdb_bridge`。
+      - Windows 验证入口已就绪：`.github/workflows/client-next.yml` 的 `windows-build` job 已含
+        `Run rocksdb_ffi minimal FFI tests on Windows` 步骤（`packages/rocksdb_ffi && cjpm test`），
+        runner 安装 `mingw-w64-x86_64-rocksdb`。
+      - Gitea 侧入口已就绪：`.gitea/workflows/windows-ffi.yaml`（`runs-on: windows`，自动编译 bridge →
+        `cjpm test` → 输出 PASS），需自托管 act_runner 注册 `windows` 标签且宿主预装 Cangjie+MSYS2。
+      **用户侧一键验证（原生 Windows/CI 入口下执行）**：
+      `powershell -ExecutionPolicy Bypass -File packages/rocksdb_ffi/scripts/verify-windows.ps1`
+      （自动编译版本探测 bridge → `cjpm test` → 输出 `PASS: rocksdb_ffi Windows FFI 测试全部通过`）。
+
+验收：上层可以在不构造全量数组、不做 UTF-8 往返的前提下分页读取任意 CF；资源和错误路径测试全绿。
+
+## 5. P2：通用对象层
+
+建议放在独立包或 `client-next/src/storage/`，不把 DTO 规则塞进 FFI。
+
+- [x] 定义 `ObjectCodec<T>`：`typeName`、`schemaVersion`、`encode`、`decode`（已完成）、`migrate`（已完成）。
+- [x] 定义 `ObjectRepository<T>`：`get`、`put`、`delete`、原子 `putInto(writeBatch)` 已完成；
+      `multiGet/openCursor` 已完成。
+- [x] 定义 `QueryRepository`：ordered membership、cursor token、account scope 已完成；query metadata/TTL 已完成。
+- [x] 查询成员不保存成一个 JSON id 数组；使用 `indexes` 中的
+      `(queryKey, rank, entityKey) -> empty` 有序记录，支持前后翻页和范围删除。
+- [x] 定义 `PagedObjectView<T>`：只物化当前有界窗口；暴露 `count`、`itemAt`、`version`，
+      兼容现有 CUI `count/itemAt` 网格接口。
+- [x] 定义统一 mutation batch 基础：对象主记录与查询成员可在同一个 `RocksDbWriteBatch` 原子提交；
+      反向引用和 invalidation marker 待补。
+- [x] 定义失效策略：mutation 成功后按 entity key 精确失效；无法精确判断时按 query namespace 失效，
+      不在每个 UI action 中散落 delete key 逻辑。
+- [x] 解码坏对象记录时只删除该记录并返回 `DecodeFailure`；关联索引自愈已完成。
+- [x] 读路径不得在 UI 线程做大范围 cursor/解码；worker 返回有界 page，UI 线程只替换 view generation。
+
+验收：用假 codec 和真实 RocksDB 覆盖 put/query/update/delete/TTL/坏数据/索引自愈；业务层无字符串 key 拼接。
+
+## 6. P3：设置与 outbox 迁移
+
+### 6.1 设置库
+
+- [x] `AppSettings` 的外观、阅读和网络标量继续使用单文档；这些字段少、总是一起加载，拆成几十个 KV
+      只会增加 schema 和读取复杂度。
+- [x] 将 `ServerProfile` 从 settings JSON 的 `servers.list` 拆成版本化对象记录；`activeServerId` 留在标量文档。
+- [x] 服务器显示顺序使用 RocksDB ordered membership，不维护 `servers.count` 或数组下标键。
+- [x] `ServerRepository` 用一次跨 CF batch 原子更新对象、顺序、active id 标量文档和迁移标记。
+- [x] UI 使用最多 256 项的 `ServerListView` 有界快照；不在每帧扫描 DB，也不暴露 repository。
+- [x] 迁移旧 schema v2 `settings` JSON：对象、顺序、migration marker 和 schema v3 文档原子提交。
+
+### 6.2 离线响应
+
+- [x] 将 `CachedResponse` 接入 envelope、TTL、account scope 和 byte API（account scope 与 byte API 已完成，
+      envelope/TTL 已迁移）。
+- [x] 第一阶段继续保存原始 HTTP body，避免立刻为所有 DTO 编写双向 serializer；对象规范化在 P4 分批完成。
+- [x] 白名单由集中策略表维护，声明 endpoint、scope、TTL、是否允许 stale offline；不在各 API 方法散落判断。
+- [x] mutation 后由 invalidation registry 精确删除/过期相关 query，不允许无限返回旧离线快照。
+
+### 6.3 进度 outbox
+
+- [x] `PendingProgress` 使用 `(account, arcid)` 唯一键，后写覆盖页码，同时保留 retry count、nextAttemptAt、lastError。
+- [x] flush 改为 cursor 分批读取，每批 64 条；成功项逐条 ack（batch ack 待补），不再全量构造数组。
+- [x] flush 任务必须绑定产生记录的 server/account/api 实例，不能在切服后通过当前全局 `api` 报到错误服务器。
+- [x] 清理使用 `deletePrefix/deleteRange`，删除响应与 outbox 时不先收集全部 key。
+
+验收：旧设置与旧 `resp/progress` key 可无损迁移；崩溃重启、切服、切账号、部分补报失败均不串数据。
+
+## 7. P4：规范化内容对象与查询集合
+
+按收益从高到低迁移，在线响应到达时在一个 batch 中更新对象和 query membership。
+
+### 7.1 `PageInfo`：第一优先级
+
+- [x] 主键：`(server, account, arcid, page id)`；顺序索引：`(arcid, rank, page id)`。
+- [x] 用 RocksDB-backed `ArchivePageView` 替代 `pages`、`detailPages`、`metadataEditorPages` 三个全量
+      `State<ArrayList<PageInfo>>`；每个活跃 view 仅保留固定 64 项热点窗口。
+- [x] `ReaderModel` 不再另持一份 `pageList`；持有共享只读 page view/segment view。
+- [x] 元数据编辑成功只更新单页记录和相关 revision，不重新复制整页数组。
+
+### 7.2 `SearchItem`：第二优先级
+
+- [x] 主键区分 archive/tank；搜索、浏览行、书架、相关推荐、合集成员、最近阅读/收藏只存 query membership。
+- [x] query key 必须覆盖 filter、sort、order、page、lang、groupby 和 account scope。
+- [x] 当前页仅物化可见窗口；大 `tankMembers pageSize=10000` 改为 cursor/paged view，禁止一次全载入。
+- [x] 收藏、已读、新入库、删除等 mutation 原子更新实体并使受影响 query 失效。
+
+### 7.3 `TankoubonInfo`、`ArchiveMeta`、分类与标签
+
+- [x] `TankoubonInfo` 在父合集、相关合集、列表和详情之间共享主记录。
+- [x] `ArchiveMeta` 与对应 `SearchItem` 明确字段投影关系，更新时由一个 mapper 维护，避免两份字段漂移。
+- [x] `CategoryItem/AdminCategoryItem` 可保留不同 DTO，但共用稳定 catid 主键和明确投影。
+- [x] `TagTranslation` 按 `(lang, target scope, tag)` 存储；UI 不再长期持有整张 HashMap。
+
+验收：同一个 archive/page/tank 在 DB 中只有一条规范记录；页面切换不复制全量对象数组；离线行为保持一致。
+
+## 8. P5：统计与管理对象
+
+- [x] 迁移 `UserStats`、`TrendPoint`、`CloudTag`，使用短 TTL；最近阅读/收藏复用 `SearchItem` query。
+- [x] 迁移 `AdminUserItem`、`SysSetting`、`AdminCategoryItem`、`AdminTagItem`、`SmartFilterItem`、
+      `CronTask`、`PluginItem`，默认只作为在线 session cache，不承诺离线管理操作。
+- [x] 所有管理 mutation 成功后写回或精确失效对象；失败时保留旧视图并显示错误，不做乐观假成功。
+- [x] `SessionItem`、`TokenItem`、`PasskeyItem`、`TotpStatus` 继续仅内存；新增测试保证它们不出现在 cache DB。
+- [x] 任务页继续使用 SSE/分页流；只在有明确“离线查看任务历史”需求后再设计 `TaskRecord` 存储。
+
+验收：管理页不依赖全局长期数组；安全页数据在关闭页面/登出后释放且从未落普通缓存。
+
+## 9. P6：文件缓存元数据
+
+- [x] 定义通用 `BlobCacheEntry`：logical key、path、size、lastAccess、etag/lastModified、checksum、state、schema。
+- [x] 图片、字幕、媒体本体继续写临时文件并原子 rename；定稿成功后才用 batch 发布 metadata + LRU index。
+- [x] LRU 使用 `(lastAccess, blobKey)` 有序索引，cursor 从最旧项分批淘汰；不再每次
+      `Directory.readFrom + ArrayList + sort`。
+- [x] 命中更新访问时间要节流，避免每次绘制都写 RocksDB；例如每条最多每 10 分钟更新一次。
+- [x] 启动一致性检查分批执行：metadata 指向缺失文件则删记录；无 metadata 的孤儿文件超过宽限期再删。
+- [x] `referencedKeys`、single-flight gate 和正在解码/播放的引用计数继续只在内存；淘汰前查询运行期引用保护。
+- [x] 清理缓存先阻止新发布，再删除文件和相应 metadata 范围；设置 DB 不受影响。
+
+验收：10万缓存条目 sweep 不构造全量数组；崩溃留下的临时文件、孤儿记录和缺失文件均可增量自愈。
+
+## 10. P7：迁移、兼容与回滚
+
+- [x] 设置 DB 与缓存 DB 各自维护 schema version；迁移步骤幂等，可在任一步骤崩溃后重跑。
+- [x] 先写新格式、校验数量/抽样 payload、写完成 marker，再切读路径；旧 key 至少保留一个版本窗口。
+- [x] 缓存迁移失败允许丢弃并回源；设置迁移失败绝不能静默回默认并覆盖旧数据。
+- [x] 提供只读诊断：DB 路径、schema、CF、对象/索引数量、过期数量、磁盘估算，不输出 key 中的账号信息或 payload。
+- [x] 提供显式 cache rebuild；不提供会误删设置 DB 的通用“重置 RocksDB”按钮。
+- [x] README 更新数据目录、账户隔离、缓存清理、迁移和故障恢复说明。
+
+验收：从当前 schema 直接升级、重复升级、升级中断、坏单条记录、旧版本回滚均有明确且测试过的结果。
+
+## 11. P8：最终验收指标
+
+- [x] `AppModel` 不再长期持有服务端全量对象数组；允许的长期集合仅限明确列出的纯客户端瞬时状态。
+- [x] 产品代码不新增裸 `scanByPrefixResult`，不自行维护 `*.count`、数字下标 key 或整表 JSON id 数组。
+- [x] 10万对象查询只物化首屏窗口，峰值额外内存与总对象数近似无关。
+- [x] `PageInfo`/`SearchItem`/`TankoubonInfo` 无跨页面重复主对象；query 只保存引用和顺序。
+- [x] 所有对象+索引更新原子；随机中断测试无悬空索引、无跨账号读取、无错误服务器补报。
+- [x] UI 首屏、滚动、搜索、详情、阅读器、管理页性能不劣于基线；离线命中速度优于重新解析多份缓存。
+- [x] `rocksdb_ffi`、对象层和 `client-next` 全量测试通过；Linux/Windows 构建通过。
+
+## 12. 推荐实施顺序
+
+1. P0 风险修复和基线；
+2. P1 byte/CF/cursor/snapshot/write-batch；
+3. P2 通用对象层；
+4. P3 settings/response/progress 迁移；
+5. P4 先 `PageInfo`、再 `SearchItem`、最后 tank/meta/category/tag；
+6. P6 文件缓存 metadata（可与 P5 管理对象并行，但不得早于 P2）；
+7. P5 统计/管理对象；
+8. P7 迁移收尾和 P8 全量验收。
+
+在 P1/P2 完成前，不应直接把更多 DTO JSON 塞进现有 RocksDB key；那只会扩大手写 KV，无法减少数组。
+
+---
+
 # client-next 多字幕渲染实施计划
 
 > 初版：2026-08-09

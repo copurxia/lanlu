@@ -2,7 +2,8 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, TankoubonInfo, SearchItem, PageInfo}
+import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, ArchivePageView, TankoubonInfo, SearchItem,
+    SearchItemProjectionView, SearchItemView}
 import std.collection.ArrayList
 
 // 详情页（档案 / 合集共用骨架；原型 home-detail-redesign.html「档案详情/合集详情」视图）：
@@ -717,7 +718,7 @@ private func oneArcid(id: String): ArrayList<String> {
 
 // 选择模式批量操作栏：已选计数 + 收藏/取消收藏/从合集移除/删除/退出。
 // 移除/删除为 destructive 动作，先落确认框（open 状态由 tankDetailBody 持有）。
-private func tankMemberBatchBar(model: AppModel, members: ArrayList<SearchItem>, removeOpen: State<Bool>,
+private func tankMemberBatchBar(model: AppModel, members: SearchItemView, removeOpen: State<Bool>,
     batchDelOpen: State<Bool>, batchEditOpen: State<Bool>): Unit {
     let elev = if (model.isLight()) {
         LANLU_L_PANEL
@@ -774,7 +775,7 @@ private func tankMemberBatchBar(model: AppModel, members: ArrayList<SearchItem>,
         .background(elev, 10.vp)
 }
 
-private func selectedAll(model: AppModel, members: ArrayList<SearchItem>, predicate: (SearchItem) -> Bool): Bool {
+private func selectedAll(model: AppModel, members: SearchItemView, predicate: (SearchItem) -> Bool): Bool {
     if (model.selectedCount() == 0) {
         return false
     }
@@ -827,13 +828,13 @@ class MemberFilterMemo {
     var filter: String = ""
     var revision: UInt64 = 0
     var inited: Bool = false
-    var result: Array<SearchItem> = []
+    var result: SearchItemProjectionView = SearchItemProjectionView.all(SearchItemView.empty())
 }
 
 // 成员即时筛选：标题包含（ASCII 大小写不敏感；空串返回全部）。
 // 按 (tankFilter.value, tankMembers.revision) memo：成员列表只在 dispatch 整体重赋值时
 // 推进代次（model 契约），筛选词与成员都未变时直接返回上次结果（评审 #9）。
-private func filteredMembers(model: AppModel, memo: MemberFilterMemo): Array<SearchItem> {
+private func filteredMembers(model: AppModel, memo: MemberFilterMemo): SearchItemProjectionView {
     let filter = model.tankFilter.value.trimAscii()
     let revision = model.tankMembers.revision
     if (memo.inited && memo.filter == filter && memo.revision == revision) {
@@ -841,16 +842,12 @@ private func filteredMembers(model: AppModel, memo: MemberFilterMemo): Array<Sea
     }
     let members = model.tankMembers.value
     let result = if (filter.size == 0) {
-        members.toArray()
+        SearchItemProjectionView.all(members)
     } else {
         let lf = filter.toAsciiLower()
-        let list = ArrayList<SearchItem>()
-        for (it in members) {
-            if (it.title.toAsciiLower().contains(lf) || it.tagsCsv.toAsciiLower().contains(lf)) {
-                list.add(it)
-            }
-        }
-        list.toArray()
+        SearchItemProjectionView.filter(members, {
+            it => it.title.toAsciiLower().contains(lf) || it.tagsCsv.toAsciiLower().contains(lf)
+        })
     }
     memo.filter = filter
     memo.revision = revision
@@ -860,7 +857,7 @@ private func filteredMembers(model: AppModel, memo: MemberFilterMemo): Array<Sea
 }
 
 // 已读完成员数（progress >= pagecount），侧栏「已读完 N 个」。
-private func countFinishedMembers(members: ArrayList<SearchItem>): Int64 {
+private func countFinishedMembers(members: SearchItemView): Int64 {
     var n: Int64 = 0
     for (it in members) {
         if (it.pagecount > 0 && it.progress >= it.pagecount) {
@@ -953,7 +950,7 @@ private func joinMeta(a: String, b: String): String {
 
 // 档案基础信息行（原型 info-list：文件名/大小/页数/路径/来源/发布日期/添加时间/最近阅读；
 // 「更新时间」「状态」「文件类型」为保留的额外行，置尾）。路径/来源无数据即隐藏。
-private func archiveInfoRows(model: AppModel, m: ArchiveMeta, pages: ArrayList<PageInfo>): Array<(String, String)> {
+private func archiveInfoRows(model: AppModel, m: ArchiveMeta, pages: ArchivePageView): Array<(String, String)> {
     let rows = ArrayList<(String, String)>()
     if (m.filename.size > 0) {
         rows.add((model.t("detail.filename"), m.filename))
@@ -993,25 +990,15 @@ private func archiveInfoRows(model: AppModel, m: ArchiveMeta, pages: ArrayList<P
 }
 
 // 页数行：「48（图像 44 · 视频 2 · 音频 1 · 文本 1）」；无页表或无统计时仅总页数。
-private func pageStatText(model: AppModel, pagecount: Int64, pages: ArrayList<PageInfo>): String {
+private func pageStatText(model: AppModel, pagecount: Int64, pages: ArchivePageView): String {
     if (pages.size == 0) {
         return "${pagecount}"
     }
-    // 与 net.statPages 同口径按 pageType 计数；此处直接遍历 ArrayList——页表可达千级，
-    // 若为调 statPages（签名要 Array）每帧 toArray 一次，恰是评审 #29 要消掉的拷贝。
-    var image: Int64 = 0
-    var video: Int64 = 0
-    var audio: Int64 = 0
-    var html: Int64 = 0
-    for (p in pages) {
-        match (p.pageType) {
-            case "image" => image += 1
-            case "video" => video += 1
-            case "audio" => audio += 1
-            case "html" => html += 1
-            case _ => ()
-        }
-    }
+    // 统计随 RocksDB 页表快照一次生成；视图重建不再遍历并解码整本页表。
+    let image = pages.stats.image
+    let video = pages.stats.video
+    let audio = pages.stats.audio
+    let html = pages.stats.html
     let parts = ArrayList<String>()
     if (image > 0) {
         parts.add(model.t("detail.imageCount", params: [("count", "${image}")]))

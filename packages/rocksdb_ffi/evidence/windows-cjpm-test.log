@@ -1,0 +1,70 @@
+0024:fixme:ntdll:NtQuerySystemInformation info_class SYSTEM_PERFORMANCE_INFORMATION
+[?25l[0J7[;r8
+
+
+
+[4F7[9999E[3F📦 group rocksdb_ffi                   0% [90m[[0m[90m--------------------[0m[90m][0m [32m    [0m (00:00:00)
+🧪 test TestCase_binaryKeysAndValuesRoundTrip.binaryKeysAndVa...      (00:00:00)
+
+passed: 0, failed: 0                  0% [90m[[0m[90m--------------------[0m[90m][0m  0/10 (00:00:00) 80024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8D1548, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000EC, 5, 00007FFFFF8CF458, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E8, 5, 00007FFFFF8D5D68, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000D0, 5, 00007FFFFF8D1738, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8CF648, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000D0, 5, 00007FFFFF8D1408, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8CF318, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D5C28, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000D0, 5, 00007FFFFF8D0FA8, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8CEEB8, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D5708, 8
+[0J7[;r8
+
+
+
+[4F7[9999E[3F📦 group rocksdb_ffi                  40% [90m[[0m[32m||[0m[32m||[0m[32m||[0m[32m||[0m[90m------------[0m[90m][0m [32m    [0m (00:00:00)
+🧪 test TestCase_writeBatchAndDeletePrefixAreAtomicOperations...      (00:00:00)
+
+passed: [32m4[0m, failed: 0                 40% [90m[[0m[32m||[0m[32m||[0m[32m||[0m[32m||[0m[90m------------[0m[90m][0m  4/10 (00:00:00) 80024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D1658, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CF568, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8D6338, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D0928, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CE838, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8D4FA8, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000EC, 5, 00007FFFFF8CE838, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CE838, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D1D08, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CFC18, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8D6238, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D1728, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CF638, 8
+0074:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007E07B2ED6958, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000DC, 5, 00007FFFFF8D1908, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E4, 5, 00007FFFFF8CF818, 8
+0024:fixme:file:SetFileInformationByHandle 00000000000000E0, 5, 00007FFFFF8D6128, 8
+compiled rocksdb 11.1
+[0J7[;r8[?25h--------------------------------------------------------------------------------------------------
+TP: [33mrocksdb_ffi[0m, time elapsed: 573299000 ns, RESULT:
+    TCS: [33mTestCase_binaryKeysAndValuesRoundTrip[0m, time elapsed: 295644100 ns, RESULT:
+    [[32m PASSED [0m] CASE: binaryKeysAndValuesRoundTrip (295460000 ns)
+    TCS: [33mTestCase_mergeFailsBeforeCallingNativeApiWithoutOperator[0m, time elapsed: 19441100 ns, RESULT:
+    [[32m PASSED [0m] CASE: mergeFailsBeforeCallingNativeApiWithoutOperator (19337400 ns)
+    TCS: [33mTestCase_binaryMultiGetPreservesOrderAndMissingValues[0m, time elapsed: 22250100 ns, RESULT:
+    [[32m PASSED [0m] CASE: binaryMultiGetPreservesOrderAndMissingValues (22156600 ns)
+    TCS: [33mTestCase_prefixCursorSupportsBoundsLimitAndReverse[0m, time elapsed: 22574600 ns, RESULT:
+    [[32m PASSED [0m] CASE: prefixCursorSupportsBoundsLimitAndReverse (22436900 ns)
+    TCS: [33mTestCase_writeBatchAndDeletePrefixAreAtomicOperations[0m, time elapsed: 28883600 ns, RESULT:
+    [[32m PASSED [0m] CASE: writeBatchAndDeletePrefixAreAtomicOperations (28759300 ns)
+    TCS: [33mTestCase_columnFamiliesReopenSnapshotAndOperationsAreConsistent[0m, time elapsed: 112092300 ns, RESULT:
+    [[32m PASSED [0m] CASE: columnFamiliesReopenSnapshotAndOperationsAreConsistent (111939800 ns)
+    TCS: [33mTestCase_transactionUncommittedCloseRollsBack[0m, time elapsed: 22840700 ns, RESULT:
+    [[32m PASSED [0m] CASE: transactionUncommittedCloseRollsBack (22655300 ns)
+    TCS: [33mTestCase_concurrentPutGetFromMultipleThreads[0m, time elapsed: 25754700 ns, RESULT:
+    [[32m PASSED [0m] CASE: concurrentPutGetFromMultipleThreads (25574200 ns)
+    TCS: [33mTestCase_oversizedLengthConversionIsRejected[0m, time elapsed: 22813800 ns, RESULT:
+    [[32m PASSED [0m] CASE: oversizedLengthConversionIsRejected (22705400 ns)
+    TCS: [33mTestCase_compiledRocksDbVersionIsProbed[0m, time elapsed: 831900 ns, RESULT:
+    [[32m PASSED [0m] CASE: compiledRocksDbVersionIsProbed (734700 ns)
+Summary: TOTAL: 10
+    [32mPASSED[0m: 10, [32mSKIPPED[0m: 0, ERROR: 0
+    [31mFAILED[0m: 0
+--------------------------------------------------------------------------------------------------

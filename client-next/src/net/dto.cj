@@ -358,7 +358,7 @@ private func parseCoverFromAssetsObject(b: Array<UInt8>): Int64 {
 }
 
 public class SearchPage {
-    public var items: ArrayList<SearchItem> = ArrayList<SearchItem>()
+    public var items: SearchItemView = SearchItemView.empty()
     public var page: Int64 = 1
     public var pageSize: Int64 = 0
     public var recordsFiltered: Int64 = 0
@@ -367,6 +367,7 @@ public class SearchPage {
 
 public func parseSearchPage(body: String): SearchPage {
     let res = SearchPage()
+    let items = ArrayList<SearchItem>()
     let r = readerOf(body)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -377,7 +378,7 @@ public func parseSearchPage(body: String): SearchPage {
                         case "data" =>
                             r.startArray()
                             while (r.peek() != EndArray) {
-                                res.items.add(SearchItem.fromJson(r))
+                                items.add(SearchItem.fromJson(r))
                             }
                             r.endArray()
                         case "page" => res.page = fastInt64(r.readValueBytes(), 1)
@@ -392,6 +393,7 @@ public func parseSearchPage(body: String): SearchPage {
             case _ => throw Exception("invalid json")
         }
     }
+    res.items = SearchItemView.memory("parsed", "", items)
     return res
 }
 

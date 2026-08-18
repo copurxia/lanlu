@@ -3,7 +3,7 @@ package lanlu_client_next.ui
 import cui.*
 import fontkit_ffi.systemFonts
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{SearchItem, TrendPoint, PasskeyItem, SessionItem, TokenItem}
+import lanlu_client_next.net.{SearchItem, SearchItemView, TrendPoint, PasskeyItem, SessionItem, TokenItem}
 import std.collection.ArrayList
 
 // 设置页（原型 settings-redesign.html）：左 224vp 分类导航 + 右侧内容页。
@@ -516,7 +516,7 @@ class TrendLineChart <: Widget {
 // 最近活动列表（原型 .s-row：封面 + 标题 + 页数进度）。
 // 异步列表必须 ForEach(key) 而非裸 for：无 key 的子节点在数据到达后的重建中
 // 会按位置错位，出现行跑出卡片、按钮错位的假象（真机实测确认）。
-private func recentList(model: AppModel, items: ArrayList<SearchItem>, emptyText: String): Unit {
+private func recentList(model: AppModel, items: SearchItemView, emptyText: String): Unit {
     if (items.size == 0) {
         Label(emptyText).fontSize(12.fp).muted()
         return

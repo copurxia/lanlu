@@ -2,7 +2,8 @@ package lanlu_client_next.ui
 
 import cui.*
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{SearchItem, TankoubonInfo, PageInfo, percentEncode}
+import lanlu_client_next.net.{ArchivePageView, SearchItem, SearchItemProjectionView, SearchItemView, TankoubonInfo,
+    TankoubonView, PageInfo, percentEncode}
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.fs.{exists, Path}
 import std.math.{cos, sin}
@@ -1772,8 +1773,8 @@ public func sectionHeader(title: String, trailing: () -> Unit): Unit {
 // 横排卡片行（原型 .card-row）：横向滚动（滚轮/滑块齐备），只物化视口附近列；
 // 间距 14vp，行高由调用方按卡片规格给定。子项 key/卡片按条目类型分派（聚合合辑
 // 条目的 arcid 为空，直接用会撞 key 闪退，见 searchItemKey）。
-// items 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
-public func cardRow(model: AppModel, rowKey: String, items: ArrayList<SearchItem>, coverW: Float32, stripH: Float32,
+// items 直接持 RocksDB-backed view 引用，LazyRow 仅按可见 rank 解码热点对象。
+public func cardRow(model: AppModel, rowKey: String, items: SearchItemView, coverW: Float32, stripH: Float32,
     recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
     LazyRow(items.size, coverW, spacing: 14.0, key: {i => searchItemKey(items[i])}, id: "browse:${rowKey}") {
         i =>
@@ -2592,25 +2593,47 @@ public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId:
     recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
     let items = ArrayList<TankCardItem>()
     for (t in tanks) {
-        let c = TankCardItem()
-        c.id = t.id
-        c.title = t.name
-        c.description = t.description
-        // StringBuilder 拼 CSV：String.join 要求 Array，会为每个合集每帧 toArray 一次标签表。
-        let csv = StringBuilder()
-        for (i in 0..t.tags.size) {
-            if (i > 0) {
-                csv.append(",")
-            }
-            csv.append(t.tags[i])
-        }
-        c.tagsCsv = csv.toString()
-        c.coverAssetId = t.coverAssetId
-        c.archiveCount = t.archiveCount
-        c.readPct = tankReadPct(t)
-        c.isfavorite = t.isfavorite
-        items.add(c)
+        items.add(tankCardItem(t))
     }
+    renderTankCardRow(model, items, rowId, recommendationScene, seedType, seedId)
+}
+
+// RocksDB-backed 版本：按 rank 从有界视图取合集，不复制全量对象数组。
+public func tankCardRow(model: AppModel, tanks: TankoubonView, rowId: String,
+    recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
+    let items = ArrayList<TankCardItem>()
+    for (i in 0..tanks.size) {
+        match (tanks.itemAt(i)) {
+            case Some(t) => items.add(tankCardItem(t))
+            case None => ()
+        }
+    }
+    renderTankCardRow(model, items, rowId, recommendationScene, seedType, seedId)
+}
+
+private func tankCardItem(t: TankoubonInfo): TankCardItem {
+    let c = TankCardItem()
+    c.id = t.id
+    c.title = t.name
+    c.description = t.description
+    // StringBuilder 拼 CSV：String.join 要求 Array，会为每个合集每帧 toArray 一次标签表。
+    let csv = StringBuilder()
+    for (i in 0..t.tags.size) {
+        if (i > 0) {
+            csv.append(",")
+        }
+        csv.append(t.tags[i])
+    }
+    c.tagsCsv = csv.toString()
+    c.coverAssetId = t.coverAssetId
+    c.archiveCount = t.archiveCount
+    c.readPct = tankReadPct(t)
+    c.isfavorite = t.isfavorite
+    return c
+}
+
+private func renderTankCardRow(model: AppModel, items: ArrayList<TankCardItem>, rowId: String,
+    recommendationScene: String, seedType: String, seedId: String): Unit {
     LazyRow(items.size, REL_COVER_W, spacing: 14.0, key: {i => items[i].id}, id: rowId) {
         i =>
             let item = items[i]
@@ -2665,8 +2688,8 @@ public func pageTypeIcon(pageType: String): ?IconName {
 
 // 页面预览卡体：按 model.pageViewIndex（0=缩略图 1=列表 2=树）切换；
 // readUpTo 为已读页码（≤ 该页码的页半透明）；点击页进阅读器对应页。
-// pages 直接持 model 的 ArrayList 引用（只读、随帧释放），避免每帧 toArray 全量拷贝。
-public func pagePreview(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
+// pages 按 rank 从 RocksDB-backed view 取当前可见对象，避免长期保留全量 PageInfo 数组。
+public func pagePreview(model: AppModel, arcid: String, pages: ArchivePageView, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     if (pages.size == 0) {
         return
@@ -2682,7 +2705,7 @@ public func pagePreview(model: AppModel, arcid: String, pages: ArrayList<PageInf
 
 // 缩略图态（原型 .pv-grid）：auto-fill minmax(96px,1fr) → 列数按主列宽现算；
 // 单元格 16:10，左上页码 pill，右上媒体类型图标，已读半透明。
-private func pvGrid(model: AppModel, arcid: String, pages: ArrayList<PageInfo>, readUpTo: Int64,
+private func pvGrid(model: AppModel, arcid: String, pages: ArchivePageView, readUpTo: Int64,
     onOpenPage: (Int64) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0 // 减去 d-card 两侧 18vp 内边距
     var cols = if (w <= 0.0) {
@@ -2815,7 +2838,7 @@ private func pvThumb(model: AppModel, arcid: String, no: Int64, page: PageInfo, 
 }
 
 // 列表态（原型 .pv-list .pv-row）：页码右对齐定宽 + 文件名截断 + 类型图标，已读半透明。
-private func pvList(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
+private func pvList(model: AppModel, pages: ArchivePageView, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
     let contentH = Float32(pages.size) * PAGE_PREVIEW_ROW_H
     LazyList(pages.size, {_ => PAGE_PREVIEW_ROW_H}, id: "pv-list", key: {i => "page:${i}"}) {
         i =>
@@ -2834,7 +2857,7 @@ private class PagePreviewTreeRow {
     var pageIndex: Int64 = 0
 }
 
-private func pvTree(model: AppModel, pages: ArrayList<PageInfo>, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
+private func pvTree(model: AppModel, pages: ArchivePageView, readUpTo: Int64, onOpenPage: (Int64) -> Unit): Unit {
     // 预分组：目录 → 页码列表（保持原顺序）。
     let dirs = ArrayList<String>()
     let grouped = HashMap<String, ArrayList<Int64>>()
@@ -2971,7 +2994,7 @@ private func pageFileName(p: PageInfo): String {
 // 网格态：auto-fill minmax(140px,1fr)；卡片同首页规格，悬停提供详情/收藏/多选图标按钮。
 // onEnterSelection：hover 浮层「多选」入口回调（进入选择模式并选中该项；tank 详情由
 // 调用方顺带记录选择归属，见 detail_view.detailSelectionOwner）。
-public func memberGridContent(model: AppModel, members: Array<SearchItem>, onEnterSelection: (String) -> Unit,
+public func memberGridContent(model: AppModel, members: SearchItemProjectionView, onEnterSelection: (String) -> Unit,
     onRemove: (String) -> Unit): Unit {
     let w = model.detailWidth.value - 36.0
     var cols = if (w <= 0.0) {
@@ -3078,7 +3101,7 @@ private let MEMBER_LIST_MAX_H: Float32 = 736.0
 // 选择模式：行首勾选图标位、点击 = 切换选中（而非打开详情）、选中行铺 accentSoft 高亮底。
 // 非选择模式：序号位让位给行首勾选圆圈（frontend 列表项 hover 勾选入口），点击 = 进入
 // 选择模式并选中本行（onEnterSelection，tank 详情由调用方记录选择归属）。
-public func memberListContent(model: AppModel, members: Array<SearchItem>, onEnterSelection: (String) -> Unit,
+public func memberListContent(model: AppModel, members: SearchItemProjectionView, onEnterSelection: (String) -> Unit,
     onRemove: (String) -> Unit): Unit {
     let light = model.isLight()
     let accent = if (light) {

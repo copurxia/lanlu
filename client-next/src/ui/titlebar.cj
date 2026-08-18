@@ -881,7 +881,7 @@ private class UserMenuChip <: Widget {
         ctx.renderer.strokeRoundedRect(shell.inset(0.5), 9.5, Pen(width: 1.0, color: userMenuAlpha(border, progress)))
         ctx.renderer.pushClip(shell)
         for (i in 0..model.settings.servers.size) {
-            let server = model.settings.servers[i]
+            let server = model.settings.servers.at(i)
             let row = serverRowRect(shell, i)
             let current = server.id == model.settings.activeServerId
             if (i == serverHighlight.value && !current) {
@@ -1067,7 +1067,7 @@ private class UserMenuChip <: Widget {
 
     private func firstSwitchableServer(): Int64 {
         for (i in 0..model.settings.servers.size) {
-            if (model.settings.servers[i].id != model.settings.activeServerId) {
+            if (model.settings.servers.at(i).id != model.settings.activeServerId) {
                 return i
             }
         }
@@ -1091,7 +1091,7 @@ private class UserMenuChip <: Widget {
             } else {
                 (next + count + delta) % count
             }
-            if (model.settings.servers[next].id != model.settings.activeServerId) {
+            if (model.settings.servers.at(next).id != model.settings.activeServerId) {
                 serverHighlight.value = next
                 return
             }
@@ -1102,7 +1102,7 @@ private class UserMenuChip <: Widget {
         if (index < 0 || index >= model.settings.servers.size) {
             return
         }
-        let server = model.settings.servers[index]
+        let server = model.settings.servers.at(index)
         if (server.id == model.settings.activeServerId) {
             return
         }

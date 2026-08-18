@@ -4,6 +4,14 @@
   description = "Minimal RocksDB C API bindings"
   version = "0.1.0"
   output-type = "static"
-  link-option = "-lrocksdb"
 
 [dependencies]
+
+[ffi.c]
+lanlu_rocksdb_bridge = { path = "./native" }
+
+[target.x86_64-unknown-linux-gnu]
+link-option = "-L ./native -llanlu_rocksdb_bridge -lrocksdb"
+
+[target.x86_64-w64-mingw32]
+link-option = "-L ./native -llanlu_rocksdb_bridge -lrocksdb"

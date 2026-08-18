@@ -121,10 +121,22 @@ SDL_VIDEODRIVER=dummy \
 
 | 内容 | 位置 |
 |------|------|
-| 客户端设置（RocksDB 单键 JSON 快照，服务器、会话、主题、阅读选项） | `~/.config/lanlu-client-next/kv/` |
+| 客户端设置（RocksDB 单键 JSON 快照，服务器、会话、主题、阅读选项；含独立 schema version） | `~/.config/lanlu-client-next/kv/` |
 | 图片磁盘缓存（按服务器地址哈希分目录） | `~/.cache/lanlu-client-next/` |
 | 内嵌字幕缓存（版本化、校验、原子写，按服务器隔离） | `~/.cache/lanlu-client-next/<server-hash>/subtitles/` |
-| 离线响应/阅读进度缓存（RocksDB，按服务器哈希分前缀；离线阅读回退 + 进度补报） | `~/.cache/lanlu-client-next/offline-kv/` |
+| 离线响应/阅读进度/对象缓存（RocksDB，按服务器哈希与账号 scope 隔离；离线阅读回退 + 进度补报） | `~/.cache/lanlu-client-next/offline-kv/` |
+
+### 数据目录、账户隔离与迁移
+
+- **两个生命周期不同的 RocksDB 实例**：设置 DB（`~/.config/lanlu-client-next/kv/`）不随“清理缓存”删除；
+  缓存 DB（`~/.cache/lanlu-client-next/offline-kv/`）可整体清理。设置 DB 绝不因缓存重建或误操作被覆盖。
+- **账户隔离**：缓存 key 全部包含不可逆 account scope（`offlineAccountScope(profileId, username, token)`），
+  同服务器切换账号不会读取上一账号的响应、页表或进度缓存；登出/换账号不跨 scope 回退。
+- **schema 版本与迁移**：设置 DB 与缓存 DB 各自维护 `db-schema` 版本（meta CF）；迁移按步骤执行并写
+  `migrate:{step}` marker，任一步骤崩溃后重跑直接跳过已完成步骤（幂等）。旧 `resp:`/`progress:` 前缀
+  缓存读取时自动搬运到对象格式并删除旧 key。
+- **故障恢复**：缓存迁移失败允许丢弃并回源（在线重新解析）；设置迁移失败绝不会静默回默认并覆盖旧数据。
+  `clearServer` 只清当前服务器的离线响应/进度/对象缓存，不影响其他服务器与设置库。
 
 ## 项目结构
 

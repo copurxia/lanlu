@@ -2,7 +2,8 @@ package lanlu_client_next
 
 import cui.stagePixelImage
 import lanlu_client_next.app.*
-import lanlu_client_next.net.{CategoryItem, SearchItem, ArchiveMeta, TankoubonInfo, PageInfo, ServerInfo,
+import lanlu_client_next.net.{ArchivePageView, CategoryItem, SearchItem, SearchItemView, ArchiveMeta, TankoubonInfo,
+    TankoubonView, PageInfo, ServerInfo,
     UserStats, TrendPoint, CloudTag, AdminUserItem, AdminCategoryItem, AdminTagItem, TagListPage,
     SmartFilterItem, TaskRecord, TaskListPage, CronTask, CronStatus, PluginItem, SessionItem, TokenItem,
     PasskeyItem, TotpStatus}
@@ -140,7 +141,7 @@ private func seedShelf(model: AppModel): Unit {
             favorites[i].archiveCount = 4 + i
         }
     }
-    model.shelfFavorites.value = favorites
+    model.shelfFavorites.value = SearchItemView.memory("snapshot:favorites", "", favorites)
 
     let history = seedItems(model, 24, 800)
     let now = DateTime.now().toUnixTimeStamp().toSeconds()
@@ -153,7 +154,7 @@ private func seedShelf(model: AppModel): Unit {
             now - (i + 2) * 86400
         }
     }
-    model.shelfHistory.value = history
+    model.shelfHistory.value = SearchItemView.memory("snapshot:history", "", history)
     if (harnessHasArg("--shelf-history")) {
         model.shelfTab.value = 1
     }
@@ -201,7 +202,7 @@ private func seedBrowseMode(model: AppModel): Unit {
 private func seedSearchMode(model: AppModel): Unit {
     model.searchText.value = "魔法"
     model.query.filter = "魔法"
-    model.items.value = seedItems(model, 18, 300)
+    model.items.value = SearchItemView.memory("snapshot:items", "", seedItems(model, 18, 300))
     model.recordsTotal.value = 42
     model.currentPage.value = 1
 }
@@ -211,7 +212,7 @@ private func makeRow(key: String, title: String, catid: String, items: ArrayList
     r.key = key
     r.title = title
     r.catid = catid
-    r.items = items
+    r.items = SearchItemView.memory("snapshot:row:${key}", "", items)
     r.requested = true
     r.loading = false
     r.failed = false
@@ -373,16 +374,16 @@ private func seedArchiveDetail(model: AppModel): Unit {
         let page = pages[i]
         stageCover(model, "page:ARC_D1:${page.sourcePath}", i + 1)
     }
-    model.detailPages.value = pages
+    model.detailPages.value = ArchivePageView.memory("ARC_D1", pages)
 
     // 所属合集 ×2（一个带 64% 进度）
     let tanks = ArrayList<TankoubonInfo>()
     tanks.add(makeTank(model, "TANK_P1", "某个合集", 9002, 12, 486, 311.0))
     tanks.add(makeTank(model, "TANK_P2", "某系列 总集篇", 9003, 8, 320, 0.0))
-    model.parentTanks.value = tanks
+    model.parentTanks.value = TankoubonView.memory("snapshot:parent-tanks", "", tanks)
 
     // 相关推荐 ×6（混合卡片态：进度/NEW/收藏交错）
-    model.relatedItems.value = seedItems(model, 6, 700)
+    model.relatedItems.value = SearchItemView.memory("snapshot:related", "", seedItems(model, 6, 700))
 
     stageBackdrop("backdrop:ARC_D1", 11)
 }
@@ -430,13 +431,13 @@ private func seedTankDetail(model: AppModel): Unit {
         it.isnew = (i == 11)
         members.add(it)
     }
-    model.tankMembers.value = members
+    model.tankMembers.value = SearchItemView.memory("snapshot:tank-members", "", members)
 
     let related = ArrayList<TankoubonInfo>()
     related.add(makeTank(model, "TANK_R1", "同作者精选集", 9201, 6, 210, 80.0))
     related.add(makeTank(model, "TANK_R2", "某系列 总集篇", 9202, 8, 320, 0.0))
     related.add(makeTank(model, "TANK_R3", "冬日主题合集", 9203, 10, 400, 160.0))
-    model.tankRelated.value = related
+    model.tankRelated.value = TankoubonView.memory("snapshot:tank-related", "", related)
 
     stageBackdrop("backdrop:tank:TANK_1", 5)
 }
@@ -527,11 +528,11 @@ private func seedSettings(model: AppModel): Unit {
     let r1 = SearchItem(); r1.arcid = "seed-r1"; r1.title = "(C105) [Starlight] Summer Days"; r1.pagecount = 320; r1.progress = 128
     let r2 = SearchItem(); r2.arcid = "seed-r2"; r2.title = "[Alpha] Illustration Works 2025"; r2.pagecount = 64; r2.progress = 64
     read.add(r1); read.add(r2)
-    model.recentRead.value = read
+    model.recentRead.value = SearchItemView.memory("snapshot:recent-read", "", read)
     let fav = ArrayList<SearchItem>()
     let f1 = SearchItem(); f1.arcid = "seed-f1"; f1.title = "[Studio Nekome] 画集：青の記憶"; f1.pagecount = 128; f1.progress = 0
     fav.add(f1)
-    model.recentFav.value = fav
+    model.recentFav.value = SearchItemView.memory("snapshot:recent-fav", "", fav)
 
     // 管理板块：用户列表（admin 管理员 / alice 普通用户）。
     let users = ArrayList<AdminUserItem>()
@@ -740,7 +741,7 @@ private func seedReader(model: AppModel): Unit {
     hp.pageType = "html"
     hp.title = "第14章 转折之时（文字）"
     pages.add(hp)
-    model.pages.value = pages
+    model.pages.value = ArchivePageView.memory("ARC_R1", pages)
     model.readerArcid = "ARC_R1"
     model.reader.open("ARC_R1", 11) // 0 基 → 第 12 页
     model.reader.setPages(pages)

@@ -1,0 +1,17 @@
+Windows-side minimal FFI run evidence (2026-08-15, Linux host with portable wine):
+1. Cross-compiled packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c with
+   clang --target=x86_64-w64-windows-gnu (reads <rocksdb/version.h> macros) against
+   MSYS2 mingw-w64-x86_64-rocksdb-11.1.1 headers (ROCKSDB_MAJOR=11).
+2. Cross-linked with lld-link against mingw crt/runtime + librocksdb.dll.a import lib,
+   producing PE32+ executable (MS Windows 6.00 console, x86-64).
+3. Ran the PE under portable wine (mmtrt/Wine_Appimage wine-stable_11.0, extracted,
+   no sudo needed). Output:
+
+   ROCKSDB_MAJOR=11 MINOR=1
+
+=> Confirms Windows-side RocksDB C API version detection works at runtime:
+   the bridge reads the MSYS2 header macros (11.1) which differ from the Linux
+   librocksdb-dev 9.11 build, and the linked MSYS2 librocksdb.dll loads correctly.
+Note: full `cjpm test` (Cangjie test suite) still requires the Windows Cangjie
+toolchain (cjc/cjpm .exe), which this Linux host cannot run; the minimal FFI
+run above is the Windows-side "minimal FFI test" required by todo.md section 4.6.

@@ -1,7 +1,7 @@
 package lanlu_client_next.net
 
 import qwest.*
-import std.collection.{ArrayList, HashMap}
+import std.collection.ArrayList
 import std.fs.{Directory, File, FileInfo, OpenMode, Path, exists}
 import std.io.OutputStream
 import std.sync.{Mutex}
@@ -48,6 +48,8 @@ public class LanluApi {
     // 离线缓存（读穿透回退 + 阅读进度队列）；None = 离线能力关闭（探测用实例不传）。
     private let offlineCache: ?OfflineCache
     private let serverHash: String
+    // 本地 profile id + 服务端账号身份的不可逆摘要；与 serverHash 共同隔离账号缓存。
+    private var accountScope: String
     // 离线回退命中时的一次性通知回调（model 用 toast 提示）。
     private let onOfflineFallback: ?(() -> Unit)
 
@@ -56,10 +58,12 @@ public class LanluApi {
         connectTimeout!: ?Duration = None,
         offlineCache!: ?OfflineCache = None,
         serverHash!: String = "",
+        accountScope!: String = "",
         onOfflineFallback!: ?(() -> Unit) = None
     ) {
         this.offlineCache = offlineCache
         this.serverHash = serverHash
+        this.accountScope = accountScope
         this.onOfflineFallback = onOfflineFallback
         var b = baseUrl.trimAscii()
         while (b.endsWith("/")) {
@@ -108,6 +112,10 @@ public class LanluApi {
 
     public func setToken(token: String): Unit {
         store.set(token)
+    }
+    // 登录成功拿到服务端规范用户名后、API 实例发布给其他线程前更新缓存 scope。
+    public func setAccountScope(scope: String): Unit {
+        accountScope = scope
     }
     public func close(): Unit {
         client.close()
@@ -167,6 +175,20 @@ public class LanluApi {
         result
     }
 
+    // mutation 成功后按 invalidation registry 精确删除/过期相关响应缓存；
+    // 白名单与失效前缀集中在 response_policy.cj，不在各 API 方法散落 delete key 逻辑。
+    private func invalidateResponses(kind: String, target: String): Unit {
+        try {
+            match (offlineCache) {
+                case Some(cache) =>
+                    for (prefix in invalidatedResponsePrefixes(kind, target)) {
+                        cache.deleteResponsePrefix(serverHash, accountScope, prefix)
+                    }
+                case None => ()
+            }
+        } catch (_: Exception) {}
+    }
+
     // 离线读穿透（GET 白名单端点专用）：在线成功返回原始 body 并写响应快照；
     // 网络类异常（连接失败/超时等，非 ApiException）时回退缓存，命中返回缓存 body 并触发
     // 一次性通知；未命中/缓存未开启原样重抛。ApiException（401/非 2xx）不触发回退。
@@ -183,7 +205,7 @@ public class LanluApi {
             let body = resp.text()
             try {
                 match (offlineCache) {
-                    case Some(c) => c.storeResponse(serverHash, path, body)
+                    case Some(c) => c.storeResponse(serverHash, accountScope, path, body)
                     case None => ()
                 }
             } catch (_: Exception) {}
@@ -194,7 +216,7 @@ public class LanluApi {
             // 网络类异常：尝试回退离线缓存。
             try {
                 match (offlineCache) {
-                    case Some(c) => match (c.getResponse(serverHash, path)) {
+                    case Some(c) => match (c.getResponse(serverHash, accountScope, path)) {
                         case Some(body) =>
                             match (onOfflineFallback) {
                                 case Some(f) => f()
@@ -270,7 +292,76 @@ public class LanluApi {
     }
 
     public func search(q: SearchQuery): SearchPage {
-        parseSearchPage(checkedBodyCached("/api/search${buildSearchQuery(q)}"))
+        let suffix = buildSearchQuery(q)
+        let page = parseSearchPage(checkedBodyCached("/api/search${suffix}"))
+        page.items = normalizeSearchItems("search:${suffix}", q.lang, page.items)
+        return page
+    }
+
+    /**
+     * Loads a large logical result in bounded HTTP pages and publishes one RocksDB-backed view.
+     */
+    public func searchAll(q: SearchQuery, chunkSize!: Int64 = 256): SearchPage {
+        let boundedChunk = min(512, max(1, chunkSize))
+        let logicalQuery = "search-all:${buildSearchQuery(q)}"
+        let result = SearchPage()
+        let fallback = ArrayList<SearchItem>()
+        var useStore = offlineCache.isSome()
+        var storedView: ?SearchItemView = None
+        var offset: Int64 = 0
+        var pageNumber: Int64 = 1
+        var expectedTotal: Int64 = 0
+        while (offset < MAX_SEARCH_ITEMS) {
+            q.page = pageNumber
+            q.pageSize = boundedChunk
+            let suffix = buildSearchQuery(q)
+            let page = parseSearchPage(checkedBodyCached("/api/search${suffix}"))
+            if (pageNumber == 1) {
+                result.recordsTotal = page.recordsTotal
+                result.recordsFiltered = page.recordsFiltered
+            }
+            if (useStore) {
+                let written = match (offlineCache) {
+                    case Some(cache) => cache.storeSearchItemPage(serverHash, accountScope, logicalQuery, q.lang,
+                        offset, pageNumber == 1, page.items)
+                    case None => None<SearchItemView>
+                }
+                match (written) {
+                    case Some(view) => storedView = Some(view)
+                    case None =>
+                        useStore = false
+                        match (offlineCache) {
+                            case Some(cache) => match (cache.openSearchItems(
+                                serverHash, accountScope, logicalQuery, q.lang)) {
+                                case Some(previous) => for (item in previous) { fallback.add(item) }
+                                case None => ()
+                            }
+                            case None => ()
+                        }
+                        for (item in page.items) { fallback.add(item) }
+                }
+            } else {
+                for (item in page.items) { fallback.add(item) }
+            }
+            offset += page.items.size
+            let expected = if (page.recordsFiltered > 0) { page.recordsFiltered } else { page.recordsTotal }
+            expectedTotal = expected
+            if (page.items.size < boundedChunk || (expected > 0 && offset >= expected)) {
+                break
+            }
+            pageNumber += 1
+        }
+        if (offset >= MAX_SEARCH_ITEMS && expectedTotal > offset) {
+            throw ApiException(0, "search item count exceeds safety limit")
+        }
+        result.page = 1
+        result.pageSize = offset
+        result.items = if (useStore) {
+            storedView ?? SearchItemView.empty(queryKey: logicalQuery, language: q.lang)
+        } else {
+            SearchItemView.memory(logicalQuery, q.lang, fallback)
+        }
+        return result
     }
 
     // 随机推荐：服务端没有 /api/search/random 路由（routes/api/search.cj 只注册 GET /api/search），
@@ -283,7 +374,35 @@ public class LanluApi {
         q.pageSize = count
         q.lang = lang
         q.groupbyTanks = groupbyTanks
-        parseSearchPage(checkedBodyCached("/api/search${buildSearchQuery(q)}"))
+        return search(q)
+    }
+
+    private func normalizeSearchItems(queryKey: String, language: String, items: SearchItemView): SearchItemView {
+        match (offlineCache) {
+            case Some(cache) => match (cache.storeSearchItems(
+                serverHash, accountScope, queryKey, language, items)) {
+                case Some(view) => return view
+                case None => ()
+            }
+            case None => ()
+        }
+        let fallback = ArrayList<SearchItem>()
+        for (item in items) {
+            fallback.add(item)
+        }
+        return SearchItemView.memory(queryKey, language, fallback)
+    }
+
+    private func normalizeTanks(queryKey: String, language: String, tanks: ArrayList<TankoubonInfo>): TankoubonView {
+        match (offlineCache) {
+            case Some(cache) => match (cache.storeTanks(
+                serverHash, accountScope, queryKey, language, TankoubonView.memory(queryKey, language, tanks))) {
+                case Some(view) => return view
+                case None => ()
+            }
+            case None => ()
+        }
+        return TankoubonView.memory(queryKey, language, tanks)
     }
 
     public func categories(): ArrayList<CategoryItem> {
@@ -301,10 +420,19 @@ public class LanluApi {
 
     public func updateArchiveMetadata(arcid: String, body: String): Unit {
         let _ = checked(client.put("/api/archives/${percentEncode(arcid)}/metadata").body(body).send())
+        invalidateResponses("archive-meta", arcid)
     }
 
-    public func files(arcid: String): ArrayList<PageInfo> {
-        parsePages(checkedBodyCached("/api/archives/${arcid}/files"))
+    public func files(arcid: String): ArchivePageView {
+        let pages = parsePages(checkedBodyCached("/api/archives/${arcid}/files"))
+        match (offlineCache) {
+            case Some(cache) => match (cache.storePages(serverHash, accountScope, arcid, pages)) {
+                case Some(view) => return view
+                case None => ()
+            }
+            case None => ()
+        }
+        return ArchivePageView.memory(arcid, pages)
     }
 
     public func assetBytes(assetId: Int64): Array<UInt8> {
@@ -398,14 +526,31 @@ public class LanluApi {
         }
     }
 
-    public func tagTranslations(lang: String, arcid!: String = "", tankid!: String = ""): HashMap<String, String> {
+    public func tagTranslations(lang: String, arcid!: String = "", tankid!: String = ""): TagTranslationView {
         var path = "/api/tags/translations?lang=${percentEncode(lang)}"
+        var scope = ""
         if (arcid.size > 0) {
             path = "${path}&arcid=${percentEncode(arcid)}"
+            scope = "archive:${arcid}"
         } else if (tankid.size > 0) {
             path = "${path}&tankoubon_id=${percentEncode(tankid)}"
+            scope = "tank:${tankid}"
         }
-        parseTagTranslationMap(checkedBodyCached(path))
+        let map = parseTagTranslationMap(checkedBodyCached(path))
+        let entries = ArrayList<(String, String)>()
+        for ((canonical, translated) in map) {
+            entries.add((canonical, translated))
+        }
+        let queryKey = "tag-translations:${scope}:${lang}"
+        match (offlineCache) {
+            case Some(cache) => match (cache.storeTagTranslations(
+                serverHash, accountScope, queryKey, lang, entries)) {
+                case Some(view) => return view
+                case None => ()
+            }
+            case None => ()
+        }
+        return TagTranslationView.memory(queryKey, lang, entries)
     }
 
     // 流式下载公共逻辑：401/状态码/错误体诊断语义与 checkedBytes 一致。
@@ -461,14 +606,17 @@ public class LanluApi {
 
     public func updateTankoubonMetadata(id: String, body: String): Unit {
         let _ = checked(client.put("/api/tankoubons/${percentEncode(id)}/metadata").body(body).send())
+        invalidateResponses("tank-meta", id)
     }
 
     public func deleteArchive(arcid: String): Unit {
         let _ = checked(client.delete("/api/archives/${percentEncode(arcid)}").send())
+        invalidateResponses("archive-delete", arcid)
     }
 
     public func deleteTankoubon(id: String): Unit {
         let _ = checked(client.delete("/api/tankoubons/${percentEncode(id)}").send())
+        invalidateResponses("tank-delete", id)
     }
 
     // 新建合集：PUT /api/tankoubons?name=X（name 在 query），响应为裸 {success, tankoubon_id}。
@@ -485,28 +633,31 @@ public class LanluApi {
     public func addTankMember(tankId: String, arcid: String): Unit {
         let _ = checkedMutation(
             client.put("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").body("").send())
+        invalidateResponses("tank-member", tankId)
     }
 
     public func removeTankMember(tankId: String, arcid: String): Unit {
         let _ = checkedMutation(
             client.delete("/api/tankoubons/${percentEncode(tankId)}/${percentEncode(arcid)}").send())
+        invalidateResponses("tank-member", tankId)
     }
 
     // 档案所属合集：GET /api/archives/:id/tankoubons，响应形态同合集列表。
-    public func listArchiveTankoubons(arcid: String, lang!: String = ""): ArrayList<TankoubonInfo> {
+    public func listArchiveTankoubons(arcid: String, lang!: String = ""): TankoubonView {
         let base = "/api/archives/${arcid}/tankoubons"
         let path = if (lang.size > 0) {
             "${base}?lang=${percentEncode(lang)}"
         } else {
             base
         }
-        parseTankoubonList(checkedBodyCached(path))
+        let queryKey = "archive-tanks:${arcid}:${lang}"
+        return normalizeTanks(queryKey, lang, parseTankoubonList(checkedBodyCached(path)))
     }
 
     // 相关推荐（档案详情）：GET /api/recommendations?scene=archive_related&archive_id=X
     // 返回裸 {"scene":...,"data":[...]}，data 数组元素与 search 条目同构，复用 parseSearchPage；
     // 混进的合集项没有 arcid，过滤丢弃（对齐 frontend getArchiveRelated 的 isArchiveItem 过滤）。
-    public func relatedArchives(arcid: String, count: Int64, lang!: String = ""): ArrayList<SearchItem> {
+    public func relatedArchives(arcid: String, count: Int64, lang!: String = ""): SearchItemView {
         let languageQuery = if (lang.size > 0) {
             "&lang=${percentEncode(lang)}"
         } else {
@@ -521,12 +672,13 @@ public class LanluApi {
                 list.add(it)
             }
         }
-        list
+        let queryKey = "related-archives:${arcid}:${count}:${lang}"
+        normalizeSearchItems(queryKey, lang, SearchItemView.memory(queryKey, lang, list))
     }
 
     // 相关推荐（合集详情）：scene=tankoubon_related，元素为合集对象（recommendations 形态，
     // assets 为对象），复用 parseTankoubonList；过滤掉无 id 的档案项。
-    public func relatedTankoubons(tankid: String, count: Int64, lang!: String = ""): ArrayList<TankoubonInfo> {
+    public func relatedTankoubons(tankid: String, count: Int64, lang!: String = ""): TankoubonView {
         let languageQuery = if (lang.size > 0) {
             "&lang=${percentEncode(lang)}"
         } else {
@@ -541,7 +693,8 @@ public class LanluApi {
                 list.add(t)
             }
         }
-        list
+        let queryKey = "related-tanks:${tankid}:${count}:${lang}"
+        return normalizeTanks(queryKey, lang, list)
     }
 
     public func recordRecommendationInteraction(scene: String, seedType: String, seedId: String, itemType: String,
@@ -588,7 +741,7 @@ public class LanluApi {
             // 网络类失败：进度入队待补报后原样重抛（worker 线程失败静默语义不变）。
             try {
                 match (offlineCache) {
-                    case Some(c) => c.enqueueProgress(serverHash, arcid, page)
+                    case Some(c) => c.enqueueProgress(serverHash, accountScope, arcid, page)
                     case None => ()
                 }
             } catch (_: Exception) {}
@@ -602,6 +755,7 @@ public class LanluApi {
         } else {
             let _ = checked(client.delete("/api/archives/${arcid}/favorite").send())
         }
+        invalidateResponses("archive-favorite", arcid)
     }
 
     public func setTankFavorite(tankid: String, fav: Bool): Unit {
@@ -610,6 +764,7 @@ public class LanluApi {
         } else {
             let _ = checked(client.delete("/api/tankoubons/${tankid}/favorite").send())
         }
+        invalidateResponses("tank-favorite", tankid)
     }
 
     public func setIsNew(arcid: String, isNew: Bool): Unit {
@@ -618,6 +773,7 @@ public class LanluApi {
         } else {
             let _ = checked(client.delete("/api/archives/${arcid}/isnew").send())
         }
+        invalidateResponses("archive-new", arcid)
     }
 
     // 档案上传协议与 frontend ChunkedUploadService 保持一致：创建 asset_upload 任务，
@@ -836,11 +992,11 @@ public class LanluApi {
     // ==================== 设置区扩展：统计 / 账户安全 ====================
 
     public func userStats(): UserStats {
-        parseUserStats(checkedBody(client.get("/api/user/stats").send()))
+        parseUserStats(checkedBodyCached("/api/user/stats"))
     }
 
     public func userTrend(days: Int64): ArrayList<TrendPoint> {
-        parseTrendList(checkedBody(client.get("/api/user/trend?days=${days}").send()))
+        parseTrendList(checkedBodyCached("/api/user/trend?days=${days}"))
     }
 
     public func tagCloud(limit: Int64, lang!: String = ""): ArrayList<CloudTag> {
@@ -849,7 +1005,7 @@ public class LanluApi {
         } else {
             ""
         }
-        parseCloudTags(checkedBody(client.get("/api/tags/cloud?limit=${limit}${langPart}").send()))
+        parseCloudTags(checkedBodyCached("/api/tags/cloud?limit=${limit}${langPart}"))
     }
 
     public func tagAutocomplete(query: String, limit: Int64, lang!: String = ""): ArrayList<TagSuggestion> {
@@ -921,21 +1077,24 @@ public class LanluApi {
     // ==================== 设置区扩展：用户管理（admin） ====================
 
     public func adminUsers(): ArrayList<AdminUserItem> {
-        parseAdminUserList(checkedBody(client.get("/api/auth/admin/users").send()))
+        parseAdminUserList(checkedBodyCached("/api/auth/admin/users"))
     }
 
     public func adminCreateUser(username: String, isAdmin: Bool): String {
         let body = "{\"username\":${jsonQuote(username)},\"isAdmin\":${isAdmin}}"
         let env = checked(client.post("/api/auth/admin/users").json(body).send())
+        invalidateResponses("admin-user", "")
         parseGeneratedPassword("{\"data\":${env.dataRaw}}")
     }
 
     public func adminSetUserRole(id: Int64, isAdmin: Bool): Unit {
         let _ = checked(client.put("/api/auth/admin/users/${id}/role").body("{\"isAdmin\":${isAdmin}}").send())
+        invalidateResponses("admin-user", "")
     }
 
     public func adminDeleteUser(id: Int64): Unit {
         let _ = checked(client.delete("/api/auth/admin/users/${id}").send())
+        invalidateResponses("admin-user", "")
     }
 
     public func adminResetUserPassword(id: Int64, newPassword: String): Unit {
@@ -944,12 +1103,13 @@ public class LanluApi {
                 .post("/api/auth/admin/users/${id}/reset-password")
                 .json("{\"password\":${jsonQuote(newPassword)}}")
                 .send())
+        invalidateResponses("admin-user", "")
     }
 
     // ==================== 设置区扩展：系统设置 ====================
 
     public func systemSettings(): ArrayList<SysSetting> {
-        parseSysSettings(checkedBody(client.get("/api/admin/system/settings").send()))
+        parseSysSettings(checkedBodyCached("/api/admin/system/settings"))
     }
 
     // 批量保存：body {"settings":{"KEY":"value",...}}（system_settings_controller batchUpdate）。
@@ -963,32 +1123,38 @@ public class LanluApi {
             inner += "${jsonQuote(k)}:${jsonQuote(v)}"
         }
         let _ = checked(client.put("/api/admin/system/settings/batch").body("{\"settings\":{${inner}}}").send())
+        invalidateResponses("system-settings", "")
     }
 
     // ==================== 设置区扩展：分类管理（admin） ====================
 
     public func adminCategories(): ArrayList<AdminCategoryItem> {
-        parseAdminCategoryList(checkedBody(client.get("/api/admin/categories").send()))
+        parseAdminCategoryList(checkedBodyCached("/api/admin/categories"))
     }
 
     public func createCategory(jsonBody: String): Unit {
         let _ = checked(client.post("/api/categories").json(jsonBody).send())
+        invalidateResponses("admin-category", "")
     }
 
     public func updateCategory(catid: String, jsonBody: String): Unit {
         let _ = checked(client.put("/api/categories/${catid}").body(jsonBody).send())
+        invalidateResponses("admin-category", catid)
     }
 
     public func deleteCategory(catid: String): Unit {
         let _ = checked(client.delete("/api/categories/${catid}").send())
+        invalidateResponses("admin-category", catid)
     }
 
     public func scanCategory(catid: String): Unit {
         let _ = checked(client.post("/api/categories/${catid}/scan").json("{}").send())
+        invalidateResponses("admin-category", catid)
     }
 
     public func scanAllCategories(): Unit {
         let _ = checked(client.post("/api/categories/scan").json("{}").send())
+        invalidateResponses("admin-category", "")
     }
 
     // ==================== 设置区扩展：标签管理（admin） ====================
@@ -1002,46 +1168,53 @@ public class LanluApi {
         if (ns.size > 0) {
             url += "&namespace=${percentEncode(ns)}"
         }
-        parseTagListPage(checkedBody(client.get(url).send()))
+        parseTagListPage(checkedBodyCached(url))
     }
 
     public func adminTagNamespaces(): ArrayList<String> {
         // 响应 data 形态是 {"namespaces": [...]}（tag_controller.listNamespaces 经 successJson 包裹）。
-        parseStringArray(dataArrayRaw(checkedBody(client.get("/api/tags/namespaces").send()), "namespaces"))
+        parseStringArray(dataArrayRaw(checkedBodyCached("/api/tags/namespaces"), "namespaces"))
     }
 
     public func createTag(jsonBody: String): Unit {
         let _ = checked(client.post("/api/admin/tags").json(jsonBody).send())
+        invalidateResponses("admin-tag", "")
     }
 
     public func updateTag(id: Int64, jsonBody: String): Unit {
         let _ = checked(client.put("/api/admin/tags/${id}").body(jsonBody).send())
+        invalidateResponses("admin-tag", "${id}")
     }
 
     public func deleteTag(id: Int64): Unit {
         let _ = checked(client.delete("/api/admin/tags/${id}").send())
+        invalidateResponses("admin-tag", "${id}")
     }
 
     // ==================== 设置区扩展：智能分类 ====================
 
     public func smartFilters(): ArrayList<SmartFilterItem> {
-        parseSmartFilterList(checkedBody(client.get("/api/admin/smart_filters").send()))
+        parseSmartFilterList(checkedBodyCached("/api/admin/smart_filters"))
     }
 
     public func createSmartFilter(jsonBody: String): Unit {
         let _ = checked(client.post("/api/admin/smart_filters").json(jsonBody).send())
+        invalidateResponses("smart-filter", "")
     }
 
     public func updateSmartFilter(id: Int64, jsonBody: String): Unit {
         let _ = checked(client.put("/api/admin/smart_filters/${id}").body(jsonBody).send())
+        invalidateResponses("smart-filter", "${id}")
     }
 
     public func deleteSmartFilter(id: Int64): Unit {
         let _ = checked(client.delete("/api/admin/smart_filters/${id}").send())
+        invalidateResponses("smart-filter", "${id}")
     }
 
     public func toggleSmartFilter(id: Int64): Unit {
         let _ = checked(client.post("/api/admin/smart_filters/${id}/toggle").json("{}").send())
+        invalidateResponses("smart-filter", "${id}")
     }
 
     public func reorderSmartFilters(ids: ArrayList<Int64>): Unit {
@@ -1053,12 +1226,13 @@ public class LanluApi {
             arr += "${ids[i]}"
         }
         let _ = checked(client.post("/api/admin/smart_filters/reorder").json("{\"ids\":[${arr}]}").send())
+        invalidateResponses("smart-filter", "")
     }
 
     // ==================== 设置区扩展：插件管理 ====================
 
     public func plugins(): ArrayList<PluginItem> {
-        parsePluginList(checkedBody(client.get("/api/admin/plugins").send()))
+        parsePluginList(checkedBodyCached("/api/admin/plugins"))
     }
 
     public func pluginParams(ns: String): ArrayList<PluginParam> {
@@ -1067,37 +1241,42 @@ public class LanluApi {
 
     public func savePluginConfig(ns: String, jsonBody: String): Unit {
         let _ = checked(client.put("/api/admin/plugins/${percentEncode(ns)}/config").body(jsonBody).send())
+        invalidateResponses("plugin", ns)
     }
 
     public func setPluginEnabled(ns: String, enabled: Bool): Unit {
         let _ = checked(
             client.put("/api/admin/plugins/${percentEncode(ns)}/enabled").body("{\"enabled\":${enabled}}").send())
+        invalidateResponses("plugin", ns)
     }
 
     public func deletePlugin(ns: String): Unit {
         let _ = checked(client.delete("/api/admin/plugins/${percentEncode(ns)}").send())
+        invalidateResponses("plugin", ns)
     }
 
     // ==================== 设置区扩展：定时任务（cron） ====================
 
     public func cronStatus(): CronStatus {
-        parseCronStatus(checkedBody(client.get("/api/admin/cron/status").send()))
+        parseCronStatus(checkedBodyCached("/api/admin/cron/status"))
     }
 
     public func cronStart(): Unit {
         let _ = checked(client.post("/api/admin/cron/start").json("{}").send())
+        invalidateResponses("cron", "")
     }
 
     public func cronStop(): Unit {
         let _ = checked(client.post("/api/admin/cron/stop").json("{}").send())
+        invalidateResponses("cron", "")
     }
 
     public func cronTasks(): ArrayList<CronTask> {
-        parseCronTaskList(checkedBody(client.get("/api/admin/cron/tasks").send()))
+        parseCronTaskList(checkedBodyCached("/api/admin/cron/tasks"))
     }
 
     public func cronTaskTypes(): ArrayList<CronTaskType> {
-        parseCronTaskTypes(checkedBody(client.get("/api/admin/cron/task-types").send()))
+        parseCronTaskTypes(checkedBodyCached("/api/admin/cron/task-types"))
     }
 
     public func cronValidate(expr: String): CronValidateResult {
@@ -1107,18 +1286,22 @@ public class LanluApi {
 
     public func cronCreateTask(jsonBody: String): Unit {
         let _ = checked(client.post("/api/admin/cron/tasks").json(jsonBody).send())
+        invalidateResponses("cron", "")
     }
 
     public func cronUpdateTask(id: Int64, jsonBody: String): Unit {
         let _ = checked(client.put("/api/admin/cron/tasks/${id}").body(jsonBody).send())
+        invalidateResponses("cron", "")
     }
 
     public func cronDeleteTask(id: Int64): Unit {
         let _ = checked(client.delete("/api/admin/cron/tasks/${id}").send())
+        invalidateResponses("cron", "")
     }
 
     public func cronTrigger(id: Int64): Unit {
         let _ = checked(client.post("/api/admin/cron/tasks/${id}/trigger").json("{}").send())
+        invalidateResponses("cron", "")
     }
 
     public func cronSetEnabled(id: Int64, enabled: Bool): Unit {
@@ -1128,14 +1311,17 @@ public class LanluApi {
             "disable"
         }
         let _ = checked(client.post("/api/admin/cron/tasks/${id}/${action}").json("{}").send())
+        invalidateResponses("cron", "")
     }
 
     public func cancelTask(id: Int64): Unit {
         let _ = checked(client.post("/api/admin/taskpool/${id}/cancel").json("{}").send())
+        invalidateResponses("taskpool", "")
     }
 
     public func retryTask(id: Int64): Unit {
         let _ = checked(client.post("/api/admin/taskpool/${id}/retry").json("{}").send())
+        invalidateResponses("taskpool", "")
     }
 
     // ==================== 设置区扩展：任务记录（SSE 实时订阅） ====================

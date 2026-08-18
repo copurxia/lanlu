@@ -2,8 +2,9 @@ package lanlu_client_next.app
 
 import lanlu_client_next.i18n.{LANGUAGE_EN, LANGUAGE_SYSTEM, LANGUAGE_ZH, normalizeLanguagePreference}
 import lanlu_client_next.net.decodeRaw
-import rocksdb_ffi.{RocksDb, RocksDbOperationResult}
-import std.collection.ArrayList
+import lanlu_client_next.storage.{DbSchema, SETTINGS_DB_SCHEMA}
+import rocksdb_ffi.{RocksDb, RocksDbColumnFamily, RocksDbOperationResult}
+import std.convert.Parsable
 import std.env.getVariable
 import std.fs.{exists, Directory, Path}
 import std.io.{ByteBuffer, readToEnd}
@@ -22,6 +23,82 @@ public class ServerProfile {
     public var lastUsedAt: String = ""
 }
 
+// RocksDB remains the source of truth; this view only materializes the bounded
+// server picker window needed by the login/titlebar UI.
+public class ServerListView <: Iterable<ServerProfile> {
+    private var items: Array<ServerProfile> = []
+
+    public prop size: Int64 {
+        get() {
+            return items.size
+        }
+    }
+
+    public func at(index: Int64): ServerProfile {
+        return items[index]
+    }
+
+    public func iterator(): Iterator<ServerProfile> {
+        return items.iterator()
+    }
+
+    public func toArray(): Array<ServerProfile> {
+        return items.clone()
+    }
+
+    func replace(values: Array<ServerProfile>): Unit {
+        if (values.size > MAX_SAVED_SERVERS) {
+            items = values[0..MAX_SAVED_SERVERS].clone()
+        } else {
+            items = values.clone()
+        }
+    }
+
+    func prepend(value: ServerProfile): Unit {
+        let nextSize = if (items.size < MAX_SAVED_SERVERS) {
+            items.size + 1
+        } else {
+            MAX_SAVED_SERVERS
+        }
+        let next = Array<ServerProfile>(nextSize, {
+            i => if (i == 0) {
+                value
+            } else {
+                items[i - 1]
+            }
+        })
+        items = next
+    }
+
+    func appendLegacy(value: ServerProfile): Unit {
+        if (items.size >= MAX_SAVED_SERVERS) {
+            return
+        }
+        items = items.concat([value])
+    }
+
+    func remove(id: String): Unit {
+        var found: Int64 = -1
+        for (i in 0..items.size) {
+            if (items[i].id == id) {
+                found = i
+                break
+            }
+        }
+        if (found < 0) {
+            return
+        }
+        let removedIndex = found
+        items = Array<ServerProfile>(items.size - 1, {
+            i => if (i < removedIndex) {
+                items[i]
+            } else {
+                items[i + 1]
+            }
+        })
+    }
+}
+
 // 服务器地址归一化：trim + 去尾部所有斜杠（对齐 client storage/servers.ts）。
 public func normalizeServerUrl(input: String): String {
     var b = input.trimAscii()
@@ -31,8 +108,10 @@ public func normalizeServerUrl(input: String): String {
     b
 }
 
-// 服务器 id：地址哈希前缀 + 单调计数（同地址可重复添加，进程内唯一即可，落盘后不再生成）。
+// 服务器 id：地址哈希前缀 + 单调计数。加载持久化 profile 时会恢复计数上界，避免进程重启后
+// 同地址重复添加重新生成已存在的 srv-<hash>-1。
 private var serverIdCounter: Int64 = 0
+private let serverIdMutex = Mutex()
 
 // html 阅读字号档位（px）：13/16/19/22，就近取档（默认 16）。
 public func clampHtmlFontSize(v: Int64): Int64 {
@@ -59,8 +138,26 @@ public func clampHtmlMargin(v: Int64): Int64 {
 }
 
 private func newServerId(baseUrl: String): String {
-    serverIdCounter++
-    "srv-${fnv1a64Hex(baseUrl)[0..8]}-${serverIdCounter}"
+    synchronized(serverIdMutex) {
+        serverIdCounter++
+        "srv-${fnv1a64Hex(baseUrl)[0..8]}-${serverIdCounter}"
+    }
+}
+
+// 从旧设置恢复持久化序列上界。非标准/损坏 id 不参与恢复，仍由 upsert 的碰撞检查兜底。
+private func observeServerId(id: String): Unit {
+    let parts = id.split("-")
+    if (parts.size < 3 || parts[0] != "srv") {
+        return
+    }
+    try {
+        let sequence = Int64.parse(parts[parts.size - 1])
+        synchronized(serverIdMutex) {
+            if (sequence > serverIdCounter) {
+                serverIdCounter = sequence
+            }
+        }
+    } catch (_: Exception) {}
 }
 
 // 上次使用时间的展示格式。
@@ -69,6 +166,7 @@ public func nowLabel(): String {
 }
 
 public class AppSettings {
+    var schemaVersion: Int64 = 3
     public var serverUrl: String = ""
     public var token: String = ""
     public var username: String = ""
@@ -90,6 +188,7 @@ public class AppSettings {
     public var readerShowInfo: Bool = false // 媒体信息浮层开关（文件名/时长/位置等）
     public var readerAutoPlay: Bool = false // 自动播放（按间隔自动翻页，到底自动停）
     public var readerAutoPlayInterval: Int64 = 3 // 自动播放间隔（秒，1-10）
+
     // html 阅读排版（Blitz 离屏页）：字号档位 px（13/16/19/22，默认 16）、
     // 页边距档位 px（24/48/72，默认 48），经 htmlThemeCss 的 UA CSS 生效。
     public var readerHtmlFontSize: Int64 = 16
@@ -100,13 +199,13 @@ public class AppSettings {
     public var probeConnectTimeoutSec: Int64 = 5
 
     // 多服务器列表与当前选中；旧三字段（serverUrl/token/username）仅作迁移与向后兼容同步。
-    public var servers = ArrayList<ServerProfile>()
+    public let servers = ServerListView()
     public var activeServerId: String = ""
 
     public func profileById(id: String): ?ServerProfile {
-        for (p in servers) {
-            if (p.id == id) {
-                return p
+        for (profile in servers) {
+            if (profile.id == id) {
+                return profile
             }
         }
         None
@@ -120,34 +219,28 @@ public class AppSettings {
     public func upsertServer(id: String, name: String, baseUrl: String): ServerProfile {
         let norm = normalizeServerUrl(baseUrl)
         if (id.size > 0) {
-            for (p in servers) {
-                if (p.id == id) {
-                    p.name = name
-                    p.baseUrl = norm
-                    return p
+            for (profile in servers) {
+                if (profile.id == id) {
+                    profile.name = name
+                    profile.baseUrl = norm
+                    return profile
                 }
             }
         }
         let p = ServerProfile()
-        p.id = newServerId(norm)
+        var nextId = newServerId(norm)
+        while (profileById(nextId).isSome()) {
+            nextId = newServerId(norm)
+        }
+        p.id = nextId
         p.name = name
         p.baseUrl = norm
-        let next = ArrayList<ServerProfile>()
-        next.add(p)
-        next.add(all: servers)
-        servers = next
+        servers.prepend(p)
         return p
     }
 
     public func deleteServer(id: String): Unit {
-        var i: Int64 = 0
-        while (i < servers.size) {
-            if (servers[i].id == id) {
-                servers.remove(at: i)
-                break
-            }
-            i++
-        }
+        servers.remove(id)
         if (activeServerId == id) {
             activeServerId = ""
         }
@@ -174,6 +267,7 @@ public func defaultSettingsRoot(): String {
 }
 
 private var settingsStore: ?RocksDb = None
+private var settingsServerRepository: ?ServerRepository = None
 
 public func initializeSettingsStore(): Unit {
     initializeSettingsStore(defaultSettingsRoot())
@@ -185,8 +279,31 @@ public func initializeSettingsStore(root: String): Unit {
         Directory.create(Path(root), recursive: true)
     }
     match (RocksDb.openLowMemory(root)) {
-        case (true, Some(db), _) => settingsStore = db
+        case (true, Some(db), _) =>
+            let meta = requireSettingsColumnFamily(db, "meta")
+            let objects = requireSettingsColumnFamily(db, "objects")
+            let indexes = requireSettingsColumnFamily(db, "indexes")
+            settingsStore = db
+            settingsServerRepository = ServerRepository(db, meta, objects, indexes)
+            // 设置 DB 独立 schema version：v2→v3 由 ServerRepository 的迁移 marker 幂等推进，
+            // 迁移完成后统一写回当前版本号（重跑时版本已正确则跳过）。
+            let schema = DbSchema(db, meta)
+            if (schema.currentVersion() != SETTINGS_DB_SCHEMA) {
+                let _ = schema.writeVersion(SETTINGS_DB_SCHEMA)
+            }
         case (_, _, err) => throw Exception("rocksdb settings store open failed: ${err}")
+    }
+}
+
+private func requireSettingsColumnFamily(db: RocksDb, name: String): RocksDbColumnFamily {
+    match (db.ensureColumnFamilyResult(name)) {
+        case RocksDbOperationResult<RocksDbColumnFamily>.Ok(value) => return value
+        case RocksDbOperationResult<RocksDbColumnFamily>.NotFound =>
+            db.close()
+            throw Exception("rocksdb settings column family ${name} was not created")
+        case RocksDbOperationResult<RocksDbColumnFamily>.Err(error) =>
+            db.close()
+            throw Exception("rocksdb settings column family ${name} failed: ${error.message}")
     }
 }
 
@@ -200,16 +317,35 @@ func store(): RocksDb {
 
 public func loadSettings(): AppSettings {
     let kv = store()
-    match (kv.getResult("settings")) {
+    let settings = match (kv.getResult("settings")) {
         case RocksDbOperationResult<String>.Ok(body) => parseSettingsJson(body)
         // 键缺失或读失败一律回落全默认（坏数据自愈，不再有逐键回退）。
         case _ => AppSettings()
     }
+    let repository = serverRepository()
+    if (repository.isMigrated()) {
+        match (repository.load()) {
+            case RocksDbOperationResult<Array<ServerProfile>>.Ok(profiles) => settings.servers.replace(profiles)
+            case _ => ()
+        }
+    } else {
+        // schema v2 的 list 先写入 objects/indexes，与 schema v3 标量文档和迁移标记同 batch 提交。
+        let _ = repository.writeSnapshot(settings.servers.toArray(), settingsToJson(settings))
+    }
+    normalizeLoadedSettings(settings)
+    return settings
 }
 
-// ---- 单键 JSON 整表快照（schema_version=2）----
-// 整个 AppSettings 序列化为一个 JSON 文档存 "settings" 键，单次 put 天然原子（WAL 持久化），
-// 不再有 servers.count/索引键与旧键清理。解析失败回落全默认 AppSettings()。
+private func serverRepository(): ServerRepository {
+    match (settingsServerRepository) {
+        case Some(value) => return value
+        case None => throw Exception("settings server repository is not initialized")
+    }
+}
+
+// ---- 标量设置文档（schema_version=3，兼容读取 v2）----
+// AppSettings 标量保存在 "settings" 键；ServerProfile 对象和顺序由 ServerRepository 管理。
+// v2 的 servers.list 只在迁移时读取，解析失败回落全默认 AppSettings()。
 private func parseSettingsJson(body: String): AppSettings {
     let s = AppSettings()
     var buf = ByteBuffer()
@@ -223,6 +359,7 @@ private func parseSettingsJson(body: String): AppSettings {
                     while (r.peek() != EndObject) {
                         let n = r.readName()
                         match (n) {
+                            case "schema_version" => s.schemaVersion = decodeRaw<Int64>(r.readValueBytes(), 0)
                             case "appearance" => readAppearance(r, s)
                             case "reader" => readReader(r, s)
                             case "network" => readNetwork(r, s)
@@ -238,7 +375,7 @@ private func parseSettingsJson(body: String): AppSettings {
     } catch (_: Exception) {
         return AppSettings()
     }
-    normalizeLoadedSettings(s)
+    normalizeLoadedSettings(s, validateActive: false)
     s
 }
 
@@ -301,7 +438,7 @@ private func readServers(r: JsonReader, s: AppSettings): Unit {
             case "list" =>
                 r.startArray()
                 while (r.peek() != EndArray) {
-                    s.servers.add(readServerProfile(r))
+                    s.servers.appendLegacy(readServerProfile(r))
                 }
                 r.endArray()
             case _ => r.skip()
@@ -330,7 +467,10 @@ private func readServerProfile(r: JsonReader): ServerProfile {
 }
 
 // 读路径归一化（对齐旧 loadSettings）：非法枚举回落、档位钳制、超时范围、activeId 校验。
-private func normalizeLoadedSettings(s: AppSettings): Unit {
+private func normalizeLoadedSettings(s: AppSettings, validateActive!: Bool = true): Unit {
+    for (profile in s.servers) {
+        observeServerId(profile.id)
+    }
     if (s.theme != "light") {
         s.theme = "dark"
     }
@@ -347,7 +487,7 @@ private func normalizeLoadedSettings(s: AppSettings): Unit {
     if (s.probeConnectTimeoutSec < 1 || s.probeConnectTimeoutSec > 60) {
         s.probeConnectTimeoutSec = 5
     }
-    if (s.profileById(s.activeServerId).isNone()) {
+    if (validateActive && s.profileById(s.activeServerId).isNone()) {
         s.activeServerId = ""
     }
     s.syncActiveProfile()
@@ -452,17 +592,16 @@ private func writeSettings(s: AppSettings): Unit {
 }
 
 private func writeSettingsLocked(s: AppSettings): Unit {
-    let kv = store()
     s.syncActiveProfile()
-    // 整表序列化为单个 JSON 文档，一次 put 原子落盘（RocksDB WAL 保证持久，替代原 kv.sync()）。
-    let _ = kv.putResult("settings", settingsToJson(s))
+    // 标量文档、服务器对象和显示顺序跨 CF 使用同一个 write batch 原子提交。
+    let _ = serverRepository().writeSnapshot(s.servers.toArray(), settingsToJson(s))
 }
 
 private func settingsToJson(s: AppSettings): String {
     let out = ByteBuffer()
     let w = JsonWriter(out)
     w.startObject()
-    w.writeName("schema_version").writeValue(2)
+    w.writeName("schema_version").writeValue(3)
     w.writeName("appearance")
     w.startObject()
     w.writeName("theme").writeValue(s.theme)
@@ -492,19 +631,6 @@ private func settingsToJson(s: AppSettings): String {
     w.writeName("servers")
     w.startObject()
     w.writeName("active_id").writeValue(s.activeServerId)
-    w.writeName("list")
-    w.startArray()
-    for (p in s.servers) {
-        w.startObject()
-        w.writeName("id").writeValue(p.id)
-        w.writeName("name").writeValue(p.name)
-        w.writeName("base_url").writeValue(p.baseUrl)
-        w.writeName("token").writeValue(p.token)
-        w.writeName("username").writeValue(p.username)
-        w.writeName("last_used_at").writeValue(p.lastUsedAt)
-        w.endObject()
-    }
-    w.endArray()
     w.endObject()
     w.endObject()
     w.flush()
@@ -518,11 +644,12 @@ public func closeSettingsStore(): Unit {
         case None => ()
     }
     settingsStore = None
+    settingsServerRepository = None
 }
 
 // 清空客户端设置并保留已打开的 store，供“恢复默认设置”和测试隔离复用。
 public func clearSettings(): Unit {
-    let _ = store().deleteResult("settings")
+    serverRepository().clear()
 }
 
 // 服务器地址 → 稳定的短目录名（区分多服务器缓存）。
@@ -542,6 +669,18 @@ public func fnv1a64Hex(s: String): String {
         v = v >> 4
     }
     String.fromUtf8(out)
+}
+
+// profile id 只标识服务器槽位，不能标识该槽位当前登录的账号。优先使用服务端规范用户名；
+// 旧设置缺用户名时用 token 作为不可逆 scope 输入，避免退化为跨账号共享。
+public func offlineAccountScope(profileId: String, username: String, token: String): String {
+    let normalizedUser = username.trimAscii()
+    let identity = if (normalizedUser.size > 0) {
+        "user:${normalizedUser}"
+    } else {
+        "token:${token}"
+    }
+    return fnv1a64Hex("${profileId}\u{0000}${identity}")
 }
 
 public func defaultCacheRoot(serverUrl: String): String {

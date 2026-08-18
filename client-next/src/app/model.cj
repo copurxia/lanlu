@@ -1,7 +1,7 @@
 package lanlu_client_next.app
 
 import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache,
-    clearPixelImages, onPixelImageEvicted, stageNativePixelImage}
+    clearPixelImages, onPixelImageEvicted, pixelUploadPerfReset, pixelUploadPerfStats, stageNativePixelImage}
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
@@ -65,7 +65,7 @@ public class BrowseRow {
     public var key: String = "" // "random" 或 <catid>（worker 任务名 row:<key>）
     public var title: String = ""
     public var catid: String = "" // 随机行为空串
-    public var items = ArrayList<SearchItem>()
+    public var items = SearchItemView.empty()
     public var requested = false // 已提交过加载任务（分类到达后补建行不复用旧任务）
     public var loading = true
     public var failed = false
@@ -95,17 +95,6 @@ public class DownloadTaskItem {
     public var message: String = ""
 }
 
-private func joinMetadataTags(tags: ArrayList<String>): String {
-    let out = StringBuilder()
-    for (i in 0..tags.size) {
-        if (i > 0) {
-            out.append(", ")
-        }
-        out.append(tags[i])
-    }
-    out.toString()
-}
-
 private func metadataTagsJson(raw: String): String {
     let out = StringBuilder()
     out.append("[")
@@ -123,17 +112,6 @@ private func metadataTagsJson(raw: String): String {
     }
     out.append("]")
     out.toString()
-}
-
-private func metadataTagList(raw: String): ArrayList<String> {
-    let out = ArrayList<String>()
-    for (part in raw.split(",")) {
-        let tag = part.trimAscii()
-        if (tag.size > 0 && !out.contains(tag)) {
-            out.add(tag)
-        }
-    }
-    out
 }
 
 private func metadataRootBody(title: String, description: String, tags: String, releaseAt: String): String {
@@ -234,7 +212,7 @@ public class AppModel {
     public let autocompleteVisible = State<Bool>(false)
     private var autocompleteRequestId: Int64 = 0
     private var autocompleteTaskName: String = ""
-    public let items = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let items = State<SearchItemView>(SearchItemView.empty())
     public let loading = State<Bool>(false)
     public let recordsTotal = State<Int64>(0)
     public let currentPage = State<Int64>(1)
@@ -298,8 +276,8 @@ public class AppModel {
     public let shelfSearchText = State<String>("")
     public let shelfFavoriteSortIndex = State<Int64>(0)
     public let shelfHistorySortIndex = State<Int64>(0)
-    public let shelfFavorites = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
-    public let shelfHistory = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let shelfFavorites = State<SearchItemView>(SearchItemView.empty())
+    public let shelfHistory = State<SearchItemView>(SearchItemView.empty())
     public let shelfFavoritesLoading = State<Bool>(false)
     public let shelfHistoryLoading = State<Bool>(false)
     public let shelfFavoritesFailed = State<Bool>(false)
@@ -312,7 +290,7 @@ public class AppModel {
 
     // 详情/阅读
     public let meta = State<?ArchiveMeta>(None)
-    public let pages = State<ArrayList<PageInfo>>(ArrayList<PageInfo>())
+    public let pages = State<ArchivePageView>(ArchivePageView.empty())
     public let readerIndex = State<Int64>(1)
     public var readerArcid: String = "" // 当前阅读档案
 
@@ -331,16 +309,16 @@ public class AppModel {
 
     // 详情页（档案）：页面预览页表、三视图切换（0=缩略图 1=列表 2=树）、所属合集、相关推荐。
     // detailWidth 由详情主列 SizeProbe 写入，驱动预览缩略图网格列数。
-    public let detailPages = State<ArrayList<PageInfo>>(ArrayList<PageInfo>())
+    public let detailPages = State<ArchivePageView>(ArchivePageView.empty())
     public let pageViewIndex = State<Int64>(0)
-    public let parentTanks = State<ArrayList<TankoubonInfo>>(ArrayList<TankoubonInfo>())
-    public let relatedItems = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let parentTanks = State<TankoubonView>(TankoubonView.empty())
+    public let relatedItems = State<SearchItemView>(SearchItemView.empty())
     // 详情主数据与辅助区各自有显式状态，失败不再永久显示 loading，空结果也可区分。
     public let detailLoadState = State<String>("idle")
     public let detailLoadError = State<String>("")
     public let detailPagesState = State<String>("idle")
     public let detailPagesError = State<String>("")
-    public let detailTagTranslations = State<HashMap<String, String>>(HashMap<String, String>())
+    public let detailTagTranslations = State<TagTranslationView>(TagTranslationView.empty())
     private var recommendedArchiveOriginScene = ""
     private var recommendedArchiveOriginSeedType = ""
     private var recommendedArchiveOriginSeedId = ""
@@ -351,10 +329,10 @@ public class AppModel {
 
     // 详情页（合集）：元数据、成员档案（search?tankoubon_id）、网格/列表切换、即时筛选、相关合集。
     public let tank = State<?TankoubonInfo>(None)
-    public let tankMembers = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let tankMembers = State<SearchItemView>(SearchItemView.empty())
     public let tankMemberViewIndex = State<Int64>(0)
     public let tankFilter = State<String>("")
-    public let tankRelated = State<ArrayList<TankoubonInfo>>(ArrayList<TankoubonInfo>())
+    public let tankRelated = State<TankoubonView>(TankoubonView.empty())
     public let tankLoadState = State<String>("idle")
     public let tankLoadError = State<String>("")
     public let tankMembersState = State<String>("idle")
@@ -382,7 +360,7 @@ public class AppModel {
     public let metadataVolumeNo = State<String>("")
     public let metadataHiddenInFiles = State<Bool>(false)
     public let metadataEditorArchiveMeta = State<?ArchiveMeta>(None)
-    public let metadataEditorPages = State<ArrayList<PageInfo>>(ArrayList<PageInfo>())
+    public let metadataEditorPages = State<ArchivePageView>(ArchivePageView.empty())
     public var metadataEditorTankId: String = ""
     public var metadataEditorTankTitle: String = ""
     public var metadataEditorArchiveId: String = ""
@@ -400,8 +378,8 @@ public class AppModel {
     // ---- 设置区扩展：各板块数据（进场加载，随 State 重建自动刷新视图） ----
     public let userStats = State<?UserStats>(None)
     public let userTrend = State<ArrayList<TrendPoint>>(ArrayList<TrendPoint>())
-    public let recentRead = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
-    public let recentFav = State<ArrayList<SearchItem>>(ArrayList<SearchItem>())
+    public let recentRead = State<SearchItemView>(SearchItemView.empty())
+    public let recentFav = State<SearchItemView>(SearchItemView.empty())
     public let tagCloud = State<ArrayList<CloudTag>>(ArrayList<CloudTag>())
     public let adminUsers = State<ArrayList<AdminUserItem>>(ArrayList<AdminUserItem>())
     public let sysSettings = State<ArrayList<SysSetting>>(ArrayList<SysSetting>())
@@ -641,7 +619,7 @@ public class AppModel {
         if (s.activeServerId.size > 0 && s.profileById(s.activeServerId).isSome()) {
             selectedServerId.value = s.activeServerId
         } else if (s.servers.size > 0) {
-            selectedServerId.value = s.servers[0].id
+            selectedServerId.value = s.servers.at(0).id
         }
         probeServers()
     }
@@ -673,7 +651,7 @@ public class AppModel {
         metadataEditorTankId = tankid
         metadataEditorArchiveId = ""
         metadataEditorArchiveMeta.value = None
-        metadataEditorPages.value = ArrayList<PageInfo>()
+        metadataEditorPages.value = ArchivePageView.empty()
         metadataEditorLevel.value = 0
         loadTankEditorDraft()
         metadataEditorOpen.value = true
@@ -683,8 +661,9 @@ public class AppModel {
     public func editTankMember(item: SearchItem, volumeNo: Int64): Unit {
         metadataEditorArchiveId = item.arcid
         metadataEditorArchiveTitle = item.title
-        metadataEditorArchiveMeta.value = None
-        metadataEditorPages.value = ArrayList<PageInfo>()
+        // 从 SearchItem 投影出编辑草稿 meta（避免两份字段漂移）。
+        metadataEditorArchiveMeta.value = Some(metaFromSearchItem(item))
+        metadataEditorPages.value = ArchivePageView.empty(arcid: item.arcid)
         metadataEditorLevel.value = 1
         metadataTitle.value = item.title
         metadataDescription.value = item.description
@@ -800,6 +779,7 @@ public class AppModel {
         let body: String
         let target: String
         let kind: String
+        var pageIndex: Int64 = -1
         if (level == 0) {
             target = metadataEditorTankId
             kind = "tank"
@@ -811,13 +791,14 @@ public class AppModel {
         } else {
             target = metadataEditorArchiveId
             kind = "page"
+            pageIndex = metadataEditorPageIndex
             let list = metadataEditorPages.value
-            if (metadataEditorPageIndex < 0 || metadataEditorPageIndex >= list.size) {
+            if (pageIndex < 0 || pageIndex >= list.size) {
                 return
             }
-            let p = list[metadataEditorPageIndex]
-            let order = parsePositiveInt(metadataOrderIndex.value, metadataEditorPageIndex + 1)
-            body = "{\"pages\":[{\"page_number\":${metadataEditorPageIndex + 1}," +
+            let p = list[pageIndex]
+            let order = parsePositiveInt(metadataOrderIndex.value, pageIndex + 1)
+            body = "{\"pages\":[{\"page_number\":${pageIndex + 1}," +
                 "\"entry_path\":${jsonQuote(p.sourcePath)},\"title\":${jsonQuote(title)}," +
                 "\"description\":${jsonQuote(metadataDescription.value)}," +
                 "\"release_at\":${jsonQuote(metadataReleaseAt.value.trimAscii())},\"order_index\":${order}," +
@@ -827,7 +808,11 @@ public class AppModel {
             return
         }
         metadataEditorSaving.value = true
-        let taskName = "editsave:${kind}:${target}"
+        let taskName = if (kind == "page") {
+            "editsave:${kind}:${target}:${pageIndex}"
+        } else {
+            "editsave:${kind}:${target}"
+        }
         let _ = worker.submit(
             taskName,
             {
@@ -848,7 +833,7 @@ public class AppModel {
                 metadataEditorTankTitle = t.name
                 metadataTitle.value = t.name
                 metadataDescription.value = t.description
-                metadataTags.value = joinMetadataTags(t.tags)
+                metadataTags.value = joinTags(t.tags)
                 metadataReleaseAt.value = ""
             case None => ()
         }
@@ -864,7 +849,7 @@ public class AppModel {
                 metadataEditorArchiveTitle = m.title
                 metadataTitle.value = m.title
                 metadataDescription.value = m.description
-                metadataTags.value = joinMetadataTags(m.tags)
+                metadataTags.value = joinTags(m.tags)
                 metadataReleaseAt.value = if (m.release_at > 0) {
                     formatTimestamp(m.release_at)
                 } else {
@@ -960,8 +945,8 @@ public class AppModel {
 
     private func resumeProfile(p: ServerProfile): Unit {
         let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
-            onOfflineFallback: {=> offlineNotice.mark()})
+            offlineCache: offlineCacheFor(), serverHash: fnv1a64Hex(p.baseUrl),
+            accountScope: offlineAccountScope(p.id, p.username, p.token), onOfflineFallback: {=> offlineNotice.mark()})
         a.setToken(p.token)
         api = a
         let _ = worker.submit("me", {=> a.me()})
@@ -979,14 +964,17 @@ public class AppModel {
 
     // 登录选中服务器。TotpRequired 不视为失败：任务内捕获后把 challengeId 放在元组第 4 位
     // 回传（worker 的 error 通道只有 String，带不了 challengeId），dispatch 据此切 TOTP 表单。
+    private var pendingLoginUsername = ""
+
     public func loginSelected(user: String, pass: String): Unit {
         let p = match (selectedProfile()) {
             case Some(x) => x
             case None => return
         }
         let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
-            onOfflineFallback: {=> offlineNotice.mark()})
+            offlineCache: offlineCacheFor(), serverHash: fnv1a64Hex(p.baseUrl),
+            accountScope: offlineAccountScope(p.id, user, ""), onOfflineFallback: {=> offlineNotice.mark()})
+        pendingLoginUsername = user
         loading.value = true
         loginError.value = ""
         let sid = p.id
@@ -1000,6 +988,7 @@ public class AppModel {
                     let _ = a.info() // 先探测：非 lanlu 服务/地址错误会在这里抛错
                     try {
                         let d = a.login(user, pass)
+                        a.setAccountScope(offlineAccountScope(sid, d.username, ""))
                         return (a, d, sid, "")
                     } catch (e: TotpRequired) {
                         return (a, LoginData(), sid, e.challengeId)
@@ -1026,7 +1015,8 @@ public class AppModel {
             return
         }
         let a = LanluApi(p.baseUrl, connectTimeout: Some(Duration.second * settings.probeConnectTimeoutSec),
-            offlineCache: offlineCacheFor(p.baseUrl), serverHash: fnv1a64Hex(p.baseUrl),
+            offlineCache: offlineCacheFor(), serverHash: fnv1a64Hex(p.baseUrl),
+            accountScope: offlineAccountScope(p.id, pendingLoginUsername, p.token),
             onOfflineFallback: {=> offlineNotice.mark()})
         loading.value = true
         loginError.value = ""
@@ -1038,6 +1028,7 @@ public class AppModel {
                 // 同 login：a 只随成功结果转交 dispatch，抛错路径就地 close（#31）。
                 try {
                     let d = a.verifyTotpLogin(cid, code, recoveryCode)
+                    a.setAccountScope(offlineAccountScope(sid, d.username, ""))
                     return (a, d, sid, "")
                 } catch (e: Exception) {
                     a.close()
@@ -1054,6 +1045,7 @@ public class AppModel {
     public func dismissTotp(): Unit {
         totpChallengeId.value = ""
         loginError.value = ""
+        pendingLoginUsername = ""
     }
 
     public func openServerModal(editId: String): Unit {
@@ -1088,7 +1080,7 @@ public class AppModel {
         serversVersion.value = serversVersion.value + 1
         if (selectedServerId.value == id) {
             selectedServerId.value = if (settings.servers.size > 0) {
-                settings.servers[0].id
+                settings.servers.at(0).id
             } else {
                 ""
             }
@@ -2125,7 +2117,7 @@ public class AppModel {
     }
 
     // 离线缓存单例：懒打开（打开失败 None，离线能力缺失不阻断启动），多服务器靠前缀隔离。
-    private func offlineCacheFor(baseUrl: String): ?OfflineCache {
+    private func offlineCacheFor(): ?OfflineCache {
         match (offlineCache) {
             case Some(c) => return c
             case None => ()
@@ -2145,14 +2137,20 @@ public class AppModel {
         }
     }
 
-    // 服务端恢复（探测 online/登录成功）后补报离线阅读进度；单条失败保留队列下次再试。
-    private func flushOfflineProgress(baseUrl: String): Unit {
+    // 当前登录服务端恢复（探测 online/登录成功）后补报离线阅读进度；单条失败保留队列下次再试。
+    // 提交任务前固定 profile 与 API，避免切服后异步任务把进度写到另一台服务器。
+    private func flushOfflineProgress(profile: ServerProfile): Unit {
+        if (settings.activeServerId != profile.id) {
+            return
+        }
+        let targetApi = api ?? return
         let c = match (offlineCache) {
             case Some(x) => x
             case None => return
         }
-        let hash = fnv1a64Hex(baseUrl)
-        let entries = c.listProgress(hash)
+        let hash = fnv1a64Hex(profile.baseUrl)
+        let accountScope = offlineAccountScope(profile.id, profile.username, profile.token)
+        let entries = c.listProgress(hash, accountScope, limit: 64)
         if (entries.size == 0) {
             return
         }
@@ -2161,15 +2159,25 @@ public class AppModel {
             {
                 =>
                     var anyOk = false
-                    for (e in entries) {
-                        match (api) {
-                            case Some(a) => try {
-                                a.setProgress(e[0], e[1])
-                                c.deleteProgress(hash, e[0])
-                                anyOk = true
-                            } catch (_: Exception) {}
-                            case None => ()
+                    var batch = entries
+                    while (batch.size > 0) {
+                        let ok = ArrayList<String>()
+                        for (e in batch) {
+                            try {
+                                targetApi.setProgress(e[0], e[1])
+                                ok.add(e[0])
+                            } catch (err: Exception) {
+                                // 部分失败不串数据：只标记该条重试状态，其余照常 ack。
+                                let _ = c.markProgressFailed(hash, accountScope, e[0], err.message)
+                            }
                         }
+                        if (ok.size > 0 && c.ackProgressBatch(hash, accountScope, ok)) {
+                            anyOk = true
+                        }
+                        if (batch.size < 64) {
+                            break
+                        }
+                        batch = c.listProgress(hash, accountScope, limit: 64)
                     }
                     return anyOk
             }
@@ -2258,6 +2266,89 @@ public class AppModel {
     private var imageQueueHi = ArrayList<(String, String)>() // (key, url) 高优先级
     private var imageQueueLo = ArrayList<(String, String)>() // (key, url) 普通优先级
 
+    // ── LANLU_PERF=1 打点（性能评估，默认关闭零开销）──
+    // imgPerfT0：key 首次 requestImage 的时刻（UI 线程独占，无需锁），dispatch 到货时
+    // 算出用户感知 e2e；imgPerfStage：worker 线程写入的 (下载us, 解码us) 分阶段耗时，
+    // dispatch 读取后移除（跨线程，加锁）。readerTurn*：翻页时刻与当前 spread 未到位
+    // 图片集合，全部到达时 emit reader_turn_ms（0ms = 预取全命中）。
+    private let imgPerfT0 = HashMap<String, MonoTime>()
+    private let imgPerfStageMutex = Mutex()
+    private let imgPerfStage = HashMap<String, (Int64, Int64)>()
+    private var readerTurnT0: ?MonoTime = None
+    private let readerTurnPending = HashSet<String>()
+    private var lastPerfFlush = MonoTime.now()
+    private var firstRowsEmitted = false
+
+    // LANLU_PERF 打点：worker 线程记录 key 的分阶段耗时（stage: 0=下载 1=解码）。
+    private func perfStageMark(key: String, stage: Int64, us: Int64): Unit {
+        synchronized(imgPerfStageMutex) {
+            match (imgPerfStage.get(key)) {
+                case Some(prev) =>
+                    if (stage == 0) {
+                        imgPerfStage[key] = (us, prev[1])
+                    } else {
+                        imgPerfStage[key] = (prev[0], us)
+                    }
+                case None =>
+                    if (stage == 0) {
+                        imgPerfStage[key] = (us, 0)
+                    } else {
+                        imgPerfStage[key] = (0, us)
+                    }
+            }
+        }
+    }
+
+    // LANLU_PERF 打点：翻页后记录当前 spread 尚未 ready 的图片 key；全部到达由
+    // dispatch("img:") emit reader_turn_ms，本就全部命中则这里直接 emit 0ms。
+    private func perfReaderTurnMark(): Unit {
+        if (!SubtitlePerf.enabled()) {
+            return
+        }
+        readerTurnPending.clear()
+        for (i in reader.spreadPages()) {
+            match (reader.pageAt(i)) {
+                case Some(p) =>
+                    if (p.pageType == "image" || p.pageType == "") {
+                        let key = "page:${reader.arcidOfReal(i)}:${p.id}"
+                        if (imageState(key).value != "ready") {
+                            readerTurnPending.add(key)
+                        }
+                    }
+                case None => ()
+            }
+        }
+        if (readerTurnPending.isEmpty()) {
+            readerTurnT0 = None
+            SubtitlePerf.emit("reader_turn_ms", 0, "ms")
+        } else {
+            readerTurnT0 = Some(MonoTime.now())
+        }
+    }
+
+    // LANLU_PERF=1：每 5s 滚动输出样本分位数（flushSamples 输出后清空，即上一窗口的
+    // 分布），并拉取 cui 纹理上传计数（UI 线程惰性上传，帧成本热点）。
+    private func perfFlushTick(): Unit {
+        if (!SubtitlePerf.enabled()) {
+            return
+        }
+        let now = MonoTime.now()
+        if ((now - lastPerfFlush).toMilliseconds() < 5000) {
+            return
+        }
+        lastPerfFlush = now
+        SubtitlePerf.flushSamples("img_queuewait_us")
+        SubtitlePerf.flushSamples("img_download_us")
+        SubtitlePerf.flushSamples("img_decode_us")
+        SubtitlePerf.flushSamples("img_e2e_us")
+        SubtitlePerf.flushSamples("pump_dispatch_us")
+        let (n, totalUs, maxUs) = pixelUploadPerfStats()
+        if (n > 0) {
+            println("[perf] tex_upload count=${n} avg=${totalUs / n / 1000}ms max=${maxUs / 1000}ms")
+            pixelUploadPerfReset()
+        }
+    }
+
     // 已在途/已排队/已完成的 key 直接跳过（状态机去重，队列不会进重）；否则置 loading
     // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）、page:<arcid>:<pagePath>
     // （阅读页）与 thumb:<arcid>:<pagePath>（300px 缩略图档）。
@@ -2268,6 +2359,10 @@ public class AppModel {
             return
         }
         st.value = "loading"
+        // LANLU_PERF 打点：记录首次请求时刻（e2e 起点；重试不覆盖，保留用户最早等待点）。
+        if (SubtitlePerf.enabled() && !imgPerfT0.contains(key)) {
+            imgPerfT0[key] = MonoTime.now()
+        }
         if (activeImages >= 4) {
             // 按优先级进各自 FIFO：高优先级始终先于低优先级补位（P2.8，无整队列复制）。
             if (highPriority) {
@@ -2285,6 +2380,10 @@ public class AppModel {
     // 其完成结果落磁盘/staged 缓存无害（P2.7 的协作式取消点会跳过解码）。
     // 仅 UI 线程调用（同 requestImage/pump 纪律）。
     public func cancelImage(key: String): Unit {
+        // LANLU_PERF 打点：滚出屏幕取消排队时清掉 e2e 起点，重新可见后再请求从 0 计。
+        if (SubtitlePerf.enabled()) {
+            imgPerfT0.remove(key)
+        }
         var i: Int64 = 0
         while (i < imageQueueHi.size) {
             if (imageQueueHi[i][0] == key) {
@@ -2323,6 +2422,13 @@ public class AppModel {
             return
         }
         activeImages++
+        // LANLU_PERF 打点：requestImage → 实际开跑的排队等待（并发上限 4 的排队成本）。
+        if (SubtitlePerf.enabled()) {
+            match (imgPerfT0.get(key)) {
+                case Some(t0) => SubtitlePerf.sampleUs("img_queuewait_us", (MonoTime.now() - t0).toMicroseconds())
+                case None => ()
+            }
+        }
         let c = cache()
         // 图片任务走三级流水线（P1.6）：下载阶段在独立下载池（4 线程），完成后在下载
         // 线程内把解码阶段提交到独立解码池（2 线程、有界队列 32 背压）；两阶段都不再
@@ -2342,7 +2448,14 @@ public class AppModel {
                     // 缓存原始字节（工作线程上流式落盘，按原始资源 key 去重/共用：thumb
                     // 与 page 共享同一份原始页面文件）
                     let rawKey = rawKeyFor(key)
+                    let dlT0 = MonoTime.now()
                     let path = c.ensureCached(rawKey, writer)
+                    // LANLU_PERF 打点：下载+落盘（命中磁盘缓存时≈0）。
+                    if (SubtitlePerf.enabled()) {
+                        let dlUs = (MonoTime.now() - dlT0).toMicroseconds()
+                        SubtitlePerf.sampleUs("img_download_us", dlUs)
+                        perfStageMark(key, 0, dlUs)
+                    }
                     // 下载完成 → 提交解码阶段（解码池；队列满则阻塞下载线程产生背压）。
                     // 解码阶段使用 "img:" 命名空间（与下载阶段 "imgdl:" 分开），inflight
                     // 不冲突；UI dispatch 按 "img:" 正常处理解码结果。
@@ -2360,10 +2473,17 @@ public class AppModel {
                                 //（原始 key 条目）再抛出，重试可重新拉取。解码期间标记引用，
                                 // sweep 不得删除正在被 vips 打开的文件（P2.9）。
                                 c.markReferenced(rawKey)
+                                let decT0 = MonoTime.now()
                                 let d = try {
                                     decodeCachedOrEvict(c, rawKey, path, maxDimension: decodeMaxDimension(key))
                                 } finally {
                                     c.clearReferenced(rawKey)
+                                }
+                                // LANLU_PERF 打点：vips 解码（含 shrink-on-load/resize/圆角前）。
+                                if (SubtitlePerf.enabled()) {
+                                    let decUs = (MonoTime.now() - decT0).toMicroseconds()
+                                    SubtitlePerf.sampleUs("img_decode_us", decUs)
+                                    perfStageMark(key, 1, decUs)
                                 }
                                 // 封面圆角在工作线程内完成（原生内存直改 alpha，避免 UI dispatch
                                 // 遍历整张封面像素）；阅读页（page:/thumb:）不处理。
@@ -2426,10 +2546,11 @@ public class AppModel {
         playback.stop() // 离开阅读器停播（音频不带到详情页）
         lastLane = Book
         meta.value = None
-        detailPages.value = ArrayList<PageInfo>()
-        parentTanks.value = ArrayList<TankoubonInfo>()
-        relatedItems.value = ArrayList<SearchItem>()
-        detailTagTranslations.value = HashMap<String, String>()
+        detailPages.value = ArchivePageView.empty(arcid: arcid)
+        parentTanks.value = TankoubonView.empty(queryKey: "parent-tanks:${arcid}", language: language.value)
+        relatedItems.value = SearchItemView.empty(queryKey: "related-archives:${arcid}", language: language.value)
+        detailTagTranslations.value = TagTranslationView.empty(queryKey: "tag-translations:archive:${arcid}",
+            language: language.value)
         detailLoadState.value = "loading"
         detailLoadError.value = ""
         detailPagesState.value = "loading"
@@ -2459,10 +2580,11 @@ public class AppModel {
             case _ => detailReturnToShelf = false
         }
         tank.value = None
-        tankMembers.value = ArrayList<SearchItem>()
-        tankRelated.value = ArrayList<TankoubonInfo>()
+        tankMembers.value = SearchItemView.empty(queryKey: "tank-members:${tankid}", language: language.value)
+        tankRelated.value = TankoubonView.empty(queryKey: "tank-related:${tankid}", language: language.value)
         tankFilter.value = ""
-        detailTagTranslations.value = HashMap<String, String>()
+        detailTagTranslations.value = TagTranslationView.empty(queryKey: "tag-translations:tank:${tankid}",
+            language: language.value)
         tankLoadState.value = "loading"
         tankLoadError.value = ""
         tankMembersState.value = "loading"
@@ -2471,15 +2593,14 @@ public class AppModel {
         let a = api ?? return
         let lang = language.value
         let _ = worker.submitTagged("tankmeta:${tankid}", lang, {=> a.getTankoubon(tankid, lang: lang)})
-        // 成员档案走 search?tankoubon_id=X&sortby=tank_order（对齐 frontend
-        // tankoubon/page.tsx fetchArchives：合集内序、大 pageSize 一次取全）。
+        // 成员档案按 256 项分批拉取并逐页写入 RocksDB membership，避免万级响应一次物化。
         let q = SearchQuery()
         q.tankoubonId = tankid
         q.sortby = "tank_order"
         q.order = "asc"
-        q.pageSize = 10000
+        q.pageSize = 256
         q.lang = lang
-        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.search(q)})
+        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
         let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
             => a.relatedTankoubons(tankid, 12, lang: lang)
         })
@@ -2502,9 +2623,9 @@ public class AppModel {
         q.tankoubonId = tankid
         q.sortby = "tank_order"
         q.order = "asc"
-        q.pageSize = 10000
+        q.pageSize = 256
         q.lang = lang
-        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.search(q)})
+        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
         let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
             => a.relatedTankoubons(tankid, 12, lang: lang)
         })
@@ -2582,7 +2703,7 @@ public class AppModel {
         playback.stop() // 换档案/重进阅读器：停掉上一媒体（旧进程不得泄漏）
         lastLane = Book // 与 reader.open 的 activeLane=Book 复位对齐
         readerArcid = arcid
-        pages.value = ArrayList<PageInfo>()
+        pages.value = ArchivePageView.empty(arcid: arcid)
         // 顶栏标题/收藏态随档案切换：清掉上一档案的元数据，避免迟到结果显示错档案。
         meta.value = None
         // 无缝续读状态复位：候选/在途标记/解析缓存不跨档案（reader.open 内重置流）。
@@ -2635,6 +2756,7 @@ public class AppModel {
         readerIndex.value = reader.displayPage
         readerPageSlider.value = Float32(reader.displayPage)
         readerVersion.value += 1
+        perfReaderTurnMark()
     }
 
     // html 页 PgUp/PgDn/空格：先页内按视口高翻滚（重叠 24px）；到底/到顶后
@@ -2678,6 +2800,7 @@ public class AppModel {
                 readerIndex.value = reader.displayPage
                 readerPageSlider.value = Float32(reader.displayPage)
                 readerVersion.value += 1
+                perfReaderTurnMark()
             case None => ()
         }
     }
@@ -2932,9 +3055,9 @@ public class AppModel {
                         q.tankoubonId = tanks[0].id
                         q.sortby = "tank_order"
                         q.order = "asc"
-                        q.pageSize = 10000
+                        q.pageSize = 256
                         q.lang = lang
-                        let members = a.search(q).items
+                        let members = a.searchAll(q).items
                         var i: Int64 = 0
                         while (i < members.size) {
                             if (members[Int64(i)].arcid == arcid) {
@@ -3064,6 +3187,42 @@ public class AppModel {
         let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
     }
 
+    // 元数据刷新/保存后把规范 SearchItem 投影写回共享对象：搜索/浏览行/书架/合集成员等
+    // 视图按 rank 重读同一实体，标题、简介、标签等重叠字段不再各持一份拷贝。
+    private func syncSearchItemFromMeta(meta: ArchiveMeta): Unit {
+        if (meta.arcid.size == 0) {
+            return
+        }
+        let synced = searchItemFromMeta(meta)
+        for (view in [items.value, relatedItems.value, tankMembers.value, shelfFavorites.value,
+            shelfHistory.value, recentRead.value, recentFav.value]) {
+            for (i in 0..view.size) {
+                match (view.itemAt(i)) {
+                    case Some(it) =>
+                        if (it.arcid == meta.arcid) {
+                            copySearchProjection(it, synced)
+                            let _ = view.persist(it)
+                            break
+                        }
+                    case None => ()
+                }
+            }
+        }
+        for (row in browseRows.value) {
+            for (i in 0..row.items.size) {
+                match (row.items.itemAt(i)) {
+                    case Some(it) =>
+                        if (it.arcid == meta.arcid) {
+                            copySearchProjection(it, synced)
+                            let _ = row.items.persist(it)
+                            break
+                        }
+                    case None => ()
+                }
+            }
+        }
+    }
+
     private func refreshDetailLocalized(arcid: String): Unit {
         let a = api ?? return
         let lang = language.value
@@ -3093,39 +3252,59 @@ public class AppModel {
         var found = false
         for (it in items.value) {
             if (it.arcid == arcid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = items.value.persist(it)
+                break
             }
         }
         for (row in browseRows.value) {
             for (it in row.items) {
                 if (it.arcid == arcid) {
-                    found = true
-                    target = !it.isfavorite
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
                     it.isfavorite = target
+                    let _ = row.items.persist(it)
+                    break
                 }
             }
         }
         for (it in tankMembers.value) {
             if (it.arcid == arcid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = tankMembers.value.persist(it)
+                break
             }
         }
         for (it in shelfFavorites.value) {
             if (it.arcid == arcid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = shelfFavorites.value.persist(it)
+                break
             }
         }
         for (it in shelfHistory.value) {
             if (it.arcid == arcid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = shelfHistory.value.persist(it)
+                break
             }
         }
         if (!found) {
@@ -3145,46 +3324,76 @@ public class AppModel {
         var found = false
         for (it in items.value) {
             if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = items.value.persist(it)
+                break
             }
         }
         for (row in browseRows.value) {
             for (it in row.items) {
                 if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
-                    found = true
-                    target = !it.isfavorite
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
                     it.isfavorite = target
+                    let _ = row.items.persist(it)
+                    break
                 }
             }
         }
-        for (it in parentTanks.value) {
-            if (it.id == tankid) {
-                found = true
-                target = !it.isfavorite
-                it.isfavorite = target
+        for (i in 0..parentTanks.value.size) {
+            match (parentTanks.value.itemAt(i)) {
+                case Some(it) =>
+                    if (it.id == tankid) {
+                        if (!found) {
+                            target = !it.isfavorite
+                            found = true
+                        }
+                        it.isfavorite = target
+                        let _ = parentTanks.value.persist(it)
+                        break
+                    }
+                case None => ()
             }
         }
-        for (it in tankRelated.value) {
-            if (it.id == tankid) {
-                found = true
-                target = !it.isfavorite
-                it.isfavorite = target
+        for (i in 0..tankRelated.value.size) {
+            match (tankRelated.value.itemAt(i)) {
+                case Some(it) =>
+                    if (it.id == tankid) {
+                        if (!found) {
+                            target = !it.isfavorite
+                            found = true
+                        }
+                        it.isfavorite = target
+                        let _ = tankRelated.value.persist(it)
+                        break
+                    }
+                case None => ()
             }
         }
         for (it in shelfFavorites.value) {
             if (it.itemType == "tankoubon" && it.tankoubonId == tankid) {
-                found = true
-                target = !it.isfavorite
+                if (!found) {
+                    target = !it.isfavorite
+                    found = true
+                }
                 it.isfavorite = target
+                let _ = shelfFavorites.value.persist(it)
+                break
             }
         }
         match (tank.value) {
             case Some(it) =>
                 if (it.id == tankid) {
-                    found = true
-                    target = !it.isfavorite
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
                     it.isfavorite = target
                     tank.value = Some(it)
                 }
@@ -3346,8 +3555,8 @@ public class AppModel {
         summaryAppend: String): Unit {
         let a = api ?? return
         let members = tankMembers.value
-        let addTags = metadataTagList(addTagsRaw)
-        let removeTags = metadataTagList(removeTagsRaw)
+        let addTags = splitTags(addTagsRaw)
+        let removeTags = splitTags(removeTagsRaw)
         let summary = summaryAppend.trimAscii()
         let _ = worker.submit(
             "batch.edit",
@@ -3360,7 +3569,7 @@ public class AppModel {
                                 continue
                             }
                             let tags = ArrayList<String>()
-                            for (existing in metadataTagList(item.tagsCsv)) {
+                            for (existing in splitTags(item.tagsCsv)) {
                                 if (!removeTags.contains(existing)) {
                                     tags.add(existing)
                                 }
@@ -3395,14 +3604,19 @@ public class AppModel {
             return
         }
         var canonical = display
-        for ((raw, translated) in detailTagTranslations.value) {
-            let expected = match (raw.indexOf(":")) {
-                case Some(i) => "${raw[0..i]}:${translated}"
-                case None => translated
-            }
-            if (expected == display) {
-                canonical = raw
-                break
+        let translations = detailTagTranslations.value
+        for (i in 0..translations.size) {
+            match (translations.entryAt(i)) {
+                case Some((raw, translated)) =>
+                    let expected = match (raw.indexOf(":")) {
+                        case Some(j) => "${raw[0..j]}:${translated}"
+                        case None => translated
+                    }
+                    if (expected == display) {
+                        canonical = raw
+                        break
+                    }
+                case None => ()
             }
         }
         searchText.value = if (canonical.endsWith("$")) {
@@ -3937,6 +4151,7 @@ public class AppModel {
         }
         // 离线回退通知轮询：worker 置位后在此（UI 线程）toast。
         pollOfflineNotice()
+        let pumpT0 = MonoTime.now()
         let results = worker.drain()
         for (r in results) {
             if (r.tag.size > 0 && r.tag != language.value) {
@@ -3950,6 +4165,13 @@ public class AppModel {
                 continue
             }
             dispatch(r)
+        }
+        // LANLU_PERF 打点：有结果时的 drain+dispatch UI 线程成本；并驱动 5s 滚动汇总。
+        if (SubtitlePerf.enabled()) {
+            if (results.size > 0) {
+                SubtitlePerf.sampleUs("pump_dispatch_us", (MonoTime.now() - pumpT0).toMicroseconds())
+            }
+            perfFlushTick()
         }
     }
 
@@ -4327,6 +4549,7 @@ public class AppModel {
                         totpChallengeId.value = cid
                     } else {
                         totpChallengeId.value = ""
+                        pendingLoginUsername = ""
                         api = a
                         match (settings.profileById(sid)) {
                             case Some(prof) =>
@@ -4354,7 +4577,7 @@ public class AppModel {
                         loadBrowseRows()
                         // 登录成功：服务端已恢复，补报该服务器的离线阅读进度。
                         match (settings.profileById(sid)) {
-                            case Some(prof) => flushOfflineProgress(prof.baseUrl)
+                            case Some(prof) => flushOfflineProgress(prof)
                             case None => ()
                         }
                     }
@@ -4370,7 +4593,7 @@ public class AppModel {
                     probeState(pid).value = "online"
                     // 服务端已恢复：补报该服务器的离线阅读进度。
                     match (settings.profileById(pid)) {
-                        case Some(prof) => flushOfflineProgress(prof.baseUrl)
+                        case Some(prof) => flushOfflineProgress(prof)
                         case None => ()
                     }
                 case None => ()
@@ -4393,6 +4616,11 @@ public class AppModel {
             navigate(Page.Library)
             loadCategories()
             loadBrowseRows()
+            // LANLU_PERF 打点：会话恢复端到端（tryResumeSession→me 到货）。
+            if (SubtitlePerf.enabled()) {
+                SubtitlePerf.spanEnd("session_resume")
+                SubtitlePerf.emit("session_resume_ms", SubtitlePerf.getGauge("session_resume"), "ms")
+            }
         } else if (name.startsWith("autocomplete:")) {
             match (r.payload) {
                 case Some(p) =>
@@ -4437,8 +4665,8 @@ public class AppModel {
         } else if (name == "set.overview") {
             match (r.payload) {
                 case Some(p) =>
-                    let (stats, trend, read, fav) = (p as (UserStats, ArrayList<TrendPoint>, ArrayList<SearchItem>, 
-                        ArrayList<SearchItem>)).getOrThrow()
+                    let (stats, trend, read, fav) = (p as (UserStats, ArrayList<TrendPoint>, SearchItemView,
+                        SearchItemView)).getOrThrow()
                     userStats.value = stats
                     userTrend.value = trend
                     recentRead.value = read
@@ -4572,6 +4800,12 @@ public class AppModel {
             }
             browseRows.value = browseRows.value
             onRowTaskFinished() // 本批落盘：补发下一批分类行
+            // LANLU_PERF 打点：首批浏览行到货（首屏内容可用的近似点，只报一次）。
+            if (SubtitlePerf.enabled() && !firstRowsEmitted) {
+                firstRowsEmitted = true
+                SubtitlePerf.spanEnd("first_rows")
+                SubtitlePerf.emit("first_rows_ms", SubtitlePerf.getGauge("first_rows"), "ms")
+            }
         } else if (name.startsWith("meta:")) {
             match (r.payload) {
                 case Some(p) =>
@@ -4585,6 +4819,8 @@ public class AppModel {
                                 meta.value = Some(m)
                                 detailLoadState.value = "ready"
                                 detailLoadError.value = ""
+                                // 把规范字段投影写回共享 SearchItem 视图，避免两份字段漂移。
+                                syncSearchItemFromMeta(m)
                                 // 优先真实 backdrop，缺省才退回封面模糊背景。
                                 let backdropAsset = if (m.backdropAssetId > 0) {
                                     m.backdropAssetId
@@ -4601,6 +4837,7 @@ public class AppModel {
                             if (arcid == cur) {
                                 let m = (p as ArchiveMeta).getOrThrow()
                                 meta.value = Some(m)
+                                syncSearchItemFromMeta(m)
                                 reader.setSegmentTitle(arcid, m.title)
                             }
                         case _ => ()
@@ -4623,7 +4860,7 @@ public class AppModel {
                 case Some(p) =>
                     let arcid = name.removePrefix("editfiles:")
                     if (metadataEditorOpen.value && arcid == metadataEditorArchiveId) {
-                        metadataEditorPages.value = (p as ArrayList<PageInfo>).getOrThrow()
+                        metadataEditorPages.value = (p as ArchivePageView).getOrThrow()
                     }
                 case None => ()
             }
@@ -4632,6 +4869,38 @@ public class AppModel {
             metadataEditorDirty.value = false
             metadataEditorOpen.value = false
             toaster.show("元数据已保存", kind: ToastKind.Success)
+            // 页级编辑成功后只更新单页主记录并让热点窗口失效，不重新整本拉取页表。
+            if (name.startsWith("editsave:page:")) {
+                let remainder = name.removePrefix("editsave:page:")
+                let sep = remainder.lastIndexOf(":")
+                if (let Some(i) <- sep) {
+                    let arcid = remainder[0..i]
+                    let rank = try {
+                        Int64.parse(remainder[i + 1..remainder.size])
+                    } catch (_: Exception) {
+                        -1
+                    }
+                    if (rank >= 0 && detailPages.value.arcid == arcid) {
+                        match (detailPages.value.itemAt(rank)) {
+                            case Some(edited) =>
+                                let view = detailPages.value
+                                view.invalidateRank(rank)
+                                match (offlineCacheFor()) {
+                                    case Some(c) =>
+                                        match (settings.activeProfile()) {
+                                            case Some(p) =>
+                                                let _ = c.updatePage(fnv1a64Hex(p.baseUrl),
+                                                    offlineAccountScope(p.id, p.username, p.token), arcid, rank,
+                                                    edited)
+                                            case None => ()
+                                        }
+                                    case None => ()
+                                }
+                            case None => ()
+                        }
+                    }
+                }
+            }
             match (page.value) {
                 case Page.Detail(arcid) =>
                     refreshMeta(arcid)
@@ -4652,7 +4921,7 @@ public class AppModel {
                     match (page.value) {
                         case Page.Detail(cur) =>
                             if (arcid == cur) {
-                                detailPages.value = (p as ArrayList<PageInfo>).getOrThrow()
+                                detailPages.value = (p as ArchivePageView).getOrThrow()
                                 detailPagesState.value = "ready"
                                 detailPagesError.value = ""
                             }
@@ -4667,7 +4936,7 @@ public class AppModel {
                     match (page.value) {
                         case Page.Detail(cur) =>
                             if (arcid == cur) {
-                                parentTanks.value = (p as ArrayList<TankoubonInfo>).getOrThrow()
+                                parentTanks.value = (p as TankoubonView).getOrThrow()
                             }
                         case _ => ()
                     }
@@ -4680,7 +4949,7 @@ public class AppModel {
                     match (page.value) {
                         case Page.Detail(cur) =>
                             if (arcid == cur) {
-                                relatedItems.value = (p as ArrayList<SearchItem>).getOrThrow()
+                                relatedItems.value = (p as SearchItemView).getOrThrow()
                             }
                         case _ => ()
                     }
@@ -4688,7 +4957,7 @@ public class AppModel {
             }
         } else if (name.startsWith("tagtranslations:")) {
             match (r.payload) {
-                case Some(p) => detailTagTranslations.value = (p as HashMap<String, String>).getOrThrow()
+                case Some(p) => detailTagTranslations.value = (p as TagTranslationView).getOrThrow()
                 case None => ()
             }
         } else if (name.startsWith("tankmeta:")) {
@@ -4737,7 +5006,7 @@ public class AppModel {
                     match (page.value) {
                         case Page.Tank(cur) =>
                             if (tankid == cur) {
-                                tankRelated.value = (p as ArrayList<TankoubonInfo>).getOrThrow()
+                                tankRelated.value = (p as TankoubonView).getOrThrow()
                             }
                         case _ => ()
                     }
@@ -4752,11 +5021,11 @@ public class AppModel {
                     match (page.value) {
                         case Page.Reader(cur, _) =>
                             if (arcid == cur) {
-                                let list = (p as ArrayList<PageInfo>).getOrThrow()
-                                pages.value = list
+                                let view = (p as ArchivePageView).getOrThrow()
+                                pages.value = view
                                 // 起始页来自可能过期的 progress；页表到货钳制+spread 吸附
                                 // 在 ReaderModel 内完成，readerIndex 同步回 1 基。
-                                reader.setPages(list)
+                                reader.setPages(view)
                                 readerIndex.value = reader.displayPage
                                 readerPageSlider.value = Float32(reader.displayPage)
                             }
@@ -4942,9 +5211,53 @@ public class AppModel {
                             // 首帧绘制时惰性创建。
                             stageNativePixelImage(k, img.width, img.height, img.pointer(), NativeImageReleaser(img))
                             imageState(k).value = "ready"
+                            // LANLU_PERF 打点：e2e（requestImage→上屏前）+ 分阶段明细；
+                            // 若该图属于翻页待达集合，集齐时 emit reader_turn_ms。
+                            if (SubtitlePerf.enabled()) {
+                                var dlUs: Int64 = 0
+                                var decUs: Int64 = 0
+                                synchronized(imgPerfStageMutex) {
+                                    match (imgPerfStage.get(k)) {
+                                        case Some(v) =>
+                                            dlUs = v[0]
+                                            decUs = v[1]
+                                            imgPerfStage.remove(k)
+                                        case None => ()
+                                    }
+                                }
+                                var e2eUs: Int64 = 0
+                                match (imgPerfT0.get(k)) {
+                                    case Some(t0) =>
+                                        e2eUs = (MonoTime.now() - t0).toMicroseconds()
+                                        imgPerfT0.remove(k)
+                                    case None => ()
+                                }
+                                SubtitlePerf.sampleUs("img_e2e_us", e2eUs)
+                                println("[perf] img ${k} ${img.width}x${img.height} e2e=${e2eUs / 1000}ms dl=${dlUs / 1000}ms dec=${decUs / 1000}ms")
+                                if (readerTurnPending.contains(k)) {
+                                    readerTurnPending.remove(k)
+                                    if (readerTurnPending.isEmpty()) {
+                                        match (readerTurnT0) {
+                                            case Some(t0) =>
+                                                readerTurnT0 = None
+                                                SubtitlePerf.emit("reader_turn_ms",
+                                                    (MonoTime.now() - t0).toMilliseconds(), "ms")
+                                            case None => ()
+                                        }
+                                    }
+                                }
+                            }
                         case None => ()
                     }
-                case None => imageState(key).value = "error"
+                case None =>
+                    imageState(key).value = "error"
+                    // LANLU_PERF 打点：失败也要清起点，避免残留影响后续重试的 e2e。
+                    if (SubtitlePerf.enabled()) {
+                        imgPerfT0.remove(key)
+                        synchronized(imgPerfStageMutex) {
+                            imgPerfStage.remove(key)
+                        }
+                    }
             }
         } else if (name.startsWith("backdrop:")) {
             // backdrop 解码到货：直接登记 staged 原生像素（不经过 img 管线，不需圆角），
@@ -5068,11 +5381,11 @@ public class AppModel {
             appendInFlight = false
             match (r.payload) {
                 case Some(p) =>
-                    let (id, title, list) = (p as (String, String, ArrayList<PageInfo>)).getOrThrow()
-                    if (list.size == 0) {
+                    let (id, title, view) = (p as (String, String, ArchivePageView)).getOrThrow()
+                    if (view.size == 0) {
                         reader.appendNextFailed("没有下一档案了")
                     } else {
-                        reader.appendArchive(id, title, list)
+                        reader.appendArchive(id, title, view)
                     }
                     readerVersion.value += 1
                 case None => ()
