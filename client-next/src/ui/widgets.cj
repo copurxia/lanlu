@@ -1266,8 +1266,10 @@ class CoverProgress <: Widget {
         emit(this)
     }
 
-    public func measure(_: UiContext, available: Size): Size {
-        Size(available.w, 3.0)
+    public func measure(_: UiContext, _: Size): Size {
+        // 零尺寸参与测量：ZStack 布局时伸展到完整封面 frame（同 CardHoverActions），
+        // 浮层内容不反向参与封面测量。
+        Size.zero()
     }
 
     public func layout(_: UiContext, rect: Rect): Unit {
@@ -1275,9 +1277,10 @@ class CoverProgress <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        // 两端内缩 5vp：封面圆角为短边 7.2%（168vp 宽 ≈ 12vp），内缩 5 可保证
-        // 3vp 高的贴底条始终落在圆角弧内（原型 .cover .prog 为全宽贴底条）。
-        let track = Rect(frame.x + 5.0, frame.y, frame.w - 10.0, 3.0)
+        // frame 为完整封面 rect，贴底 3vp 自算轨道；两端内缩 5vp：封面圆角为短边 7.2%
+        //（168vp 宽 ≈ 12vp），内缩 5 可保证 3vp 高的贴底条始终落在圆角弧内
+        //（原型 .cover .prog 为全宽贴底条）。
+        let track = Rect(frame.x + 5.0, frame.y + frame.h - 3.0, frame.w - 10.0, 3.0)
         if (track.w <= 0.0) {
             return
         }
@@ -1556,7 +1559,11 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
         }
     }) {
         ZStack {
-            CardEntranceTicker(entrance, index)
+            // 入场播完（progress 达 1.0）后 ticker 不再挂树；状态由分支外的 rememberState
+            // 驻留（key 不变），选择态/收藏态重建或列表复用都不会重播。
+            if (entrance.progress < 1.0) {
+                CardEntranceTicker(entrance, index)
+            }
             VStack {
                 ZStack {
                     if (tank) {
@@ -1601,30 +1608,35 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     }
                     // 顶部角标行：左上合集类型、右上 NEW（原型 .badge-type / .badge-new 位置）；
                     // 选择模式下 NEW 让位给勾选圆点（选择态比「新到」更需要一目了然）。
-                    HStack {
-                        if (tank) {
-                            tankBadge(model)
-                        }
-                        Spacer()
-                        if (selecting) {
-                            SelectionDot(selected)
-                        } else if (isNew && !tank) {
-                            newBadge()
-                        }
-                    }.crossAxisAlignment(CrossAxisAlignment.Start).padding(8.vp)
-                    // 底部进度条：全宽（两端内缩在 CoverProgress 内部处理）。
-                    if (pct > 0) {
-                        VStack {
+                    // 无任何角标可显示时整行不挂载：空行只剩 HStack{Spacer}.padding 稳态废节点。
+                    if (tank || selecting || (isNew && !tank)) {
+                        HStack {
+                            if (tank) {
+                                tankBadge(model)
+                            }
                             Spacer()
-                            CoverProgress(pct)
-                        }
+                            if (selecting) {
+                                SelectionDot(selected)
+                            } else if (isNew && !tank) {
+                                newBadge()
+                            }
+                        }.crossAxisAlignment(CrossAxisAlignment.Start).padding(8.vp)
+                    }
+                    // 底部进度条：CoverProgress 与 CardHoverActions 同法，在 ZStack 内伸展到
+                    // 完整封面 frame、自算贴底 rect（两端内缩在其内部处理），不再要包装层。
+                    if (pct > 0) {
+                        CoverProgress(pct)
                     }
                     // 浮层内容不能反向参与封面测量；封面槽位始终保持调用方给定的固定尺寸。
                 }.alignment(Alignment.TopLeading).width(coverW).height(coverH)
                 Label(title).maxLines(1).fontSize(12.5.fp)
                 Label(meta).fontSize(11.fp).muted()
             }.spacing(4.vp).crossAxisAlignment(CrossAxisAlignment.Start).width(coverW).offset(x: 0.0, y: entranceY)
-            CardEntranceVeil(entrance).offset(x: 0.0, y: entranceY)
+            // 入场遮罩与 ticker 同生命周期：progress 达 1.0 后其 draw 本就不产生任何绘制，
+            // 整节点不挂载（连同 offset 修饰节点）。
+            if (entrance.progress < 1.0) {
+                CardEntranceVeil(entrance).offset(x: 0.0, y: entranceY)
+            }
         }.alignment(Alignment.TopLeading)
     }
 }
@@ -1774,9 +1786,12 @@ public func sectionHeader(title: String, trailing: () -> Unit): Unit {
 // 间距 14vp，行高由调用方按卡片规格给定。子项 key/卡片按条目类型分派（聚合合辑
 // 条目的 arcid 为空，直接用会撞 key 闪退，见 searchItemKey）。
 // items 直接持 RocksDB-backed view 引用，LazyRow 仅按可见 rank 解码热点对象。
+// scroll：外置横向滚动位置（默认 None 用行内局部状态）。浏览页纵向虚拟化后行会随
+// 滚动卸载/重建，局部状态被 StateStore 清除，调用方需外置持有才能保住横滚位置。
 public func cardRow(model: AppModel, rowKey: String, items: SearchItemView, coverW: Float32, stripH: Float32,
-    recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
-    LazyRow(items.size, coverW, spacing: 14.0, key: {i => searchItemKey(items[i])}, id: "browse:${rowKey}") {
+    recommendationScene!: String = "", seedType!: String = "", seedId!: String = "",
+    scroll!: ?State<Float32> = None): Unit {
+    LazyRow(items.size, coverW, spacing: 14.0, scroll: scroll, key: {i => searchItemKey(items[i])}, id: "browse:${rowKey}") {
         i =>
             let item = items[i]
             if (recommendationScene.size > 0 && item.arcid.size > 0) {

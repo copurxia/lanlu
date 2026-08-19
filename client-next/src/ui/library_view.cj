@@ -27,6 +27,14 @@ private let CARD_TEXT_H: Float32 = 50.0 // 标题(13fp)+meta(11fp)+内部间距
 private let ROW_SCROLLBAR_CLEARANCE: Float32 = 12.0
 private let BROWSE_STRIP_H: Float32 = BROWSE_COVER_H + CARD_TEXT_H + ROW_SCROLLBAR_CLEARANCE
 
+// 浏览行定高（纵向虚拟化的 LazyColumn 要求定高行）：行头 + 行内间距 10 + 卡条。
+// 行头高 = max(28, textHeight(16fp)+6)（Label 单行测高公式，28 为框架 CUI_SMALL_H 行高
+// 下限），随运行期字体与 fontScale 变化，构建期拿不到 UiContext 无法算，故由
+// RowHeightProbe 在 measure 时实测写回；估值仅用于首帧起画，一帧内收敛到真实值。
+private let BROWSE_ROW_HEADER_MIN: Float32 = 28.0
+private let BROWSE_ROW_GAP: Float32 = 10.0
+private let BROWSE_ROW_H_EST: Float32 = BROWSE_ROW_HEADER_MIN + BROWSE_ROW_GAP + BROWSE_STRIP_H
+
 // 搜索/过滤模式自适应网格（原型 #home-grid：列数 = clamp(floor(宽/196), 3, 10)）
 private let GRID_PADDING: Float32 = 20.0
 private let GRID_SPACING: Float32 = 16.0
@@ -187,15 +195,58 @@ private func toolbar(model: AppModel): Unit {
 // ---- 浏览模式（横排行：继续阅读 / 随机推荐 / 新到档案 / 分类行）----
 
 private func browseContent(model: AppModel): Unit {
-    ScrollView(key: "browse-rows") {
-        VStack {
-            for (row in model.browseRows.value) {
-                // 加载完成且无内容的行直接隐藏（空分类不制造噪音）。
-                if (row.loading || row.failed || row.items.size > 0) {
-                    browseRowSection(model, row)
-                }
-            }
-        }.spacing(28.vp).hug().padding(20.vp)
+    // 加载完成且无内容的行直接隐藏（空分类不制造噪音）：与原 VStack 内 if 同一条件，
+    // 提前到构建前过滤，LazyColumn 的行下标才与可见行一一对应。
+    let rows = ArrayList<BrowseRow>()
+    for (row in model.browseRows.value) {
+        if (row.loading || row.failed || row.items.size > 0) {
+            rows.add(row)
+        }
+    }
+    // 行高实测值（见 RowHeightProbe）；估值起画，一帧内收敛。
+    let rowH = rememberState<Float32>("lib.browseRowH", {=> BROWSE_ROW_H_EST})
+    // 纵向虚拟化：LazyColumn 只物化可见行 ±2 overscan（原 ScrollView+VStack 全量构建/
+    // measure/draw，900vp 视口仅容 ~3 行）。行 key 保持身份；行内容 browseRowSection
+    // 原样复用；行间 28vp、四边 20vp 同原值。ZStack 只为叠放行高探针（零尺寸不可见），
+    // Flexible 维持与原 ScrollView 相同的剩余高度分配。
+    Flexible {
+        ZStack {
+            RowHeightProbe(rowH)
+            LazyColumn(rows.size, rowH.value, spacing: 28.0, key: {i => rows[i].key}, id: "browse-rows") {
+                i => browseRowSection(model, rows[i])
+            }.padding(20.vp)
+        }
+    }
+}
+
+// 行高探针（浏览页纵向虚拟化配套）：LazyColumn 需要定高行，而行头高 = max(28, 行文本高
+// +6) 取决于运行期字体与 fontScale（Label.measure 单行公式，行高与文本内容无关），构建期
+// 拿不到 UiContext 无法计算。探针在 measure 时按同一公式实测并写回 State（setIfChanged
+// 变化才写，与 SizeProbe 同一收敛机制）；零尺寸、不绘制、不消费事件，叠在 ZStack 底层，
+// 对布局与交互无影响。
+private class RowHeightProbe <: Widget {
+    private let target: State<Float32>
+
+    public init(target: State<Float32>) {
+        this.target = target
+        emit(this)
+    }
+
+    public func measure(ctx: UiContext, _: Size): Size {
+        // 复刻 sectionHeader 标题 Label（16fp 单行、非 tight）的测高公式；行头内 trailing
+        // 的 12fp 文本与 ≤13vp 图标均不超过该高度（textHeight 随字号单调不减）。
+        let ps = max(1.0, 16.0 * ctx.fontScale)
+        let headerH = max(BROWSE_ROW_HEADER_MIN, ctx.renderer.textHeight(pointSize: ps) + 6.0)
+        let _ = target.setIfChanged(headerH + BROWSE_ROW_GAP + BROWSE_STRIP_H)
+        Size(0.0, 0.0)
+    }
+
+    public func layout(_: UiContext, _: Rect): Unit {}
+
+    public func draw(_: UiContext): Unit {}
+
+    public func handle(_: UiContext, _: UiEvent): Bool {
+        false
     }
 }
 
@@ -209,7 +260,10 @@ private func browseRowSection(model: AppModel, row: BrowseRow): Unit {
                 rowStripPlaceholder(model.t("library.loadFailed"))
             }
         } else {
-            cardRow(model, row.key, row.items, BROWSE_COVER_W, BROWSE_STRIP_H)
+            // 横滚位置外置到 model：行滚出视口被 LazyColumn 卸载后局部状态清除，
+            // 外置 State 保证回滚时横向位置不丢（与虚拟化前行常驻行为一致）。
+            cardRow(model, row.key, row.items, BROWSE_COVER_W, BROWSE_STRIP_H,
+                scroll: Some(model.browseRowScroll(row.key)))
         }
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug()
 }

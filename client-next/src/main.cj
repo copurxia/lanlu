@@ -185,8 +185,16 @@ main(): Int64 {
         }
     }
     println("[boot] 3.5 uiScale=${uiScale} window=${winW}x${winH} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 超采样档位：默认 AUTO（GPU 渲染 2x，software 回退 1x）。LANLU_PERF 实测 2x 超采样
+    // 是帧成本大头（阅读页 present 15ms/帧），LANLU_SUPERSAMPLE=1 可关到 1x（文字边缘
+    // 锐度略降换帧成本减半）；用户显式设置时优先，未设置保持默认行为不变。
+    let supersample: Int32 = if (getVariable("LANLU_SUPERSAMPLE") == Some("1")) {
+        1
+    } else {
+        AUTO_SUPERSAMPLE
+    }
     let app = DesktopApp(
-        WindowSpec("lanlu", winW, winH, scale: uiScale,
+        WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
             } else {

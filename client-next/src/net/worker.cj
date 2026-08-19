@@ -36,12 +36,15 @@ private class WorkItem {
 // 独立队列 + 独立线程，互不阻塞——图片下载（慢网络链路）打满下载池时，元数据/搜索/
 // 进度等交互 API 仍能即时开工；解码池独立避免下载过快积压大量待解码结果。下载完成在
 // 下载线程内提交解码任务（解码队列有界，满则阻塞下载线程产生背压，禁止无界积累
-// decoded/native 图片）。图片并发硬上限（下载在途 4 个）在 model.cj 的 activeImages
+// decoded/native 图片）。图片并发硬上限（下载在途 8 个）在 model.cj 的 activeImages
 // 计数（requestImage/finishImageTask）；三池共享 inflight 去重表（任务名全局命名空间）。
+// 线程数依据（2026-08 LANLU_PERF 实测，8 核）：书库滚动时图片 e2e 的 ~85% 是排队等待
+//（activeImages=4 槽位 + DECODE_THREADS=2），下载/解码本身 p50 仅 ~20ms，故下载 4→6、
+// 解码 2→4；4 解码 × vips 内部并发 2 = 8 线程，仍不超过物理核数。
 public class ApiWorker {
     private static let API_THREADS: Int64 = 2
-    private static let DOWNLOAD_THREADS: Int64 = 4
-    private static let DECODE_THREADS: Int64 = 2
+    private static let DOWNLOAD_THREADS: Int64 = 6
+    private static let DECODE_THREADS: Int64 = 4
     private static let SUBTITLE_THREADS: Int64 = 1
 
     private let mutex = Mutex()

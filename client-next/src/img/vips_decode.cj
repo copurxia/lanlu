@@ -26,8 +26,9 @@ private func ensureVips(): Unit {
                     vipsReady = Some(false)
                     throw Exception("libvips 初始化失败: ${VipsApi.takeErrorString()}")
                 }
-                // 与解码池线程数（worker.cj DECODE_THREADS=2）对齐：libvips 内部并发
+                // 与解码池线程数（worker.cj DECODE_THREADS=4）对齐：libvips 内部并发
                 // 过高会与多个解码 worker 叠加造成 CPU 过度订阅（P1.6 流水线）。
+                // 4 worker × vips 并发 2 = 8 线程，不超过 8 核物理上限。
                 VipsApi.setConcurrency(2)
                 vipsReady = Some(true)
         }

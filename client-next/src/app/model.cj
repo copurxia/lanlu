@@ -265,6 +265,22 @@ public class AppModel {
     // 浏览模式行数据（随机推荐 + 分类行）与内容区宽度（SizeProbe 写入，驱动自适应列数）
     public let browseRows = State<ArrayList<BrowseRow>>(ArrayList<BrowseRow>())
     public let contentWidth = State<Float32>(0.0)
+    // 浏览行横向滚动位置外置存储（浏览页纵向虚拟化配套）：LazyColumn 只物化视口附近行，
+    // 滚出视口的行其 LazyRow 局部状态被 StateStore 清除（lazy_column.cj 文档），横向 scroll
+    // offset 随之归零。按 rowKey 惰性持有 State 并经 cardRow 的 scroll 参数外置传入，横滚
+    // 位置与虚拟化前（行常驻）一致。仅 UI 线程读写（构建与事件处理），无需加锁。
+    private let browseRowScrolls = HashMap<String, State<Float32>>()
+
+    // 取（惰性创建）某浏览行的横向滚动位置 State。
+    public func browseRowScroll(rowKey: String): State<Float32> {
+        match (browseRowScrolls.get(rowKey)) {
+            case Some(st) => st
+            case None =>
+                let st = State<Float32>(0.0)
+                browseRowScrolls[rowKey] = st
+                st
+        }
+    }
     // 工具条「合集聚合」开关（0=开 1=关）：T10 合集数据管线接入时消费，
     // 本任务仅保存选择状态（原型 home-tools 的第二个下拉）。
     public let tankGroupIndex = State<Int64>(0)
@@ -2258,7 +2274,9 @@ public class AppModel {
         }
     }
 
-    // 图片并发硬上限 4（spec §6）：超出进队列，完成一个补一个。
+    // 图片并发硬上限 8（2026-08 LANLU_PERF 实测由 4 上调：书库滚动时图片 e2e 的 ~85%
+    // 耗在等槽位，而下载/解码本身 p50 仅 ~20ms；8 与下载池 6/解码池 4 配套，8 核内不
+    // 造成过度订阅）：超出进队列，完成一个补一个。
     // 队列拆成高优先级 FIFO 与普通优先级 FIFO（P2.8）：高优先级插队不再重建整个
     // ArrayList，只往高优先级队列尾部追加；同优先级保持 FIFO。requestImage 与 pump
     // 都在 UI 线程运行，计数无需加锁。
@@ -2363,7 +2381,7 @@ public class AppModel {
         if (SubtitlePerf.enabled() && !imgPerfT0.contains(key)) {
             imgPerfT0[key] = MonoTime.now()
         }
-        if (activeImages >= 4) {
+        if (activeImages >= 8) {
             // 按优先级进各自 FIFO：高优先级始终先于低优先级补位（P2.8，无整队列复制）。
             if (highPriority) {
                 imageQueueHi.add((key, url))
@@ -2422,7 +2440,7 @@ public class AppModel {
             return
         }
         activeImages++
-        // LANLU_PERF 打点：requestImage → 实际开跑的排队等待（并发上限 4 的排队成本）。
+        // LANLU_PERF 打点：requestImage → 实际开跑的排队等待（并发上限 8 的排队成本）。
         if (SubtitlePerf.enabled()) {
             match (imgPerfT0.get(key)) {
                 case Some(t0) => SubtitlePerf.sampleUs("img_queuewait_us", (MonoTime.now() - t0).toMicroseconds())
@@ -2430,9 +2448,9 @@ public class AppModel {
             }
         }
         let c = cache()
-        // 图片任务走三级流水线（P1.6）：下载阶段在独立下载池（4 线程），完成后在下载
-        // 线程内把解码阶段提交到独立解码池（2 线程、有界队列 32 背压）；两阶段都不再
-        // 占用交互 API 池（#22）。activeImages 并发硬上限 4 与优先级插队语义不变
+        // 图片任务走三级流水线（P1.6）：下载阶段在独立下载池（6 线程），完成后在下载
+        // 线程内把解码阶段提交到独立解码池（4 线程、有界队列 32 背压）；两阶段都不再
+        // 占用交互 API 池（#22）。activeImages 并发硬上限 8 与优先级插队语义不变
         //（见 requestImage/pump）。
         // 下载阶段使用独立命名空间 "imgdl:" 避免与解码阶段 "img:" 的 inflight 冲突
         //（workLoop 在 job 返回后才释放 inflight，job 内部 submitDecode 时下载条目仍在）；
