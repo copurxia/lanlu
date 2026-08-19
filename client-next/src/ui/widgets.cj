@@ -2749,11 +2749,13 @@ private func pvGrid(model: AppModel, arcid: String, pages: ArchivePageView, read
 
 // 详情页缩略图复用阅读器的原始页面磁盘缓存，但以 thumb: 展示 key 解码到 300px 档：
 // 冷缓存只下载一份原图，之后进入阅读器可直接从同一原始缓存解码 2000px 档。
-// 自定义缩略图优先走资产；非图片页没有自定义缩略图时保留媒体类型占位，避免把
+// 自定义缩略图优先走资产：展示 key 用 athumb:<id>（按 thumb 的 300px 档解码，显示位
+// 仅 ~100-150vp，asset: 的 400 档浪费），rawKeyFor 归并回 asset:<id> 与封面共享同一
+// 原始磁盘缓存（不重复下载）。非图片页没有自定义缩略图时保留媒体类型占位，避免把
 // 视频/音频/html 原文件当图片送去解码。
 func pagePreviewThumbKey(arcid: String, page: PageInfo): String {
     if (page.thumbAssetId > 0) {
-        return "asset:${page.thumbAssetId}"
+        return "athumb:${page.thumbAssetId}"
     }
     if ((page.pageType == "image" || page.pageType == "") && page.id.size > 0) {
         return "thumb:${arcid}:${page.id}"

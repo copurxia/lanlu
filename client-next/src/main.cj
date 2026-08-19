@@ -163,6 +163,8 @@ main(): Int64 {
     // "me"/"row:" 分支，emit session_resume_ms / first_rows_ms）。
     SubtitlePerf.spanStart("session_resume")
     SubtitlePerf.spanStart("first_rows")
+    // 窗口创建段与 first_rows 同起点（终点在 [boot] 5 进主循环处）。
+    SubtitlePerf.spanStart("boot_to_loop")
     println("[boot] 3 model ready, creating DesktopApp t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 脚本化字幕性能基准（LANLU_BENCH_ARCID 设置时启用）：复用真实 AppModel/PlaybackModel/
     // libVLC/libass 全链路，按阶段状态机驱动冷扫描→播放→切换→seek→缓存命中并输出 @@RESULT。
@@ -222,6 +224,12 @@ main(): Int64 {
     app.sdlWindow.setBordered(false)
     syncTitleBarDragRegion(app.sdlWindow, model)
     println("[boot] 5 entering main loop t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // LANLU_PERF 打点：窗口创建段（model ready→主循环入口，与 first_rows 同起点；
+    // first_rows ≈ boot_to_loop + me 等待 + rows_fetch，把窗口创建段从首屏耗时中切出）。
+    if (SubtitlePerf.enabled()) {
+        SubtitlePerf.spanEnd("boot_to_loop")
+        SubtitlePerf.emit("boot_to_loop_ms", SubtitlePerf.getGauge("boot_to_loop"), "ms")
+    }
     // 空转零渲染：主循环每次迭代泵回工作线程结果（drain 为空时不写任何 State，
     // dirty-frame skipping 使该迭代不重建/不绘制）；不能用 FrameHandler 做这件事——
     // 它必须每帧 requestFrame 才能持续触发，会强制 60fps 全量重建+绘制。

@@ -24,7 +24,8 @@ public let BROWSE_ROW_SIZE: Int64 = 12
 // 阅读页按 2000 封顶，侧栏/编辑器缩略图按 300。按 key 前缀分档、档位固定，故内存
 // staged/纹理 key 无需带尺寸；磁盘缓存存原始字节，缩小只发生在解码期，各尺寸共用同一
 // 磁盘缓存条目（thumb: 与 page: 经 rawKeyFor 映射为同一 page: 原始 key，磁盘只存
-// 一份原始字节，解码档不同；backdrop 与普通封面共享 asset:<id> 原始缓存）。
+// 一份原始字节，解码档不同；athumb: 归并 asset:<id> 与封面共享原始缓存；
+// backdrop 与普通封面共享 asset:<id> 原始缓存）。
 private let ASSET_DECODE_MAX_DIM: Int32 = 400
 private let PAGE_DECODE_MAX_DIM: Int32 = 2000
 private let THUMB_DECODE_MAX_DIM: Int32 = 300
@@ -34,7 +35,9 @@ private let SWEEP_MAX_BYTES: Int64 = 2 * 1024 * 1024 * 1024
 private let SWEEP_INTERVAL_MS: Int64 = 3600000 // 每小时兜底一次
 private let SWEEP_WRITE_TRIGGER_BYTES: Int64 = 512 * 1024 * 1024 // 累计新写入超 512MB 提前补扫
 
-// key 前缀 → 解码尺寸档位（asset:=封面/资产，page:=阅读页，thumb:=缩略图）。
+// key 前缀 → 解码尺寸档位（asset:=封面/资产，page:=阅读页，thumb:=缩略图，
+// athumb:=资产缩略图，按 thumb 档解码——详情页页面预览的自定义缩略图用，显示位
+// 远小于 asset 的 400 档）。
 private func decodeMaxDimension(key: String): Int32 {
     if (key.startsWith("asset:")) {
         return ASSET_DECODE_MAX_DIM
@@ -45,16 +48,23 @@ private func decodeMaxDimension(key: String): Int32 {
     if (key.startsWith("thumb:")) {
         return THUMB_DECODE_MAX_DIM
     }
+    if (key.startsWith("athumb:")) {
+        return THUMB_DECODE_MAX_DIM
+    }
     return 0
 }
 
 // 展示 key → 原始资源 key（网络去重与磁盘缓存的粒度）：thumb: 与 page: 共用同一
-// 原始页面字节（仅解码档不同），映射为 page: 使磁盘只存一份；backdrop 展示 key
+// 原始页面字节（仅解码档不同），映射为 page: 使磁盘只存一份；athumb: 归并回
+// asset:<id>（与封面共享同一原始缓存，磁盘缓存键不变、不重复下载）；backdrop 展示 key
 // 不在此映射（其下载方显式使用 asset:<id> 原始 key，见 requestBackdrop 系列）。
 // asset:/page: 本身即原始 key，原样返回。
 private func rawKeyFor(key: String): String {
     if (key.startsWith("thumb:")) {
         return "page:${key.removePrefix("thumb:")}"
+    }
+    if (key.startsWith("athumb:")) {
+        return "asset:${key.removePrefix("athumb:")}"
     }
     key
 }
@@ -163,6 +173,10 @@ private class ImageWriter <: CacheWriter {
             let rest = key.removePrefix("thumb:")
             let sep = rest.indexOf(":") ?? 0
             a.downloadPageTo(rest[0..sep], rest[(sep + 1)..rest.size], output)
+        } else if (key.startsWith("athumb:")) {
+            // athumb:<assetId>：资产缩略图展示 key，与 asset: 同一下载通道（原始字节），
+            // 仅解码档不同（300 vs 400）。
+            a.downloadAssetTo(Int64.parse(key.removePrefix("athumb:")), output)
         } else {
             throw Exception("未知图片 key: ${key}")
         }
@@ -977,7 +991,16 @@ public class AppModel {
             accountScope: offlineAccountScope(p.id, p.username, p.token), onOfflineFallback: {=> offlineNotice.mark()})
         a.setToken(p.token)
         api = a
-        let _ = worker.submit("me", {=> a.me()})
+        let _ = worker.submit("me", {
+            =>
+                // LANLU_PERF 打点：me RPC 实际执行耗时（区分"RPC 慢"与 API 池排队）。
+                let rpcT0 = MonoTime.now()
+                let d = a.me()
+                if (SubtitlePerf.enabled()) {
+                    SubtitlePerf.sampleUs("me_rpc_us", (MonoTime.now() - rpcT0).toMicroseconds())
+                }
+                d
+        })
     }
 
     public func tryResumeSession(): Unit {
@@ -1993,7 +2016,16 @@ public class AppModel {
         if (r.key == "random") {
             let groupbyTanks = tankGroupOn()
             let _ = worker.submitTagged("row:random", lang,
-                {=> a.randomSearch(BROWSE_ROW_SIZE, lang: lang, groupbyTanks: groupbyTanks)})
+                {
+                    =>
+                        // LANLU_PERF 打点：行搜索 RPC 实际执行耗时（区分 RPC 慢与 API 池排队）。
+                        let rpcT0 = MonoTime.now()
+                        let sp = a.randomSearch(BROWSE_ROW_SIZE, lang: lang, groupbyTanks: groupbyTanks)
+                        if (SubtitlePerf.enabled()) {
+                            SubtitlePerf.sampleUs("row_rpc_us", (MonoTime.now() - rpcT0).toMicroseconds())
+                        }
+                        sp
+                })
         } else {
             // 继续阅读 = 最近阅读倒序（固定）；分类行跟随工具条排序/方向。
             // 浏览模式的所有行（包括上面的随机行）都跟随「合集聚合」开关。
@@ -2013,7 +2045,17 @@ public class AppModel {
                     "desc"
                 }
             }
-            let _ = worker.submitTagged("row:${r.key}", lang, {=> a.search(q)})
+            let _ = worker.submitTagged("row:${r.key}", lang,
+                {
+                    =>
+                        // LANLU_PERF 打点：行搜索 RPC 实际执行耗时（区分 RPC 慢与 API 池排队）。
+                        let rpcT0 = MonoTime.now()
+                        let sp = a.search(q)
+                        if (SubtitlePerf.enabled()) {
+                            SubtitlePerf.sampleUs("row_rpc_us", (MonoTime.now() - rpcT0).toMicroseconds())
+                        }
+                        sp
+                })
         }
     }
 
@@ -2379,6 +2421,11 @@ public class AppModel {
         SubtitlePerf.flushSamples("img_decode_us")
         SubtitlePerf.flushSamples("img_e2e_us")
         SubtitlePerf.flushSamples("pump_dispatch_us")
+        SubtitlePerf.flushSamples("pump_img_us")
+        SubtitlePerf.flushSamples("pump_files_us")
+        SubtitlePerf.flushSamples("pump_other_us")
+        SubtitlePerf.flushSamples("me_rpc_us")
+        SubtitlePerf.flushSamples("row_rpc_us")
         let (n, totalUs, maxUs) = pixelUploadPerfStats()
         if (n > 0) {
             println("[perf] tex_upload count=${n} avg=${totalUs / n / 1000}ms max=${maxUs / 1000}ms")
@@ -2387,8 +2434,9 @@ public class AppModel {
     }
 
     // 已在途/已排队/已完成的 key 直接跳过（状态机去重，队列不会进重）；否则置 loading
-    // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）、page:<arcid>:<pagePath>
-    // （阅读页）与 thumb:<arcid>:<pagePath>（300px 缩略图档）。
+    // 并提交 img:<key> 任务。key 约定：asset:<assetId>（封面/资产）、athumb:<assetId>
+    // （资产缩略图，300px 档）、page:<arcid>:<pagePath>（阅读页）与
+    // thumb:<arcid>:<pagePath>（300px 缩略图档）。
     // highPriority：当前可见的关键图（阅读当前页）置 true，滚屏封面/预取用默认 false。
     public func requestImage(key: String, url: String, highPriority!: Bool = false): Unit {
         let st = imageState(key)
@@ -4235,7 +4283,13 @@ public class AppModel {
                 handleError(r);
                 continue
             }
+            let dispatchT0 = MonoTime.now()
             dispatch(r)
+            // LANLU_PERF 打点：按结果名前缀分桶的 dispatch 成本（定位 pump p99 尖刺归属：
+            // 图片类 img:/imgdl:、章节文件 files:、其余 me/row:/categories 等归 other）。
+            if (SubtitlePerf.enabled()) {
+                SubtitlePerf.sampleUs(pumpDispatchBucket(r.name), (MonoTime.now() - dispatchT0).toMicroseconds())
+            }
         }
         // LANLU_PERF 打点：有结果时的 drain+dispatch UI 线程成本；并驱动 5s 滚动汇总。
         if (SubtitlePerf.enabled()) {
@@ -4244,6 +4298,17 @@ public class AppModel {
             }
             perfFlushTick()
         }
+    }
+
+    // pump 分桶：img:/imgdl: 归图片，files: 归章节文件，其余（me/row:/categories 等）归 other。
+    private func pumpDispatchBucket(name: String): String {
+        if (name.startsWith("img:") || name.startsWith("imgdl:")) {
+            return "pump_img_us"
+        }
+        if (name.startsWith("files:")) {
+            return "pump_files_us"
+        }
+        "pump_other_us"
     }
 
     private func handleError(r: ApiResult): Unit {
@@ -4691,6 +4756,8 @@ public class AppModel {
             if (SubtitlePerf.enabled()) {
                 SubtitlePerf.spanEnd("session_resume")
                 SubtitlePerf.emit("session_resume_ms", SubtitlePerf.getGauge("session_resume"), "ms")
+                // 首批浏览行抓取区间起点（与 session_resume 首尾相接，终点在首个 row: dispatch）。
+                SubtitlePerf.spanStart("rows_fetch")
             }
         } else if (name.startsWith("autocomplete:")) {
             match (r.payload) {
@@ -4876,6 +4943,9 @@ public class AppModel {
                 firstRowsEmitted = true
                 SubtitlePerf.spanEnd("first_rows")
                 SubtitlePerf.emit("first_rows_ms", SubtitlePerf.getGauge("first_rows"), "ms")
+                // 首批浏览行抓取区间终点（起点在 me dispatch 的 loadBrowseRows 之后）。
+                SubtitlePerf.spanEnd("rows_fetch")
+                SubtitlePerf.emit("rows_fetch_ms", SubtitlePerf.getGauge("rows_fetch"), "ms")
             }
         } else if (name.startsWith("meta:")) {
             match (r.payload) {
@@ -5304,7 +5374,11 @@ public class AppModel {
                                     case None => ()
                                 }
                                 SubtitlePerf.sampleUs("img_e2e_us", e2eUs)
-                                println("[perf] img ${k} ${img.width}x${img.height} e2e=${e2eUs / 1000}ms dl=${dlUs / 1000}ms dec=${decUs / 1000}ms")
+                                // 逐图明细仅在 LANLU_PERF_VERBOSE=1 时输出：洪泛期 UI 线程
+                                // 同步 println 本身是 pump 尖刺来源；聚合采样不受影响。
+                                if (SubtitlePerf.verbose()) {
+                                    println("[perf] img ${k} ${img.width}x${img.height} e2e=${e2eUs / 1000}ms dl=${dlUs / 1000}ms dec=${decUs / 1000}ms")
+                                }
                                 if (readerTurnPending.contains(k)) {
                                     readerTurnPending.remove(k)
                                     if (readerTurnPending.isEmpty()) {

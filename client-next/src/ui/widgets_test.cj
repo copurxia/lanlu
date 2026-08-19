@@ -16,7 +16,7 @@ func pagePreviewThumbUsesCustomAssetWhenPresent(): Unit {
     page.id = "folder/page 1.jpg"
     page.pageType = "image"
     page.thumbAssetId = 42
-    @Expect(pagePreviewThumbKey("arc-1", page), "asset:42")
+    @Expect(pagePreviewThumbKey("arc-1", page), "athumb:42")
     @Expect(pagePreviewThumbUrl("arc-1", page), "/api/assets/42")
 }
 

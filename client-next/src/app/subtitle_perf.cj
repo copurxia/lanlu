@@ -14,6 +14,9 @@ import std.time.MonoTime
 
 public class SubtitlePerf {
     private static let _enabled = getVariable("LANLU_PERF") == Some("1")
+    // 逐条明细日志门控（LANLU_PERF_VERBOSE=1）：洪泛期逐图 println 本身即是 pump 尖刺
+    // 来源，默认只保留聚合采样，明细需显式打开（仍需 LANLU_PERF=1 才生效）。
+    private static let _verbose = getVariable("LANLU_PERF_VERBOSE") == Some("1")
     private static let lock = Mutex()
     // 命名区间起点（覆盖式：同名重新 start 即覆盖）。
     private static let spans = HashMap<String, MonoTime>()
@@ -25,6 +28,11 @@ public class SubtitlePerf {
 
     public static func enabled(): Bool {
         _enabled
+    }
+
+    // 逐条明细日志是否输出（LANLU_PERF=1 且 LANLU_PERF_VERBOSE=1）。
+    public static func verbose(): Bool {
+        _enabled && _verbose
     }
 
     // ---- 区间计时（跨函数配对用）----
