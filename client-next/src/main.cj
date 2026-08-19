@@ -2,6 +2,7 @@ package lanlu_client_next
 
 import cui.*
 import lanlu_client_next.app.*
+import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
@@ -139,12 +140,20 @@ main(): Int64 {
         loadSettings()
     }
     println("[boot] 2 settings loaded, seedMode=${seedMode} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 离线缓存预热：RocksDB open（session_resume 302ms 的主要构成）与 webview 字体预热、
+    // AppModel 构造并行，首次用缓存（resumeProfile）时由 offlineCacheFor join。seed 模式
+    // 不预热——隔离 HOME 的快照路径不应触碰真实缓存目录。
+    let offlineCachePrewarm: ?Future<?OfflineCache> = if (seedMode.size == 0) {
+        Some(spawn {OfflineCache.open(defaultOfflineCacheRoot())})
+    } else {
+        None
+    }
     // webview 字体预热：fontique 系统字体扫描（FcConfigBuildFonts）是 loadHtml
     // 崩溃窗口的主要来源，提前到 GC 未活跃、主线程浅栈的启动阶段完成一次；
     // 进程级共享，后续 loadHtml 复用不再重建（见 webview_native session.rs）。
     warmup()
     println("[boot] 2.1 webview fonts warmed t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
-    let model = AppModel(settings, persistSettings: {s => saveSettings(s)})
+    let model = AppModel(settings, persistSettings: {s => saveSettings(s)}, offlineCachePrewarm: offlineCachePrewarm)
     if (seedMode.size > 0) {
         seedLibrarySnapshot(model, seedMode)
     } else {

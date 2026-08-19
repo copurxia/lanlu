@@ -199,6 +199,9 @@ public class AppModel {
     public var api: ?LanluApi = None
     // 离线缓存（响应快照 + 进度队列）：按 active 服务器地址懒加载；打开失败为 None（不阻断）。
     private var offlineCache: ?OfflineCache = None
+    // 启动预热（仅正常启动由 main.cj 注入）：RocksDB open 与字体预热/设置加载并行，
+    // 首次用缓存时 join——拿到的实例与同步打开完全相同，失败重试语义也不变。
+    private var offlineCachePrewarm: ?Future<?OfflineCache> = None
     // 离线回退通知：worker 线程 mark（仅方法调用，规避 cjc 1.1.3 GC 屏障缺陷），UI pump 轮询 take。
     private let offlineNotice = OfflineNotice()
     private var offlineToastShown = false
@@ -417,8 +420,10 @@ public class AppModel {
     private let imageMutex = Mutex()
     private let persistSettings: (AppSettings) -> Unit
 
-    public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()}) {
+    public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()},
+        offlineCachePrewarm!: ?Future<?OfflineCache> = None) {
         settings = s
+        this.offlineCachePrewarm = offlineCachePrewarm
         language = State<String>(resolveLanguage(s.languagePreference))
         this.persistSettings = persistSettings
         reader = ReaderModel(s)
@@ -435,6 +440,8 @@ public class AppModel {
                             st.value = ""
                             // 诊断：就绪纹理被预算淘汰 → 状态复位 → 重新可见时需重解码。
                             pixelEvictRedecodeCount++
+                            // 条漫可见区请求缓存（reader_stage.cj）须随复位失效。
+                            imageResetEpoch++
                         }
                     case None => ()
                 }
@@ -2143,7 +2150,14 @@ public class AppModel {
             case Some(c) => return c
             case None => ()
         }
-        let c = OfflineCache.open(defaultOfflineCacheRoot())
+        let c = match (offlineCachePrewarm) {
+            case Some(f) =>
+                // 启动预热线程的 join：结果与同步 open 相同；消费后置 None，失败（None）
+                // 时下次调用走同步重试，与无预热路径的重试语义一致。
+                offlineCachePrewarm = None
+                f.get()
+            case None => OfflineCache.open(defaultOfflineCacheRoot())
+        }
         offlineCache = c
         c
     }
@@ -2402,6 +2416,12 @@ public class AppModel {
     // 之后重新可见时 requestImage 可再次入队。已开始/在途任务不干预——
     // 其完成结果落磁盘/staged 缓存无害（P2.7 的协作式取消点会跳过解码）。
     // 仅 UI 线程调用（同 requestImage/pump 纪律）。
+    // 图片状态复位代际：任何把已请求 key 复位为 "" 的路径（cancelImage 队列取消、
+    // 像素纹理 LRU 逐出回调）都 +1。条漫可见区请求去重缓存（reader_stage.cj）以此为
+    // 输入之一——不复位的复位路径会让缓存漏掉重新请求。retryImage 同步复位并重入队，
+    // 无中间窗口，不参与。
+    public var imageResetEpoch: Int64 = 0
+
     public func cancelImage(key: String): Unit {
         // LANLU_PERF 打点：滚出屏幕取消排队时清掉 e2e 起点，重新可见后再请求从 0 计。
         if (SubtitlePerf.enabled()) {
@@ -2412,6 +2432,7 @@ public class AppModel {
             if (imageQueueHi[i][0] == key) {
                 let _ = imageQueueHi.remove(at: i)
                 imageState(key).value = ""
+                imageResetEpoch++
                 return
             }
             i++
@@ -2421,6 +2442,7 @@ public class AppModel {
             if (imageQueueLo[i][0] == key) {
                 let _ = imageQueueLo.remove(at: i)
                 imageState(key).value = ""
+                imageResetEpoch++
                 return
             }
             i++
@@ -3223,8 +3245,13 @@ public class AppModel {
             return
         }
         let synced = searchItemFromMeta(meta)
+        // 空视图直接跳过：persisted 视图每次 itemAt 都是 UI 线程上的 RocksDB 点查，
+        // 对 size==0 的视图整个扫描必然无产出。
         for (view in [items.value, relatedItems.value, tankMembers.value, shelfFavorites.value,
             shelfHistory.value, recentRead.value, recentFav.value]) {
+            if (view.size == 0) {
+                continue
+            }
             for (i in 0..view.size) {
                 match (view.itemAt(i)) {
                     case Some(it) =>
@@ -3238,6 +3265,9 @@ public class AppModel {
             }
         }
         for (row in browseRows.value) {
+            if (row.items.size == 0) {
+                continue
+            }
             for (i in 0..row.items.size) {
                 match (row.items.itemAt(i)) {
                     case Some(it) =>
@@ -3276,21 +3306,27 @@ public class AppModel {
 
     // 档案卡收藏：乐观翻转首页/搜索/合集成员中的同一档案并立即重绘；
     // 失败由 handleError 统一 toast（不回滚，下次行/网格数据到货自愈）。
+    // persisted 视图按 rank 线性扫描是 UI 线程上的 RocksDB 点查，空视图先短路。
     public func toggleFavoriteOnCard(arcid: String): Unit {
         var target = false
         var found = false
-        for (it in items.value) {
-            if (it.arcid == arcid) {
-                if (!found) {
-                    target = !it.isfavorite
-                    found = true
+        if (items.value.size > 0) {
+            for (it in items.value) {
+                if (it.arcid == arcid) {
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
+                    it.isfavorite = target
+                    let _ = items.value.persist(it)
+                    break
                 }
-                it.isfavorite = target
-                let _ = items.value.persist(it)
-                break
             }
         }
         for (row in browseRows.value) {
+            if (row.items.size == 0) {
+                continue
+            }
             for (it in row.items) {
                 if (it.arcid == arcid) {
                     if (!found) {
@@ -3303,37 +3339,43 @@ public class AppModel {
                 }
             }
         }
-        for (it in tankMembers.value) {
-            if (it.arcid == arcid) {
-                if (!found) {
-                    target = !it.isfavorite
-                    found = true
+        if (tankMembers.value.size > 0) {
+            for (it in tankMembers.value) {
+                if (it.arcid == arcid) {
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
+                    it.isfavorite = target
+                    let _ = tankMembers.value.persist(it)
+                    break
                 }
-                it.isfavorite = target
-                let _ = tankMembers.value.persist(it)
-                break
             }
         }
-        for (it in shelfFavorites.value) {
-            if (it.arcid == arcid) {
-                if (!found) {
-                    target = !it.isfavorite
-                    found = true
+        if (shelfFavorites.value.size > 0) {
+            for (it in shelfFavorites.value) {
+                if (it.arcid == arcid) {
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
+                    it.isfavorite = target
+                    let _ = shelfFavorites.value.persist(it)
+                    break
                 }
-                it.isfavorite = target
-                let _ = shelfFavorites.value.persist(it)
-                break
             }
         }
-        for (it in shelfHistory.value) {
-            if (it.arcid == arcid) {
-                if (!found) {
-                    target = !it.isfavorite
-                    found = true
+        if (shelfHistory.value.size > 0) {
+            for (it in shelfHistory.value) {
+                if (it.arcid == arcid) {
+                    if (!found) {
+                        target = !it.isfavorite
+                        found = true
+                    }
+                    it.isfavorite = target
+                    let _ = shelfHistory.value.persist(it)
+                    break
                 }
-                it.isfavorite = target
-                let _ = shelfHistory.value.persist(it)
-                break
             }
         }
         if (!found) {

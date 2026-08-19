@@ -188,6 +188,18 @@ class ReaderStageState {
     var webtoonViewportH: Float32 = 720.0
     var webtoonSyncedIndex: Int64 = -1
     var wasWebtoon = false
+    // 条漫可见区请求去重：webtoonHeights 任何改写（重建/追加/宽度重缩放/实测回写）必须
+    // bump webtoonHeightsVersion。requestVisibleWebtoonImages 以 (区间, 滚动, 视口, 高度版本,
+    // model.imageResetEpoch) 为缓存键，全部一致则跳过整轮 ±3 屏扫描与 RocksDB 点查——
+    // 条漫滚动每帧重建，而绝大多数帧这些输入没有变化。imageResetEpoch 覆盖把 key 状态
+    // 复位为 "" 的两条路径（预取窗口取消、像素纹理 LRU 逐出）后需要重新请求的场景。
+    var webtoonHeightsVersion: Int64 = 0
+    var webtoonReqFirst: Int64 = -1
+    var webtoonReqLast: Int64 = -1
+    var webtoonReqScroll: Float32 = -1.0
+    var webtoonReqViewport: Float32 = -1.0
+    var webtoonReqHeightsVersion: Int64 = -1
+    var webtoonReqResetEpoch: Int64 = -1
     var webtoonZoomIndex: Int64 = -1
     var webtoonZoomOriginX: Float32 = 0.5
     var webtoonZoomOriginY: Float32 = 0.5
@@ -635,6 +647,7 @@ class ReaderStage <: Widget {
                     max(320.0, st.webtoonViewportH)
                 }
             })
+            st.webtoonHeightsVersion++
             st.webtoonScroll.value = 0.0
             st.webtoonArchive = r.arcid
             st.webtoonZoomIndex = -1
@@ -651,6 +664,7 @@ class ReaderStage <: Widget {
                     max(320.0, st.webtoonViewportH)
                 }
             })
+            st.webtoonHeightsVersion++
         }
         // reader.index 与上次由滚动同步的索引不同，说明来源是初始进度、滑条或侧栏，
         // 需要像 frontend pendingWebtoonScrollToIndex 一样跳到目标页顶部。
@@ -667,7 +681,22 @@ class ReaderStage <: Widget {
             return
         }
         let viewport = max(1.0, st.webtoonViewportH)
-        let (first, last) = webtoonLazyRange(st.webtoonHeights, st.webtoonScroll.value, viewport)
+        let scroll = st.webtoonScroll.value
+        let (first, last) = webtoonLazyRange(st.webtoonHeights, scroll, viewport)
+        // 去重缓存：区间与全部输入不变时，上一轮扫描已请求过区间内所有缺失图片
+        //（状态复位/高度变化/滚动都会使对应键失效），跳过整轮扫描。
+        let resetEpoch = model.imageResetEpoch
+        if (first == st.webtoonReqFirst && last == st.webtoonReqLast && scroll == st.webtoonReqScroll &&
+            viewport == st.webtoonReqViewport && st.webtoonHeightsVersion == st.webtoonReqHeightsVersion &&
+            resetEpoch == st.webtoonReqResetEpoch) {
+            return
+        }
+        st.webtoonReqFirst = first
+        st.webtoonReqLast = last
+        st.webtoonReqScroll = scroll
+        st.webtoonReqViewport = viewport
+        st.webtoonReqHeightsVersion = st.webtoonHeightsVersion
+        st.webtoonReqResetEpoch = resetEpoch
         for (streamIndex in first..last + 1) {
             match (model.reader.realPageAtStream(streamIndex)) {
                 case Some(realIndex) => match (model.reader.pageAt(realIndex)) {
@@ -706,6 +735,7 @@ class ReaderStage <: Widget {
                     for (i in 0..st.webtoonHeights.size) {
                         st.webtoonHeights[i] = max(WEBTOON_MIN_PAGE_HEIGHT, st.webtoonHeights[i] * ratio)
                     }
+                    st.webtoonHeightsVersion++
                     st.webtoonScroll.value = max(0.0, st.webtoonScroll.value * ratio)
                 }
                 st.webtoonContentW = nextWidth
@@ -819,6 +849,7 @@ class ReaderStage <: Widget {
                                             if (heightDelta > 1.0 || heightDelta < -1.0) {
                                                 rowHeight = measured
                                                 st.webtoonHeights[streamIndex] = measured
+                                                st.webtoonHeightsVersion++
                                                 geometryChanged = true
                                             }
                                             var dest = Rect(contentX, rowY, contentW, rowHeight)
