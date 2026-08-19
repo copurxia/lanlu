@@ -457,13 +457,18 @@ public class AppModel {
             }
         }
         // 跨 segment 预取：页属哪个档案按 arcidOfReal 取（拼接后邻居页可能属下一档案）。
+        // 只预取图片页：audio/video/html 页不经图片管线展示（reader_stage/webtoon/侧栏
+        // 均按同款条件过滤），预取只会拿到 4xx/5xx 或不可解码字节，且 error 态会被
+        // requestImage 重复入队形成重试风暴（音频档案每翻一页全部曲目重试）。
         reader.onPrefetch = {
             _, indices => for (i in indices) {
                 match (reader.pageAt(i)) {
                     case Some(p) =>
-                        let a2 = reader.arcidOfReal(i)
-                        let pid = p.id
-                        requestImage("page:${a2}:${pid}", "/api/archives/${a2}/page?path=${percentEncode(pid)}")
+                        if (p.pageType == "image" || p.pageType == "") {
+                            let a2 = reader.arcidOfReal(i)
+                            let pid = p.id
+                            requestImage("page:${a2}:${pid}", "/api/archives/${a2}/page?path=${percentEncode(pid)}")
+                        }
                     case None => ()
                 }
             }
@@ -2834,6 +2839,9 @@ public class AppModel {
     private var lastPrefetchKeys = HashSet<String>()
 
     // 预取当前页前后各 2 页（经图片管线，并发上限由 requestImage 保证）。
+    // 只预取图片页（同 reader.onPrefetch 接线处的守卫）：audio/video/html 页
+    // 不经图片管线展示，预取必然 4xx/5xx 或解码失败，且 error 态不挡 requestImage
+    // 重复入队——音频档案里这会让每页翻页都重试全部曲目（重试风暴）。
     public func prefetchAround(): Unit {
         let total = pages.value.size
         let cur = readerIndex.value
@@ -2841,10 +2849,13 @@ public class AppModel {
         for (d in [-2, -1, 1, 2]) {
             let idx = cur + d
             if (idx >= 1 && idx <= total) {
-                let pid = pages.value[idx - 1].id
-                let key = "page:${readerArcid}:${pid}"
-                next.add(key)
-                requestImage(key, "/api/archives/${readerArcid}/page?path=${percentEncode(pid)}")
+                let p = pages.value[idx - 1]
+                if (p.pageType == "image" || p.pageType == "") {
+                    let pid = p.id
+                    let key = "page:${readerArcid}:${pid}"
+                    next.add(key)
+                    requestImage(key, "/api/archives/${readerArcid}/page?path=${percentEncode(pid)}")
+                }
             }
         }
         // 离开预取区且尚未开始的任务取消（排队中移除；在途/已完成的跳过）。

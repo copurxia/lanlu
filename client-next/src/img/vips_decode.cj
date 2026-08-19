@@ -91,9 +91,10 @@ public class NativeDecodedImage {
 }
 
 // 任意格式图片文件 → 原生 RGBA 内存。失败抛异常（信息带 vips 错误串）。
-// 管线：imageNewFromFile（JPEG 且需缩小时按档位带 [shrink=N] loader 选项重开，
-// 解码期 DCT 缩放）→ （可选）vips_resize 缩到档位 → autorot（按 EXIF 方向转正）
-// → colourspace(sRGB) → castUchar → bands 归一到 4 波段 → writeToMemory → 拷进 Array<UInt8>。
+// 管线：imageNewFromFile（JPEG/WebP 且需缩小时按档位带 [shrink=N]/[scale=N] loader
+// 选项重开，解码期 DCT/libwebp 缩放）→ （可选）vips_resize 缩到档位 → autorot（按 EXIF
+// 方向转正）→ colourspace(sRGB) → castUchar → bands 归一到 4 波段 → writeToMemory → 拷进
+// Array<UInt8>。
 // maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
 // 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
 // 仅在工作线程调用（vips 解码是 CPU 重活，UI 线程纪律见 model.startImageTask）。
@@ -121,13 +122,14 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
             var longest = max(Int64(w0), Int64(h0))
             if (longest > Int64(maxDimension)) {
                 // shrink-on-load（#7）：JPEG 解码器支持 DCT 缩放（loader 选项 shrink=2/4/8），
+                // WebP 解码器支持 libwebp 解码期缩放（loader 选项 scale=2/4/8，与 shrink 同构），
                 // 按目标档位选最大 2 幂因子先缩（shrunk 最长边不低于目标档），余量仍交给
-                // vips_resize——避免全尺寸解码，JPEG 可获 4-8 倍解码加速。vips 是惰性管线，
-                // 上面的打开只读头部，带选项重开才真正决定解码分辨率；非 JPEG（其余 loader
-                // 没有 shrink 选项）或选项不被接受时保持原图走原 resize 路径，行为不变。
-                let shrink = jpegShrinkFactor(path, longest, maxDimension)
+                // vips_resize——避免全尺寸解码，JPEG/WebP 可获 4-8 倍解码加速。vips 是惰性管线，
+                // 上面的打开只读头部，带选项重开才真正决定解码分辨率；其余格式（PNG 等 loader
+                // 没有缩档选项）或选项不被接受时保持原图走原 resize 路径，行为不变。
+                let (shrink, shrinkOpt) = shrinkOnLoadOption(path, longest, maxDimension)
                 if (shrink > 1) {
-                    let optC = unsafe { LibC.mallocCString("${path}[shrink=${shrink}]") }
+                    let optC = unsafe { LibC.mallocCString("${path}[${shrinkOpt}=${shrink}]") }
                     let shrunk = VipsApi.imageNewFromFile(optC)
                     unsafe { LibC.free(optC) }
                     if (shrunk.isNotNull()) {
@@ -388,17 +390,40 @@ private func isJpegFile(path: String): Bool {
     }
 }
 
-// 按目标档位选最大 2 幂 shrink 因子（2/4/8）：shrunk 最长边不得低于 maxDimension，
-// 否则缩小过度、最终 resize 就得放大（糊）。非 JPEG 恒为 1（不启用 shrink-on-load）。
-private func jpegShrinkFactor(path: String, longest: Int64, maxDimension: Int32): Int64 {
-    if (!isJpegFile(path)) {
-        return 1
+// WebP 魔数嗅探：RIFF 容器（"RIFF"...."WEBP"），需读前 12 字节；失败按非 WebP 处理。
+private func isWebpFile(path: String): Bool {
+    try {
+        let f = File(Path(path), OpenMode.Read)
+        var head = Array<UInt8>(12, repeat: 0u8)
+        let n = try {
+            f.read(head)
+        } finally {
+            f.close()
+        }
+        return n >= 12 && head[0] == 0x52u8 && head[1] == 0x49u8 && head[2] == 0x46u8 && head[3] == 0x46u8 &&
+            head[8] == 0x57u8 && head[9] == 0x45u8 && head[10] == 0x42u8 && head[11] == 0x50u8
+    } catch (_: Exception) {
+        return false
+    }
+}
+
+// shrink-on-load 档位与 loader 选项名：按目标档位选最大 2 幂因子（2/4/8），shrunk 最长边
+// 不得低于 maxDimension，否则缩小过度、最终 resize 就得放大（糊）。JPEG 用 shrink=（DCT
+// 缩放），WebP 用 scale=（libwebp 解码期缩放，取值同为 2 幂 2/4/8）；其余格式（PNG 等）
+// 无此能力，恒返回 (1, "")（不启用 shrink-on-load）。
+private func shrinkOnLoadOption(path: String, longest: Int64, maxDimension: Int32): (Int64, String) {
+    let optName = if (isJpegFile(path)) {
+        "shrink"
+    } else if (isWebpFile(path)) {
+        "scale"
+    } else {
+        return (1, "")
     }
     var shrink: Int64 = 1
     while (shrink < 8 && longest / (shrink * 2) >= Int64(maxDimension)) {
         shrink *= 2
     }
-    shrink
+    (shrink, optName)
 }
 
 // 1 波段（灰度）→ RGBA：灰度通道三复制成 RGB，再补常数 alpha 255。

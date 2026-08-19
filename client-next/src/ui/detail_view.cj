@@ -573,6 +573,9 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     // 成员筛选 memo（#9）：仅在 (筛选词, tankMembers 代次) 变化时重算全量小写化匹配，
     // 封面到货等无关状态写引发的重建直接命中缓存，万级成员合集不再每帧 O(n) 过滤。
     let filterMemo = rememberState<MemberFilterMemo>("detail:tank:member-filter", {=> MemberFilterMemo()}).value
+    // 已读完计数 memo（与筛选同款 revision memo）：无关状态写引发的重建不再每帧 O(n) 重扫。
+    let doneMemo = rememberState<MemberDoneCountMemo>("detail:tank:member-done-count", {=> MemberDoneCountMemo()})
+        .value
 
     // 主列：收录档案（网格/列表切换 + 即时筛选 + 计数）→ 相关推荐（无数据隐藏）
     // 多选入口对齐 frontend：成员区无显式按钮，由卡片 hover 浮层勾选钮 / 列表行首
@@ -643,7 +646,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
     }
 
     // 侧栏：进度大卡（大数字 + 已读完 N 个）→ 基础信息 → 标签分组
-    let done = countFinishedMembers(members)
+    let done = countFinishedMembers(model, doneMemo)
     let sideCards = ArrayList<() -> Unit>()
     sideCards.add({
         => progressCard(model, "${pct}%",
@@ -823,6 +826,13 @@ private func batchMemberEditModal(model: AppModel, open: State<Bool>, addTags: S
     })
 }
 
+// 已读完计数 memo（rememberState 跨帧保留）：结果仅在成员代次变化时重算。
+class MemberDoneCountMemo {
+    var revision: UInt64 = 0
+    var inited: Bool = false
+    var count: Int64 = 0
+}
+
 // 成员筛选 memo 缓存（rememberState 跨帧保留）：结果仅在筛选词或成员代次变化时重算。
 class MemberFilterMemo {
     var filter: String = ""
@@ -857,13 +867,22 @@ private func filteredMembers(model: AppModel, memo: MemberFilterMemo): SearchIte
 }
 
 // 已读完成员数（progress >= pagecount），侧栏「已读完 N 个」。
-private func countFinishedMembers(members: SearchItemView): Int64 {
+// 按 tankMembers.revision memo（同 filteredMembers 模式）：成员列表只在 dispatch 整体
+// 重赋值时推进代次（model 契约），代次未变时直接返回上次计数，避免每次重建全扫。
+private func countFinishedMembers(model: AppModel, memo: MemberDoneCountMemo): Int64 {
+    let revision = model.tankMembers.revision
+    if (memo.inited && memo.revision == revision) {
+        return memo.count
+    }
     var n: Int64 = 0
-    for (it in members) {
+    for (it in model.tankMembers.value) {
         if (it.pagecount > 0 && it.progress >= it.pagecount) {
             n++
         }
     }
+    memo.revision = revision
+    memo.inited = true
+    memo.count = n
     n
 }
 
