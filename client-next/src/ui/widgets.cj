@@ -3028,9 +3028,10 @@ public func memberGridContent(model: AppModel, members: SearchItemProjectionView
         (w - Float32(cols - 1) * 12.0) / Float32(cols)
     }
     let coverH = cellW * 4.0 / 3.0
-    let rows = (members.size + cols - 1) / cols
-    let gridH = Float32(rows) * (coverH + MEMBER_TEXT_H) + Float32(rows - 1) * 16.0
-    LazyGrid(members.size, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0, id: "member-grid",
+    // 视口虚拟化：ClipLazyGrid 按祖先 ScrollView 的裁剪窗只物化可见行（±overscan），布局仍
+    // 占满完整内容高（组件自行按行数×行高上报，勿加 .height(gridH)——那是 LazyGrid 的定高
+    // 用法，会把视口撑成整个网格、虚拟化失效，几百个成员的一次性全量构建曾卡死详情页）。
+    ClipLazyGrid(members.size, cols, coverH + MEMBER_TEXT_H, spacing: 16.0, columnSpacing: 12.0, id: "member-grid",
         itemAt: {i => (i, members[i])}) {
         pair =>
         let (index, item) = pair
@@ -3039,7 +3040,7 @@ public func memberGridContent(model: AppModel, members: SearchItemProjectionView
         } else {
             memberCard(model, item, cellW, onEnterSelection, onRemove, index: index)
         }
-    }.height(gridH)
+    }
 }
 
 // 成员卡：复用首页卡骨架，悬停提供详情/收藏/多选图标按钮。
