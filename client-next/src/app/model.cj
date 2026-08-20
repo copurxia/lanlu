@@ -3292,42 +3292,44 @@ public class AppModel {
 
     // 元数据刷新/保存后把规范 SearchItem 投影写回共享对象：搜索/浏览行/书架/合集成员等
     // 视图按 rank 重读同一实体，标题、简介、标签等重叠字段不再各持一份拷贝。
+    // 规范实体按 (language, arcid) 全库共享，因此只需：热窗/内存中的可见副本原地更新
+    // （屏幕上正在显示的行），外加一次规范记录直查直写（实体在库中但不可见的场景）。
+    // 旧实现按 rank 全扫描每个视图，persisted 视图每 rank 两次 RocksDB 点查，
+    // 实测单次 meta 同步在 UI 线程耗时 25.8ms（大书库），还会把可见行挤出热窗。
     private func syncSearchItemFromMeta(meta: ArchiveMeta): Unit {
         if (meta.arcid.size == 0) {
             return
         }
         let synced = searchItemFromMeta(meta)
-        // 空视图直接跳过：persisted 视图每次 itemAt 都是 UI 线程上的 RocksDB 点查，
-        // 对 size==0 的视图整个扫描必然无产出。
+        let apply = {it: SearchItem => copySearchProjection(it, synced)}
+        var found = false
         for (view in [items.value, relatedItems.value, tankMembers.value, shelfFavorites.value,
             shelfHistory.value, recentRead.value, recentFav.value]) {
-            if (view.size == 0) {
-                continue
-            }
-            for (i in 0..view.size) {
-                match (view.itemAt(i)) {
-                    case Some(it) =>
-                        if (it.arcid == meta.arcid) {
-                            copySearchProjection(it, synced)
-                            let _ = view.persist(it)
-                            break
-                        }
-                    case None => ()
-                }
+            match (view.updateCachedCopy(meta.arcid, apply)) {
+                case Some(it) =>
+                    let _ = view.persist(it)
+                    found = true
+                case None => ()
             }
         }
         for (row in browseRows.value) {
-            if (row.items.size == 0) {
-                continue
+            match (row.items.updateCachedCopy(meta.arcid, apply)) {
+                case Some(it) =>
+                    let _ = row.items.persist(it)
+                    found = true
+                case None => ()
             }
-            for (i in 0..row.items.size) {
-                match (row.items.itemAt(i)) {
+        }
+        if (!found) {
+            // 所有视图热窗均未命中：对规范实体键做一次直查直写，后续任意视图按 rank
+            // 重读都会拿到新投影；实体本就不在库中（NotFound）时与旧扫描行为一致地跳过。
+            for (view in [items.value, relatedItems.value, tankMembers.value, shelfFavorites.value,
+                shelfHistory.value, recentRead.value, recentFav.value]) {
+                match (view.loadByArcid(meta.arcid)) {
                     case Some(it) =>
-                        if (it.arcid == meta.arcid) {
-                            copySearchProjection(it, synced)
-                            let _ = row.items.persist(it)
-                            break
-                        }
+                        copySearchProjection(it, synced)
+                        let _ = view.persist(it)
+                        return
                     case None => ()
                 }
             }
@@ -4306,8 +4308,8 @@ public class AppModel {
 
     // pump 分桶：img:/imgdl: 归图片，files: 归章节文件；other 再细分——静态分析表明
     // row:/categories 的 dispatch 只是字段/State 赋值（无观察者、无 I/O），me 多一次
-    // leading 落盘（saveSettings 即时写契约），meta: 含 syncSearchItemFromMeta 的 UI 线程
-    // RocksDB 点查；细分后实测可直接归因 pump_other 尖刺，剩余杂项仍归 pump_other_us。
+    // leading 落盘（saveSettings 即时写契约），meta: 含 syncSearchItemFromMeta 的热窗
+    // 更新加规范实体直查直写（已消除全视图 RocksDB 扫描）；剩余杂项仍归 pump_other_us。
     private func pumpDispatchBucket(name: String): String {
         if (name.startsWith("img:") || name.startsWith("imgdl:")) {
             return "pump_img_us"

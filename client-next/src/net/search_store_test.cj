@@ -129,3 +129,45 @@ func searchItemPagesAppendByRankWithoutHoldingDecodedSnapshot(): Unit {
     @Expect(replacement[0].arcid, "arc:2")
     cache.close()
 }
+
+@Test
+func updateCachedCopyMutatesMemoryAndHotWindowOnly(): Unit {
+    // 内存视图：命中即原地更新；未命中返回 None。
+    let memory = memorySearchItems("search:mem", "zh")
+    let hit = memory.updateCachedCopy("arc:1", {it => it.title = "内存改"})
+    @Expect(hit.isSome(), true)
+    @Expect(memory[0].title, "内存改")
+    @Expect(memory.updateCachedCopy("arc:none", {_ => ()}).isNone(), true)
+
+    let path = Directory.createTemp(Path("/tmp")).toString()
+    let cache = OfflineCache.open(path).getOrThrow()
+    let persisted = cache
+        .storeSearchItems("server", "account", "search:p", "zh", memorySearchItems("search:p", "zh"))
+        .getOrThrow()
+    // 热窗为空时不得触发按 rank 扫描，直接未命中。
+    @Expect(persisted.updateCachedCopy("arc:1", {_ => ()}).isNone(), true)
+    // itemAt 把 rank 0 装入热窗后即可命中并原地更新。
+    let _ = persisted.itemAt(0)
+    let warmed = persisted.updateCachedCopy("arc:1", {it => it.title = "热窗改"})
+    @Expect(warmed.isSome(), true)
+    @Expect(persisted.persist(warmed.getOrThrow()), true)
+    @Expect(cache.openSearchItems("server", "account", "search:p", "zh").getOrThrow()[0].title, "热窗改")
+    cache.close()
+}
+
+@Test
+func loadByArcidReadsCanonicalEntityWithoutRankScan(): Unit {
+    let path = Directory.createTemp(Path("/tmp")).toString()
+    let cache = OfflineCache.open(path).getOrThrow()
+    let view = cache
+        .storeSearchItems("server", "account", "search:q", "zh", memorySearchItems("search:q", "zh"))
+        .getOrThrow()
+    // 规范实体按键直查：archive 记录命中，tank 记录（tank: 命名空间）与未知 arcid 不命中。
+    @Expect(view.loadByArcid("arc:1").getOrThrow().title, "档案一")
+    @Expect(view.loadByArcid("tank:1").isNone(), true)
+    @Expect(view.loadByArcid("arc:none").isNone(), true)
+    @Expect(view.loadByArcid("").isNone(), true)
+    // 内存视图没有存储后端，恒为 None。
+    @Expect(memorySearchItems("search:mem", "zh").loadByArcid("arc:1").isNone(), true)
+    cache.close()
+}

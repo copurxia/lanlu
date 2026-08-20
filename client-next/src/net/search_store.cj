@@ -209,6 +209,47 @@ public class SearchItemView <: Iterable<SearchItem> {
             case None => false
         }
     }
+
+    /**
+     * Mutates the retained copy for `arcid` (memory array or hot window only) and returns it.
+     * Purely in-memory: persisted views are NOT scanned rank by rank — that would be one
+     * RocksDB point query per rank on the UI thread (measured 25.8ms for one meta sync).
+     */
+    public func updateCachedCopy(arcid: String, apply: (SearchItem) -> Unit): Option<SearchItem> {
+        match (memoryItems) {
+            case Some(values) =>
+                for (value in values) {
+                    if (value.arcid == arcid) {
+                        apply(value)
+                        return Some(value)
+                    }
+                }
+                return None
+            case None => ()
+        }
+        for (slot in 0..SEARCH_HOT_CACHE_SIZE) {
+            match (cacheItems[slot]) {
+                case Some(item) =>
+                    if (item.arcid == arcid) {
+                        apply(item)
+                        return Some(item)
+                    }
+                case None => ()
+            }
+        }
+        return None
+    }
+
+    /** Loads the canonical entity directly by its stable key, bypassing rank scans. */
+    public func loadByArcid(arcid: String): Option<SearchItem> {
+        match (searchStore) {
+            case Some(store) => match (store.loadByArcid(serverHash, accountScope, language, arcid)) {
+                case RocksDbOperationResult<SearchItem>.Ok(item) => Some(item)
+                case _ => None
+            }
+            case None => None
+        }
+    }
 }
 
 private class SearchItemIterator <: Iterator<SearchItem> {
@@ -448,6 +489,27 @@ class SearchStore {
         let scope = StorageScope(serverHash, accountScope)
         let objectRepo = ObjectRepository<SearchItem>(db, scope, SearchItemCodec(), columnFamily: Some(objects))
         return objectRepo.put(id, item)
+    }
+
+    // 规范实体按 (language, arcid) 定址（与 stableEntityId 的 archive 分支同键）：
+    // 元数据投影回写用它绕开按 rank 的全视图扫描。
+    func loadByArcid(
+        serverHash: String,
+        accountScope: String,
+        language: String,
+        arcid: String
+    ): RocksDbOperationResult<SearchItem> {
+        if (arcid.size == 0) {
+            return RocksDbOperationResult<SearchItem>.NotFound
+        }
+        let lang = if (language.size > 0) {
+            language
+        } else {
+            "_"
+        }
+        let scope = StorageScope(serverHash, accountScope)
+        let objectRepo = ObjectRepository<SearchItem>(db, scope, SearchItemCodec(), columnFamily: Some(objects))
+        return objectRepo.get("${lang}:archive:${arcid}")
     }
 
     private static func entityId(language: String, queryKey: String, item: SearchItem, rank: Int64): String {
