@@ -2015,6 +2015,13 @@ public class AppModel {
         let lang = language.value
         if (r.key == "random") {
             let groupbyTanks = tankGroupOn()
+            // SWR 预热：queryKey 与 randomSearch 内部构造（同字段同默认）一致。
+            let seedQ = SearchQuery()
+            seedQ.sortby = "RANDOM()"
+            seedQ.pageSize = BROWSE_ROW_SIZE
+            seedQ.lang = lang
+            seedQ.groupbyTanks = groupbyTanks
+            seedRowFromCache(r, seedQ)
             let _ = worker.submitTagged("row:random", lang,
                 {
                     =>
@@ -2045,6 +2052,7 @@ public class AppModel {
                     "desc"
                 }
             }
+            seedRowFromCache(r, q)
             let _ = worker.submitTagged("row:${r.key}", lang,
                 {
                     =>
@@ -2056,6 +2064,36 @@ public class AppModel {
                         }
                         sp
                 })
+        }
+    }
+
+    // SWR 预热：RPC 在途期间先把本地缓存的上次同查询快照摆上（openSearchItems 返回
+    // 懒视图，UI 线程仅一次 RocksDB 反向点查，不做全量解码），row: dispatch 到货后
+    // 整体替换为新快照。仅冷启动空行触发；重试/换一批时行内已有内容，直接跳过。
+    // 缓存缺失/离线库不可用/查询从未缓存过时与旧行为一致（空行转圈等到货）。
+    private func seedRowFromCache(r: BrowseRow, q: SearchQuery): Unit {
+        if (r.items.size > 0) {
+            return
+        }
+        let c = match (offlineCacheFor()) {
+            case Some(x) => x
+            case None => return
+        }
+        let p = match (settings.activeProfile()) {
+            case Some(x) => x
+            case None => return
+        }
+        match (c.openSearchItems(fnv1a64Hex(p.baseUrl), offlineAccountScope(p.id, p.username, p.token),
+            "search:${buildSearchQuery(q)}", q.lang)) {
+            case Some(view) =>
+                r.items = view
+                // 行内容写在共享对象的普通字段上，整体重赋值推进代次触发重绘（同 row: dispatch）。
+                browseRows.value = browseRows.value
+                // LANLU_PERF 打点：SWR 种子摆上（验证其先于 row: RPC 到货生效）。
+                if (SubtitlePerf.enabled()) {
+                    println("[perf] row_seeded key=${r.key} items=${view.size}")
+                }
+            case None => ()
         }
     }
 
