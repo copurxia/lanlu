@@ -113,14 +113,15 @@ main(): Int64 {
     // 渲染驱动优先级策略：D3D/Metal > vulkan > opengl > software。
     // Windows/macOS 不动——SDL 内置顺序里 D3D11/12、Metal 本来就在最前，自动选择即正确；
     // 但 SDL3 内置顺序把 opengl 排在 vulkan 之前（SDL_render.c），故 Linux 桌面会话
-    // （wayland/x11）下显式默认 vulkan；创建失败 SDL 自动回退 opengl → software。
+    // （wayland/x11）下显式指定 "vulkan,opengl"：SDL3 的 SDL_RENDER_DRIVER hint 支持逗号
+    // 分隔回退列表（SDL_render.c 逐 token 尝试），vulkan 创建失败自动回退 opengl。
     // LANLU_SOFTWARE_RENDER=1 强制 software 兜底；用户显式 SDL_RENDER_DRIVER 永远优先。
     if ((getVariable("XDG_SESSION_TYPE") == "wayland" || getVariable("XDG_SESSION_TYPE") == "x11") &&
         SdlHints.get(SdlHint.CustomHint("SDL_RENDER_DRIVER")).isNone()) {
         let driver = if (getVariable("LANLU_SOFTWARE_RENDER") == Some("1")) {
             "software"
         } else {
-            "vulkan"
+            "vulkan,opengl"
         }
         SdlHints.set(SdlHint.CustomHint("SDL_RENDER_DRIVER"), driver)
     }
@@ -170,6 +171,7 @@ main(): Int64 {
     // libVLC/libass 全链路，按阶段状态机驱动冷扫描→播放→切换→seek→缓存命中并输出 @@RESULT。
     let bench = SubtitleBench()
     let benchEnabled = bench.isEnabled()
+    println("[boot] 3.4 SubtitleBench ready (enabled=${benchEnabled}) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 启动时一次性缩放适配（ADR：不做运行时动态缩放）：seedMode 钉死 1.0 保证
     // CI 快照像素确定性；正常启动取主显示器 contentScale（Windows 高 DPI 下 >1，
     // primaryDisplayInfo 内部自带 SDL_Init(VIDEO) 引用计数，建窗前调用安全），
@@ -206,6 +208,11 @@ main(): Int64 {
     }
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
+            // 无边框窗口：创建时即无 OS 装饰（替代旧的事后 setBordered(false)），
+            // Wayland 下 libdecor-cairo 不再先栅格化一遍随即摘除的标题栏装饰；
+            // 标题栏由 ui/titlebar.cj 自绘（Task 8），阅读器页换用专用顶栏
+            // ui/reader_bar.cj（T13）。
+            borderless: true,
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
             } else {
@@ -219,9 +226,7 @@ main(): Int64 {
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
     app.setMinimumSize(960, 640)
-    // 无边框窗口：移除 OS 装饰，标题栏由 ui/titlebar.cj 自绘（Task 8）；
-    // 阅读器页换用专用顶栏 ui/reader_bar.cj（T13）。
-    app.sdlWindow.setBordered(false)
+    // 无边框已在 WindowSpec(borderless: true) 创建时生效（见上方 WindowSpec 注释）。
     syncTitleBarDragRegion(app.sdlWindow, model)
     println("[boot] 5 entering main loop t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // LANLU_PERF 打点：窗口创建段（model ready→主循环入口，与 first_rows 同起点；

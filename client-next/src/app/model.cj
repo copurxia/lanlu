@@ -2423,6 +2423,10 @@ public class AppModel {
         SubtitlePerf.flushSamples("pump_dispatch_us")
         SubtitlePerf.flushSamples("pump_img_us")
         SubtitlePerf.flushSamples("pump_files_us")
+        SubtitlePerf.flushSamples("pump_row_us")
+        SubtitlePerf.flushSamples("pump_categories_us")
+        SubtitlePerf.flushSamples("pump_me_us")
+        SubtitlePerf.flushSamples("pump_meta_us")
         SubtitlePerf.flushSamples("pump_other_us")
         SubtitlePerf.flushSamples("me_rpc_us")
         SubtitlePerf.flushSamples("row_rpc_us")
@@ -4286,7 +4290,7 @@ public class AppModel {
             let dispatchT0 = MonoTime.now()
             dispatch(r)
             // LANLU_PERF 打点：按结果名前缀分桶的 dispatch 成本（定位 pump p99 尖刺归属：
-            // 图片类 img:/imgdl:、章节文件 files:、其余 me/row:/categories 等归 other）。
+            // 图片类 img:/imgdl:、章节文件 files:、行/分类/会话/元数据各自独立桶，其余归 other）。
             if (SubtitlePerf.enabled()) {
                 SubtitlePerf.sampleUs(pumpDispatchBucket(r.name), (MonoTime.now() - dispatchT0).toMicroseconds())
             }
@@ -4300,13 +4304,28 @@ public class AppModel {
         }
     }
 
-    // pump 分桶：img:/imgdl: 归图片，files: 归章节文件，其余（me/row:/categories 等）归 other。
+    // pump 分桶：img:/imgdl: 归图片，files: 归章节文件；other 再细分——静态分析表明
+    // row:/categories 的 dispatch 只是字段/State 赋值（无观察者、无 I/O），me 多一次
+    // leading 落盘（saveSettings 即时写契约），meta: 含 syncSearchItemFromMeta 的 UI 线程
+    // RocksDB 点查；细分后实测可直接归因 pump_other 尖刺，剩余杂项仍归 pump_other_us。
     private func pumpDispatchBucket(name: String): String {
         if (name.startsWith("img:") || name.startsWith("imgdl:")) {
             return "pump_img_us"
         }
         if (name.startsWith("files:")) {
             return "pump_files_us"
+        }
+        if (name.startsWith("row:")) {
+            return "pump_row_us"
+        }
+        if (name == "categories") {
+            return "pump_categories_us"
+        }
+        if (name == "me") {
+            return "pump_me_us"
+        }
+        if (name.startsWith("meta:")) {
+            return "pump_meta_us"
         }
         "pump_other_us"
     }
