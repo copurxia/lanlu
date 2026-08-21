@@ -520,6 +520,7 @@ public class GhostIconButton <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -584,6 +585,7 @@ public class ThemeToggleButton <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     public func draw(ctx: UiContext): Unit {

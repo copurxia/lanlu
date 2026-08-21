@@ -32,8 +32,21 @@ private var dragRegionReader = false
 private var dragRegionChrome = true
 private var dragRegionReaderPanel = false
 private var dragRegionUploadDrawer = false
-private var dragRegionHasBack = false
-private var dragRegionHasFilter = false
+// 上一次实际注册的顶栏拖动矩形：控件占位随布局/动画逐帧变化，逐帧对比矩形集，
+// 有变化才重注册（FFI + HashMap 写入），无变化零成本。
+private var dragRegionApplied = Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0))
+
+private func dragRectsEqual(a: Array<(Int32, Int32, Int32, Int32)>, b: Array<(Int32, Int32, Int32, Int32)>): Bool {
+    if (a.size != b.size) {
+        return false
+    }
+    for (i in 0..a.size) {
+        if (a[i] != b[i]) {
+            return false
+        }
+    }
+    true
+}
 
 private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     let w = window.width
@@ -41,20 +54,21 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
         case Page.Reader(_, _) => true
         case _ => false
     }
-    let hasBack = match (model.page.value) {
-        case Page.Detail(_) | Page.Tank(_) | Page.Settings => true
-        case _ => false
-    }
-    let hasFilter = match (model.page.value) {
-        case Page.Library => true
-        case _ => false
-    }
     let chrome = !isReader || model.reader.chromeVisible
     let readerPanelOpen = isReader && (model.readerSidebarOpen.value || model.readerSettingsOpen.value)
     let uploadPanelOpen = model.uploadDrawerOpen.value
+    // 顶栏交互控件在 layout 时上报实际占位（见 titlebar.cj noteTitleBarControl），
+    // 拖动矩形 = 顶栏横向对占位的互补集——搜索框展开动画、返回/筛选钮出现、用户名
+    // 长度变化都被自然覆盖，无需手工几何估算。
+    let rects = if (uploadPanelOpen || (isReader && (!chrome || readerPanelOpen))) {
+        Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0))
+    } else if (isReader) {
+        readerBarDragRects(w)
+    } else {
+        titleBarDragRects(w, titleBarDragExclusionRects())
+    }
     if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && readerPanelOpen ==
-        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && hasBack == dragRegionHasBack &&
-        hasFilter == dragRegionHasFilter) {
+        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && dragRectsEqual(rects, dragRegionApplied)) {
         return
     }
     dragRegionWidth = w
@@ -62,22 +76,11 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     dragRegionChrome = chrome
     dragRegionReaderPanel = readerPanelOpen
     dragRegionUploadDrawer = uploadPanelOpen
-    dragRegionHasBack = hasBack
-    dragRegionHasFilter = hasFilter
+    dragRegionApplied = rects
     // 不支持 hit-test 的视频驱动（如快照装置的 dummy）会拒绝注册：忽略即可，窗口照常
     // 可用，只是没有 OS 托管拖动（与 desktop_app 忽略光标/IME 锚点拒绝同一惯例）。
     try {
-        if (uploadPanelOpen) {
-            window.setDragRegions(Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0)))
-        } else if (isReader) {
-            if (chrome && !readerPanelOpen) {
-                window.setDragRegions(readerBarDragRects(w))
-            } else {
-                window.setDragRegions(Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0)))
-            }
-        } else {
-            window.setDragRegions(titleBarDragRects(w, hasBack, hasFilter))
-        }
+        window.setDragRegions(rects)
     } catch (_: Exception) {
         ()
     }
@@ -124,6 +127,12 @@ main(): Int64 {
             "vulkan,opengl"
         }
         SdlHints.set(SdlHint.CustomHint("SDL_RENDER_DRIVER"), driver)
+    }
+    // Wayland 下任务栏/应用菜单的图标按 app_id 匹配同名 .desktop 文件（CI 打包安装
+    // lanlu.desktop）；X11/Windows 的任务栏图标由下方 setIcon 直接生效。
+    // 用户显式设置 SDL_APP_ID 时不覆盖。
+    if (SdlHints.get(SdlHint.AppId).isNone()) {
+        SdlHints.set(SdlHint.AppId, "lanlu")
     }
 
     // ── 临时快照装置（验证专用，用后逐字还原）：--seed-browse/--seed-search/
@@ -226,6 +235,17 @@ main(): Int64 {
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
     app.setMinimumSize(960, 640)
+    // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
+    // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
+    // Wayland 无窗口图标协议（图标靠上方 app_id 匹配 .desktop），SDL 会返回
+    // unsupported——忽略即可，不影响 X11/Windows 的设置效果。
+    let iconSurface = Surface.loadPngFromMemory(EMBEDDED_LOGO_PNG)
+    app.manage(iconSurface)
+    try {
+        app.sdlWindow.setIcon(iconSurface)
+    } catch (_: Exception) {
+        ()
+    }
     // 无边框已在 WindowSpec(borderless: true) 创建时生效（见上方 WindowSpec 注释）。
     syncTitleBarDragRegion(app.sdlWindow, model)
     println("[boot] 5 entering main loop t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")

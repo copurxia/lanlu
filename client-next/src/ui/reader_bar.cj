@@ -277,7 +277,7 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
             GhostIconButton(GhostGlyph.Gear, "readerbar:settings") {=> model.toggleReaderSettings() }
             WinSep()
             WinControlButton(WinGlyph.Min, "readerbar:min") { _ => window.minimize() }
-            WinControlButton(WinGlyph.Max, "readerbar:max") { _ => window.maximize() }
+            WinControlButton(WinGlyph.Max, "readerbar:max") { _ => toggleWindowMaximize(window) }
             WinControlButton(WinGlyph.Close, "readerbar:close") { ctx => ctx.requestClose() }
         }.spacing(6.0).crossAxisAlignment(CrossAxisAlignment.Center).padding(12.0, 0.0, 12.0, 0.0)
     // alignment 是 ZStack 专有链式，须排在通用修饰器 height 之前（同 titleBar 写法）。

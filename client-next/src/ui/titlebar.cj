@@ -10,9 +10,12 @@ import std.collection.ArrayList
 // 默认封顶 460vp，点击/聚焦后展开至 680vp，在品牌与右侧固定带之间水平居中）→
 // 弹性空隙 → 导航胶囊（首页/书架/在线源，
 // 后两项无页面置灰）→ ◐ 主题 → 用户菜单 → 1×20 分隔线 → 最小化/最大化/关闭。
-// 窗口拖动走 SdlWindow.setDragRegions 多矩形（main.cj 注册：品牌区 + 搜索框两侧的弹性空隙，
-// 见 titleBarDragRects）——DRAGGABLE 内鼠标事件不投递给应用，
-// 故所有交互控件都必须落在注册矩形之外。双击最大化手势因同一限制放弃（YAGNI）。
+// 窗口拖动走 SdlWindow.setDragRegions 多矩形（main.cj 注册，见 titleBarDragRects）——
+// DRAGGABLE 内鼠标事件不投递给应用，故所有交互控件都必须落在注册矩形之外。
+// 交互控件在 layout 时把实际占位上报进 titleBarDragExclusions（TitleBarBackground 每帧
+// 开头清空），拖动矩形 = 顶栏横向对这些占位取互补集：空隙随真实布局收放，
+// 搜索框展开动画、用户名长度、返回/筛选钮出现与否都无需手工几何估算。
+// 双击最大化手势因同一限制放弃（YAGNI）。
 
 // 标题栏高（vp）；main.cj 注册拖动区时同用。
 public let TITLEBAR_HEIGHT: Int32 = 56
@@ -35,34 +38,66 @@ private let DRAG_RIGHT_RESERVE: Int32 = 640
 // 左侧预留带同步右移（44 = 钮 34 + 间距 10，即返回钮相对品牌块的位移）。
 private let DRAG_BACK_OFFSET: Int32 = 44
 
-// 标题栏拖动矩形集：品牌区恒有；搜索框在品牌区与右侧固定带之间水平居中（前后各一个
-// Spacer），两侧弹性空隙各注册一块（窗口过窄空隙不存在则不注册，避免盖住交互控件）。
-// hasBack：详情/合集页顶栏最左有返回钮，拖动矩形整体避让（品牌矩形与左预留带右移）；
-// hasFilter：首页搜索框右侧有筛选钮，搜索簇与右侧拖动带均须为它留出命中空间。
-// 坐标为逻辑 vp。
-public func titleBarDragRects(windowWidth: Int32, hasBack: Bool, hasFilter: Bool): Array<(Int32, Int32, Int32, Int32)> {
-    let rects = ArrayList<(Int32, Int32, Int32, Int32)>()
-    let brandX: Int32 = if (hasBack) {
-        16 + DRAG_BACK_OFFSET
-    } else {
-        0
+// 顶栏交互控件的实际占位（逻辑 vp）：控件在 layout 时上报，TitleBarBackground 在每帧
+// 布局开头清空。main.cj 读取它计算拖动矩形（互补集），无需手工几何估算。
+private let titleBarDragExclusions = ArrayList<Rect>()
+
+// 控件 layout 时调用：把自己的实际占位上报为顶栏拖动避让区。共享控件（GhostIconButton
+// 等）在正文区也会上报，由 titleBarDragRects 按 y 过滤（只认与顶栏竖带相交的占位）。
+func noteTitleBarControl(rect: Rect): Unit {
+    titleBarDragExclusions.add(rect)
+}
+
+/** main.cj 读取本帧顶栏交互控件占位的快照。 */
+public func titleBarDragExclusionRects(): Array<Rect> {
+    titleBarDragExclusions.toArray()
+}
+
+// 标题栏拖动矩形集：顶栏横向 [0, windowWidth] 对交互控件实际占位（exclusions，
+// 只取与顶栏竖带 0..TITLEBAR_HEIGHT 相交者）的互补集，每个空隙一块矩形。
+// 过窄的缝隙（< 8vp）不注册，避免产生无法利用的细碎命中区。坐标为逻辑 vp。
+private let MIN_DRAG_GAP: Int32 = 8
+
+public func titleBarDragRects(windowWidth: Int32, exclusions: Array<Rect>): Array<(Int32, Int32, Int32, Int32)> {
+    // 收集与顶栏竖带相交的占位，裁剪到窗口内，按左端点升序排序（区间数量 ≤ 十，
+    // 直接插入排序足够）。
+    let intervals = ArrayList<(Int32, Int32)>()
+    for (r in exclusions) {
+        if (r.y >= Float32(TITLEBAR_HEIGHT) || r.y + r.h <= 0.0) {
+            continue
+        }
+        let x0 = max(0, Int32(r.x))
+        let x1 = min(windowWidth, Int32(r.x + r.w + 0.5))
+        if (x1 > x0) {
+            intervals.add((x0, x1))
+        }
     }
-    rects.add((brandX, 0, DRAG_BRAND_W, TITLEBAR_HEIGHT))
-    let leftReserve = brandX + DRAG_BRAND_W
-    let freeW = windowWidth - leftReserve - DRAG_RIGHT_RESERVE
-    if (freeW > 0) {
-        let filterSlot: Int32 = if (hasFilter) {
-            Int32(FILTER_BUTTON_SLOT_W)
-        } else {
-            0
+    let sorted = intervals.toArray()
+    for (i in 1..sorted.size) {
+        var j = i
+        while (j > 0 && sorted[j - 1][0] > sorted[j][0]) {
+            let tmp = sorted[j - 1]
+            sorted[j - 1] = sorted[j]
+            sorted[j] = tmp
+            j -= 1
         }
-        let searchW = min(Int32(SEARCH_EXPANDED_W), max(0, freeW - filterSlot))
-        let searchClusterW = searchW + filterSlot
-        let side = (freeW - searchClusterW) / 2
-        if (side > 0) {
-            rects.add((leftReserve, 0, side, TITLEBAR_HEIGHT))
-            rects.add((leftReserve + side + searchClusterW, 0, side, TITLEBAR_HEIGHT))
+    }
+    // 合并重叠/相邻区间，同时输出互补空隙。
+    let rects = ArrayList<(Int32, Int32, Int32, Int32)>()
+    var cursor: Int32 = 0
+    for (iv in sorted) {
+        let (x0, x1) = iv
+        if (x0 > cursor) {
+            if (x0 - cursor >= MIN_DRAG_GAP) {
+                rects.add((cursor, 0, x0 - cursor, TITLEBAR_HEIGHT))
+            }
+            cursor = x1
+        } else if (x1 > cursor) {
+            cursor = x1
         }
+    }
+    if (windowWidth - cursor >= MIN_DRAG_GAP) {
+        rects.add((cursor, 0, windowWidth - cursor, TITLEBAR_HEIGHT))
     }
     rects.toArray()
 }
@@ -127,6 +162,7 @@ public class WinControlButton <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -187,6 +223,8 @@ private class TitleBarBackground <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        // 顶栏 ZStack 首个子件：每帧布局从这里开始，清空上一帧的拖动避让占位。
+        titleBarDragExclusions.clear()
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -246,6 +284,7 @@ private class SearchChrome <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -327,10 +366,13 @@ private class SearchPlaceholder <: Widget {
             model.t("nav.search")
         }
         let th = ctx.renderer.textHeight(pointSize: 13.0)
+        // 窄窗口下搜索框收缩后占位文案可能长于框体，裁剪防止溢出压到右侧筛选钮。
+        ctx.renderer.pushClip(frame)
         ctx
             .renderer
             .text(ph, frame.x + SEARCH_ICON_INSET + 12.0, frame.centerY() - th / 2.0, ctx.theme.mutedText,
                 pointSize: 13.0)
+        ctx.renderer.popClip()
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -483,6 +525,7 @@ private class NavPill <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     private func itemRect(ctx: UiContext, index: Int64): Rect {
@@ -615,6 +658,7 @@ private class UserMenuChip <: Widget {
 
     public func layout(_: UiContext, rect: Rect): Unit {
         frame = rect
+        noteTitleBarControl(rect)
     }
 
     public func draw(ctx: UiContext): Unit {
@@ -1161,6 +1205,15 @@ private func titleBarLogoutConfirmModal(model: AppModel, logoutOpen: State<Bool>
     })
 }
 
+// 桌面窗口惯例：最大化钮在最大化态再点应还原（SDL_MaximizeWindow 无开关语义，须自行判断）。
+internal func toggleWindowMaximize(window: SdlWindow): Unit {
+    if (window.windowFlags().maximized) {
+        window.restore()
+    } else {
+        window.maximize()
+    }
+}
+
 // 自定义标题栏：品牌 + 全局搜索 + 导航胶囊 + 设置/主题 + 用户芯片 + 分隔线 +
 // 最小化/最大化/关闭。登录页只保留品牌与右侧主题/窗口控制（无可搜内容、无会话用户）。
 // 最小化/最大化经 SdlWindow 扩展直达，关闭走 ctx.requestClose()。
@@ -1233,7 +1286,7 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
             }
             WinSep()
             WinControlButton(WinGlyph.Min, "titlebar:min") {_ => window.minimize()}
-            WinControlButton(WinGlyph.Max, "titlebar:max") {_ => window.maximize()}
+            WinControlButton(WinGlyph.Max, "titlebar:max") {_ => toggleWindowMaximize(window)}
             WinControlButton(WinGlyph.Close, "titlebar:close") {ctx => ctx.requestClose()}
         }.spacing(10.0).crossAxisAlignment(CrossAxisAlignment.Center).padding(16.0, 0.0, 16.0, 0.0)
         // 顶层键盘接线件：最后声明 = 事件分发最优先（只吃不相关鼠标事件之外的键）。
