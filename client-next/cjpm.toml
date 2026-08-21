@@ -30,6 +30,8 @@ link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/nativ
 # MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 MINGW64 的 import libraries。
 # -lgcc_s：fontkit_native 以 x86_64-pc-windows-gnu 构建，Rust std/panic_unwind 需要 libgcc_s 提供 _Unwind_* / _GCC_specific_handler。
 # -lcrypt32：stdx.crypto.x509 通过 CryptoAPI 读取系统根证书（CertOpenSystemStoreA 等）。
-link-option = "-L \"${MINGW_LIBRARY_PATH}\" -L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -lass -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s"
+# -mwindows：GUI 子系统，双击启动时不再弹出黑色控制台窗口（mingw-w64 的 libmingw32 提供 WinMain→main 桩，console main 程序可正常链接）。
+# 注意：GUI 子系统下 println 的诊断输出（[boot]/[win] 等）不再可见，调试时需临时移除该选项。
+link-option = "-L \"${MINGW_LIBRARY_PATH}\" -L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -lass -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s -mwindows"
   [target.x86_64-w64-mingw32.bin-dependencies]
     path-option = [ "${CANGJIE_STDX_PATH}" ]

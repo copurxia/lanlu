@@ -1,16 +1,44 @@
-import std.fs.{copy, Directory, exists, Path}
+import std.fs.{copy, Directory, exists, File, Path}
 import std.process.{execute, ProcessRedirect}
 
 private let LOGO_SOURCE = Path("assets/lanlu_logo_gold.png")
+private let EMBEDDED_LOGO_OUTPUT = Path("src/ui/embedded_logo.cj")
 
-private func stageDesktopAssets(): Unit {
-    // cjpm 1.1.3 只调用 pre-* 钩子；预先准备两个 profile，保证普通/调试产物目录都自带资源。
-    for (output in [Path("target/release/bin/lanlu_logo_gold.png"), Path("target/debug/bin/lanlu_logo_gold.png")]) {
-        if (!exists(output.parent)) {
-            Directory.create(output.parent, recursive: true)
+// 将 logo PNG 字节内嵌为源码（EMBEDDED_LOGO_PNG），发布产物不再附带 PNG 文件。
+// 生成内容与既有文件一致时跳过重写，避免每次构建都触发 ui 包重编译。
+private func generateEmbeddedLogo(): Unit {
+    let bytes = File.readFrom(LOGO_SOURCE)
+    let builder = StringBuilder()
+    builder.append("// 本文件由 build.cj 根据 assets/lanlu_logo_gold.png 自动生成，请勿手工修改。\n")
+    builder.append("package lanlu_client_next.ui\n\n")
+    builder.append("public let EMBEDDED_LOGO_PNG: Array<UInt8> = [\n")
+    for (i in 0..bytes.size) {
+        if (i % 16 == 0) {
+            builder.append("    ")
         }
-        copy(LOGO_SOURCE, to: output, overwrite: true)
+        builder.append(hexByte(bytes[i]))
+        builder.append(",")
+        if (i % 16 == 15) {
+            builder.append("\n")
+        } else {
+            builder.append(" ")
+        }
     }
+    if (bytes.size % 16 != 0) {
+        builder.append("\n")
+    }
+    builder.append("]\n")
+    let generated = builder.toString()
+    if (exists(EMBEDDED_LOGO_OUTPUT) && String.fromUtf8(File.readFrom(EMBEDDED_LOGO_OUTPUT)) == generated) {
+        return
+    }
+    File.writeTo(EMBEDDED_LOGO_OUTPUT, generated.toArray())
+}
+
+private let HEX_CHARS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
+
+private func hexByte(b: UInt8): String {
+    "0x${HEX_CHARS[Int64(b) / 16]}${HEX_CHARS[Int64(b) % 16]}u8"
 }
 
 // fontkit native 静态库需与 cjpm 目标链接器匹配：
@@ -144,8 +172,8 @@ main(args: Array<String>): Int64 {
             if (subtitleExitCode != 0) {
                 return subtitleExitCode
             }
-            // 源资源缺失或复制失败都属于打包错误，直接让构建失败。
-            stageDesktopAssets()
+            // logo 字节内嵌为源码；源资源缺失或生成失败都属于打包错误，直接让构建失败。
+            generateEmbeddedLogo()
             0
         case _ => 0
     }

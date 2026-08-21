@@ -256,7 +256,6 @@ jobs:
           mkdir -p "${staging}/DEBIAN" "${appdir}" "${staging}/usr/bin" dist
 
           cp target/release/bin/main "${appdir}/${pkgname}"
-          cp target/release/bin/lanlu_logo_gold.png "${appdir}/"
 
           # 捆绑非系统私有库（SDL3、仓颉 runtime 等）；
           # apt 系统库（vips、vlc、rocksdb 等）通过 control 的 Depends 声明。
@@ -283,6 +282,22 @@ jobs:
             'exec env LD_LIBRARY_PATH="/opt/lanlu-client-next${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /opt/lanlu-client-next/lanlu-client-next "$@"' \
             > "${staging}/usr/bin/${pkgname}"
           chmod 755 "${staging}/usr/bin/${pkgname}"
+
+          # 桌面入口与任务栏图标：app_id（main.cj 设置 SDL_APP_ID=lanlu）匹配
+          # /usr/share/applications/lanlu.desktop，Wayland 下任务栏图标由此解析。
+          mkdir -p "${staging}/usr/share/applications" "${staging}/usr/share/icons/hicolor/192x192/apps"
+          cp assets/lanlu_logo_gold.png "${staging}/usr/share/icons/hicolor/192x192/apps/lanlu.png"
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Type=Application' \
+            'Name=Lanlu' \
+            'Comment=Lanlu desktop client' \
+            "Exec=/usr/bin/${pkgname}" \
+            'Icon=lanlu' \
+            'StartupWMClass=lanlu' \
+            'Terminal=false' \
+            'Categories=Graphics;' \
+            > "${staging}/usr/share/applications/lanlu.desktop"
 
           installed_size="$(du -sk "${staging}" | cut -f1)"
           printf '%s\n' \
@@ -468,7 +483,6 @@ jobs:
           stage="client-next/dist/windows/lanlu-client-next"
           mkdir -p "${stage}"
           cp client-next/target/release/bin/main.exe "${stage}/"
-          cp client-next/target/release/bin/lanlu_logo_gold.png "${stage}/"
 
           # 仓颉 runtime 目录：setup-cangjie 导出 CANGJIE_HOME（SDK 根目录），
           # runtime 库位于 ${CANGJIE_HOME}/runtime/lib/windows_<arch>_<backend>/。
@@ -722,7 +736,6 @@ jobs:
           name: client-next-windows-${{ github.sha }}
           path: |
             client-next/target/release/bin/main.exe
-            client-next/target/release/bin/lanlu_logo_gold.png
           if-no-files-found: error
           retention-days: 14
 

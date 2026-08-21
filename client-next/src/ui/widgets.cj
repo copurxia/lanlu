@@ -5,26 +5,20 @@ import lanlu_client_next.app.*
 import lanlu_client_next.net.{ArchivePageView, SearchItem, SearchItemProjectionView, SearchItemView, TankoubonInfo,
     TankoubonView, PageInfo, percentEncode}
 import std.collection.{ArrayList, HashMap, HashSet}
-import std.fs.{exists, Path}
 import std.math.{cos, sin}
 
-// 品牌 logo（顶栏 28vp / 登录卡 44vp 共用）：金色镂空书架方块
-//（build.cj 将 client-next/assets/lanlu_logo_gold.png 复制到可执行文件旁）。
-// Logo 缺失说明发布产物不完整：立即报错，不能用无关图标掩盖打包问题。
-func lanluLogoPath(): String {
-    let executableDir = match (ApplicationPaths.basePath()) {
-        case Some(path) => path
-        case None => throw IllegalStateException("无法定位 Lanlu 可执行文件目录")
-    }
-    let path = "${executableDir}/lanlu_logo_gold.png"
-    if (!exists(Path(path))) {
-        throw IllegalStateException("Lanlu Logo 资源缺失：${path}")
-    }
-    path
-}
+// 品牌 logo（顶栏 28vp / 登录卡 44vp 共用）：金色镂空书架方块。
+// PNG 字节由 build.cj 内嵌进二进制（embedded_logo.cj），发布产物不再附带图片文件；
+// 首次使用时注册进纹理缓存的内存注册表，之后与普通图片同一路径解码渲染。
+private let LOGO_TEXTURE_KEY = "embedded:lanlu_logo_gold"
+private var logoBytesRegistered = false
 
 func brandLogo(size: Length): Unit {
-    ImageView(lanluLogoPath(), preferredWidth: Some(size), preferredHeight: size)
+    if (!logoBytesRegistered) {
+        registerImageBytes(LOGO_TEXTURE_KEY, EMBEDDED_LOGO_PNG)
+        logoBytesRegistered = true
+    }
+    ImageView(LOGO_TEXTURE_KEY, preferredWidth: Some(size), preferredHeight: size)
 }
 
 // 旋转加载圈（indeterminate spinner）：270° 弧的起点随帧钟旋转，绘制时 requestFrame
