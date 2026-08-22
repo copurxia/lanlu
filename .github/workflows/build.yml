@@ -69,6 +69,15 @@ jobs:
           WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
         run: |
           unset GIT_DIR GIT_WORK_TREE
+          # rocksdb_ffi 的 [ffi.c] 校验发生在 cjpm update 阶段，早于 build.cj 的
+          # pre-build 钩子；fresh checkout 下 liblanlu_rocksdb_bridge.a 被 gitignore
+          # 不存在，update 直接报 "can not find the library"。这里按 build.cj 的
+          # 同款命令预生成（build 阶段 pre-build 会幂等重编，无冲突）。
+          g++ -std=c++17 -O2 -fPIC \
+            -c packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c \
+            -o packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
+            packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
           cjpm update
           for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
             grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
