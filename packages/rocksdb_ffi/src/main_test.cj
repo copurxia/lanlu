@@ -1,13 +1,26 @@
 package rocksdb_ffi
 
 import std.collection.ArrayList
+import std.env.getVariable
 import std.fs.{Directory, Path}
 import std.sync.{Mutex, SyncCounter}
 import std.unittest.*
 import std.unittest.testmacro.*
 
+// 跨平台临时目录：Windows 无 /tmp，依次取 TMPDIR/TEMP/TMP，兜底当前目录。
+private func tempBaseDir(): Path {
+    for (name in ["TMPDIR", "TEMP", "TMP"]) {
+        if (let Some(value) <- getVariable(name)) {
+            if (value.size > 0) {
+                return Path(value)
+            }
+        }
+    }
+    return Path(".")
+}
+
 private func openTestDb(): RocksDb {
-    let dir = Directory.createTemp(Path("/tmp"))
+    let dir = Directory.createTemp(tempBaseDir())
     let (ok, db, error) = RocksDb.openLowMemory(dir.toString())
     if (!ok) {
         throw Exception(error)
