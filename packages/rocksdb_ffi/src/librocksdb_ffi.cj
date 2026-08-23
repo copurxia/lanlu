@@ -377,7 +377,9 @@ foreign func rocksdb_create_snapshot(db: CPointer<rocksdb_t>): CPointer<rocksdb_
 
 foreign func rocksdb_release_snapshot(db: CPointer<rocksdb_t>, snapshot: CPointer<rocksdb_snapshot_t>): Unit
 
-foreign func rocksdb_snapshot_get_sequence_number(snapshot: CPointer<rocksdb_snapshot_t>): UInt64
+// RocksDB 9.0 起才有 rocksdb_snapshot_get_sequence_number；经 bridge 转发，
+// 老库（如 Ubuntu 24.04 的 8.9.x）由 bridge 返回 0，避免直接引用符号链接失败。
+foreign func llrocksdb_snapshot_get_sequence_number(snapshot: CPointer<rocksdb_snapshot_t>): UInt64
 
 foreign func rocksdb_iter_destroy(iter: CPointer<rocksdb_iterator_t>): Unit
 

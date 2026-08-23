@@ -1559,7 +1559,7 @@ public class RocksDbSnapshot <: Resource {
         if (closed) {
             return 0u64
         }
-        return unsafe { rocksdb_snapshot_get_sequence_number(snapshot) }
+        return unsafe { llrocksdb_snapshot_get_sequence_number(snapshot) }
     }
 
     public func getBytesResult(key: Array<UInt8>): RocksDbOperationResult<Array<UInt8>> {
