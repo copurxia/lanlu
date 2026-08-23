@@ -10,6 +10,8 @@ on:
       - "packages/libass_ffi/**"
       - "packages/fontkit_ffi/**"
       - "packages/webview/**"
+      - "packages/rocksdb_ffi/**"
+      - "packages/qwest/**"
       - "cangjie-repo.toml"
       - ".github/workflows/client-next.yml"
   pull_request:
@@ -21,6 +23,8 @@ on:
       - "packages/libass_ffi/**"
       - "packages/fontkit_ffi/**"
       - "packages/webview/**"
+      - "packages/rocksdb_ffi/**"
+      - "packages/qwest/**"
       - "cangjie-repo.toml"
       - ".github/workflows/client-next.yml"
   workflow_dispatch:
@@ -130,6 +134,8 @@ jobs:
             packages/libass_ffi/cjpm.toml
             packages/fontkit_ffi/native/Cargo.lock
             packages/webview/native/Cargo.lock
+            packages/rocksdb_ffi/cjpm.toml
+            packages/qwest/cjpm.toml
           )
           for required_file in "${required_files[@]}"; do
             if [ ! -f "${required_file}" ]; then
@@ -355,7 +361,9 @@ jobs:
             "packages/libavformat_ffi/cjpm.toml",
             "packages/libass_ffi/cjpm.toml",
             "packages/fontkit_ffi/native/Cargo.lock",
-            "packages/webview/native/Cargo.lock"
+            "packages/webview/native/Cargo.lock",
+            "packages/rocksdb_ffi/cjpm.toml",
+            "packages/qwest/cjpm.toml"
           )
           foreach ($requiredFile in $requiredFiles) {
             if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
