@@ -21,6 +21,7 @@ public class TaskRunnerRegistry {
             "upload",
             "asset_upload",
             "download_url",
+            "source_download",
             "upload_process",
             "asset_upload_process",
             "archive_asset_consume",
@@ -72,6 +73,9 @@ public class TaskRunnerRegistry {
         }
         handlers["download_url"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             DownloadUrlTaskRunner.run(taskId, parameters, context)
+        }
+        handlers["source_download"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
+            SourceDownloadTaskRunner.run(taskId, parameters, context)
         }
         handlers["upload_process"] = { taskId: Int64, parameters: String, context: TaskRunnerContext =>
             UploadProcessTaskRunner.run(taskId, parameters, context)

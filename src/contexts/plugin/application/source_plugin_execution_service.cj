@@ -112,6 +112,10 @@ public class SourcePluginExecutionService {
     /**
      * 通过 Download 插件下载整本 source 档案。
      *
+     * 创建 source_download 壳任务，由 SourceDownloadTaskRunner 负责编排：
+     * 壳任务 -> wasm 插件子任务 -> download_url_callback（搬运文件 + scan_archive 入库），
+     * 与 download_url 链路结构一致，确保在线源下载结果会进入库中。
+     *
      * @param sourceId 完整的 sourceId
      * @return 任务 task id，0 表示失败
      */
@@ -122,23 +126,52 @@ public class SourcePluginExecutionService {
 
         let logger = getLogger("source_plugin_execution")
 
-        match (SourcePluginMatcher.findDownloadPlugin(sourceId)) {
-            case Some(plugin) =>
-                // 通过 taskpool 执行 Download 插件的 download_archive action
-                let taskParams = buildDownloadArchiveTaskParams(sourceId, plugin.namespace, categoryId, kind)
-                let task = TaskModel.createTaskWithOptions(
-                    "在线源下载",
-                    "wasm_task",
-                    taskParams,
-                    50,
-                    "source_download:${sourceId}",
-                    "source"
-                )
-                return if (task.id > 0) { task.id } else { 0 }
-            case None =>
-                logger.warn("未找到匹配 sourceId 的 Download 插件", ("sourceId", sourceId))
-                return 0
+        let paramsOut = ByteBuffer()
+        let pw = JsonWriter(paramsOut)
+        pw.startObject()
+        pw.writeName("sourceId").writeValue(sourceId)
+        pw.writeName("category_id").writeValue(categoryId)
+        pw.writeName("kind").writeValue(kind)
+        pw.endObject()
+        pw.flush()
+        let taskParams = String.fromUtf8(readToEnd(paramsOut))
+
+        let task = TaskModel.createTaskWithOptions(
+            "在线源下载",
+            "source_download",
+            taskParams,
+            50,
+            "source_download:${sourceId}",
+            "source"
+        )
+        if (task.id > 0) {
+            logger.debug("已创建在线源下载任务", ("sourceId", sourceId), ("task_id", task.id.toString()))
+        } else {
+            logger.error("创建在线源下载任务失败", ("sourceId", sourceId))
         }
+        return if (task.id > 0) { task.id } else { 0 }
+    }
+
+    /**
+     * 创建 download_archive 的 wasm 子任务（供 SourceDownloadTaskRunner 编排调用）。
+     *
+     * @param parentTaskId 壳任务 id，用于日志/进度镜像
+     * @return 任务 task id，0 表示失败
+     */
+    public static func createDownloadArchiveTask(parentTaskId: Int64, sourceId: String, pluginNamespace: String, categoryId: Int64, kind: String): Int64 {
+        if (categoryId <= 0) {
+            return 0
+        }
+        let taskParams = buildDownloadArchiveTaskParams(sourceId, pluginNamespace, categoryId, kind, parentTaskId: parentTaskId)
+        let task = TaskModel.createTaskWithOptions(
+            "执行在线源下载插件",
+            "wasm_task",
+            taskParams,
+            50,
+            "source_download:${sourceId}",
+            "source"
+        )
+        return if (task.id > 0) { task.id } else { 0 }
     }
 
     /**
@@ -233,7 +266,7 @@ public class SourcePluginExecutionService {
      * 构建整本下载的 task params JSON。
      * 使用 wasm_task runner 格式，指定 Download 插件执行 download_archive。
      */
-    private static func buildDownloadArchiveTaskParams(sourceId: String, pluginNamespace: String, categoryId: Int64, kind: String): String {
+    private static func buildDownloadArchiveTaskParams(sourceId: String, pluginNamespace: String, categoryId: Int64, kind: String, parentTaskId!: Int64 = 0): String {
         let groupId = "source_download:${sourceId}"
         let paramsOut = ByteBuffer()
         let pw = JsonWriter(paramsOut)
@@ -252,6 +285,7 @@ public class SourcePluginExecutionService {
         w.writeName("groupId").writeValue(groupId)
         w.writeName("targetType").writeValue("source")
         w.writeName("targetId").writeValue(sourceId)
+        w.writeName("parentTaskId").writeValue(parentTaskId)
         w.writeName("extraParams").writeValue(String.fromUtf8(readToEnd(paramsOut)))
         w.endObject()
         w.flush()

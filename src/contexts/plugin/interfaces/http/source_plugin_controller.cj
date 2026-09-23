@@ -11,6 +11,7 @@ import lanlu.shared.utils.{getLogger, JsonCodec}
 import lanlu.contexts.plugin.infrastructure.persistence.*
 import lanlu.contexts.plugin.application.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.category.infrastructure.persistence.CategoryDao
 
 public class SourcePluginController {
 
@@ -107,7 +108,9 @@ public class SourcePluginController {
                 let requestMap = JsonCodec.decode<HashMap<String, String>>(body)
                 remoteId = requestMap.get("remote_id") ?? ""
                 let catStr = requestMap.get("category_id") ?? "0"
-                try { categoryId = Int64.parse(catStr) } catch (_: Exception) { categoryId = 0 }
+                // 与 download_url 链路的 parseCategoryId 行为对齐：数字按内部 ID，
+                // 其他字符串按公开 catid 查表转换，查不到再回退 0
+                try { categoryId = Int64.parse(catStr) } catch (_: Exception) { categoryId = CategoryDao.getInternalId(catStr) }
                 kind = requestMap.get("kind") ?? "archive"
             }
         } catch (e: Exception) {
