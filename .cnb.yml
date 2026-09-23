@@ -110,6 +110,11 @@ $:
               # Patch wasmedge_ffi native build script to clear git env before nested git/cmake steps.
               for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
                 grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+                # Newer runner GCC flags vendored wasm.hh strncpy as -Wstringop-truncation.
+                # WasmEdge appends its own -Werror after CMAKE_CXX_FLAGS, which overrides
+                # the blanket -Wno-error in the script default; only a warning-specific
+                # -Wno-error= survives trailing -Werror, so append one to the CXX flags default.
+                grep -q -- "-Wno-error=stringop-truncation" "$f" || sed -i "s/-Wno-array-bounds/-Wno-array-bounds -Wno-error=stringop-truncation/" "$f"
               done
 
               cjc -v
