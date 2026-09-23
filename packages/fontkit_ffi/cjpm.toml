@@ -1,0 +1,13 @@
+[package]
+cjc-version = "1.1.0"
+name = "fontkit_ffi"
+version = "0.1.0"
+description = "Safe Cangjie wrapper for font-kit system font enumeration"
+output-type = "static"
+link-option = "-lfontconfig -lfreetype -ldl -lpthread -lm"
+
+[dependencies]
+
+[ffi.c]
+fontkit_native = { path = "./native/target/release" }
+

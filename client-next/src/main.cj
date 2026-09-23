@@ -1,0 +1,308 @@
+package lanlu_client_next
+
+import cui.*
+import lanlu_client_next.app.*
+import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
+import lanlu_client_next.ui.*
+import std.env.{getVariable, setVariable}
+import std.fs.{canonicalize, exists, Path}
+import std.time.MonoTime
+import webview.warmup
+
+// 根路由：按 model.page 切页（无路由框架，状态驱动）。
+func rootView(model: AppModel): Unit {
+    match (model.page.value) {
+        case Page.Login => loginView(model)
+        case Page.Library => libraryView(model) // Task 8 提供
+        case Page.Shelf => shelfView(model)
+        case Page.Detail(_) => detailView(model) // Task 11：档案详情（共用骨架）
+        case Page.Tank(_) => tankView(model) // Task 11：合集详情（共用骨架）
+        case Page.Reader(_, _) => readerView(model)
+        case Page.Settings => settingsView(model)
+    }
+}
+
+// 标题栏拖动区：titleBarDragRects/readerBarDragRects 给出顶栏死区矩形（DRAGGABLE 内
+// 鼠标事件不投递给应用，交互控件必须全部落在矩形之外；几何预算与取舍见 ui/titlebar.cj、
+// ui/reader_bar.cj 注释）。坐标为逻辑 vp，内部已处理 scale；阅读器换用专用顶栏且
+// chrome 隐藏或阅读器抽屉打开时清空拖动区（顶部恢复点击翻页/抽屉标签点击），故按
+//（宽度, 页型, chrome 可见性, 抽屉可见性, 返回钮）复查；任一变化时经 onTick 重注册。
+private var dragRegionWidth: Int32 = -1
+private var dragRegionReader = false
+private var dragRegionChrome = true
+private var dragRegionReaderPanel = false
+private var dragRegionUploadDrawer = false
+// 上一次实际注册的顶栏拖动矩形：控件占位随布局/动画逐帧变化，逐帧对比矩形集，
+// 有变化才重注册（FFI + HashMap 写入），无变化零成本。
+private var dragRegionApplied = Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0))
+
+private func dragRectsEqual(a: Array<(Int32, Int32, Int32, Int32)>, b: Array<(Int32, Int32, Int32, Int32)>): Bool {
+    if (a.size != b.size) {
+        return false
+    }
+    for (i in 0..a.size) {
+        if (a[i] != b[i]) {
+            return false
+        }
+    }
+    true
+}
+
+private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
+    let w = window.width
+    let isReader = match (model.page.value) {
+        case Page.Reader(_, _) => true
+        case _ => false
+    }
+    let chrome = !isReader || model.reader.chromeVisible
+    let readerPanelOpen = isReader && (model.readerSidebarOpen.value || model.readerSettingsOpen.value)
+    let uploadPanelOpen = model.uploadDrawerOpen.value
+    // 顶栏交互控件在 layout 时上报实际占位（见 titlebar.cj noteTitleBarControl），
+    // 拖动矩形 = 顶栏横向对占位的互补集——搜索框展开动画、返回/筛选钮出现、用户名
+    // 长度变化都被自然覆盖，无需手工几何估算。
+    let rects = if (uploadPanelOpen || (isReader && (!chrome || readerPanelOpen))) {
+        Array<(Int32, Int32, Int32, Int32)>(0, repeat: (0, 0, 0, 0))
+    } else if (isReader) {
+        readerBarDragRects(w)
+    } else {
+        titleBarDragRects(w, titleBarDragExclusionRects())
+    }
+    if (w == dragRegionWidth && isReader == dragRegionReader && chrome == dragRegionChrome && readerPanelOpen ==
+        dragRegionReaderPanel && uploadPanelOpen == dragRegionUploadDrawer && dragRectsEqual(rects, dragRegionApplied)) {
+        return
+    }
+    dragRegionWidth = w
+    dragRegionReader = isReader
+    dragRegionChrome = chrome
+    dragRegionReaderPanel = readerPanelOpen
+    dragRegionUploadDrawer = uploadPanelOpen
+    dragRegionApplied = rects
+    // 不支持 hit-test 的视频驱动（如快照装置的 dummy）会拒绝注册：忽略即可，窗口照常
+    // 可用，只是没有 OS 托管拖动（与 desktop_app 忽略光标/IME 锚点拒绝同一惯例）。
+    try {
+        window.setDragRegions(rects)
+    } catch (_: Exception) {
+        ()
+    }
+}
+
+main(): Int64 {
+    // 启动计时基准（LANLU_PERF 评估用）：各 [boot] 行尾部为距进程入口的累计毫秒。
+    let bootT0 = MonoTime.now()
+    // 临时启动诊断（定位 Windows 启动即崩的访问违规，查到后可删）：
+    // 分段打印启动进度，崩溃前最后一条即崩溃所在阶段。
+    println("[boot] 0 settings-store root=${defaultSettingsRoot()} t=0ms")
+    initializeSettingsStore()
+    println("[boot] 1 settings-store initialized t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 启动后端策略（2026-07-19 Task E2 实测，详见 .superpowers/sdd/task-e2-report.md）：
+    // 原生 Wayland 启动崩溃根因 = libdecor 的 GTK 插件在窗口创建时初始化 GTK3，
+    // 触发 glycin（本体经 libvips→librsvg→gdk_pixbuf 常驻进程，无法移除）的
+    // 初始化竞态 SIGSEGV。对策：把 LIBDECOR_PLUGIN_DIR 指向随仓库发布的
+    // libdecor-cairo 插件（无 GTK 依赖，装饰照常绘制），GTK 插件不再加载，
+    // 原生 Wayland 20/20 启动 0 SIGSEGV。渲染驱动优先级见下方独立段落。
+    // 用户显式设置 LIBDECOR_PLUGIN_DIR / SDL_VIDEODRIVER / SDL_RENDER_DRIVER 时不覆盖。
+    if (getVariable("XDG_SESSION_TYPE") == "wayland") {
+        if (getVariable("LIBDECOR_PLUGIN_DIR").isNone()) {
+            // 以 /proc/self/exe 定位可执行文件再推导随仓库插件目录（不依赖启动目录），
+            // 检查到具体 .so 文件才设置——目录在而插件缺失时回退系统插件，避免无装饰窗口。
+            // 可执行文件位于 client-next/target/release/bin/，向上四级即仓库根。
+            let exeDir = canonicalize(Path("/proc/self/exe")).parent.toString()
+            let pluginDir = "${exeDir}/../../../../packages/cangjie-gui/sdl/libdecor-plugins"
+            if (exists(Path("${pluginDir}/libdecor-cairo.so"))) {
+                setVariable("LIBDECOR_PLUGIN_DIR", pluginDir)
+            }
+        }
+    }
+    // 渲染驱动优先级策略：D3D/Metal > vulkan > opengl > software。
+    // Windows/macOS 不动——SDL 内置顺序里 D3D11/12、Metal 本来就在最前，自动选择即正确；
+    // 但 SDL3 内置顺序把 opengl 排在 vulkan 之前（SDL_render.c），故 Linux 桌面会话
+    // （wayland/x11）下显式指定 "vulkan,opengl"：SDL3 的 SDL_RENDER_DRIVER hint 支持逗号
+    // 分隔回退列表（SDL_render.c 逐 token 尝试），vulkan 创建失败自动回退 opengl。
+    // LANLU_SOFTWARE_RENDER=1 强制 software 兜底；用户显式 SDL_RENDER_DRIVER 永远优先。
+    if ((getVariable("XDG_SESSION_TYPE") == "wayland" || getVariable("XDG_SESSION_TYPE") == "x11") &&
+        SdlHints.get(SdlHint.CustomHint("SDL_RENDER_DRIVER")).isNone()) {
+        let driver = if (getVariable("LANLU_SOFTWARE_RENDER") == Some("1")) {
+            "software"
+        } else {
+            "vulkan,opengl"
+        }
+        SdlHints.set(SdlHint.CustomHint("SDL_RENDER_DRIVER"), driver)
+    }
+    // Wayland 下任务栏/应用菜单的图标按 app_id 匹配同名 .desktop 文件（CI 打包安装
+    // lanlu.desktop）；X11/Windows 的任务栏图标由下方 setIcon 直接生效。
+    // 用户显式设置 SDL_APP_ID 时不覆盖。
+    if (SdlHints.get(SdlHint.AppId).isNone()) {
+        SdlHints.set(SdlHint.AppId, "lanlu")
+    }
+
+    // ── 临时快照装置（验证专用，用后逐字还原）：--seed-browse/--seed-search/
+    // --seed-detail/--seed-tank/--seed-settings
+    // 离线播种假数据，跳过磁盘配置与会话恢复；--width N 覆盖窗口宽（默认 1440）。
+    let seedMode = harnessSeedMode()
+    let settings = if (seedMode.size > 0) {
+        let s = AppSettings()
+        s.serverUrl = "https://demo.lanlu.local"
+        // 亮主题快照：种子模式跳过磁盘配置，唯独 theme 取自磁盘——隔离 HOME 预置
+        // 设置库中 theme=light 即可拍亮主题快照，其余字段保持离线默认。
+        s.theme = loadSettings().theme
+        s
+    } else {
+        loadSettings()
+    }
+    println("[boot] 2 settings loaded, seedMode=${seedMode} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 离线缓存预热：RocksDB open（session_resume 302ms 的主要构成）与 webview 字体预热、
+    // AppModel 构造并行，首次用缓存（resumeProfile）时由 offlineCacheFor join。seed 模式
+    // 不预热——隔离 HOME 的快照路径不应触碰真实缓存目录。
+    let offlineCachePrewarm: ?Future<?OfflineCache> = if (seedMode.size == 0) {
+        Some(spawn {OfflineCache.open(defaultOfflineCacheRoot())})
+    } else {
+        None
+    }
+    // webview 字体预热：fontique 系统字体扫描（FcConfigBuildFonts）是 loadHtml
+    // 崩溃窗口的主要来源，提前到 GC 未活跃、主线程浅栈的启动阶段完成一次；
+    // 进程级共享，后续 loadHtml 复用不再重建（见 webview_native session.rs）。
+    warmup()
+    println("[boot] 2.1 webview fonts warmed t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    let model = AppModel(settings, persistSettings: {s => saveSettings(s)}, offlineCachePrewarm: offlineCachePrewarm)
+    if (seedMode.size > 0) {
+        seedLibrarySnapshot(model, seedMode)
+    } else {
+        model.tryResumeSession()
+    }
+    // LANLU_PERF 打点：会话恢复与首批浏览行的端到端起点（终点在 model dispatch 的
+    // "me"/"row:" 分支，emit session_resume_ms / first_rows_ms）。
+    SubtitlePerf.spanStart("session_resume")
+    SubtitlePerf.spanStart("first_rows")
+    // 窗口创建段与 first_rows 同起点（终点在 [boot] 5 进主循环处）。
+    SubtitlePerf.spanStart("boot_to_loop")
+    println("[boot] 3 model ready, creating DesktopApp t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 脚本化字幕性能基准（LANLU_BENCH_ARCID 设置时启用）：复用真实 AppModel/PlaybackModel/
+    // libVLC/libass 全链路，按阶段状态机驱动冷扫描→播放→切换→seek→缓存命中并输出 @@RESULT。
+    let bench = SubtitleBench()
+    let benchEnabled = bench.isEnabled()
+    println("[boot] 3.4 SubtitleBench ready (enabled=${benchEnabled}) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 启动时一次性缩放适配（ADR：不做运行时动态缩放）：seedMode 钉死 1.0 保证
+    // CI 快照像素确定性；正常启动取主显示器 contentScale（Windows 高 DPI 下 >1，
+    // primaryDisplayInfo 内部自带 SDL_Init(VIDEO) 引用计数，建窗前调用安全），
+    // 查询失败回退 1.0。逻辑尺寸按可用桌面区钳制：默认 1440×900 在 150% 缩放的
+    // 1080p 屏上物理 2160×1350 超界，收缩逻辑尺寸使 逻辑×scale ≤ usableBounds；
+    // 钳制结果低于 960×640 最小窗口时不再收缩（宁可超界也保住最小可用布局）。
+    var uiScale: Float32 = 1.0
+    var winW = harnessWindowWidth()
+    var winH = harnessWindowHeight()
+    if (seedMode.size == 0) {
+        try {
+            let geo = primaryDisplayInfo().geometry
+            uiScale = geo.contentScale
+            let maxW = Int32(geo.usableBounds.w / uiScale)
+            let maxH = Int32(geo.usableBounds.h / uiScale)
+            if (maxW >= 960 && winW > maxW) {
+                winW = maxW
+            }
+            if (maxH >= 640 && winH > maxH) {
+                winH = maxH
+            }
+        } catch (_: Exception) {
+            uiScale = 1.0
+        }
+    }
+    println("[boot] 3.5 uiScale=${uiScale} window=${winW}x${winH} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 超采样档位：默认 AUTO（GPU 渲染 2x，software 回退 1x）。LANLU_PERF 实测 2x 超采样
+    // 是帧成本大头（阅读页 present 15ms/帧），LANLU_SUPERSAMPLE=1 可关到 1x（文字边缘
+    // 锐度略降换帧成本减半）；用户显式设置时优先，未设置保持默认行为不变。
+    let supersample: Int32 = if (getVariable("LANLU_SUPERSAMPLE") == Some("1")) {
+        1
+    } else {
+        AUTO_SUPERSAMPLE
+    }
+    let app = DesktopApp(
+        WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
+            // 无边框窗口：创建时即无 OS 装饰（替代旧的事后 setBordered(false)），
+            // Wayland 下 libdecor-cairo 不再先栅格化一遍随即摘除的标题栏装饰；
+            // 标题栏由 ui/titlebar.cj 自绘（Task 8），阅读器页换用专用顶栏
+            // ui/reader_bar.cj（T13）。
+            borderless: true,
+            fontPath: if (settings.fontPath.size > 0) {
+                Some(settings.fontPath)
+            } else {
+                None
+            }), theme: lanluThemeFor(settings.theme))
+    println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
+    // SDL_WaitEventTimeout 的主循环立即唤醒；醒后那次迭代的 onTick/pump 正常 drain，
+    // 图片到货/UI 更新不再等下一个输入事件。
+    model.worker.onResult = { => app.requestWake() }
+    // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
+    model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
+    app.setMinimumSize(960, 640)
+    // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
+    // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
+    // Wayland 无窗口图标协议（图标靠上方 app_id 匹配 .desktop），SDL 会返回
+    // unsupported——忽略即可，不影响 X11/Windows 的设置效果。
+    let iconSurface = Surface.loadPngFromMemory(EMBEDDED_LOGO_PNG)
+    app.manage(iconSurface)
+    try {
+        app.sdlWindow.setIcon(iconSurface)
+    } catch (_: Exception) {
+        ()
+    }
+    // 无边框已在 WindowSpec(borderless: true) 创建时生效（见上方 WindowSpec 注释）。
+    syncTitleBarDragRegion(app.sdlWindow, model)
+    println("[boot] 5 entering main loop t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // LANLU_PERF 打点：窗口创建段（model ready→主循环入口，与 first_rows 同起点；
+    // first_rows ≈ boot_to_loop + me 等待 + rows_fetch，把窗口创建段从首屏耗时中切出）。
+    if (SubtitlePerf.enabled()) {
+        SubtitlePerf.spanEnd("boot_to_loop")
+        SubtitlePerf.emit("boot_to_loop_ms", SubtitlePerf.getGauge("boot_to_loop"), "ms")
+    }
+    // 空转零渲染：主循环每次迭代泵回工作线程结果（drain 为空时不写任何 State，
+    // dirty-frame skipping 使该迭代不重建/不绘制）；不能用 FrameHandler 做这件事——
+    // 它必须每帧 requestFrame 才能持续触发，会强制 60fps 全量重建+绘制。
+    // pump 的周期定时器（chrome 自动隐藏/自动翻页/进度防抖尾巴）注册为定时帧请求：
+    // 循环空转等待（SDL_WaitEventTimeout）时在最近到期时刻唤醒，醒后本次迭代已正常 pump。
+    app.onTick = {
+        =>
+            model.pump()
+            match (model.nextPumpTimerMs()) {
+                case Some(ms) => app.requestFrameAfter(UInt64(ms))
+                case None => ()
+            }
+            let ww = Int64(app.sdlWindow.width)
+            if (ww != model.windowWidth.value) {
+                model.windowWidth.value = ww
+            }
+            syncTitleBarDragRegion(app.sdlWindow, model)
+            if (benchEnabled) {
+                let _ = bench.step(model)
+            }
+    }
+    app.run {
+        ZStack {
+            // 根布局：常规页面 = 顶部通用 titleBar（品牌/搜索/导航/用户芯片）+ 页面区（VStack）；
+            // 阅读器页 = 舞台恒全高 + 顶栏浮层（ZStack 叠层，原型 #topbar 浮于 stage 之上），
+            // chrome 显隐动画在 readerTopBarChrome 内（上滑/下滑 Spring，见 ui/reader_bar.cj）。
+            // readerVersion 订阅由 readerView/reader_bar 内部读取完成，这里无需再读。
+            match (model.page.value) {
+                case Page.Reader(_, _) => ZStack {
+                    readerView(model)
+                    readerTopBarChrome(app.sdlWindow, model)
+                }.alignment(Alignment.TopLeading)
+                case _ => VStack {
+                    titleBar(app.sdlWindow, model)
+                    rootView(model)
+                }.spacing(0.0)
+            }
+            // 页面切换交叉淡化：navigate() 推迟切页，本层在旧页留存的那一帧捕获
+            // GPU 快照，提交切页后旧帧 200ms 淡出。置于页面内容之上、浮层之下，
+            // 快照只含页面主体（titlebar+页区），抽屉/Toast 不受影响。
+            PageTransition(model)
+            uploadDrawer(app.sdlWindow, model)
+            metadataEditOverlay(model)
+            ThemeRipple(model)
+            ToastLayer(model.toaster)
+        }
+    }
+    model.close()
+    closeSettingsStore()
+    return 0
+}

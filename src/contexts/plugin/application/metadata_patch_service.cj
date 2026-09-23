@@ -463,23 +463,6 @@ public class MetadataPatchService {
                             }
                         }
                         r.endArray()
-                    case Some(BeginObject) =>
-                        r.startObject()
-                        while (r.peek() != EndObject) {
-                            let assetKey = r.readName().trimAscii().toAsciiLower()
-                            let value = readStringFlexible().trimAscii()
-                            if (assetKey == "cover") {
-                                updated.cover = value
-                                updated.coverProvided = true
-                            } else if (assetKey == "backdrop") {
-                                updated.backdrop = value
-                                updated.backdropProvided = true
-                            } else if (assetKey == "clearlogo") {
-                                updated.clearlogo = value
-                                updated.clearlogoProvided = true
-                            }
-                        }
-                        r.endObject()
                     case Some(_) => r.skip()
                     case None => ()
                 }

@@ -69,7 +69,7 @@ export default function CategoriesSettingsPage() {
     if (!isAuthenticated) return;
     setCategoriesLoading(true);
     try {
-      const cats = await CategoryService.getAllCategories();
+      const cats = await CategoryService.getAllCategoriesAdmin();
       // Apply filters
       let filtered = cats;
       if (searchQuery) {

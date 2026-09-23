@@ -1338,7 +1338,7 @@ public class WasmHostBridge {
             var buf = ByteBuffer()
             unsafe { buf.write(trimmed.rawData()) }
             let r = JsonReader(buf)
-            rewriteJsonValue(r, w, "", pluginNamespace, targetType, targetId, executionId)
+            rewriteJsonValue(r, w, "", false, pluginNamespace, targetType, targetId, executionId)
             w.flush()
             return String.fromUtf8(readToEnd(out))
         } catch (_: Exception) {
@@ -1350,6 +1350,7 @@ public class WasmHostBridge {
         r: JsonReader,
         w: JsonWriter,
         currentField: String,
+        insideAssets: Bool,
         pluginNamespace: String,
         targetType: String,
         targetId: String,
@@ -1357,12 +1358,13 @@ public class WasmHostBridge {
     ): Unit {
         match (r.peek()) {
             case Some(BeginObject) =>
+                let objectInsideAssets = insideAssets || currentField == "assets"
                 r.startObject()
                 w.startObject()
                 while (r.peek() != EndObject) {
                     let name = r.readName()
                     w.writeName(name)
-                    rewriteJsonValue(r, w, name.trimAscii().toAsciiLower(), pluginNamespace, targetType, targetId, executionId)
+                    rewriteJsonValue(r, w, name.trimAscii().toAsciiLower(), objectInsideAssets, pluginNamespace, targetType, targetId, executionId)
                 }
                 r.endObject()
                 w.endObject()
@@ -1370,12 +1372,12 @@ public class WasmHostBridge {
                 r.startArray()
                 w.startArray()
                 while (r.peek() != EndArray) {
-                    rewriteJsonValue(r, w, currentField, pluginNamespace, targetType, targetId, executionId)
+                    rewriteJsonValue(r, w, currentField, insideAssets || currentField == "assets", pluginNamespace, targetType, targetId, executionId)
                 }
                 r.endArray()
                 w.endArray()
             case Some(_) =>
-                if (isAdjacentAssetField(currentField)) {
+                if (isAdjacentAssetField(currentField, insideAssets)) {
                     let rawValue = r.readValue<String>()
                     let normalized = maybeMaterializeAdjacentRef(rawValue, pluginNamespace, targetType, targetId, executionId)
                     w.writeValue(normalized)
@@ -1388,9 +1390,13 @@ public class WasmHostBridge {
         }
     }
 
-    private static func isAdjacentAssetField(field: String): Bool {
+    private static func isAdjacentAssetField(field: String, insideAssets: Bool): Bool {
         let f = field.trimAscii().toAsciiLower()
-        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb" || f == "path"
+        // Metadata image slots are represented only through `assets`. Keep page
+        // thumbnails and attachment paths because they are separate page-level
+        // protocol fields rather than metadata asset slots.
+        return (insideAssets && (f == "value" || f == "cover" || f == "backdrop" || f == "clearlogo")) ||
+               f == "thumb" || f == "path"
     }
 
     private static func maybeMaterializeAdjacentRef(
@@ -1679,7 +1685,8 @@ public class WasmHostBridge {
         if (archiveId.size == 0 || entryName.trimAscii().size == 0) {
             return (false, "{}", "missing archive_id/entry_name")
         }
-        if (length <= 0) {
+        // length=0 是合法的探测请求（只查询 total_size），仅拒绝负数
+        if (length < 0) {
             return (false, "{}", "invalid length")
         }
         let safeName = normalizeSafeRelPath(entryName)
@@ -3210,6 +3217,8 @@ public class WasmHostBridge {
         stateMutex.unlock()
     }
 
+    private static let MAX_CACHED_ADJACENT_ITEMS: Int64 = 100
+
     private static func getCachedAdjacentListing(executionId: Int64, cacheKey: String): Option<String> {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
@@ -3227,6 +3236,19 @@ public class WasmHostBridge {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
+                if (state.adjacentListings.size >= MAX_CACHED_ADJACENT_ITEMS) {
+                    // FIFO eviction: remove oldest entry to prevent unbounded growth
+                    let keys = state.adjacentListings.keys()
+                    var firstKey: ?String = None
+                    for (k in keys) {
+                        firstKey = Some(k)
+                        break
+                    }
+                    match (firstKey) {
+                        case Some(k) => state.adjacentListings.remove(k)
+                        case None => ()
+                    }
+                }
                 state.adjacentListings[cacheKey] = responseJson
                 executionStates[executionId] = state
             case None => ()
@@ -3251,6 +3273,19 @@ public class WasmHostBridge {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
+                if (state.adjacentTexts.size >= MAX_CACHED_ADJACENT_ITEMS) {
+                    // FIFO eviction: remove oldest entry to prevent unbounded growth
+                    let keys = state.adjacentTexts.keys()
+                    var firstKey: ?String = None
+                    for (k in keys) {
+                        firstKey = Some(k)
+                        break
+                    }
+                    match (firstKey) {
+                        case Some(k) => state.adjacentTexts.remove(k)
+                        case None => ()
+                    }
+                }
                 state.adjacentTexts[cacheKey] = text
                 executionStates[executionId] = state
             case None => ()

@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu client-next 阅读器重设计 · 交互原型</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;          /* lanlu 金 */
+    --accent-soft: rgba(232,176,75,.16);
+    --good: #6fcF97;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    /* ---- 媒体叠层语义 ---- */
+    --surface-overlay: rgba(18,18,22,.78);   /* 毛玻璃叠层底（随主题翻转） */
+    --overlay-border: rgba(255,255,255,.14);
+    --overlay-hover: rgba(255,255,255,.12);
+    --overlay-track: rgba(255,255,255,.22);  /* 叠层上的滑轨 */
+    --on-overlay: #f2f2f4;                   /* 叠层上的主文字 */
+    --on-overlay-dim: rgba(242,242,244,.62); /* 叠层上的次文字 */
+    --on-media: #f2f2f4;                     /* 恒深媒体舞台上的文字（不翻转） */
+    --on-media-dim: rgba(242,242,244,.62);
+    --stage-bg: #000;                        /* 阅读舞台底色（图像页随主题，媒体页恒深） */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+
+  /* ============ 设备窗口（模拟桌面客户端窗口） ============ */
+  #window {
+    width: min(1280px, 96vw); height: min(820px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏 ============ */
+  #topbar {
+    height: 52px; flex: none; display: flex; align-items: center; gap: 6px;
+    padding: 0 12px; background: linear-gradient(rgba(11,11,13,.95), rgba(11,11,13,.75));
+    border-bottom: 1px solid var(--border);
+    transition: transform .28s ease, opacity .28s ease;
+    position: relative; z-index: 30;
+  }
+  #window.chrome-hidden #topbar { transform: translateY(-100%); opacity: 0; }
+  .tb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; font-size: 14px; color: var(--text-dim); margin: 0 8px; }
+  .tb-title b { color: var(--text); font-weight: 600; }
+  .tb-page { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums;
+             background: var(--bg-elev); border: 1px solid var(--border);
+             padding: 4px 10px; border-radius: 999px; }
+
+  button { font-family: inherit; color: var(--text); background: transparent;
+           border: none; cursor: pointer; }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+              align-items: center; justify-content: center; font-size: 16px;
+              color: var(--text-dim); transition: .15s; flex: none; }
+  .icon-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+  #mode-btn { display: inline-flex; gap: 6px; align-items: center; width: auto;
+              padding: 0 12px; font-size: 12.5px; }
+
+  /* ============ 主舞台 ============ */
+  #stage { flex: 1; position: relative; overflow: hidden; background: var(--stage-bg); }
+  .stage-page { position: absolute; inset: 0; display: none; }
+  .stage-page.on { display: flex; }
+
+  /* --- 图片页 --- */
+  #page-image { align-items: center; justify-content: center; }
+  .fake-img {
+    background: linear-gradient(160deg,#2b3a55,#1a2333 55%,#101722);
+    border: 1px solid var(--border); border-radius: 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: var(--text-dim); transition: transform .25s ease; cursor: zoom-in;
+  }
+  .fake-img .ph-icon { font-size: 42px; opacity: .5; }
+  .fake-img .ph-text { font-size: 12px; letter-spacing: .12em; }
+  #stage.zoomed .fake-img { transform: scale(2); cursor: zoom-out; }
+  /* 长图模式示意 */
+  #page-image.long { overflow-y: auto; display: none; flex-direction: column;
+                     align-items: center; padding: 24px 0; }
+  #page-image.long .fake-img { width: min(560px, 70%); flex: none; }
+
+  /* --- 点击翻页热区提示 --- */
+  .tap-zone { position: absolute; top: 0; bottom: 0; width: 30%; z-index: 5;
+              display: flex; align-items: center; opacity: 0; transition: opacity .2s;
+              font-size: 26px; color: rgba(255,255,255,.65); pointer-events: none; }
+  .tap-zone.left  { left: 0;  justify-content: flex-start; padding-left: 18px;
+                    background: linear-gradient(90deg, rgba(0,0,0,.35), transparent); }
+  .tap-zone.right { right: 0; justify-content: flex-end;  padding-right: 18px;
+                    background: linear-gradient(-90deg, rgba(0,0,0,.35), transparent); }
+  #stage:hover .tap-zone { opacity: 1; }
+  #window.tap-off .tap-zone { display: none; }
+
+  /* --- 视频页 --- */
+  #page-video { background: #000; align-items: center; justify-content: center; }
+  .video-box { width: 100%; height: 100%; background:
+      radial-gradient(ellipse at 50% 40%, #1d2733 0%, #0a0e14 70%);
+      display: flex; align-items: center; justify-content: center; position: relative; }
+  .video-box .v-icon { font-size: 64px; opacity: .35; }
+  .subtitle-overlay {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 96px; max-width: 80%; padding: 6px 14px; border-radius: 8px;
+    background: var(--surface-overlay); backdrop-filter: blur(8px);
+    color: var(--on-overlay); font-size: 15px; line-height: 1.5; text-align: center;
+  }
+  #window.chrome-hidden .subtitle-overlay { bottom: 24px; }
+
+  /* --- 音频页（音乐播放器舞台） --- */
+  #page-audio { background: #000; }
+  .audio-bg { position: absolute; inset: -40px;
+      background: linear-gradient(140deg,#3a2b4d,#1c1428 45%,#0d0a14);
+      filter: blur(38px) brightness(.75); }
+  .audio-content { position: relative; z-index: 2; flex: 1; display: flex;
+      align-items: center; gap: 48px; padding: 32px 56px 100px; }
+  .vinyl { width: 240px; height: 240px; border-radius: 50%; flex: none; position: relative;
+      background: repeating-radial-gradient(circle, #111 0 2px, #1c1c1c 2px 4px);
+      border: 6px solid #0a0a0a; box-shadow: 0 12px 40px rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center; }
+  .vinyl .label { width: 84px; height: 84px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .vinyl.spin { animation: spin 18s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .audio-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; height: 100%; }
+  .audio-meta h2 { font-size: 20px; font-weight: 600; color: var(--on-media); }
+  .audio-meta p { font-size: 13px; color: var(--on-media-dim); margin-top: 4px; }
+  .lyrics { flex: 1; overflow: hidden; position: relative;
+      mask-image: linear-gradient(transparent, #000 25%, #000 75%, transparent); }
+  .lyrics ul { position: absolute; top: 42%; left: 0; right: 0; transition: transform .4s ease; }
+  .lyrics li { list-style: none; font-size: 15px; color: var(--on-media-dim);
+      padding: 7px 0; transition: color .3s, font-size .3s; }
+  .lyrics li.now { color: var(--accent); font-size: 17px; font-weight: 600; }
+  .audio-dock { display: flex; align-items: center; gap: 14px; }
+  .audio-dock .t { font-size: 12px; color: var(--on-media-dim); font-variant-numeric: tabular-nums; }
+  .dock-bar { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); position: relative; }  /* 音频舞台恒深，固定浅色轨 */
+  .dock-bar .buf { position: absolute; inset: 0; width: 62%; background: rgba(255,255,255,.32); border-radius: 2px; }
+  .dock-bar .cur { position: absolute; inset: 0; width: 34%; background: var(--accent); border-radius: 2px; }
+  .dock-play { width: 46px; height: 46px; border-radius: 50%; background: var(--text);
+      color: #000; font-size: 17px; display: flex; align-items: center; justify-content: center; }
+
+  /* --- HTML/EPUB 页 --- */
+  #page-html { background: #f4f1ea; color: #2a2a2a; overflow-y: auto; }
+  #page-html .paper { max-width: 640px; margin: 0 auto; padding: 48px 32px 120px;
+      font-size: 15.5px; line-height: 2; user-select: text; }
+  #page-html h3 { margin-bottom: 18px; }
+
+  /* --- webtoon 模式 --- */
+  #stage.webtoon .stage-page { position: static; }
+  #stage.webtoon { overflow-y: auto; }
+  #stage.webtoon #page-image.on { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #stage.webtoon .fake-img { width: min(680px, 86%); }
+
+  /* --- 双页模式 --- */
+  #stage.double #page-image.on { flex-direction: row; gap: 2px; justify-content: center; }
+
+  /* ============ 翻页进入/离开动画 ============ */
+  /* 方向由 JS 按阅读模式换算：next/prev × ltr/rtl/ttb */
+  .anim-layer { position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; will-change: transform, opacity; }
+  @keyframes pg-in-r  { from { transform: translateX(60px);  opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes pg-in-l  { from { transform: translateX(-60px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes pg-in-b  { from { transform: translateY(60px);  opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes pg-in-t  { from { transform: translateY(-60px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes pg-out-r { to   { transform: translateX(60px);  opacity: 0; } }
+  @keyframes pg-out-l { to   { transform: translateX(-60px); opacity: 0; } }
+  @keyframes pg-out-b { to   { transform: translateY(60px);  opacity: 0; } }
+  @keyframes pg-out-t { to   { transform: translateY(-60px); opacity: 0; } }
+  .pg-in-r  { animation: pg-in-r  .26s cubic-bezier(.2,.7,.3,1) both; }
+  .pg-in-l  { animation: pg-in-l  .26s cubic-bezier(.2,.7,.3,1) both; }
+  .pg-in-b  { animation: pg-in-b  .26s cubic-bezier(.2,.7,.3,1) both; }
+  .pg-in-t  { animation: pg-in-t  .26s cubic-bezier(.2,.7,.3,1) both; }
+  .pg-out-r { animation: pg-out-r .18s ease-in both; }
+  .pg-out-l { animation: pg-out-l .18s ease-in both; }
+  .pg-out-b { animation: pg-out-b .18s ease-in both; }
+  .pg-out-t { animation: pg-out-t .18s ease-in both; }
+  /* webtoon 模式不做位移翻页动画 */
+  #stage.webtoon .pg-in-r, #stage.webtoon .pg-in-l,
+  #stage.webtoon .pg-in-b, #stage.webtoon .pg-in-t { animation: none; }
+
+  /* ============ chrome 进入/离开（顶栏下滑、胶囊上浮） ============ */
+  @keyframes chrome-bar-in  { from { transform: translateY(-100%); opacity: 0; } }
+  @keyframes chrome-dock-in { from { transform: translate(-50%,140%); opacity: 0; } }
+  #topbar { animation: chrome-bar-in .35s cubic-bezier(.2,.7,.3,1) .05s both; }
+  #dock   { animation: chrome-dock-in .35s cubic-bezier(.2,.7,.3,1) .12s both; }
+
+  /* ============ 媒体信息浮层 ============ */
+  #media-info { position: absolute; top: 12px; left: 12px; z-index: 20;
+      background: var(--surface-overlay); backdrop-filter: blur(10px);
+      border: 1px solid var(--overlay-border); border-radius: 10px;
+      padding: 8px 12px; font-size: 11.5px; color: var(--on-overlay-dim); line-height: 1.7;
+      font-variant-numeric: tabular-nums; display: none; }
+  #window.info-on #media-info { display: block; }
+
+  /* ============ 底部 lane 胶囊 ============ */
+  #dock {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    z-index: 30; display: flex; align-items: stretch; gap: 4px;
+    background: var(--surface-overlay); backdrop-filter: blur(20px) saturate(1.3);
+    border: 1px solid var(--overlay-border); border-radius: 999px; padding: 6px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    transition: transform .28s ease, opacity .28s ease;
+    max-width: calc(100% - 48px);
+  }
+  #window.chrome-hidden #dock { transform: translate(-50%, 140%); opacity: 0; }
+
+  /* lane 容器：媒体 lane 出现/消失动画（缩放+淡入+挤压展开） */
+  .lane { display: flex; align-items: center; border-radius: 999px; overflow: hidden;
+          max-width: 400px; opacity: 1; transform: scale(1);
+          transition: max-width .32s cubic-bezier(.4,0,.2,1), opacity .22s ease,
+                      transform .32s cubic-bezier(.34,1.4,.64,1); }
+  .lane.lane-hidden { max-width: 0; opacity: 0; transform: scale(.6);
+                      pointer-events: none; }
+  .lane-tab { width: 36px; height: 36px; border-radius: 50%; flex: none;
+      display: flex; align-items: center; justify-content: center; font-size: 15px;
+      color: var(--on-overlay-dim); transition: .15s; }
+  .lane-tab:hover { color: var(--on-overlay); background: var(--overlay-hover); }
+  .lane.open .lane-tab { background: var(--accent-soft); color: var(--accent); }
+  /* lane 切换：body 宽度用 JS 测量做关键帧过渡，内容交叉淡入 */
+  .lane-body { width: 0; opacity: 0; overflow: hidden; display: flex; align-items: center;
+      gap: 6px; white-space: nowrap; flex: none;
+      transition: width .34s cubic-bezier(.4,0,.2,1), opacity .22s ease, padding .34s cubic-bezier(.4,0,.2,1); }
+  .lane.open .lane-body { opacity: 1; padding: 0 8px 0 2px; }
+
+  .lane-slider { width: 200px; height: 4px; border-radius: 2px; background: var(--overlay-track);
+      position: relative; cursor: pointer; flex: none; }
+  .lane-slider .buf { position: absolute; inset: 0; width: 70%; background: rgba(255,255,255,.3); border-radius: 2px; }
+  .lane-slider .cur { position: absolute; inset: 0; width: 41%; background: var(--accent); border-radius: 2px; }
+  .lane-slider .cur::after { content: ""; position: absolute; right: -5px; top: 50%;
+      width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+      transform: translateY(-50%); }
+  .lane-num { font-size: 12px; color: var(--on-overlay-dim); font-variant-numeric: tabular-nums; flex: none; }
+  .lane .icon-btn { width: 30px; height: 30px; font-size: 13px; color: var(--on-overlay-dim); }
+  .lane .icon-btn:hover { color: var(--on-overlay); background: var(--overlay-hover); }
+  .dock-sep { width: 1px; background: var(--border); margin: 6px 4px; flex: none; }
+
+  /* ============ 侧边栏 ============ */
+  #sidebar {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 300px; z-index: 40;
+    background: var(--bg-elev); border-right: 1px solid var(--border);
+    transform: translateX(-102%); transition: transform .3s ease;
+    display: flex; flex-direction: column;
+  }
+  #window.sidebar-open #sidebar { transform: translateX(0); }
+  .sb-tabs { display: flex; gap: 2px; padding: 10px 10px 0; }
+  .sb-tab { flex: 1; padding: 8px 0; font-size: 12.5px; color: var(--text-dim);
+      border-radius: 9px; text-align: center; transition: .15s; }
+  .sb-tab.on { background: var(--accent-soft); color: var(--accent); }
+  .sb-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .sb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .thumb { aspect-ratio: 3/4; border-radius: 8px; border: 1px solid var(--border);
+      background: linear-gradient(160deg,#253247,#141b28); position: relative;
+      display: flex; align-items: center; justify-content: center; font-size: 11px;
+      color: var(--text-dim); cursor: pointer; }
+  .thumb.now { outline: 2px solid var(--accent); color: var(--accent); }
+  .thumb .ty { position: absolute; top: 4px; right: 4px; font-size: 10px;
+      background: rgba(0,0,0,.6); border-radius: 5px; padding: 1px 5px; }
+  .sb-list .row, .sb-tree .row { display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
+  .sb-list .row:hover, .sb-tree .row:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .sb-list .row.now { color: var(--accent); background: var(--accent-soft); }
+  .row .n { width: 26px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+  .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-tree .row.dir { color: var(--text); font-weight: 600; margin-top: 6px; }
+
+  /* ============ 设置面板 ============ */
+  #settings {
+    position: absolute; top: 0; bottom: 0; right: 0; width: 320px; z-index: 40;
+    background: var(--bg-elev); border-left: 1px solid var(--border);
+    transform: translateX(102%); transition: transform .3s ease;
+    overflow-y: auto; padding: 18px;
+  }
+  #window.settings-open #settings { transform: translateX(0); }
+  #settings h3 { font-size: 14px; margin-bottom: 4px; }
+  #settings .sub { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+  .set-sec { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; margin: 18px 0 8px; }
+  .set-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; font-size: 13px; }
+  .set-row .lb { flex: 1; }
+  .switch { width: 38px; height: 22px; border-radius: 999px; background: rgba(255,255,255,.15);
+      position: relative; transition: .2s; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+      border-radius: 50%; background: #fff; transition: .2s; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 19px; }
+  .seg { display: flex; background: rgba(255,255,255,.07); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button { flex: 1; padding: 7px 0; font-size: 12px; border-radius: 8px; color: var(--text-dim); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
+
+  /* 遮罩 */
+  #scrim { position: absolute; inset: 0; background: rgba(0,0,0,.45); z-index: 35;
+      opacity: 0; pointer-events: none; transition: opacity .3s; }
+  #window.sidebar-open #scrim, #window.settings-open #scrim { opacity: 1; pointer-events: auto; }
+
+  /* demo 工具条（不属于设计，仅原型操控） */
+  #demo-bar { position: fixed; top: 8px; left: 8px; z-index: 99; display: flex; gap: 6px;
+      background: rgba(0,0,0,.7); border: 1px solid #444; border-radius: 10px; padding: 6px; }
+  #demo-bar button { font-size: 11px; color: #ccc; padding: 5px 9px; border-radius: 7px;
+      border: 1px solid #444; }
+  #demo-bar button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* ============ 窗口控制（最小化/最大化/关闭） ============ */
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+  #window.light .win-btn:hover { background: rgba(0,0,0,.07); }
+  #window.light .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-capsule: rgba(255,255,255,.86);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+    --stage-bg: #ececf1;
+    /* 叠层（lane 胶囊/浮层）整体翻转为浅色毛玻璃 */
+    --surface-overlay: rgba(255,255,255,.82);
+    --overlay-border: rgba(0,0,0,.1);
+    --overlay-hover: rgba(0,0,0,.07);
+    --overlay-track: rgba(0,0,0,.14);
+    --on-overlay: #1d1d21;
+    --on-overlay-dim: rgba(29,29,33,.58);
+  }
+  /* 图像阅读区随主题翻转；点击热区改为浅色擦除 */
+  #window.light .tap-zone.left  { background: linear-gradient(90deg, rgba(255,255,255,.6), transparent); }
+  #window.light .tap-zone.right { background: linear-gradient(-90deg, rgba(255,255,255,.6), transparent); }
+  #window.light .tap-zone { color: rgba(0,0,0,.4); }
+  #window.light #topbar { background: linear-gradient(rgba(244,244,246,.96), rgba(244,244,246,.8)); }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .switch { background: rgba(0,0,0,.18); }
+  #window.light .seg, #window.light .mini-seg { background: rgba(0,0,0,.06); }
+  #window.light .tb-page { background: #fff; }
+  #window.light .sb-list .row:hover, #window.light .sb-tree .row:hover { background: rgba(0,0,0,.05); }
+  #window.light .thumb { background: linear-gradient(160deg,#dde4f0,#c3cddd); color: #6d6d76; }
+  #window.light .thumb .ty { background: rgba(255,255,255,.7); }
+  #window.light .fake-img { background: linear-gradient(160deg,#dde4f0,#c9d2e2 55%,#b9c4d8); }
+  /* 舞台与媒体叠层随主题翻转；音频舞台内部恒深 */
+  #window.light #dock { box-shadow: 0 12px 32px rgba(0,0,0,.18); }
+  #window.light .lane-slider .buf { background: rgba(0,0,0,.18); }
+  #window.light #scrim { background: rgba(0,0,0,.35); }
+  #window.light .kbd { border-color: var(--border); }
+</style>
+</head>
+<body>
+
+<div id="demo-bar">
+  <span style="font-size:11px;color:#888;padding:5px 4px">页面类型:</span>
+  <button data-ptype="image" class="on">图片</button>
+  <button data-ptype="video">视频</button>
+  <button data-ptype="audio">音频</button>
+  <button data-ptype="html">EPUB</button>
+  <span style="font-size:11px;color:#888;padding:5px 4px">长图:</span>
+  <button id="demo-long">切换</button>
+</div>
+
+<div id="window">
+  <!-- 顶栏 -->
+  <div id="topbar">
+    <button class="icon-btn" title="返回详情">←</button>
+    <button class="icon-btn" id="btn-sidebar" title="页面导航">☰</button>
+    <div class="tb-title"><b>某个合集 第3话</b> · 第14章 转折之时</div>
+    <span class="tb-page" id="page-indicator">12 / 48</span>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <button class="icon-btn" id="mode-btn" title="切换阅读模式">⇄ <span id="mode-label">单页 · 左到右</span></button>
+    <button class="icon-btn" id="btn-fav" title="收藏">♡</button>
+    <button class="icon-btn" id="btn-settings" title="阅读设置">⚙</button>
+    <span class="win-sep"></span>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" id="btn-max" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <!-- 主舞台 -->
+  <div id="stage">
+    <!-- 图片页 -->
+    <div class="stage-page on" id="page-image">
+      <div class="anim-layer" id="img-anim-layer">
+        <div class="fake-img" id="main-img" style="width:min(430px,60%);height:88%">
+          <span class="ph-icon">🖼</span>
+          <span class="ph-text">PAGE 12 · 双击缩放</span>
+        </div>
+        <div class="fake-img double-mate" style="width:min(430px,42%);height:88%;display:none">
+          <span class="ph-icon">🖼</span><span class="ph-text">PAGE 13</span>
+        </div>
+      </div>
+      <div class="tap-zone left">‹</div>
+      <div class="tap-zone right">›</div>
+    </div>
+
+    <!-- 视频页 -->
+    <div class="stage-page" id="page-video">
+      <div class="video-box">
+        <span class="v-icon">🎬</span>
+        <div class="subtitle-overlay">——你到底想要什么？<br>——想要的，是能把这一切推翻的力量。</div>
+      </div>
+      <div class="tap-zone left">‹</div>
+      <div class="tap-zone right">›</div>
+    </div>
+
+    <!-- 音频页 -->
+    <div class="stage-page" id="page-audio">
+      <div class="audio-bg"></div>
+      <div class="audio-content">
+        <div class="vinyl spin" id="vinyl"><div class="label">♪</div></div>
+        <div class="audio-right">
+          <div class="audio-meta">
+            <h2>夜に駆ける</h2>
+            <p>YOASOBI · 03:22 · FLAC 44.1kHz</p>
+          </div>
+          <div class="lyrics">
+            <ul id="lyrics-list">
+              <li>沈むように溶けてゆくように</li>
+              <li>二人だけの空が広がる夜に</li>
+              <li class="now">「さよなら」だけだった</li>
+              <li>その一言で全てが分かった</li>
+              <li>日が沈み出した空と君の姿</li>
+              <li>フェンス越しに重なっていた</li>
+              <li>初めて会った日から</li>
+              <li>僕の心の全てを奪った</li>
+            </ul>
+          </div>
+          <div class="audio-dock">
+            <span class="t">01:08</span>
+            <button class="icon-btn" style="color:var(--on-media)">⏮</button>
+            <button class="dock-play">❚❚</button>
+            <button class="icon-btn" style="color:var(--on-media)">⏭</button>
+            <div class="dock-bar"><div class="buf"></div><div class="cur"></div></div>
+            <span class="t">03:22</span>
+          </div>
+        </div>
+      </div>
+      <div class="tap-zone left">‹</div>
+      <div class="tap-zone right">›</div>
+    </div>
+
+    <!-- EPUB/HTML 页 -->
+    <div class="stage-page" id="page-html">
+      <div class="paper">
+        <h3>第十四章　转折之时</h3>
+        <p>夜色降临时，城头的灯火次第亮起。他站在城墙的阴影里，望着远处连绵的山脊线，第一次觉得这座生活了二十年的城如此陌生。</p>
+        <p>「你当真要走？」身后的声音很轻，像是怕惊动了什么。</p>
+        <p>他没有回头。「留在这里，只会看着它一点点烂掉。」</p>
+        <p>风从北面吹来，带着雪的气息。他想起了很多年前那个同样寒冷的清晨，想起了那个人说过的话——想要的，是能把这一切推翻的力量。</p>
+      </div>
+    </div>
+
+    <!-- 媒体信息浮层 -->
+    <div id="media-info">
+      p.12 · 1440×2080 AVIF 218KB<br>缓存命中 · 解码 41ms · 17:42:03
+    </div>
+  </div>
+
+  <!-- 底部 lane 胶囊 -->
+  <div id="dock">
+    <div class="lane open" id="lane-book">
+      <button class="lane-tab" title="书籍进度">📖</button>
+      <div class="lane-body">
+        <button class="icon-btn">‹</button>
+        <div class="lane-slider"><div class="cur" style="width:25%"></div></div>
+        <span class="lane-num">12 / 48</span>
+        <button class="icon-btn">›</button>
+      </div>
+    </div>
+    <div class="lane lane-hidden" id="lane-video">
+      <button class="lane-tab" title="视频控制">🎬</button>
+      <div class="lane-body">
+        <button class="icon-btn" title="快退 5s">−5</button>
+        <button class="icon-btn" title="播放/暂停">▶</button>
+        <button class="icon-btn" title="快进 5s">+5</button>
+        <div class="lane-slider"><div class="buf"></div><div class="cur" style="width:33%"></div></div>
+        <span class="lane-num">02:41/08:05</span>
+        <button class="icon-btn" title="静音">🔊</button>
+        <button class="icon-btn" title="播放源">🎞</button>
+        <button class="icon-btn" title="字幕">💬</button>
+      </div>
+    </div>
+    <div class="lane lane-hidden" id="lane-audio">
+      <button class="lane-tab" title="音频控制">🎵</button>
+      <div class="lane-body">
+        <button class="icon-btn" title="快退 5s">−5</button>
+        <button class="icon-btn" title="播放/暂停">❚❚</button>
+        <button class="icon-btn" title="快进 5s">+5</button>
+        <div class="lane-slider"><div class="buf" style="width:62%"></div><div class="cur" style="width:34%"></div></div>
+        <span class="lane-num">01:08/03:22</span>
+        <button class="icon-btn" title="静音">🔊</button>
+        <button class="icon-btn" title="歌词">♪</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 遮罩 -->
+  <div id="scrim"></div>
+
+  <!-- 侧边栏 -->
+  <div id="sidebar">
+    <div class="sb-tabs">
+      <button class="sb-tab on" data-tab="grid">缩略图</button>
+      <button class="sb-tab" data-tab="list">列表</button>
+      <button class="sb-tab" data-tab="tree">文件树</button>
+    </div>
+    <div class="sb-body">
+      <div class="sb-grid" data-pane="grid"></div>
+      <div class="sb-list" data-pane="list" style="display:none"></div>
+      <div class="sb-tree" data-pane="tree" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- 设置面板 -->
+  <div id="settings">
+    <h3>阅读设置</h3>
+    <div class="sub">某个合集 第3话 · 48 页 · image/epub 混合</div>
+
+    <div class="set-sec">阅读模式</div>
+    <div class="seg" id="set-mode">
+      <button data-m="single-ltr" class="on">左到右</button>
+      <button data-m="single-rtl">右到左</button>
+      <button data-m="single-ttb">纵向</button>
+      <button data-m="webtoon">条漫</button>
+    </div>
+
+    <div class="set-sec">页面布局</div>
+    <div class="set-row"><span class="lb">双页模式</span><button class="switch" data-set="double"></button></div>
+    <div class="set-row"><span class="lb">拆分封面</span><button class="switch on" data-set="splitCover"></button></div>
+    <div class="set-row"><span class="lb">长图滚动</span><button class="switch on" data-set="longPage"></button></div>
+
+    <div class="set-sec">行为</div>
+    <div class="set-row"><span class="lb">点击翻页</span><button class="switch on" data-set="tap"></button></div>
+    <div class="set-row"><span class="lb">双击缩放</span><button class="switch on" data-set="zoom"></button></div>
+    <div class="set-row"><span class="lb">自动播放（1–10s 间隔）</span><button class="switch" data-set="autoplay"></button></div>
+    <div class="set-row"><span class="lb">工具栏自动隐藏</span><button class="switch on" data-set="autohide"></button></div>
+    <div class="set-row"><span class="lb">无缝续读下一档案</span><button class="switch on" data-set="seamless"></button></div>
+
+    <div class="set-sec">调试</div>
+    <div class="set-row"><span class="lb">媒体信息浮层</span><button class="switch" data-set="info"></button></div>
+  </div>
+</div>
+
+<script>
+const W = document.getElementById('window');
+const stage = document.getElementById('stage');
+const pages = { image: 'page-image', video: 'page-video', audio: 'page-audio', html: 'page-html' };
+
+/* ---- 页面类型切换（demo） ---- */
+document.querySelectorAll('#demo-bar [data-ptype]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#demo-bar [data-ptype]').forEach(x => x.classList.toggle('on', x === b));
+  setPageType(b.dataset.ptype);
+});
+function setPageType(t) {
+  const curEl = document.querySelector('.stage-page.on');
+  const nextEl = document.getElementById(pages[t]);
+  if (curEl !== nextEl) {
+    // 页面类型切换：旧页淡出，新页浮入
+    curEl.classList.add('pg-out-r');
+    setTimeout(() => {
+      curEl.classList.remove('on', 'pg-out-r');
+      nextEl.classList.add('on');
+      nextEl.style.animation = 'none'; nextEl.offsetHeight; // reflow
+      nextEl.style.animation = '';
+      nextEl.classList.add('pg-in-r');
+      nextEl.addEventListener('animationend', () => nextEl.classList.remove('pg-in-r'), { once: true });
+    }, 160);
+  }
+  // lane 出现/消失：压缩收起动画（CSS .lane-hidden 过渡）
+  document.getElementById('lane-video').classList.toggle('lane-hidden', t !== 'video');
+  document.getElementById('lane-audio').classList.toggle('lane-hidden', t !== 'audio');
+  openLane(t === 'video' ? 'lane-video' : t === 'audio' ? 'lane-audio' : 'lane-book');
+}
+
+/* ---- lane 展开（测量宽度做平滑过渡） ---- */
+function openLane(id) {
+  document.querySelectorAll('.lane').forEach(l => {
+    const body = l.querySelector('.lane-body');
+    const opening = l.id === id;
+    if (opening) {
+      l.classList.add('open');
+      body.style.width = body.scrollWidth + 'px';
+    } else {
+      body.style.width = body.scrollWidth + 'px';
+      body.offsetHeight; // reflow，保证从当前宽度收起
+      l.classList.remove('open');
+      body.style.width = '0px';
+    }
+  });
+}
+document.querySelectorAll('.lane-tab').forEach(t =>
+  t.onclick = () => openLane(t.parentElement.id));
+
+/* ---- 侧边栏 ---- */
+const grid = document.querySelector('[data-pane=grid]');
+const list = document.querySelector('[data-pane=list]');
+const tree = document.querySelector('[data-pane=tree]');
+const types = { 5: '🎬', 12: '🖼', 20: '🎵', 31: '📄' };
+const names = { 5: 'PV1.mp4', 20: 'theme.flac', 31: 'ch14.xhtml' };
+for (let i = 1; i <= 48; i++) {
+  const ty = types[i] || '';
+  const th = document.createElement('div');
+  th.className = 'thumb' + (i === 12 ? ' now' : '');
+  th.innerHTML = `${ty ? `<span class="ty">${ty}</span>` : ''}${i}`;
+  grid.appendChild(th);
+  const r = document.createElement('div');
+  r.className = 'row' + (i === 12 ? ' now' : '');
+  r.innerHTML = `<span class="n">${i}</span><span class="nm">${names[i] || `page_${String(i).padStart(3, '0')}.avif`}</span><span>${ty}</span>`;
+  list.appendChild(r);
+}
+tree.innerHTML = `
+  <div class="row dir">▾ 第14章</div>
+  <div class="row"><span class="n"></span><span class="nm">cover.avif</span></div>
+  <div class="row"><span class="n"></span><span class="nm">page_001…011.avif</span></div>
+  <div class="row dir">▾ media/</div>
+  <div class="row"><span class="n"></span><span class="nm">🎬 PV1.mp4</span></div>
+  <div class="row"><span class="n"></span><span class="nm">🎵 theme.flac</span></div>
+  <div class="row"><span class="n"></span><span class="nm">💬 PV1.chs.srt</span></div>
+  <div class="row dir">▾ text/</div>
+  <div class="row"><span class="n"></span><span class="nm">📄 ch14.xhtml</span></div>`;
+document.querySelectorAll('.sb-tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.sb-tab').forEach(x => x.classList.toggle('on', x === t));
+  document.querySelectorAll('[data-pane]').forEach(p =>
+    p.style.display = p.dataset.pane === t.dataset.tab ? '' : 'none');
+});
+document.getElementById('btn-sidebar').onclick = () => {
+  W.classList.toggle('sidebar-open'); W.classList.remove('settings-open');
+};
+
+/* ---- 设置面板 ---- */
+document.getElementById('btn-settings').onclick = () => {
+  W.classList.toggle('settings-open'); W.classList.remove('sidebar-open');
+};
+document.getElementById('scrim').onclick = () =>
+  W.classList.remove('sidebar-open', 'settings-open');
+document.querySelectorAll('.switch').forEach(s => s.onclick = () => {
+  s.classList.toggle('on');
+  const k = s.dataset.set;
+  if (k === 'info') W.classList.toggle('info-on', s.classList.contains('on'));
+  if (k === 'tap') W.classList.toggle('tap-off', !s.classList.contains('on'));
+  if (k === 'double') applyMode();
+  if (k === 'autohide' && !s.classList.contains('on')) W.classList.remove('chrome-hidden');
+});
+
+/* ---- 阅读模式 ---- */
+const modes = [['single-ltr', '单页 · 左到右'], ['single-rtl', '单页 · 右到左'],
+               ['single-ttb', '单页 · 纵向'], ['webtoon', '条漫滚动']];
+let modeIdx = 0;
+function applyMode() {
+  const m = modes[modeIdx][0];
+  const dbl = document.querySelector('[data-set=double]').classList.contains('on');
+  stage.classList.toggle('webtoon', m === 'webtoon');
+  stage.classList.toggle('double', dbl && m !== 'webtoon');
+  document.querySelector('.double-mate').style.display =
+    (dbl && m !== 'webtoon') ? '' : 'none';
+  document.getElementById('mode-label').textContent = modes[modeIdx][1];
+  document.querySelectorAll('#set-mode button').forEach(b =>
+    b.classList.toggle('on', b.dataset.m === m));
+}
+document.getElementById('mode-btn').onclick = () => {
+  modeIdx = (modeIdx + 1) % modes.length; applyMode();
+};
+document.querySelectorAll('#set-mode button').forEach(b => b.onclick = () => {
+  modeIdx = modes.findIndex(x => x[0] === b.dataset.m); applyMode();
+});
+
+/* ---- 双击缩放 ---- */
+document.getElementById('main-img').ondblclick = () => {
+  if (document.querySelector('[data-set=zoom]').classList.contains('on'))
+    stage.classList.toggle('zoomed');
+};
+
+/* ---- 长图 demo ---- */
+document.getElementById('demo-long').onclick = () => {
+  const img = document.getElementById('main-img');
+  const long = img.style.height !== '180%';
+  img.style.height = long ? '180%' : '88%';
+  img.querySelector('.ph-text').textContent =
+    (long ? '长图 1:3 · 滚动浏览 · ' : 'PAGE 12 · ') + '双击缩放';
+  document.getElementById('page-image').style.overflowY = long ? 'auto' : '';
+};
+
+/* ---- 收藏 ---- */
+document.getElementById('btn-fav').onclick = e => {
+  e.currentTarget.classList.toggle('active');
+  e.currentTarget.textContent = e.currentTarget.classList.contains('active') ? '♥' : '♡';
+};
+
+/* ---- 点击空白切换 chrome（模拟点击中央/自动隐藏） ---- */
+let hideTimer = null;
+function resetAutoHide() {
+  if (!document.querySelector('[data-set=autohide]').classList.contains('on')) return;
+  W.classList.remove('chrome-hidden');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => W.classList.add('chrome-hidden'), 3000);
+}
+stage.addEventListener('click', e => {
+  if (e.target.closest('.fake-img') || e.target.closest('.vinyl')) return;
+  W.classList.toggle('chrome-hidden');
+  resetAutoHide();
+});
+W.addEventListener('mousemove', resetAutoHide);
+
+/* ---- 键盘翻页 demo（带方向性进入/离开动画） ---- */
+const total = 48; let cur = 12;
+function dirKey(forward) {
+  const m = modes[modeIdx][0];
+  if (m === 'single-rtl') return forward ? 'l' : 'r';
+  if (m === 'single-ttb') return forward ? 'b' : 't';
+  return forward ? 'r' : 'l';
+}
+let animating = false;
+window.onkeydown = e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const forward = e.key === 'ArrowRight';
+    const next = Math.min(total, Math.max(1, cur + (forward ? 1 : -1)));
+    if (next === cur || animating) return;
+    const d = dirKey(forward);
+    const layer = document.getElementById('img-anim-layer');
+    animating = true;
+    // 离开动画结束后换页并播进入动画
+    layer.classList.add('pg-out-' + d);
+    layer.addEventListener('animationend', function h() {
+      layer.removeEventListener('animationend', h);
+      layer.classList.remove('pg-out-' + d);
+      cur = next;
+      document.getElementById('page-indicator').textContent = `${cur} / ${total}`;
+      document.querySelector('#lane-book .lane-num').textContent = `${cur} / ${total}`;
+      document.querySelector('#lane-book .lane-slider .cur').style.width = (cur / total * 100) + '%';
+      document.getElementById('main-img').querySelector('.ph-text').textContent = `PAGE ${cur} · 双击缩放`;
+      const mate = document.querySelector('.double-mate .ph-text');
+      if (mate) mate.textContent = `PAGE ${Math.min(total, cur + 1)}`;
+      layer.classList.add('pg-in-' + d);
+      layer.addEventListener('animationend', () => {
+        layer.classList.remove('pg-in-' + d); animating = false;
+      }, { once: true });
+    });
+  }
+  if (e.key === 'Escape') W.classList.remove('sidebar-open', 'settings-open');
+};
+
+/* ---- 音频歌词滚动 demo ---- */
+let li = 2;
+setInterval(() => {
+  const listEl = document.getElementById('lyrics-list');
+  const items = listEl.children;
+  if (!document.getElementById('page-audio').classList.contains('on')) return;
+  items[li].classList.remove('now');
+  li = (li + 1) % items.length;
+  items[li].classList.add('now');
+  listEl.style.transform = `translateY(${-li * 36}px)`;
+}, 2600);
+/* ---- 明暗主题切换 ---- */
+const themeBtn = document.getElementById('btn-theme');
+function applyTheme(t) {
+  W.classList.toggle('light', t === 'light');
+  themeBtn.textContent = t === 'light' ? '☀' : '◐';
+  localStorage.setItem('lanlu-mockup-theme', t);
+}
+themeBtn.onclick = () => applyTheme(W.classList.contains('light') ? 'dark' : 'light');
+applyTheme(localStorage.getItem('lanlu-mockup-theme') || 'dark');
+
+/* ---- 初始化：展开 book lane ---- */
+requestAnimationFrame(() => openLane('lane-book'));
+</script>
+</body>
+</html>

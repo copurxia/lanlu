@@ -53,86 +53,95 @@ public class CheckDatabaseTaskRunner {
         try {
             let logger = getLogger("check_database")
 
-            logger.debug("Fetching all archives from database...")
-            let archives = ArchiveDao.getAllArchives()
-            logger.debug("Retrieved ${archives.size} archives from database")
+            logger.debug("Starting database file check (paginated)...")
 
+            var totalChecked: Int64 = 0
             var deletedCount: Int64 = 0
-            let checkedCount = archives.size
+            var start: Int32 = 0
+            let batchSize: Int32 = 100
 
-            if (archives.size == 0) {
+            while (true) {
+                let (archives, _) = ArchiveDao.searchArchives("", "", start, batchSize, "id", "asc",
+                    false, false, false, "", "", 0)
+                if (archives.size == 0) { break }
+
+                logger.debug("Processing batch: offset=${start}, size=${archives.size}")
+
+                var processed = 0
+                for (archive in archives) {
+                    processed++
+                    totalChecked++
+                    // 从分类获取基础路径
+                    let categoryId = archive.category_id
+                    var archiveBasePath = ""
+                    if (categoryId > 0) {
+                        match (CategoryDao.getCategoryByInternalId(categoryId)) {
+                            case Some(cat) => archiveBasePath = cat.scanPath
+                            case None => ()
+                        }
+                    }
+
+                    if (archiveBasePath.size == 0) {
+                        logger.warn("Archive has no valid category", ("arcid", archive.id))
+                        continue
+                    }
+
+                    let fullFilePath: String
+                    if (archive.relative_path.size > 0 && archive.relative_path != "") {
+                        let dirPath = joinPath(archiveBasePath, archive.relative_path)
+                        fullFilePath = joinPath(dirPath, archive.filename)
+                    } else {
+                        fullFilePath = joinPath(archiveBasePath, archive.filename)
+                    }
+
+                    logger.debug("Checking file ${processed}/ ${archives.size}", ("file", fullFilePath))
+
+                    // 根据archive_type检查文件或目录是否存在（支持软链接）
+                    let pathExists = if (archive.archive_type == "folder") {
+                        // 文件夹类型：检查目录是否存在
+                        DirectoryScanner.isDirectory(fullFilePath)
+                    } else {
+                        // 压缩包或PDF类型：检查文件是否存在
+                        fileExists(fullFilePath)
+                    }
+
+                    if (!pathExists) {
+                        logger.warn("Archive path not found, will delete from database", ("path", fullFilePath), ("archive_id", archive.id.toString()), ("type", archive.archive_type))
+                        if (ArchiveDao.delete(archive.id)) {
+                            deletedCount++
+                            // DB 删除后清理缩略图（原始文件已不存在/不可用；缩略图属于缓存，可安全删除）
+                            if (!ArchiveModel.deleteThumbnailFile(archive.id)) {
+                                logger.debug("Failed to delete thumbnail file", ("arcid", archive.id))
+                            }
+                            logger.debug("Successfully deleted database record", ("id", archive.id.toString()), ("title", archive.title))
+                        } else {
+                            logger.error("Failed to delete database record", ("id", archive.id.toString()), ("title", archive.title))
+                        }
+                    } else {
+                        logger.debug("Archive path exists, skipping", ("path", fullFilePath), ("type", archive.archive_type))
+                    }
+
+                    // 每处理100个文件输出一次进度
+                    if (totalChecked % 100 == 0) {
+                        logger.debug("Progress: ${totalChecked} files checked so far, ${deletedCount} deletions")
+                    }
+                }
+
+                start += batchSize
+            }
+
+            if (totalChecked == 0) {
                 logger.debug("No archives found in database, nothing to check")
                 return CheckResultData(true, 0, 0, "")
             }
 
-            logger.debug("Starting file existence check for ${checkedCount} archives")
-
-            var processed = 0
-            for (archive in archives) {
-                processed++
-                // 从分类获取基础路径
-                let categoryId = archive.category_id
-                var archiveBasePath = ""
-                if (categoryId > 0) {
-                    match (CategoryDao.getCategoryByInternalId(categoryId)) {
-                        case Some(cat) => archiveBasePath = cat.scanPath
-                        case None => ()
-                    }
-                }
-
-                if (archiveBasePath.size == 0) {
-                    logger.warn("Archive has no valid category", ("arcid", archive.id))
-                    continue
-                }
-
-                let fullFilePath: String
-                if (archive.relative_path.size > 0 && archive.relative_path != "") {
-                    let dirPath = joinPath(archiveBasePath, archive.relative_path)
-                    fullFilePath = joinPath(dirPath, archive.filename)
-                } else {
-                    fullFilePath = joinPath(archiveBasePath, archive.filename)
-                }
-
-                logger.debug("Checking file ${processed}/${checkedCount}", ("file", fullFilePath))
-
-                // 根据archive_type检查文件或目录是否存在（支持软链接）
-                let pathExists = if (archive.archive_type == "folder") {
-                    // 文件夹类型：检查目录是否存在
-                    DirectoryScanner.isDirectory(fullFilePath)
-                } else {
-                    // 压缩包或PDF类型：检查文件是否存在
-                    fileExists(fullFilePath)
-                }
-
-                if (!pathExists) {
-                    logger.warn("Archive path not found, will delete from database", ("path", fullFilePath), ("archive_id", archive.id.toString()), ("type", archive.archive_type))
-                    if (ArchiveDao.delete(archive.id)) {
-                        deletedCount++
-                        // DB 删除后清理缩略图（原始文件已不存在/不可用；缩略图属于缓存，可安全删除）
-                        if (!ArchiveModel.deleteThumbnailFile(archive.id)) {
-                            logger.debug("Failed to delete thumbnail file", ("arcid", archive.id))
-                        }
-                        logger.debug("Successfully deleted database record", ("id", archive.id.toString()), ("title", archive.title))
-                    } else {
-                        logger.error("Failed to delete database record", ("id", archive.id.toString()), ("title", archive.title))
-                    }
-                } else {
-                    logger.debug("Archive path exists, skipping", ("path", fullFilePath), ("type", archive.archive_type))
-                }
-
-                // 每处理100个文件输出一次进度
-                if (processed % 100 == 0 || processed == checkedCount) {
-                    logger.debug("Progress: ${processed}/${checkedCount} files checked, ${deletedCount} deletions so far")
-                }
-            }
-
             if (deletedCount > 0) {
-                logger.debug("Database check completed with deletions", ("deleted_count", deletedCount.toString()), ("checked_count", checkedCount.toString()))
+                logger.debug("Database check completed with deletions", ("deleted_count", deletedCount.toString()), ("checked_count", totalChecked.toString()))
             } else {
-                logger.debug("Database check completed successfully - all ${checkedCount} files exist", ("checked_count", checkedCount.toString()))
+                logger.debug("Database check completed successfully - all ${totalChecked} files exist", ("checked_count", totalChecked.toString()))
             }
 
-            return CheckResultData(true, deletedCount, checkedCount, "")
+            return CheckResultData(true, deletedCount, totalChecked, "")
         } catch (e: Exception) {
             let logger = getLogger("check_database")
             logger.error("Database check failed with exception", ("error", e.message), ("stack", e.toString()))

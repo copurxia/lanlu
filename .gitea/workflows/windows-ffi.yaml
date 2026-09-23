@@ -1,0 +1,38 @@
+# Gitea Actions：rocksdb_ffi 最小 FFI 测试（Windows）。
+# 前置（需 Gitea 管理员自托管 runner 提供，见 todo.md §4.6 标注）：
+#   - 一个注册了 `windows` 标签的 act_runner，宿主为 Windows x86_64；
+#   - 宿主已安装 Cangjie 1.1.3（cjpm 在 PATH）与 MSYS2 MINGW64（mingw64/bin、mingw64/lib 在 PATH，
+#     含 mingw-w64-x86_64-toolchain 与 mingw-w64-x86_64-rocksdb）。
+# 触发后输出 PASS 即满足 §4.6 的 Windows 侧验证。
+name: rocksdb-ffi-windows
+run-name: rocksdb_ffi minimal FFI tests on Windows
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'packages/rocksdb_ffi/**'
+      - 'client-next/build.cj'
+      - 'client-next/cjpm.toml'
+      - '.gitea/workflows/windows-ffi.yaml'
+
+jobs:
+  rocksdb-ffi-test:
+    runs-on: windows
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compile version probe bridge (mingw g++)
+        working-directory: packages/rocksdb_ffi/native
+        run: |
+          x86_64-w64-mingw32-g++ -std=c++17 -Wall -Wextra -Werror -O2 -c lanlu_rocksdb_bridge.c -o lanlu_rocksdb_bridge.o
+          ar rcs liblanlu_rocksdb_bridge.a lanlu_rocksdb_bridge.o
+
+      - name: Run rocksdb_ffi cjpm test
+        working-directory: packages/rocksdb_ffi
+        run: cjpm test
+
+      - name: Report PASS
+        if: ${{ success() }}
+        run: |
+          Write-Host "PASS: rocksdb_ffi Windows FFI tests all green (todo.md section 4.6)"

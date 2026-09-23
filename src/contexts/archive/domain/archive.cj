@@ -66,34 +66,6 @@ public class Archive {
  */
 public class ArchiveModel {
     /**
-     * 获取所有归档
-     */
-    public static func getAllArchives(): Array<Archive> {
-        let daoRows = ArchiveDao.getAllArchives()
-        var archives = ArrayList<Archive>()
-        for (row in daoRows) {
-            let archive = Archive()
-            archive.id = row.id
-            archive.internalId = row.internalId
-            archive.title = row.title
-            archive.filename = row.filename
-            archive.summary = row.summary
-            archive.thumbhash = row.thumbhash
-            archive.cover_asset_id = row.cover_asset_id
-            archive.release_at = row.release_at
-            archive.created_at = row.created_at
-            archive.updated_at = row.updated_at
-            archive.relative_path = row.relative_path
-            archive.file_size = row.file_size
-            archive.pagecount = row.pagecount
-            archive.archive_type = row.archive_type
-            archive.tags = row.tags
-            archives.add(archive)
-        }
-        return archives.toArray()
-    }
-
-    /**
      * 根据 ID 获取归档
      */
     public static func getArchiveById(id: String): Archive {

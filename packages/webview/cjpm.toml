@@ -1,0 +1,16 @@
+[package]
+cjc-version = "1.1.0"
+name = "webview"
+version = "0.1.0"
+description = "Safe Cangjie wrapper for webview_native (Blitz offscreen HTML → RGBA)"
+output-type = "static"
+
+[dependencies]
+
+[ffi.c]
+webview_native = { path = "./native/target/release" }
+
+# 测试二进制（及未来可执行消费方）需随 webview_native 静态库追加系统库：
+# Blitz 字体源依赖 fontconfig/freetype，Rust 静态库解包需要 libgcc_s。
+[target.x86_64-unknown-linux-gnu]
+link-option = "-lfontconfig -lfreetype -ldl -lpthread -lgcc_s"

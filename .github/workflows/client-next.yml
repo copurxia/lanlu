@@ -1,0 +1,771 @@
+name: Client Next CI
+
+on:
+  push:
+    paths:
+      - "client-next/**"
+      - "packages/vips_ffi/**"
+      - "packages/libvlc_ffi/**"
+      - "packages/libavformat_ffi/**"
+      - "packages/libass_ffi/**"
+      - "packages/fontkit_ffi/**"
+      - "packages/webview/**"
+      - "packages/rocksdb_ffi/**"
+      - "packages/qwest/**"
+      - "cangjie-repo.toml"
+      - ".github/workflows/client-next.yml"
+  pull_request:
+    paths:
+      - "client-next/**"
+      - "packages/vips_ffi/**"
+      - "packages/libvlc_ffi/**"
+      - "packages/libavformat_ffi/**"
+      - "packages/libass_ffi/**"
+      - "packages/fontkit_ffi/**"
+      - "packages/webview/**"
+      - "packages/rocksdb_ffi/**"
+      - "packages/qwest/**"
+      - "cangjie-repo.toml"
+      - ".github/workflows/client-next.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-next-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env: {}
+
+jobs:
+  quality:
+    name: Quality report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v3
+        with:
+          channel: sts
+          version: 1.1.3
+
+      - name: Show tool versions
+        run: |
+          set -euo pipefail
+          cjc -v
+          cjfmt -v
+          cjlint -v
+
+      # client-next has pre-existing formatting differences. Keep this advisory until
+      # the baseline is formatted, then remove continue-on-error to make it a gate.
+      - name: Check formatting (advisory)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          format_root="${RUNNER_TEMP}/client-next-format"
+          report="client-next/reports/cjfmt.diff"
+          mkdir -p "${format_root}/src" client-next/reports
+          cp -a client-next/src/. "${format_root}/src/"
+          cp -a client-next/build.cj "${format_root}/build.cj"
+
+          cjfmt -d "${format_root}" -c client-next/cangjie-format.toml
+
+          format_clean=true
+          diff -ru client-next/src "${format_root}/src" > "${report}" || format_clean=false
+          diff -u client-next/build.cj "${format_root}/build.cj" >> "${report}" || format_clean=false
+          if [ "${format_clean}" != true ]; then
+            echo "::warning::client-next contains files that cjfmt would change; see the quality report artifact."
+            exit 1
+          fi
+
+      - name: Run cjlint
+        run: |
+          set -euo pipefail
+          mkdir -p client-next/reports
+          cjlint -f client-next/src -r json -o client-next/reports/cjlint
+          test -s client-next/reports/cjlint.json
+          issue_count="$(jq 'length' client-next/reports/cjlint.json)"
+          {
+            echo "### client-next cjlint"
+            echo
+            echo "Reported issues: ${issue_count} (report-only baseline)."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-quality-${{ github.sha }}
+          path: client-next/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  build-test:
+    name: Build, test and headless smoke test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch CangjieGUI source
+        run: |
+          set -euo pipefail
+          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+
+      - name: Verify in-repository dependencies
+        run: |
+          set -euo pipefail
+          required_files=(
+            packages/cangjie-gui/cjpm.toml
+            packages/cangjie-gui/sdl/.sdl3/libSDL3.so.0.4.2
+            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so.0.2.2
+            packages/vips_ffi/cjpm.toml
+            packages/libvlc_ffi/cjpm.toml
+            packages/libavformat_ffi/cjpm.toml
+            packages/libass_ffi/cjpm.toml
+            packages/fontkit_ffi/native/Cargo.lock
+            packages/webview/native/Cargo.lock
+            packages/rocksdb_ffi/cjpm.toml
+            packages/qwest/cjpm.toml
+          )
+          for required_file in "${required_files[@]}"; do
+            if [ ! -f "${required_file}" ]; then
+              echo "::error file=${required_file}::Required client-next dependency is missing from the checkout."
+              exit 1
+            fi
+          done
+
+          sdl_dir="packages/cangjie-gui/sdl/.sdl3"
+          ln -sfn libSDL3.so.0.4.2 "${sdl_dir}/libSDL3.so.0"
+          ln -sfn libSDL3.so.0 "${sdl_dir}/libSDL3.so"
+          ln -sfn libSDL3_ttf.so.0.2.2 "${sdl_dir}/libSDL3_ttf.so.0"
+          ln -sfn libSDL3_ttf.so.0 "${sdl_dir}/libSDL3_ttf.so"
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v3
+        with:
+          channel: sts
+          version: 1.1.3
+          components: stdx
+
+      - name: Export CANGJIE_STDX_PATH
+        # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
+        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
+
+      - name: Install native build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb libvulkan1 \
+            libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev librocksdb-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libass-dev \
+            libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
+            libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6
+
+      - name: Cache Cangjie and Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cjpm/git
+            ~/.cjpm/repository
+            ~/.cargo/git
+            ~/.cargo/registry
+            packages/fontkit_ffi/native/target
+            packages/webview/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
+
+      - name: Configure native library path
+        run: |
+          set -euo pipefail
+          native_paths="${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
+          printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+
+      - name: Verify native libraries
+        run: |
+          set -euo pipefail
+          libraries=(
+            packages/cangjie-gui/sdl/.sdl3/libSDL3.so
+            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so
+          )
+          for library in "${libraries[@]}"; do
+            echo "Checking ${library}"
+            if ldd "${library}" | tee /dev/stderr | grep -q 'not found'; then
+              echo "::error file=${library}::A native runtime dependency is missing."
+              exit 1
+            fi
+          done
+          pkg-config --modversion libavformat libavcodec libavutil libass
+
+      - name: Show compiler version
+        run: cjc -v
+
+      - name: Build client-next
+        working-directory: client-next
+        run: cjpm build -V
+
+      - name: Run client-next tests
+        working-directory: client-next
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          cjpm test \
+            --no-color \
+            --parallel nCores \
+            --timeout-each 60s \
+            --report-path test-results \
+            --report-format xml
+
+      - name: Run headless snapshot smoke test
+        working-directory: client-next
+        env:
+          # cangjie-gui 建窗硬带 SDL_WINDOW_VULKAN flag，X11 下 SDL 需 dlopen libvulkan.so.1
+          # （apt 已装 libvulkan1 loader，无 ICD 也只需 loader 符号）；窗口建成后渲染器
+          # 走 software（无 GPU）。dummy 驱动无 Vulkan_LoadLibrary 实现，故用 Xvfb。
+          SDL_VIDEODRIVER: x11
+          SDL_RENDER_DRIVER: software
+        run: |
+          set -euo pipefail
+          timeout 60s xvfb-run -a ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
+          test -s client-next.bmp
+
+      - name: Package Linux deb
+        working-directory: client-next
+        run: |
+          set -euo pipefail
+          pkgname="lanlu-client-next"
+          version="0.1.0+nightly.$(date -u +%Y%m%d.%H%M)"
+          arch="amd64"
+          staging="dist/${pkgname}_${version}_${arch}"
+          appdir="${staging}/opt/${pkgname}"
+          mkdir -p "${staging}/DEBIAN" "${appdir}" "${staging}/usr/bin" dist
+
+          cp target/release/bin/main "${appdir}/${pkgname}"
+
+          # 捆绑非系统私有库（SDL3、仓颉 runtime 等）；
+          # apt 系统库（vips、vlc、rocksdb 等）通过 control 的 Depends 声明。
+          ldd "${appdir}/${pkgname}" | awk '$3 ~ /^\// {print $3}' | sort -u > dist/ldd.txt
+          while IFS= read -r lib; do
+            case "$lib" in
+              /usr/*|/lib/*|/lib64/*) ;;
+              *) cp -L "$lib" "${appdir}/" ;;
+            esac
+          done < dist/ldd.txt
+          # 兜底：如果 ldd 未能解析到仓颉 runtime，在 SDK 目录下查找。
+          # （setup-cangjie 会导出 CANGJIE_HOME，见 cjv envsetup 的 env.vars。）
+          if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
+            if [ -z "${CANGJIE_HOME:-}" ]; then
+              echo "error: libcangjie-runtime not found by ldd and CANGJIE_HOME is not set" >&2
+              exit 1
+            fi
+            find "${CANGJIE_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
+          fi
+
+          # 用 printf 生成包装脚本，避免 heredoc 顶格内容破坏 YAML block scalar。
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec env LD_LIBRARY_PATH="/opt/lanlu-client-next${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /opt/lanlu-client-next/lanlu-client-next "$@"' \
+            > "${staging}/usr/bin/${pkgname}"
+          chmod 755 "${staging}/usr/bin/${pkgname}"
+
+          # 桌面入口与任务栏图标：app_id（main.cj 设置 SDL_APP_ID=lanlu）匹配
+          # /usr/share/applications/lanlu.desktop，Wayland 下任务栏图标由此解析。
+          mkdir -p "${staging}/usr/share/applications" "${staging}/usr/share/icons/hicolor/192x192/apps"
+          cp assets/lanlu_logo_gold.png "${staging}/usr/share/icons/hicolor/192x192/apps/lanlu.png"
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Type=Application' \
+            'Name=Lanlu' \
+            'Comment=Lanlu desktop client' \
+            "Exec=/usr/bin/${pkgname}" \
+            'Icon=lanlu' \
+            'StartupWMClass=lanlu' \
+            'Terminal=false' \
+            'Categories=Graphics;' \
+            > "${staging}/usr/share/applications/lanlu.desktop"
+
+          installed_size="$(du -sk "${staging}" | cut -f1)"
+          printf '%s\n' \
+            "Package: ${pkgname}" \
+            "Version: ${version}" \
+            "Architecture: ${arch}" \
+            "Maintainer: lanlu <lanlu@localhost>" \
+            "Installed-Size: ${installed_size}" \
+            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6, librocksdb9.11 | librocksdb8.9, libavformat62, libavcodec62, libavutil60, libass9" \
+            "Section: graphics" \
+            "Priority: optional" \
+            "Description: Lanlu desktop client built on CangjieGUI" \
+            > "${staging}/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "${staging}" "dist/${pkgname}_${version}_${arch}.deb"
+
+      - name: Upload Linux deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-linux-deb-${{ github.sha }}
+          path: client-next/dist/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-test-evidence-${{ github.sha }}
+          path: |
+            client-next/test-results/
+            client-next/client-next.bmp
+          if-no-files-found: ignore
+          retention-days: 14
+
+  windows-build:
+    name: Build on Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env: {}
+    steps:
+      - name: Configure Git line endings
+        run: git config --global core.autocrlf input
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch CangjieGUI source
+        run: |
+          $ErrorActionPreference = "Stop"
+          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
+
+      - name: Verify in-repository dependencies
+        run: |
+          $ErrorActionPreference = "Stop"
+          $requiredFiles = @(
+            "packages/cangjie-gui/cjpm.toml",
+            "packages/cangjie-gui/sdl/.sdl3/libSDL3.dll",
+            "packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.dll",
+            "packages/vips_ffi/cjpm.toml",
+            "packages/libvlc_ffi/cjpm.toml",
+            "packages/libavformat_ffi/cjpm.toml",
+            "packages/libass_ffi/cjpm.toml",
+            "packages/fontkit_ffi/native/Cargo.lock",
+            "packages/webview/native/Cargo.lock",
+            "packages/rocksdb_ffi/cjpm.toml",
+            "packages/qwest/cjpm.toml"
+          )
+          foreach ($requiredFile in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              Write-Error "Required client-next dependency is missing: $requiredFile"
+            }
+          }
+
+      - name: Set up Cangjie 1.1.3
+        uses: Zxilly/setup-cangjie@v3
+        with:
+          channel: sts
+          version: 1.1.3
+          components: stdx
+
+      - name: Export CANGJIE_STDX_PATH
+        # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
+        run: Add-Content -LiteralPath $env:GITHUB_ENV -Value "CANGJIE_STDX_PATH=${env:CANGJIE_STDX_PATH_STATIC}\stdx"
+
+      - name: Set up MSYS2 native dependencies
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-libvips
+            mingw-w64-x86_64-libheif
+            mingw-w64-x86_64-libjxl
+            mingw-w64-x86_64-imagemagick
+            mingw-w64-x86_64-graphviz
+            mingw-w64-x86_64-openslide
+            mingw-w64-x86_64-poppler
+            mingw-w64-x86_64-vlc
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-libass
+            mingw-w64-x86_64-dlfcn
+            mingw-w64-x86_64-rocksdb
+
+      - name: Cache Cangjie and Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cjpm/git
+            ~/.cjpm/repository
+            ~/.cargo/git
+            ~/.cargo/registry
+            packages/fontkit_ffi/native/target
+            packages/webview/native/target
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
+
+      - name: Configure Windows native paths
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mingwBin = Join-Path $env:MSYS2_LOCATION "mingw64/bin"
+          $mingwLib = Join-Path $env:MSYS2_LOCATION "mingw64/lib"
+          $sdlLib = Join-Path $env:GITHUB_WORKSPACE "packages/cangjie-gui/sdl/.sdl3"
+          @($mingwBin, $sdlLib) |
+            ForEach-Object { Add-Content -LiteralPath $env:GITHUB_PATH -Value $_ }
+          $mingwLibraryPath = $mingwLib.Replace("\", "/")
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "MINGW_LIBRARY_PATH=$mingwLibraryPath"
+
+      - name: Show tool versions
+        run: |
+          cjc -v
+          rustc --version
+          cargo --version
+
+      - name: Add GNU Rust target for native FFI libraries
+        # build.cj 的 pre-build 在 Windows 上用 x86_64-pc-windows-gnu 构建
+        # fontkit_native 和 webview_native，cjpm 的 MinGW 链接器需要 GNU 格式的 .a 产物。
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Build client-next on Windows
+        working-directory: client-next
+        run: cjpm build -V
+
+      - name: Run rocksdb_ffi minimal FFI tests on Windows
+        # §4.6 Linux/Windows 最小 FFI 测试：rocksdb_ffi 编译期版本门槛 + 全部 FFI 用例
+        #（含 NUL/非法 UTF-8/0B/1B/1MiB/上限拒绝、CF、快照、cursor、事务 rollback-on-close、
+        #  多线程并发读写）。bridge 由 build.cj pre-build 用 mingw g++ 编译。
+        working-directory: packages/rocksdb_ffi
+        run: cjpm test
+
+      - name: Verify Windows executable
+        run: |
+          $executable = "client-next/target/release/bin/main.exe"
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "Windows executable was not produced: $executable"
+          }
+          Get-Item -LiteralPath $executable | Format-List Name, Length, LastWriteTime
+
+      - name: Collect Windows runtime DLLs
+        # 从 main.exe 出发用 objdump 递归解析 DLL Name，在候选目录里查找并
+        # 逐个展开（传递依赖如 libarchive-13/libffi-8/SDL3_ttf 都会收录）；
+        # libvips、ImageMagick 与 LibVLC 的运行时模块也作为递归根加入。不依赖
+        # ldd/PATH，仓颉 runtime 目录（libcangjie-runtime.dll）直接列入候选。
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          stage="client-next/dist/windows/lanlu-client-next"
+          mkdir -p "${stage}"
+          cp client-next/target/release/bin/main.exe "${stage}/"
+
+          # 仓颉 runtime 目录：setup-cangjie 导出 CANGJIE_HOME（SDK 根目录），
+          # runtime 库位于 ${CANGJIE_HOME}/runtime/lib/windows_<arch>_<backend>/。
+          # 注意不能用 command -v cjc 反推：msys2 下可能查不到而静默返回空。
+          if [ -z "${CANGJIE_HOME:-}" ]; then
+            echo "error: CANGJIE_HOME not exported by setup-cangjie" >&2
+            exit 1
+          fi
+          runtime_dir="$(find "${CANGJIE_HOME}/runtime" -maxdepth 2 -type d -name 'windows_*' -print -quit)"
+          mingw_prefix="${MINGW_LIBRARY_PATH%/lib}"
+          system_dir="$(cygpath -u "${WINDIR}")/System32"
+          if [ ! -d "${system_dir}" ]; then
+            echo "::error::Windows system directory could not be resolved: ${system_dir}"
+            exit 1
+          fi
+
+          search_dirs=(
+            "$PWD/client-next/target/release/bin"
+            "$PWD/packages/cangjie-gui/sdl/.sdl3"
+            "${mingw_prefix}/bin"
+            "${runtime_dir}"
+          )
+          echo "sdl dir listing:"; ls "$PWD/packages/cangjie-gui/sdl/.sdl3" || true
+
+          # PE 的 import 表记录的名字可能与磁盘文件名不一致（SDL3 同时存在
+          # libSDL3.dll / SDL3.dll 两种形态）；精确名找不到时尝试变体，命中后
+          # 两种名字都落盘，保证 PE 记录的那个名字一定存在。
+          variant_of() {
+            case "$1" in
+              lib*) printf '%s' "${1#lib}" ;;
+              *) printf 'lib%s' "$1" ;;
+            esac
+          }
+
+          needed() { objdump -p "$1" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'; }
+
+          # libvips 解码器由 GModule 动态加载，不在 main.exe 的 PE import 表里。
+          # 保留 MSYS2 的 <prefix>/lib/vips-modules-8.x 布局，并将每个模块作为
+          # 递归扫描根，覆盖 HEIF/JXL/ImageMagick/OpenSlide/Poppler 后端。
+          queue=("main.exe")
+          modules_src="$(find "${MINGW_LIBRARY_PATH}" -maxdepth 1 -type d -name 'vips-modules-*' -print -quit)"
+          if [ -z "${modules_src}" ]; then
+            echo "::error::vips modules directory not found under ${MINGW_LIBRARY_PATH}."
+            exit 1
+          fi
+          modules_rel="lib/$(basename "${modules_src}")"
+          mkdir -p "${stage}/${modules_rel}"
+          for mod in "${modules_src}"/*.dll; do
+            cp -L "$mod" "${stage}/${modules_rel}/"
+            queue+=("${modules_rel}/$(basename "$mod")")
+            echo "collect (vips module): ${modules_rel}/$(basename "$mod")"
+          done
+
+          # ImageMagick 的 coder/filter 也是运行时动态模块。只收集 MagickCore DLL
+          # 仍会导致常见格式在实际读取时失败，因此保留其 lib、etc、share 布局，
+          # 并把所有模块 DLL 加入同一 PE 依赖闭包。
+          magick_modules_src="$(find "${MINGW_LIBRARY_PATH}" -mindepth 2 -maxdepth 2 -type d -name 'modules-*' \
+            -path '*/ImageMagick-*/*' -print -quit)"
+          if [ -z "${magick_modules_src}" ]; then
+            echo "::error::ImageMagick runtime modules were not installed."
+            exit 1
+          fi
+          magick_lib_src="$(dirname "${magick_modules_src}")"
+          magick_lib_rel="lib/$(basename "${magick_lib_src}")"
+          while IFS= read -r -d '' mod_src; do
+            module_rel="${mod_src#"${magick_lib_src}/"}"
+            rel="${magick_lib_rel}/${module_rel}"
+            mkdir -p "$(dirname "${stage}/${rel}")"
+            cp -L "${mod_src}" "${stage}/${rel}"
+            queue+=("${rel}")
+            echo "collect (ImageMagick module): ${rel}"
+          done < <(find "${magick_lib_src}" -type f -name '*.dll' -print0)
+          for resource in "${mingw_prefix}/etc/ImageMagick-7" "${mingw_prefix}/share/ImageMagick-7"; do
+            if [ -d "${resource}" ]; then
+              resource_parent="$(basename "$(dirname "${resource}")")"
+              mkdir -p "${stage}/${resource_parent}"
+              cp -aL "${resource}" "${stage}/${resource_parent}/"
+            fi
+          done
+
+          # ImageMagick 的 DOT coder 依赖 Graphviz。libgvc 会在运行时动态加载
+          # libgvplugin_*.dll，这些模块不会出现在 dot.dll 的 PE import 表中，
+          # 因此显式复制并作为递归根，避免只收集 libcgraph/libgvc 后仍无法渲染。
+          graphviz_plugin_count=0
+          while IFS= read -r -d '' graphviz_plugin; do
+            name="$(basename "${graphviz_plugin}")"
+            cp -L "${graphviz_plugin}" "${stage}/${name}"
+            queue+=("${name}")
+            graphviz_plugin_count=$((graphviz_plugin_count + 1))
+            echo "collect (Graphviz plugin): ${name}"
+          done < <(find "${mingw_prefix}/bin" -maxdepth 1 -type f -iname 'libgvplugin_*.dll' -print0)
+          if [ "${graphviz_plugin_count}" -eq 0 ]; then
+            echo "::error::Graphviz runtime plugins were not installed."
+            exit 1
+          fi
+
+          # libvlc.dll/libvlccore.dll 只是插件宿主；访问、解封装、解码、音频输出和
+          # 视频输出都由动态插件提供。Windows 便携版约定 plugins 目录与 DLL/EXE
+          # 同级，因此从 MSYS2 的 lib/vlc/plugins 复制完整目录（含 plugins.dat），
+          # 并把每个插件 DLL 作为递归扫描根收集其 FFmpeg 等传递依赖。
+          vlc_plugins_src="${mingw_prefix}/lib/vlc/plugins"
+          if [ ! -d "${vlc_plugins_src}" ]; then
+            echo "::error::LibVLC plugins directory was not installed: ${vlc_plugins_src}"
+            exit 1
+          fi
+          mkdir -p "${stage}/plugins"
+          cp -aL "${vlc_plugins_src}/." "${stage}/plugins/"
+          while IFS= read -r -d '' plugin; do
+            rel="${plugin#"${stage}/"}"
+            queue+=("${rel}")
+            echo "collect (LibVLC plugin): ${rel}"
+          done < <(find "${stage}/plugins" -type f -iname '*.dll' -print0)
+
+          # Lua 播放列表解析器和服务发现脚本不参与 PE 依赖扫描，但属于 VLC 的
+          # 完整运行时资源；存在时按 MSYS2 的 share/vlc 布局一并发布。
+          if [ -d "${mingw_prefix}/share/vlc" ]; then
+            mkdir -p "${stage}/share"
+            cp -aL "${mingw_prefix}/share/vlc" "${stage}/share/"
+          fi
+
+          declare -A seen=()
+          while ((${#queue[@]} > 0)); do
+            current="${queue[0]}"
+            queue=("${queue[@]:1}")
+            while IFS= read -r dll; do
+              [ -n "$dll" ] || continue
+              key="$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')"
+              [ -z "${seen[$key]:-}" ] || continue
+              seen[$key]=1
+              found=""
+              alias_src=""
+              for dir in "${search_dirs[@]}"; do
+                [ -n "$dir" ] || continue
+                cand="$(find "$dir" -maxdepth 1 -iname "$dll" -print -quit)"
+                if [ -n "$cand" ]; then
+                  found="$cand"
+                  break
+                fi
+                if [ -z "$alias_src" ]; then
+                  acand="$(find "$dir" -maxdepth 1 -iname "$(variant_of "$dll")" -print -quit)"
+                  if [ -n "$acand" ]; then
+                    alias_src="$acand"
+                  fi
+                fi
+              done
+              if [ -z "$found" ] && [ -n "$alias_src" ]; then
+                # PE 只加载它 import 表里记录的名字，按该名字落盘即可。
+                cp -L "$alias_src" "${stage}/${dll}"
+                found="${stage}/${dll}"
+                echo "collect (alias): ${dll} <- ${alias_src}"
+              fi
+              if [ -n "$found" ]; then
+                echo "collect: ${dll} <- ${found}"
+                if [ "$found" != "${stage}/${dll}" ]; then
+                  cp -L "$found" "${stage}/${dll}"
+                fi
+                queue+=("${dll}")
+              else
+                system_dll="$(find "${system_dir}" -maxdepth 1 -iname "$dll" -print -quit)"
+                case "$(printf '%s' "$dll" | tr '[:upper:]' '[:lower:]')" in
+                  api-ms-win-*.dll|ext-ms-win-*.dll)
+                    echo "skip (Windows API set): ${dll}"
+                    ;;
+                  *)
+                    if [ -n "${system_dll}" ]; then
+                      echo "skip (Windows system): ${dll}"
+                    else
+                      echo "::error::Non-system runtime DLL ${dll} required by ${current} was not found."
+                      exit 1
+                    fi
+                    ;;
+                esac
+              fi
+            done < <(needed "${stage}/${current}")
+          done
+
+          # 关键库校验：任一缺失直接失败，避免打出跑不起来的 zip。
+          # SDL3/SDL3_ttf 磁盘与 PE import 表的名字可能是带/不带 lib 前缀的任一形态，
+          # 收集时已按 PE 记录名落盘（必要时经变体别名），这里按"对内任一存在"判定。
+          for required in libcangjie-runtime.dll librocksdb.dll libvlc.dll libvlccore.dll; do
+            if ! ls "${stage}"/"${required}" >/dev/null 2>&1; then
+              echo "::error::Required runtime DLL ${required} was not collected."
+              exit 1
+            fi
+          done
+          # Reader 依赖完整的 libvips 可选后端；任一插件、直接运行库或 ImageMagick
+          # coder 集缺失都中止打包，避免发布启动时才出现 GModule 警告。
+          for module in vips-heif.dll vips-jxl.dll vips-magick.dll vips-openslide.dll vips-poppler.dll; do
+            if ! ls "${stage}"/lib/vips-modules-*/"${module}" >/dev/null 2>&1; then
+              echo "::error::Required libvips module ${module} was not collected."
+              exit 1
+            fi
+          done
+          for runtime_pattern in 'libheif*.dll' 'libjxl.dll' 'libMagickCore*.dll' 'libopenslide*.dll' \
+            'libpoppler-glib*.dll' 'libcgraph*.dll' 'libgvc*.dll' 'libgvplugin_core*.dll'; do
+            if ! compgen -G "${stage}/${runtime_pattern}" >/dev/null; then
+              echo "::error::Required image runtime ${runtime_pattern} was not collected."
+              exit 1
+            fi
+          done
+          if ! find "${stage}"/lib/ImageMagick-*/modules-*/coders -maxdepth 1 -type f -name '*.dll' -print -quit \
+            | grep -q .; then
+            echo "::error::ImageMagick coder modules were not collected."
+            exit 1
+          fi
+          # 音视频播放链路的关键插件类别必须全部存在。插件的具体文件名会随 VLC
+          # 版本变化，因此按功能目录校验，而不硬编码版本相关的模块名。
+          if [ ! -f "${stage}/plugins/plugins.dat" ]; then
+            echo "::error::LibVLC plugin cache plugins.dat was not collected."
+            exit 1
+          fi
+          for category in access audio_output codec demux video_output; do
+            if ! find "${stage}/plugins/${category}" -maxdepth 1 -type f -iname '*.dll' -print -quit \
+              | grep -q .; then
+              echo "::error::LibVLC ${category} plugins were not collected."
+              exit 1
+            fi
+          done
+          for pair in "libSDL3.dll SDL3.dll" "libSDL3_ttf.dll SDL3_ttf.dll"; do
+            present=0
+            for name in $pair; do
+              if ls "${stage}"/"${name}" >/dev/null 2>&1; then
+                present=1
+                break
+              fi
+            done
+            if [ "$present" -eq 0 ]; then
+              echo "::error::Required runtime DLL (${pair}) was not collected."
+              exit 1
+            fi
+          done
+          ls -l "${stage}"
+
+      - name: Package Windows zip
+        run: |
+          $ErrorActionPreference = "Stop"
+          Compress-Archive -Path "client-next/dist/windows/lanlu-client-next" `
+            -DestinationPath "client-next/dist/lanlu-client-next-windows-x86_64.zip" -Force
+
+      - name: Upload Windows zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-windows-zip-${{ github.sha }}
+          path: client-next/dist/lanlu-client-next-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-next-windows-${{ github.sha }}
+          path: |
+            client-next/target/release/bin/main.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  nightly-release:
+    name: Publish nightly release
+    needs: [build-test, windows-build]
+    # push/手动触发时发布；PR 没有写权限，只构建不发布。
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux deb
+        uses: actions/download-artifact@v4
+        with:
+          name: client-next-linux-deb-${{ github.sha }}
+          path: release-assets
+
+      - name: Download Windows zip
+        uses: actions/download-artifact@v4
+        with:
+          name: client-next-windows-zip-${{ github.sha }}
+          path: release-assets
+
+      - name: Publish to nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 该 job 只下载产物、不 checkout 源码，工作目录不是 git 仓库；
+          # gh 默认靠 git remote 推断仓库，非 git 目录会报 "failed to run git"，
+          # 故用 GH_REPO 显式指定目标仓库。
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ls -l release-assets
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly \
+              --title "Nightly" \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --notes "client-next 最新构建产物：Linux 为 .deb（amd64），Windows 为 zip。每次构建覆盖同名附件。"
+          fi
+          gh release upload nightly release-assets/* --clobber
+          gh release edit nightly --notes "构建于 $(date -u '+%Y-%m-%d %H:%M UTC')，commit ${GITHUB_SHA:0:12}。Linux 为 .deb（amd64），Windows 为 zip。"

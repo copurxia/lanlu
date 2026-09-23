@@ -8,9 +8,8 @@ import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, 
 import {useI18n} from '../i18n';
 import {useAuth} from '../auth/AuthContext';
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
-import {createCategory, deleteCategory, scanCategory, scanMediaLibrary, updateCategory, adminListPlugins} from '../api/admin';
+import {createCategory, deleteCategory, scanCategory, scanMediaLibrary, updateCategory, adminListPlugins, adminFetchCategories} from '../api/admin';
 import type {Plugin} from '../api/admin';
-import {fetchCategories} from '../api/lanlu';
 import type {Category} from '../types/api';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
@@ -50,7 +49,7 @@ export function CategorySettingsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchCategories();
+      const data = await adminFetchCategories();
       setCategories(data);
     } catch (error) {
       Alert.alert(t('common.error'), extractApiError(error));

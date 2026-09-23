@@ -1,0 +1,21 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "qwest"
+  description = "Reqwest-style HTTP/1.1 client for Cangjie: pooled connections, streaming bodies, native timeouts"
+  version = "0.1.0"
+  target-dir = ""
+  src-dir = "src"
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+
+# stdx（net.tls / encoding.url）以二进制依赖方式引入，与 client-next/服务端 cjpm.toml 同款。
+[target.x86_64-unknown-linux-gnu.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+[target.x86_64-w64-mingw32.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH}" ]

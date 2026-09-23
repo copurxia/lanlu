@@ -526,12 +526,7 @@ export async function fetchSmartFilters(): Promise<SmartFilter[]> {
   return Array.isArray(items) ? items.filter(item => item.enabled !== false) : [];
 }
 
-export async function fetchCategories(): Promise<Category[]> {
-  const response = await apiClient.get<{
-    success?: number;
-    data?: Category | Category[];
-  }>('/api/categories');
-  const data = response.data?.data;
+export function normalizeCategories(data?: Category | Category[]): Category[] {
   return (Array.isArray(data) ? data : data ? [data] : [])
     .map(category => ({
       ...category,
@@ -546,6 +541,14 @@ export async function fetchCategories(): Promise<Category[]> {
       }
       return a.name.localeCompare(b.name);
     });
+}
+
+export async function fetchCategories(): Promise<Category[]> {
+  const response = await apiClient.get<{
+    success?: number;
+    data?: Category | Category[];
+  }>('/api/categories');
+  return normalizeCategories(response.data?.data);
 }
 
 export async function fetchDiscover(count = 12): Promise<MediaItem[]> {

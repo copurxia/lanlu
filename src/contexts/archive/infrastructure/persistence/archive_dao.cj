@@ -978,7 +978,7 @@ public class ArchiveDao {
                     var orderJoinPrefix: ArrayList<String> = ArrayList<String>()
                     if (!hasRelevance) {
                         // 无 relevance：保持原查询形态
-                        sql = "SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags FROM archive_metadata_search"
+                        sql = "SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, archive_metadata_search.category_id FROM archive_metadata_search"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
                             sql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
                             sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_metadata_search.id"
@@ -989,7 +989,7 @@ public class ArchiveDao {
                         }
                     } else {
                         // 有 relevance：在 base CTE 里计算 relevance_score，并在外层应用阈值过滤
-                        sql = "WITH base AS (SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, (" + relevanceExpr + ") AS relevance_score"
+                        sql = "WITH base AS (SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, archive_metadata_search.category_id, (" + relevanceExpr + ") AS relevance_score"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
                             sql += ", ta_order.sort_order AS tank_sort_order"
                         }
@@ -1002,7 +1002,7 @@ public class ArchiveDao {
                         if (baseWhereClause.size > 0) {
                             sql += " WHERE " + baseWhereClause
                         }
-                        sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, tags FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
+                        sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, tags, category_id FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
                     }
 
                     // 处理排序参数
@@ -1044,6 +1044,9 @@ public class ArchiveDao {
                         } else {
                             sql += " ORDER BY created_at DESC"
                         }
+                    } else if (sortby == "id") {
+                        let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                        sql += " ORDER BY id ${orderDirection}"
                     } else {
                         // 默认按标题排序
                         let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
@@ -1086,6 +1089,7 @@ public class ArchiveDao {
                         archive.pagecount = row.getOrNullInt32(12) ?? 0
                         archive.archive_type = row.getOrNullText(13) ?? "archive"
                         archive.tags = row.getOrNullText(14) ?? ""
+                        archive.category_id = row.getOrNullInt64(15) ?? 0
                         archive
                     })
                     for (a in rows) {
@@ -2523,14 +2527,6 @@ public class ArchiveDao {
                 getLogger("archive_dao").error("无法连接到数据库")
         }
         return result
-    }
-
-    public static func getPageMetadata(arcid: String): Array<PageMetadataData> {
-        let normalizedId = arcid.trimAscii()
-        if (normalizedId.size == 0) {
-            return Array<PageMetadataData>()
-        }
-        return MetadataDao.listPageMetadata(normalizedId)
     }
 
     public static func getPageThumbAssetId(arcid: String, pageNumber: Int32): Int64 {

@@ -1,0 +1,12 @@
+[package]
+cjc-version = "1.1.0"
+name = "libavformat_ffi"
+version = "0.1.0"
+description = "Safe subtitle probing and extraction wrapper for libavformat/libavcodec"
+output-type = "static"
+link-option = "-lavformat -lavcodec -lavutil"
+
+[dependencies]
+
+[ffi.c]
+lanlu_avformat_bridge = { path = "./native" }

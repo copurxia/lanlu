@@ -1,0 +1,13 @@
+[package]
+name = "lanlu-fontkit-native"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "fontkit_native"
+crate-type = ["staticlib"]
+
+[dependencies]
+font-kit = "=0.14.3"
+

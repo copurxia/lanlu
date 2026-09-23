@@ -1,0 +1,2447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu 设置页重设计 · 交互原型（含 Web 前端设置区）</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-card: #131316;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;
+    --accent-soft: rgba(232,176,75,.16);
+    --danger: #e05d5d;
+    --success: #4caf7d;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+  button { font-family: inherit; color: var(--text); background: transparent; border: none; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  #window {
+    width: min(1320px, 96vw); height: min(860px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏（全局，与首页一致） ============ */
+  #topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-capsule); backdrop-filter: blur(18px); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; margin-right: 6px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .brand b { font-size: 15px; letter-spacing: .02em; }
+  /* 搜索框固定宽度、在中间区域居中（左右 margin auto 吸收剩余空间） */
+  .search-shell { flex: 0 1 460px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 12px; color: var(--text-dim); font-size: 13px; cursor: text; transition: .15s; }
+  .search-shell:hover { border-color: rgba(232,176,75,.4); }
+  .kbd { font-size: 10.5px; border: 1px solid var(--border); border-radius: 5px;
+      padding: 1px 6px; color: var(--text-dim); }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      color: var(--text-dim); transition: .15s; flex: none; }
+  .icon-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+  .nav-pill { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; gap: 2px; }
+  .nav-pill button { padding: 6px 14px; font-size: 12.5px; border-radius: 999px; color: var(--text-dim); }
+  .nav-pill button.on { background: var(--accent-soft); color: var(--accent); }
+  .user-chip { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+      font-size: 12px; color: var(--text-dim); }
+  .avatar { width: 24px; height: 24px; border-radius: 50%;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55);
+      display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; }
+
+  /* ============ 窗口控制 ============ */
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 设置页骨架：左分类导航 + 右内容 ============ */
+  #settings-stage { flex: 1; display: flex; overflow: hidden; }
+
+  /* 左侧分类导航（复用首页侧栏语言） */
+  #set-nav { width: 224px; flex: none; border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  #set-nav::-webkit-scrollbar { width: 5px; }
+  #set-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .nav-title { font-size: 15px; font-weight: 700; padding: 6px 10px 12px; letter-spacing: .02em; }
+  .side-sec { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; padding: 12px 10px 6px; }
+  .side-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+      border-radius: 9px; font-size: 13px; color: var(--text-dim); cursor: pointer; transition: .13s; }
+  .side-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .side-item.on { background: var(--accent-soft); color: var(--accent); }
+  .side-item .ico { width: 18px; text-align: center; flex: none; }
+  .side-item .cnt { margin-left: auto; font-size: 11px; opacity: .7; }
+  .nav-foot { margin-top: auto; padding: 14px 10px 4px; font-size: 11px;
+      color: var(--text-dim); line-height: 1.7; }
+
+  /* 右侧内容 */
+  #set-main { flex: 1; overflow-y: auto; padding: 22px 26px 48px; scroll-behavior: smooth; }
+  #set-main::-webkit-scrollbar { width: 6px; }
+  #set-main::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .set-page { display: none; max-width: 640px; }
+  .set-page.wide { max-width: 900px; }
+  .set-page.on { display: block; animation: fadeUp .3s ease both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } }
+  .set-page h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .set-page .page-sub { font-size: 12.5px; color: var(--text-dim); margin-bottom: 20px; }
+
+  /* ============ 卡片与设置行 ============ */
+  .s-card { background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+  .s-card-pad { padding: 16px 18px; }
+  .s-card h3 { font-size: 13.5px; font-weight: 600; }
+  .card-head { padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
+  .card-head .sub { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+
+  /* 设置行：图标 + 文案 + 右侧控件 */
+  .s-row { display: flex; align-items: center; gap: 12px; padding: 13px 18px;
+      border-bottom: 1px solid rgba(255,255,255,.04); }
+  #window.light .s-row { border-bottom-color: rgba(0,0,0,.05); }
+  .s-row:last-child { border-bottom: none; }
+  .s-row .row-ico { width: 30px; height: 30px; flex: none; border-radius: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .s-row .row-main { flex: 1; min-width: 0; }
+  .s-row .row-label { font-size: 13.5px; }
+  .s-row .row-desc { font-size: 11.5px; color: var(--text-dim); margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-row.clickable { cursor: pointer; transition: .13s; }
+  .s-row.clickable:hover { background: rgba(255,255,255,.03); }
+  .s-row .chev { color: var(--text-dim); font-size: 13px; }
+  .s-row.danger .row-label, .s-row.danger .chev { color: var(--danger); }
+  .s-row.danger .row-ico { color: var(--danger); border-color: rgba(224,93,93,.3); }
+
+  /* 分段选择器（主题等） */
+  .seg { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 9px; padding: 2px; gap: 2px; }
+  .seg button { padding: 5px 13px; font-size: 12px; border-radius: 7px; color: var(--text-dim); transition: .13s; }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); }
+
+  /* 单选列表（语言） */
+  .radio-dot { width: 16px; height: 16px; border-radius: 50%; flex: none;
+      border: 1.5px solid var(--text-dim); position: relative; transition: .13s; }
+  .s-row.sel .radio-dot { border-color: var(--accent); }
+  .s-row.sel .radio-dot::after { content: ""; position: absolute; inset: 3px;
+      border-radius: 50%; background: var(--accent); }
+
+  /* 开关 */
+  .switch { width: 38px; height: 22px; border-radius: 999px; flex: none;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      position: relative; transition: .15s; cursor: pointer; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px;
+      width: 16px; height: 16px; border-radius: 50%; background: var(--text-dim); transition: .15s; }
+  .switch.on { background: var(--accent-soft); border-color: rgba(232,176,75,.4); }
+  .switch.on::after { left: 18px; background: var(--accent); }
+
+  /* 按钮 */
+  .btn-primary { background: var(--accent); color: #1a1206; font-weight: 600; font-size: 12.5px;
+      padding: 8px 18px; border-radius: 9px; transition: .15s;
+      display: inline-flex; align-items: center; gap: 7px; }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { padding: 8px 16px; border-radius: 9px; font-size: 12.5px; font-weight: 600;
+      border: 1px solid var(--border); color: var(--text-dim);
+      display: inline-flex; align-items: center; gap: 7px; transition: .15s; }
+  .btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .btn-danger { padding: 8px 16px; border-radius: 9px; font-size: 12.5px; font-weight: 600;
+      border: 1px solid rgba(224,93,93,.35); color: var(--danger);
+      background: rgba(224,93,93,.08); transition: .15s; }
+  .btn-danger:hover { background: rgba(224,93,93,.16); }
+  .btn-sm { padding: 5px 12px; font-size: 11.5px; }
+  .spinner { width: 12px; height: 12px; border-radius: 50%;
+      border: 2px solid rgba(26,18,6,.3); border-top-color: #1a1206;
+      animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 概览：账号卡 */
+  .acct-card { display: flex; align-items: center; gap: 14px; }
+  .acct-avatar { width: 52px; height: 52px; flex: none; border-radius: 14px;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55);
+      display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; }
+  .acct-main { flex: 1; min-width: 0; }
+  .acct-name { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 10.5px; padding: 2px 9px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent); font-weight: 600;
+      display: inline-flex; align-items: center; gap: 4px; }
+  .acct-sub { font-size: 12px; color: var(--accent); margin-top: 3px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acct-actions { display: flex; gap: 8px; flex: none; }
+
+  /* 徽章变体 */
+  .badge.b-blue   { background: rgba(80,140,220,.16);  color: #6ea8e8; }
+  .badge.b-green  { background: rgba(76,175,125,.16);  color: #4caf7d; }
+  .badge.b-red    { background: rgba(224,93,93,.16);   color: #e05d5d; }
+  .badge.b-orange { background: rgba(224,152,60,.16);  color: #e0983c; }
+  .badge.b-yellow { background: rgba(224,200,60,.15);  color: #e0c83c; }
+  .badge.b-purple { background: rgba(150,110,220,.16); color: #9a7ae0; }
+  .badge.b-cyan   { background: rgba(70,170,190,.16);  color: #4fb3c7; }
+  .badge.b-gray   { background: rgba(255,255,255,.08); color: var(--text-dim); }
+  .badge.b-outline{ background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+  #window.light .badge.b-gray { background: rgba(0,0,0,.06); }
+
+  /* 服务器信息列表 */
+  .info-row { display: flex; font-size: 12.5px; padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,.04); }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .k { width: 90px; flex: none; color: var(--text-dim); }
+  .info-row .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srv-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--success); margin-right: 6px; }
+  .kv-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 26px; }
+
+  /* 缓存用量条 */
+  .cache-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1);
+      margin: 10px 0 6px; overflow: hidden; }
+  .cache-bar i { display: block; height: 100%; border-radius: 3px; width: 34%;
+      background: linear-gradient(90deg, var(--accent), #b0782a); transition: width .4s ease; }
+  .cache-meta { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); }
+
+  /* 关于页 */
+  .about-hero { display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: 34px 18px 26px; text-align: center; }
+  .about-hero .mark { width: 64px; height: 64px; border-radius: 18px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 32px;
+      box-shadow: 0 12px 32px rgba(232,176,75,.25); }
+  .about-hero h2 { font-size: 17px; }
+  .about-hero .ver { font-size: 12px; color: var(--text-dim); }
+  .link-row { color: var(--accent); cursor: pointer; }
+  .link-row:hover .row-label { text-decoration: underline; }
+
+  /* ============ 表单控件（Web 前端设置区新增） ============ */
+  .s-input, .s-select, .s-textarea {
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px;
+      padding: 8px 12px; font-size: 12.5px; color: var(--text); font-family: inherit;
+      outline: none; transition: border-color .15s; width: 100%; }
+  .s-input:focus, .s-select:focus, .s-textarea:focus { border-color: rgba(232,176,75,.5); }
+  .s-input::placeholder, .s-textarea::placeholder { color: var(--text-dim); opacity: .65; }
+  .s-input, .s-textarea { user-select: text; }
+  .s-textarea { resize: vertical; min-height: 54px; line-height: 1.6; }
+  .s-select { appearance: none; padding-right: 28px; cursor: pointer; }
+  .s-select option { background: #1a1a1e; color: #e8e8ea; }
+  .sel-wrap { position: relative; }
+  .sel-wrap::after { content: "▾"; position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%); color: var(--text-dim); font-size: 11px; pointer-events: none; }
+  input[type=range], input[type=checkbox] { accent-color: var(--accent); }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+  .form-item { display: flex; flex-direction: column; gap: 6px; }
+  .form-item.full { grid-column: 1 / -1; }
+  .form-item.row-between { flex-direction: row; align-items: center; gap: 10px; }
+  .form-item.row-between .f-label { flex: 1; }
+  .f-label { font-size: 12px; color: var(--text-dim); }
+  .f-hint { font-size: 11px; color: var(--text-dim); opacity: .8; line-height: 1.5; }
+
+  /* 工具栏 */
+  .toolbar { display: flex; gap: 10px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+  .toolbar .s-input { flex: 1; min-width: 150px; width: auto; }
+  .toolbar .spacer { flex: 1; }
+
+  /* 页签（筛选/分类 Tabs） */
+  .ftabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .ftabs button { padding: 6px 13px; font-size: 12px; border-radius: 999px;
+      color: var(--text-dim); border: 1px solid var(--border); background: var(--bg-card); transition: .13s;
+      display: inline-flex; align-items: center; gap: 6px; }
+  .ftabs button:hover { color: var(--text); }
+  .ftabs button.on { background: var(--accent-soft); color: var(--accent); border-color: rgba(232,176,75,.4); }
+
+  /* 提示框 */
+  .notice { border: 1px solid rgba(232,176,75,.3); background: var(--accent-soft);
+      border-radius: 10px; padding: 10px 14px; font-size: 12px; color: var(--accent);
+      margin-bottom: 14px; line-height: 1.7; }
+
+  /* 统计卡片（概览） */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .stat-card .st-ico { width: 38px; height: 38px; flex: none; border-radius: 10px;
+      background: var(--bg-elev); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-size: 16px; color: var(--accent); }
+  .stat-card .st-num { font-size: 20px; font-weight: 700; }
+  .stat-card .st-label { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+
+  /* 卡片网格（分类 / 插件） */
+  .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .m-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; display: flex; flex-direction: column; }
+  .m-banner { height: 72px; flex: none; }
+  .m-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 9px; flex: 1; }
+  .m-title { display: flex; align-items: center; gap: 8px; }
+  .m-title b { font-size: 14px; }
+  .m-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.6;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .m-actions { display: flex; gap: 8px; margin-top: auto; align-items: center; }
+
+  /* 小图标按钮 */
+  .ico-mini { width: 30px; height: 30px; flex: none; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 13px;
+      color: var(--text-dim); border: 1px solid var(--border); background: var(--bg-elev); transition: .13s; }
+  .ico-mini:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .ico-mini.danger { color: var(--danger); border-color: rgba(224,93,93,.3); }
+  .ico-mini.danger:hover { background: rgba(224,93,93,.12); }
+  .ico-mini.blue { color: #6ea8e8; border-color: rgba(110,168,232,.3); }
+  .ico-mini.blue:hover { background: rgba(110,168,232,.12); }
+
+  /* 进度条 */
+  .pbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; flex: 1; }
+  .pbar i { display: block; height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, var(--accent), #b0782a); }
+  #window.light .pbar { background: rgba(0,0,0,.08); }
+
+  /* 任务卡片 */
+  .task-card { background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
+  .task-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .task-name { font-size: 13.5px; font-weight: 600; }
+  .mini-log { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px;
+      padding: 9px 12px; font-family: "SF Mono", Consolas, monospace; font-size: 10.5px; line-height: 1.7;
+      color: var(--text-dim); max-height: 92px; overflow-y: auto; user-select: text;
+      white-space: pre-wrap; margin-top: 8px; }
+  .mini-log .lv-err { color: var(--danger); }
+  .time-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; font-size: 11.5px; }
+  .time-grid .k { color: var(--text-dim); font-size: 10.5px; margin-bottom: 2px; }
+  code { font-family: "SF Mono", Consolas, monospace; background: var(--bg-elev);
+      padding: 1px 6px; border-radius: 5px; font-size: 10.5px; }
+
+  /* 分页 */
+  .pager { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+  .pager .pages { display: flex; gap: 4px; align-items: center; }
+  .pager .pages button { min-width: 28px; height: 28px; border-radius: 7px; font-size: 11.5px;
+      color: var(--text-dim); border: 1px solid var(--border); background: var(--bg-card); }
+  .pager .pages button.on { background: var(--accent-soft); color: var(--accent); border-color: rgba(232,176,75,.4); }
+
+  /* 词云 */
+  .cloud { min-height: 280px; display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: center; gap: 10px 18px; padding: 22px 14px; }
+  .cloud span { cursor: pointer; transition: .15s; }
+  .cloud span:hover { color: var(--accent) !important; }
+
+  /* 标签输入（array 参数） */
+  .tagbox { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; }
+  .tagbox input { flex: 1; min-width: 120px; background: transparent; border: none;
+      outline: none; color: var(--text); font-size: 12px; font-family: inherit; user-select: text; }
+  .tagbox .x { cursor: pointer; margin-left: 5px; font-weight: 700; }
+
+  /* 上传区 / 分隔 */
+  .dropzone { border: 1.5px dashed var(--border); border-radius: 10px; padding: 24px 14px;
+      text-align: center; font-size: 12px; color: var(--text-dim); cursor: pointer; transition: .15s; }
+  .dropzone:hover { border-color: rgba(232,176,75,.4); color: var(--text); }
+  .or-sep { display: flex; align-items: center; gap: 10px; color: var(--text-dim);
+      font-size: 11px; margin: 14px 0; }
+  .or-sep::before, .or-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  /* 头像裁剪 / QR */
+  .crop-box { width: 100%; max-width: 230px; aspect-ratio: 1; border-radius: 12px; margin: 0 auto;
+      background: var(--bg-elev); border: 1px dashed var(--border); position: relative; overflow: hidden; }
+  .crop-box .face { position: absolute; inset: 12%;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; font-size: 60px; color: #fff; }
+  .crop-box .ring { position: absolute; inset: 6%; border: 1.5px dashed rgba(255,255,255,.5); border-radius: 50%; }
+  .qr-box { width: 128px; height: 128px; flex: none; background: #fff; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; padding: 9px; }
+
+  /* 常用预设 */
+  .cron-preset { cursor: pointer; padding: 5px 10px; font-size: 11px; transition: .13s; }
+  .cron-preset:hover { color: var(--accent); border-color: rgba(232,176,75,.4); }
+
+  /* 拖拽手柄 */
+  .grip { color: var(--text-dim); cursor: grab; font-size: 13px; flex: none; }
+
+  /* ============ 通用 Modal ============ */
+  .mask { position: absolute; inset: 0; z-index: 40; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(4px); }
+  .mask.show { display: flex; }
+  .mask.top { z-index: 45; }
+  .modal-card { width: 560px; max-width: 92%; max-height: 84%; overflow-y: auto;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px 22px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+  .modal-card.sm { width: 400px; }
+  .modal-card.lg { width: 660px; }
+  .modal-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px; }
+  .log-box { max-height: 300px; overflow-y: auto;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; font-family: "SF Mono", Consolas, monospace;
+      font-size: 11px; line-height: 1.7; color: var(--text-dim); user-select: text; white-space: pre-wrap; }
+  .log-box .lv-warn { color: var(--accent); }
+  .log-box .lv-err { color: var(--danger); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+
+  /* ============ 通用确认框 ============ */
+  .confirm-card { width: 360px; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 24px; text-align: center;
+      box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+  .confirm-card .big { font-size: 30px; margin-bottom: 10px; }
+  .confirm-card h3 { font-size: 15px; margin-bottom: 6px; display: block; }
+  .confirm-card p { font-size: 12.5px; color: var(--text-dim); line-height: 1.7; margin-bottom: 18px; }
+  .confirm-card .row { display: flex; gap: 10px; }
+  .confirm-card .row button { flex: 1; justify-content: center; }
+
+  /* ============ Toast ============ */
+  #toast { position: absolute; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
+      z-index: 50; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 18px; font-size: 12.5px;
+      display: flex; align-items: center; gap: 8px;
+      opacity: 0; pointer-events: none; transition: .25s;
+      box-shadow: 0 12px 32px rgba(0,0,0,.4); }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast .ok { color: var(--success); }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-card: #ffffff;
+    --bg-capsule: rgba(255,255,255,.88);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+  }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .side-item:hover { background: rgba(0,0,0,.05); }
+  #window.light .s-row.clickable:hover { background: rgba(0,0,0,.03); }
+  #window.light .cache-bar { background: rgba(0,0,0,.08); }
+  #window.light .s-select option { background: #fff; color: #1d1d21; }
+  #window.light .crop-box .ring { border-color: rgba(0,0,0,.35); }
+  #window.light .modal-card, #window.light .confirm-card { box-shadow: 0 24px 60px rgba(0,0,0,.15); }
+</style>
+</head>
+<body>
+
+<div id="window">
+  <!-- 顶栏（与首页一致：品牌 + 搜索 + 设置/主题 + 用户 + 窗口控制） -->
+  <div id="topbar">
+    <div class="brand"><div class="brand-mark">🦌</div><b>Lanlu</b></div>
+    <div class="search-shell"><span>⌕</span><span style="flex:1">搜索标题、标签、艺术家…</span></div>
+    <div class="nav-pill"><button>首页</button><button>随机</button><button>来源</button></div>
+    <button class="icon-btn active" title="设置">⚙</button>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <span class="win-sep"></span>
+    <div class="user-chip"><div class="avatar">A</div><span>admin</span></div>
+    <span class="win-sep"></span>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <div id="settings-stage">
+    <!-- 左：分类导航（客户端 + Web 前端设置区全量入口） -->
+    <aside id="set-nav">
+      <div class="nav-title">设置</div>
+      <div class="side-item on" data-page="overview"><span class="ico">👤</span>概览</div>
+      <div class="side-item" data-page="auth"><span class="ico">🔑</span>账户安全</div>
+      <div class="side-sec">客户端</div>
+      <div class="side-item" data-page="appearance"><span class="ico">◐</span>外观</div>
+      <div class="side-item" data-page="language"><span class="ico">🌐</span>语言</div>
+      <div class="side-item" data-page="cache"><span class="ico">🗄</span>缓存</div>
+      <div class="side-item" data-page="diagnostics"><span class="ico">📄</span>诊断</div>
+      <div class="side-sec">服务器</div>
+      <div class="side-item" data-page="categories"><span class="ico">📂</span>分类管理</div>
+      <div class="side-item" data-page="tags"><span class="ico">🏷</span>标签管理</div>
+      <div class="side-item" data-page="filters"><span class="ico">✦</span>智能分类</div>
+      <div class="side-item" data-page="users"><span class="ico">👥</span>用户管理</div>
+      <div class="side-item" data-page="system"><span class="ico">🖥</span>系统设置</div>
+      <div class="side-item" data-page="tasks"><span class="ico">☰</span>任务记录</div>
+      <div class="side-item" data-page="cron"><span class="ico">🕐</span>任务管理</div>
+      <div class="side-item" data-page="plugins"><span class="ico">📦</span>插件管理</div>
+      <div class="side-item" data-page="stats"><span class="ico">📊</span>统计信息</div>
+      <div class="side-sec">其他</div>
+      <div class="side-item" data-page="about"><span class="ico">ℹ</span>关于</div>
+      <div class="nav-foot">lanlu 桌面客户端<br>v0.1.0 · CangjieGUI</div>
+    </aside>
+
+    <!-- 右：内容页 -->
+    <div id="set-main">
+
+      <!-- ===== 概览（客户端账号卡 + 前端 dashboard） ===== -->
+      <section class="set-page wide on" id="page-overview">
+        <h1>概览</h1>
+        <div class="page-sub">当前账号、服务器连接与阅读统计</div>
+
+        <div class="s-card s-card-pad acct-card">
+          <div class="acct-avatar">A</div>
+          <div class="acct-main">
+            <div class="acct-name">admin <span class="badge">管理员</span></div>
+            <div class="acct-sub">家里 NAS · https://lanlu.home.lan:8082</div>
+          </div>
+          <div class="acct-actions">
+            <button class="btn-ghost" id="btn-switch-srv">⇄ 切换服务器</button>
+            <button class="btn-danger" data-confirm="👋|退出登录？|将清除该服务器在本机保存的会话，\n服务器与缓存目录会保留。|已退出登录">退出登录</button>
+          </div>
+        </div>
+
+        <div class="s-card s-card-pad">
+          <h3 style="margin-bottom:8px">服务器</h3>
+          <div class="info-row"><span class="k">状态</span><span class="v"><span class="srv-dot"></span>已连接</span></div>
+          <div class="info-row"><span class="k">名称</span><span class="v">兰鹿</span></div>
+          <div class="info-row"><span class="k">版本</span><span class="v">1.3.2 (REI-AYANAMI)</span></div>
+          <div class="info-row"><span class="k">档案数</span><span class="v">1,286 个档案</span></div>
+          <div class="info-row"><span class="k">地址</span><span class="v">https://lanlu.home.lan:8082</span></div>
+        </div>
+
+        <!-- 前端 dashboard：统计卡片 -->
+        <div class="stat-grid">
+          <div class="stat-card"><div class="st-ico">♥</div><div><div class="st-num">328</div><div class="st-label">收藏数量</div></div></div>
+          <div class="stat-card"><div class="st-ico">📖</div><div><div class="st-num">542</div><div class="st-label">已读档案</div></div></div>
+          <div class="stat-card"><div class="st-ico">📄</div><div><div class="st-num">18,964</div><div class="st-label">总阅读页数</div></div></div>
+          <div class="stat-card"><div class="st-ico">🗄</div><div><div class="st-num">1,286</div><div class="st-label">档案总数</div></div></div>
+        </div>
+
+        <!-- 阅读趋势 -->
+        <div class="s-card s-card-pad">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <h3>📈 阅读趋势</h3>
+            <span style="font-size:11px;color:var(--text-dim)">最近 30 天 · 总阅读: 412 · 平均: 13.7</span>
+          </div>
+          <svg id="trend-svg" viewBox="0 0 560 170" style="width:100%;height:170px;display:block"></svg>
+          <div style="display:flex;gap:18px;font-size:11px;color:var(--text-dim);margin-top:4px">
+            <span>最活跃日: 7/12</span><span>有阅读的天数: 21/30</span><span>Max: 38</span>
+          </div>
+        </div>
+
+        <!-- 最近活动 -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div class="s-card" style="margin-bottom:0">
+            <div class="card-head"><h3>📖 最近阅读</h3></div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#4a5a7a,#2b2b3a)"></div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">(C105) [Starlight] Summer Days</div>
+                <div class="row-desc">320 页 · 已读 128 页</div>
+              </div>
+            </div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#7a5a4a,#3a2b23)"></div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[Alpha] Illustration Works 2025</div>
+                <div class="row-desc">64 页 · 已读 64 页</div>
+              </div>
+            </div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#4a7a5e,#23332a);display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(255,255,255,.6)">无封面</div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">週刊少年ジャンプ 2025年29号</div>
+                <div class="row-desc">486 页 · 已读 37 页</div>
+              </div>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:0">
+            <div class="card-head"><h3>♥ 最近收藏</h3></div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#7a4a6e,#332333)"></div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[Studio Nekome] 画集：青の記憶</div>
+                <div class="row-desc">128 页 · 已读 0 页</div>
+              </div>
+            </div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#5e6e3a,#2a2f23)"></div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">(C104) [Lunaria] 夜桜日和</div>
+                <div class="row-desc">24 页 · 已读 24 页</div>
+              </div>
+            </div>
+            <div class="s-row">
+              <div style="width:36px;height:48px;flex:none;border-radius:6px;background:linear-gradient(135deg,#3a6e6e,#233333)"></div>
+              <div class="row-main">
+                <div class="row-label" style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[Beta] Character Design Notes</div>
+                <div class="row-desc">96 页 · 已读 12 页</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 账户安全（前端 /settings/auth） ===== -->
+      <section class="set-page wide" id="page-auth">
+        <h1>账户安全</h1>
+        <div class="page-sub">管理您的账户信息、密码和登录设备</div>
+
+        <!-- 当前用户 -->
+        <div class="s-card s-card-pad acct-card">
+          <div class="acct-avatar">A</div>
+          <div class="acct-main">
+            <div class="acct-name">admin <span class="badge b-gray">当前用户</span> <span class="badge">管理员</span></div>
+            <div class="acct-sub" style="color:var(--text-dim)">ID: 1 • avatar #a8f3c1</div>
+          </div>
+          <div class="acct-actions">
+            <button class="btn-ghost" data-open-modal="modal-avatar">更换头像</button>
+            <button class="btn-ghost" data-confirm="👋|确认退出当前设备？|退出后需要重新登录才能访问。|已登出">登出</button>
+          </div>
+        </div>
+
+        <!-- 修改凭据 -->
+        <div class="s-card s-card-pad">
+          <h3 style="margin-bottom:4px">修改凭据</h3>
+          <div class="page-sub" style="margin-bottom:14px">修改您的用户名和密码</div>
+          <div class="form-grid">
+            <div class="form-item full"><span class="f-label">用户名</span><input class="s-input" value="admin"></div>
+            <div class="form-item"><span class="f-label">新密码</span><input class="s-input" type="password" placeholder="请输入新密码（至少6位）"></div>
+            <div class="form-item"><span class="f-label">确认密码</span><input class="s-input" type="password" placeholder="请再次输入新密码"></div>
+          </div>
+          <div style="margin-top:14px"><button class="btn-primary" data-toast="凭据已保存">保 存</button></div>
+        </div>
+
+        <!-- 双重验证 -->
+        <div class="s-card">
+          <div class="card-head"><h3>🛡 双重验证</h3><div class="sub">为账号密码登录增加认证器动态验证码保护</div></div>
+          <div id="totp-on">
+            <div class="s-row">
+              <div class="row-ico" style="color:var(--success)">✓</div>
+              <div class="row-main">
+                <div class="row-label">双重验证已启用</div>
+                <div class="row-desc">认证器应用 · 创建于 2026-03-18 · 未使用恢复码数量: 8</div>
+              </div>
+              <button class="btn-ghost btn-sm" data-toast="已刷新">刷新</button>
+            </div>
+            <div class="s-row">
+              <div class="row-ico">🔐</div>
+              <div class="row-main">
+                <div class="row-label">恢复码</div>
+                <div class="row-desc">每个恢复码只能使用一次，请妥善保存</div>
+              </div>
+              <button class="btn-ghost btn-sm" data-confirm="🔐|重新生成恢复码？|重新生成后，旧恢复码将全部失效，请妥善保存新的恢复码。|新的恢复码已生成">重新生成恢复码</button>
+            </div>
+            <div class="s-row danger">
+              <div class="row-ico">✕</div>
+              <div class="row-main"><div class="row-label">关闭双重验证</div></div>
+              <button class="btn-danger btn-sm" data-after="totp-off" data-confirm="⚠|关闭双重验证？|关闭后账号将仅受密码保护，安全性会降低。|双重验证已关闭">关闭双重验证</button>
+            </div>
+          </div>
+          <div id="totp-off" style="display:none">
+            <div class="s-row">
+              <div class="row-ico">🛡</div>
+              <div class="row-main">
+                <div class="row-label">双重验证未启用</div>
+                <div class="row-desc">使用 Google Authenticator、1Password、Aegis 等支持 TOTP 的应用扫码绑定</div>
+              </div>
+            </div>
+            <div class="s-row">
+              <div class="row-ico">📱</div>
+              <div class="row-main"><div class="row-label">设备名称</div></div>
+              <input class="s-input" style="width:180px;flex:none" placeholder="例如：iPhone 认证器">
+              <button class="btn-primary btn-sm" id="btn-totp-setup">开始设置</button>
+            </div>
+            <div id="totp-enroll" style="display:none;border-top:1px solid var(--border)">
+              <div class="s-card-pad" style="display:flex;gap:18px;align-items:flex-start">
+                <div class="qr-box">
+                  <svg width="110" height="110" viewBox="0 0 21 21">
+                    <rect width="21" height="21" fill="#fff"/>
+                    <rect x="0" y="0" width="7" height="7" fill="#000"/><rect x="1" y="1" width="5" height="5" fill="#fff"/><rect x="2" y="2" width="3" height="3" fill="#000"/>
+                    <rect x="14" y="0" width="7" height="7" fill="#000"/><rect x="15" y="1" width="5" height="5" fill="#fff"/><rect x="16" y="2" width="3" height="3" fill="#000"/>
+                    <rect x="0" y="14" width="7" height="7" fill="#000"/><rect x="1" y="15" width="5" height="5" fill="#fff"/><rect x="2" y="16" width="3" height="3" fill="#000"/>
+                    <rect x="9" y="1" width="1" height="1" fill="#000"/><rect x="11" y="3" width="1" height="1" fill="#000"/><rect x="9" y="5" width="2" height="1" fill="#000"/>
+                    <rect x="12" y="8" width="1" height="1" fill="#000"/><rect x="8" y="9" width="1" height="1" fill="#000"/><rect x="10" y="10" width="2" height="1" fill="#000"/>
+                    <rect x="14" y="9" width="1" height="1" fill="#000"/><rect x="17" y="10" width="1" height="1" fill="#000"/><rect x="15" y="12" width="2" height="1" fill="#000"/>
+                    <rect x="9" y="13" width="1" height="1" fill="#000"/><rect x="11" y="15" width="1" height="1" fill="#000"/><rect x="13" y="14" width="1" height="1" fill="#000"/>
+                    <rect x="16" y="16" width="2" height="1" fill="#000"/><rect x="15" y="18" width="1" height="1" fill="#000"/><rect x="18" y="19" width="1" height="1" fill="#000"/>
+                    <rect x="9" y="18" width="1" height="2" fill="#000"/><rect x="12" y="19" width="1" height="1" fill="#000"/><rect x="19" y="14" width="1" height="1" fill="#000"/>
+                  </svg>
+                </div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;margin-bottom:4px">扫描二维码</div>
+                  <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:10px">使用认证器应用扫描二维码，或手动录入密钥</div>
+                  <div class="f-label">手动录入密钥</div>
+                  <div style="font-family:monospace;font-size:12px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin:5px 0 10px;user-select:text">JBSW Y3DP EHPK 3PXP</div>
+                  <div class="f-label">认证器验证码</div>
+                  <input class="s-input" style="margin:5px 0 10px" placeholder="请输入 6 位验证码" maxlength="6">
+                  <div style="display:flex;gap:8px">
+                    <button class="btn-primary btn-sm" id="btn-totp-enable">启用双重验证</button>
+                    <button class="btn-ghost btn-sm" id="btn-totp-cancel">取 消</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Passkey 管理 -->
+        <div class="s-card">
+          <div class="card-head"><h3>🔑 Passkey 管理</h3><div class="sub">为当前账号注册、查看和删除 Passkey</div></div>
+          <div class="s-row">
+            <div class="row-ico">＋</div>
+            <input class="s-input" placeholder="Passkey 名称，例如：我的工作电脑">
+            <button class="btn-primary btn-sm" style="flex:none" data-toast="已发起 Passkey 注册（演示）">注册 Passkey</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">💻</div>
+            <div class="row-main">
+              <div class="row-label">我的工作电脑 <span class="badge b-outline">ES256</span> <span class="badge b-gray">已验证用户</span></div>
+              <div class="row-desc">credentialId: 9f3a21c7… · 最后活跃: 2026-07-18</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="🗑|确认删除 Passkey|删除后，使用该 Passkey 的设备将无法再用于登录。|Passkey 已删除" data-remove-row>删除</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">📱</div>
+            <div class="row-main">
+              <div class="row-label">iPhone 15 Pro <span class="badge b-outline">ES256</span></div>
+              <div class="row-desc">credentialId: 71bc0e92… · 最后活跃: 2026-07-10</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="🗑|确认删除 Passkey|删除后，使用该 Passkey 的设备将无法再用于登录。|Passkey 已删除" data-remove-row>删除</button>
+          </div>
+        </div>
+
+        <!-- 登录设备管理 -->
+        <div class="s-card">
+          <div class="s-row" style="border-bottom:1px solid var(--border)">
+            <h3 style="flex:1">🖥 登录设备列表</h3>
+            <button class="btn-ghost btn-sm" data-confirm="⚠|确认退出其他设备？|当前设备会保持登录，其他所有登录设备会立即失效。|其他设备已全部退出">退出其他设备</button>
+            <button class="btn-ghost btn-sm" data-toast="已刷新">刷新</button>
+          </div>
+          <div class="s-row">
+            <div class="row-ico">💻</div>
+            <div class="row-main">
+              <div class="row-label">Windows · Chrome 138 <span class="badge b-outline">lanlu_Kd82</span> <span class="badge">当前设备</span></div>
+              <div class="row-desc">创建时间: 2026-07-12 · 最后活跃: 刚刚 · IP: 192.168.1.23</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="👋|确认退出当前设备？|退出后需要重新登录才能访问。|已登出">登出</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">📱</div>
+            <div class="row-main">
+              <div class="row-label">iPhone · Safari <span class="badge b-outline">lanlu_Pq19</span></div>
+              <div class="row-desc">创建时间: 2026-06-28 · 最后活跃: 2026-07-18 22:41 · IP: 112.10.86.4</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="⚠|确认撤销登录会话？|撤销后，该设备需要重新登录才能继续访问。|登录会话已撤销" data-remove-row>撤销登录</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">🖥</div>
+            <div class="row-main">
+              <div class="row-label">NAS 定时脚本 <span class="badge b-outline">lanlu_Zx31</span></div>
+              <div class="row-desc">创建时间: 2026-03-02 · 最后活跃: 2026-07-19 08:00 · IP: 192.168.1.2</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="⚠|确认撤销登录会话？|撤销后，该设备需要重新登录才能继续访问。|登录会话已撤销" data-remove-row>撤销登录</button>
+          </div>
+        </div>
+
+        <!-- API Token 管理 -->
+        <div class="s-card">
+          <div class="card-head"><h3>🎫 API Token 管理</h3><div class="sub">创建用于 API 访问的持久 Token</div></div>
+          <div class="s-row">
+            <div class="row-ico">＋</div>
+            <input class="s-input" placeholder="Token名称，例如: api, script, automation">
+            <button class="btn-primary btn-sm" style="flex:none" data-toast="Token已创建: lanlu_n3Kx9dQp2mR8vL1s（仅显示一次）">创建Token</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">🤖</div>
+            <div class="row-main">
+              <div class="row-label">automation <span class="badge b-outline">lanlu_n3Kx</span></div>
+              <div class="row-desc">用于 n8n 自动归档流程</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="🗑|确认撤销 Token|撤销后，依赖这个 Token 的脚本或第三方客户端将立即失效。|Token 已撤销" data-remove-row>删除</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico">📦</div>
+            <div class="row-main">
+              <div class="row-label">backup-script <span class="badge b-outline">lanlu_X9q1</span></div>
+              <div class="row-desc">每周元数据备份</div>
+            </div>
+            <button class="btn-danger btn-sm" data-confirm="🗑|确认撤销 Token|撤销后，依赖这个 Token 的脚本或第三方客户端将立即失效。|Token 已撤销" data-remove-row>删除</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 外观 ===== -->
+      <section class="set-page" id="page-appearance">
+        <h1>外观</h1>
+        <div class="page-sub">界面主题与显示偏好，即时生效</div>
+
+        <div class="s-card">
+          <div class="s-row">
+            <div class="row-ico">◐</div>
+            <div class="row-main">
+              <div class="row-label">主题</div>
+              <div class="row-desc">跟随系统时按操作系统明暗模式自动切换</div>
+            </div>
+            <div class="seg" id="seg-theme">
+              <button data-theme="dark" class="on">暗色</button>
+              <button data-theme="light">亮色</button>
+              <button data-theme="system">跟随系统</button>
+            </div>
+          </div>
+          <div class="s-row">
+            <div class="row-ico">▦</div>
+            <div class="row-main">
+              <div class="row-label">紧凑书库网格</div>
+              <div class="row-desc">书库卡片使用更小尺寸，一屏显示更多内容</div>
+            </div>
+            <div class="switch" data-switch></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 语言 ===== -->
+      <section class="set-page" id="page-language">
+        <h1>语言</h1>
+        <div class="page-sub">界面显示语言，切换后立即生效</div>
+
+        <div class="s-card" id="lang-list">
+          <div class="s-row clickable sel"><span class="radio-dot"></span>
+            <div class="row-main"><div class="row-label">跟随系统</div></div></div>
+          <div class="s-row clickable"><span class="radio-dot"></span>
+            <div class="row-main"><div class="row-label">简体中文</div></div></div>
+          <div class="s-row clickable"><span class="radio-dot"></span>
+            <div class="row-main"><div class="row-label">English</div></div></div>
+          <div class="s-row clickable"><span class="radio-dot"></span>
+            <div class="row-main"><div class="row-label">日本語</div></div></div>
+        </div>
+      </section>
+
+      <!-- ===== 缓存 ===== -->
+      <section class="set-page" id="page-cache">
+        <h1>缓存</h1>
+        <div class="page-sub">封面与页面图片的本地缓存，按服务器隔离存放</div>
+
+        <div class="s-card s-card-pad">
+          <h3>图片缓存</h3>
+          <div class="cache-bar"><i id="cache-fill"></i></div>
+          <div class="cache-meta"><span id="cache-used">已用 342 MB</span><span>上限 1 GB</span></div>
+          <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+            <button class="btn-primary" id="btn-clear-cache">清理图片缓存</button>
+            <span style="font-size:11.5px; color:var(--text-dim)">仅清除当前服务器的缓存</span>
+          </div>
+        </div>
+
+        <div class="s-card">
+          <div class="s-row">
+            <div class="row-ico">⏱</div>
+            <div class="row-main">
+              <div class="row-label">退出时自动清理</div>
+              <div class="row-desc">超过上限时自动清理最久未访问的缓存</div>
+            </div>
+            <div class="switch on" data-switch></div>
+          </div>
+          <div class="s-row clickable">
+            <div class="row-ico">📁</div>
+            <div class="row-main">
+              <div class="row-label">缓存目录</div>
+              <div class="row-desc">~/.cache/lanlu-client-next/a3f9c1…</div>
+            </div>
+            <span class="chev">›</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 诊断 ===== -->
+      <section class="set-page" id="page-diagnostics">
+        <h1>诊断</h1>
+        <div class="page-sub">本地诊断日志，用于排查连接与渲染问题</div>
+
+        <div class="s-card">
+          <div class="s-row">
+            <div class="row-ico">📄</div>
+            <div class="row-main">
+              <div class="row-label">记录诊断日志</div>
+              <div class="row-desc">日志仅保存在本机，不会自动上传</div>
+            </div>
+            <div class="switch on" data-switch></div>
+          </div>
+          <div class="s-row clickable" id="row-view-log">
+            <div class="row-ico">🔍</div>
+            <div class="row-main">
+              <div class="row-label">查看日志</div>
+              <div class="row-desc">最近 500 条记录</div>
+            </div>
+            <span class="chev">›</span>
+          </div>
+          <div class="s-row clickable" id="row-export-log">
+            <div class="row-ico">⇪</div>
+            <div class="row-main">
+              <div class="row-label">导出日志</div>
+              <div class="row-desc">保存为 .log 文件发送给开发者</div>
+            </div>
+            <span class="chev">›</span>
+          </div>
+          <div class="s-row clickable danger" id="row-clear-log">
+            <div class="row-ico">🗑</div>
+            <div class="row-main"><div class="row-label">清空日志</div></div>
+            <span class="chev">›</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 分类管理（前端 /settings/categories） ===== -->
+      <section class="set-page wide" id="page-categories">
+        <h1>分类管理</h1>
+        <div class="page-sub">管理档案分类和扫描目录</div>
+
+        <div class="toolbar">
+          <input class="s-input" id="cat-search" placeholder="搜索分类...">
+          <div class="seg" id="cat-status">
+            <button class="on" data-f="all">所有状态</button>
+            <button data-f="on">已启用</button>
+            <button data-f="off">已禁用</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn-ghost" data-toast="已提交全库扫描任务，请在任务记录查看进度">▶ 扫描媒体库</button>
+          <button class="btn-primary" data-open-modal="modal-category">＋ 创建分类</button>
+        </div>
+
+        <div class="grid-3" id="cat-grid">
+          <div class="m-card" data-row data-name="同人志" data-enabled="1">
+            <div class="m-banner" style="background:linear-gradient(120deg,#6e4a5e,#2b2b3a)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>同人志</b><span class="badge b-outline">486 个档案</span>
+                <div class="switch on" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">Comic Market 等同人志扫本，按社团与艺术家归档</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" data-toast="已提交分类扫描任务">▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div class="m-card" data-row data-name="漫画" data-enabled="1">
+            <div class="m-banner" style="background:linear-gradient(120deg,#4a5a6e,#23232a)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>漫画</b><span class="badge b-outline">512 个档案</span>
+                <div class="switch on" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">商业漫画与连载单行本</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" data-toast="已提交分类扫描任务">▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div class="m-card" data-row data-name="画集" data-enabled="1">
+            <div class="m-banner" style="background:linear-gradient(120deg,#4a6e5a,#232a25)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>画集</b><span class="badge b-outline">168 个档案</span>
+                <div class="switch on" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">画师个人画集与设定资料集</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" data-toast="已提交分类扫描任务">▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div class="m-card" data-row data-name="小说" data-enabled="1">
+            <div class="m-banner" style="background:linear-gradient(120deg,#6e5a4a,#2a2623)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>小说</b><span class="badge b-outline">89 个档案</span>
+                <div class="switch on" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">轻小说与同人小说文本</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" data-toast="已提交分类扫描任务">▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div class="m-card" data-row data-name="音声" data-enabled="1">
+            <div class="m-banner" style="background:linear-gradient(120deg,#5a4a6e,#26232a)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>音声</b><span class="badge b-outline">45 个档案</span>
+                <div class="switch on" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">ASMR 与广播剧音频归档</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" data-toast="已提交分类扫描任务">▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div class="m-card" data-row data-name="待整理" data-enabled="0">
+            <div class="m-banner" style="background:linear-gradient(120deg,#4a4a4e,#232323)"></div>
+            <div class="m-body">
+              <div class="m-title"><b>待整理</b><span class="badge b-outline">12 个档案</span>
+                <div class="switch" data-switch style="margin-left:auto"></div></div>
+              <div class="m-desc">新入库未分类文件（已禁用，暂不参与扫描）</div>
+              <div class="m-actions">
+                <button class="btn-ghost btn-sm" style="flex:1;justify-content:center" disabled>▶ 扫描</button>
+                <button class="ico-mini" data-open-modal="modal-category" title="编辑">✎</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|确认删除分类|将从数据库中删除该分类及其下所有档案记录（不删除磁盘文件），并清理该分类的缩略图缓存。|分类已删除">🗑</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 标签管理（前端 /settings/tags） ===== -->
+      <section class="set-page wide" id="page-tags">
+        <h1>标签管理</h1>
+        <div class="page-sub">管理系统标签、命名空间和多语言翻译</div>
+
+        <div class="toolbar">
+          <input class="s-input" id="tag-search" placeholder="搜索标签...">
+          <div class="sel-wrap" style="width:160px;flex:none">
+            <select class="s-select" id="tag-ns">
+              <option value="">所有命名空间</option>
+              <option>artist</option><option>female</option><option>male</option>
+              <option>parody</option><option>group</option><option>language</option>
+            </select>
+          </div>
+          <button class="btn-ghost btn-sm" id="tag-clear">清空</button>
+          <span class="spacer"></span>
+          <button class="btn-ghost" data-toast="已导出 tags-export-2026-07-19.json">⇩ 导出</button>
+          <button class="btn-ghost" data-confirm="⇪|确认导入标签|确定要导入标签吗？这将在系统中添加/更新标签。|导入任务 #1285 已启动，请在任务记录查看进度">⇪ 导入</button>
+          <button class="btn-primary" data-open-modal="modal-tag">＋ 创建新标签</button>
+        </div>
+
+        <div id="tag-list">
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="artist alpha 阿尔法" data-ns="artist">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#4a5a7a,#2b2b3a);color:#fff;font-size:16px">a</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">artist</span> alpha</div>
+                <div class="row-desc">中文: 阿尔法 · English: alpha · Links: 3</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="female swimsuit 泳装" data-ns="female">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#7a4a5e,#33232b);color:#fff;font-size:16px">s</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">female</span> swimsuit</div>
+                <div class="row-desc">中文: 泳装 · English: swimsuit</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="parody original 原创" data-ns="parody">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#4a6e5a,#232a25);color:#fff;font-size:16px">o</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">parody</span> original</div>
+                <div class="row-desc">中文: 原创 · English: original</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="group starlight 星光社" data-ns="group">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#6e5a4a,#2a2623);color:#fff;font-size:16px">s</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">group</span> starlight</div>
+                <div class="row-desc">中文: 星光社 · English: Starlight Studio · Links: 1</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="language chinese 中文" data-ns="language">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#5a4a6e,#26232a);color:#fff;font-size:16px">c</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">language</span> chinese</div>
+                <div class="row-desc">中文: 中文 · English: Chinese</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+          <div class="s-card" style="margin-bottom:10px" data-row data-name="male glasses 眼镜" data-ns="male">
+            <div class="s-row">
+              <div class="row-ico" style="width:40px;height:40px;background:linear-gradient(135deg,#3a6e6e,#233333);color:#fff;font-size:16px">g</div>
+              <div class="row-main">
+                <div class="row-label"><span class="badge b-gray">male</span> glasses</div>
+                <div class="row-desc">中文: 眼镜 · English: glasses</div>
+              </div>
+              <button class="ico-mini" data-open-modal="modal-tag" title="编辑">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|确认删除标签|确定要删除此标签吗？此操作无法撤销。|标签已删除">🗑</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="pager">
+          <span style="font-size:11.5px;color:var(--text-dim)">显示第 1 到 20 项，共 342 个标签</span>
+          <div class="pages">
+            <button>«</button><button>‹</button>
+            <button class="on">1</button><button>2</button><button>3</button>
+            <span style="color:var(--text-dim);font-size:11px">…</span>
+            <button>18</button>
+            <button>›</button><button>»</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 智能分类（前端 /settings/smart-filters） ===== -->
+      <section class="set-page" id="page-filters">
+        <h1>智能分类</h1>
+        <div class="page-sub">管理预设的快速筛选条件，用于搜索侧边栏</div>
+
+        <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+          <button class="btn-primary" data-open-modal="modal-filter">＋ 添加</button>
+        </div>
+
+        <div class="s-card" id="filter-list">
+          <div class="s-row" data-row>
+            <span class="grip">⠿</span>
+            <div class="row-ico">📖</div>
+            <div class="row-main">
+              <div class="row-label">本周新增</div>
+              <div class="row-desc">开始日期: -7 · 排序方式: 创建时间 降序</div>
+            </div>
+            <button class="ico-mini mv-up" title="上移">↑</button>
+            <button class="ico-mini mv-down" title="下移">↓</button>
+            <div class="switch on" data-switch></div>
+            <button class="ico-mini" data-open-modal="modal-filter" title="编辑">✎</button>
+            <button class="ico-mini danger" title="删除" data-remove-row
+              data-confirm="🗑|确认删除|确定要删除此智能分类吗？|删除成功">🗑</button>
+          </div>
+          <div class="s-row" data-row>
+            <span class="grip">⠿</span>
+            <div class="row-ico">🕐</div>
+            <div class="row-main">
+              <div class="row-label">最近更新</div>
+              <div class="row-desc">排序方式: 更新时间 降序</div>
+            </div>
+            <button class="ico-mini mv-up" title="上移">↑</button>
+            <button class="ico-mini mv-down" title="下移">↓</button>
+            <div class="switch on" data-switch></div>
+            <button class="ico-mini" data-open-modal="modal-filter" title="编辑">✎</button>
+            <button class="ico-mini danger" title="删除" data-remove-row
+              data-confirm="🗑|确认删除|确定要删除此智能分类吗？|删除成功">🗑</button>
+          </div>
+          <div class="s-row" data-row>
+            <span class="grip">⠿</span>
+            <div class="row-ico">🔍</div>
+            <div class="row-main">
+              <div class="row-label">待补标签</div>
+              <div class="row-desc"><span style="color:#e0983c">仅显示无标签档案</span> · 排序方式: 创建时间 升序</div>
+            </div>
+            <button class="ico-mini mv-up" title="上移">↑</button>
+            <button class="ico-mini mv-down" title="下移">↓</button>
+            <div class="switch on" data-switch></div>
+            <button class="ico-mini" data-open-modal="modal-filter" title="编辑">✎</button>
+            <button class="ico-mini danger" title="删除" data-remove-row
+              data-confirm="🗑|确认删除|确定要删除此智能分类吗？|删除成功">🗑</button>
+          </div>
+          <div class="s-row" data-row>
+            <span class="grip">⠿</span>
+            <div class="row-ico">⭐</div>
+            <div class="row-main">
+              <div class="row-label">画集精选</div>
+              <div class="row-desc">Q: artbook · <span style="color:#6ea8e8">仅显示新档案</span> · 排序方式: 标题 升序</div>
+            </div>
+            <button class="ico-mini mv-up" title="上移">↑</button>
+            <button class="ico-mini mv-down" title="下移">↓</button>
+            <div class="switch" data-switch></div>
+            <button class="ico-mini" data-open-modal="modal-filter" title="编辑">✎</button>
+            <button class="ico-mini danger" title="删除" data-remove-row
+              data-confirm="🗑|确认删除|确定要删除此智能分类吗？|删除成功">🗑</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 用户管理（前端 /settings/users） ===== -->
+      <section class="set-page" id="page-users">
+        <h1>用户管理</h1>
+        <div class="page-sub">管理系统用户、角色和权限</div>
+
+        <div class="s-card s-card-pad">
+          <h3 style="margin-bottom:4px">创建用户</h3>
+          <div class="page-sub" style="margin-bottom:14px">创建新的系统用户</div>
+          <div class="form-grid">
+            <div class="form-item"><span class="f-label">用户名</span><input class="s-input" placeholder="请输入用户名" maxlength="64"></div>
+            <div class="form-item"><span class="f-label">设为管理员</span><div class="switch" data-switch style="margin-top:8px"></div></div>
+          </div>
+          <div style="margin-top:14px"><button class="btn-primary" data-toast='用户创建成功 "bob", 生成密码: kX3f-9Qm2-vL7d'>创建用户</button></div>
+        </div>
+
+        <div class="s-card">
+          <div class="s-row" style="border-bottom:1px solid var(--border)">
+            <h3 style="flex:1">用户列表</h3>
+            <button class="btn-ghost btn-sm" data-toast="已刷新">刷新</button>
+          </div>
+          <div class="s-row">
+            <div class="row-ico" style="background:linear-gradient(135deg,#4a6fa5,#2b3a55);color:#fff">A</div>
+            <div class="row-main">
+              <div class="row-label">admin <span class="badge">管理员</span></div>
+              <div class="row-desc">创建时间: 2025-12-01 · 当前登录用户</div>
+            </div>
+            <button class="btn-ghost btn-sm" disabled>重置密码</button>
+            <div class="switch on" style="opacity:.45;pointer-events:none"></div>
+            <button class="ico-mini danger" disabled>🗑</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico" style="background:linear-gradient(135deg,#6e5a4a,#3a332b);color:#fff">a</div>
+            <div class="row-main">
+              <div class="row-label">alice <span class="badge b-gray">普通用户</span></div>
+              <div class="row-desc">创建时间: 2026-02-14</div>
+            </div>
+            <button class="btn-ghost btn-sm" data-open-modal="modal-reset-pw">重置密码</button>
+            <div class="switch" data-switch></div>
+            <button class="ico-mini danger" data-remove-row
+              data-confirm="🗑|确认删除用户|您确定要删除用户 alice 吗？此操作无法撤销。|用户已删除">🗑</button>
+          </div>
+          <div class="s-row" data-row>
+            <div class="row-ico" style="background:linear-gradient(135deg,#4a6e5a,#2b332b);color:#fff">g</div>
+            <div class="row-main">
+              <div class="row-label">guest <span class="badge b-gray">普通用户</span></div>
+              <div class="row-desc">创建时间: 2026-06-30</div>
+            </div>
+            <button class="btn-ghost btn-sm" data-open-modal="modal-reset-pw">重置密码</button>
+            <div class="switch" data-switch></div>
+            <button class="ico-mini danger" data-remove-row
+              data-confirm="🗑|确认删除用户|您确定要删除用户 guest 吗？此操作无法撤销。|用户已删除">🗑</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 系统设置（前端 /settings/system，4 个 Tab） ===== -->
+      <section class="set-page" id="page-system">
+        <h1>系统设置</h1>
+        <div class="page-sub">管理系统的核心配置参数</div>
+
+        <div class="ftabs" id="sys-tabs">
+          <button class="on" data-tab="storage">📁 存储设置</button>
+          <button data-tab="perf">⚡ 性能设置</button>
+          <button data-tab="server">🖥 服务器设置</button>
+          <button data-tab="ssl">🔒 SSL 设置</button>
+        </div>
+
+        <!-- 存储 -->
+        <div class="sys-pane" id="sys-storage">
+          <div class="s-card s-card-pad">
+            <div class="form-item" style="margin-bottom:14px">
+              <span class="f-label">资源文件目录路径 <span style="opacity:.6">ASSET_PATH</span></span>
+              <input class="s-input" value="./data/assets" placeholder="输入目录路径，例如：/path/to/directory">
+            </div>
+            <div class="form-item" style="margin-bottom:14px">
+              <span class="f-label">缓存目录路径 <span style="opacity:.6">CACHE_PATH</span></span>
+              <input class="s-input" value="./data/cache" placeholder="输入目录路径，例如：/path/to/directory">
+            </div>
+            <div class="form-item">
+              <span class="f-label">插件目录路径 <span style="opacity:.6">PLUGIN_PATH</span></span>
+              <input class="s-input" value="./data/plugins" placeholder="输入目录路径，例如：/path/to/directory">
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button class="btn-primary" data-toast="存储设置已保存">💾 保存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 性能 -->
+        <div class="sys-pane" id="sys-perf" style="display:none">
+          <div class="notice">性能设置中包含 TaskPool 和 RocksDB 本地 KV 的调优项。<br>所有 <code>ROCKSDB_</code> 前缀的设置都需要在服务重启后生效。</div>
+          <div class="s-card s-card-pad">
+            <div class="form-grid">
+              <div class="form-item"><span class="f-label">最大并发任务数 <span style="opacity:.6">MAX_CONCURRENT_JOBS</span></span><input class="s-input" type="number" value="8"></div>
+              <div class="form-item"><span class="f-label">TaskPool 调度回退间隔（秒） <span style="opacity:.6">TASKPOOL_TICK_SECONDS</span></span><input class="s-input" type="number" value="600"></div>
+              <div class="form-item full"><span class="f-label">扫描回退间隔（毫秒） <span style="opacity:.6">SCAN_FALLBACK_INTERVAL_MS</span></span><input class="s-input" type="number" value="300000"><span class="f-hint">单位：毫秒</span></div>
+              <div class="form-item"><span class="f-label">KV 内存（MB） <span style="opacity:.6">ROCKSDB_KV_MEMORY_MB</span></span><input class="s-input" type="number" value="64"></div>
+              <div class="form-item"><span class="f-label">Block Cache（MB） <span style="opacity:.6">ROCKSDB_BLOCK_CACHE_MB</span></span><input class="s-input" type="number" value="64"></div>
+              <div class="form-item"><span class="f-label">写缓冲数量 <span style="opacity:.6">ROCKSDB_MAX_WRITE_BUFFER_NUMBER</span></span><input class="s-input" type="number" value="4"></div>
+              <div class="form-item"><span class="f-label">最大打开文件数 <span style="opacity:.6">ROCKSDB_MAX_OPEN_FILES</span></span><input class="s-input" type="number" value="256"></div>
+              <div class="form-item"><span class="f-label">后台任务数 <span style="opacity:.6">ROCKSDB_MAX_BACKGROUND_JOBS</span></span><input class="s-input" type="number" value="2"></div>
+              <div class="form-item"><span class="f-label">压缩算法 <span style="opacity:.6">ROCKSDB_COMPRESSION</span></span>
+                <div class="sel-wrap"><select class="s-select">
+                  <option selected>none</option><option>snappy</option><option>zlib</option><option>bz2</option>
+                  <option>lz4</option><option>lz4hc</option><option>xpress</option><option>zstd</option>
+                </select></div></div>
+              <div class="form-item row-between" style="grid-column:1/-1">
+                <span class="f-label">允许 MMAP 读取 <span style="opacity:.6">ROCKSDB_ALLOW_MMAP_READS</span></span>
+                <div class="switch on" data-switch></div>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button class="btn-primary" data-toast="性能设置已保存，ROCKSDB_* 项需重启后生效">💾 保存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 服务器 -->
+        <div class="sys-pane" id="sys-server" style="display:none">
+          <div class="s-card s-card-pad">
+            <div class="form-item" style="margin-bottom:14px">
+              <span class="f-label">服务器名称 <span style="opacity:.6">SERVER_NAME</span></span>
+              <input class="s-input" value="兰鹿">
+            </div>
+            <div class="form-item">
+              <span class="f-label">服务器欢迎消息 <span style="opacity:.6">SERVER_MOTD</span></span>
+              <input class="s-input" value="兰鹿轻盈，自在如风">
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button class="btn-primary" data-toast="服务器设置已保存">💾 保存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SSL -->
+        <div class="sys-pane" id="sys-ssl" style="display:none">
+          <div class="notice">启用 SSL/TLS 后，服务会通过 ALPN 自动支持 HTTP/2，无需额外开关。<br>SSL 设置保存后需要重启服务才会生效。</div>
+          <div class="s-card s-card-pad">
+            <div class="form-item row-between" style="margin-bottom:14px">
+              <span class="f-label">启用 SSL/TLS <span style="opacity:.6">SSL_ENABLED</span></span>
+              <div class="switch" data-switch></div>
+            </div>
+            <div class="form-item" style="margin-bottom:14px">
+              <span class="f-label">证书链文件路径 <span style="opacity:.6">SSL_CERT_FILE</span></span>
+              <input class="s-input" value="./data/cert/fullchain.pem">
+            </div>
+            <div class="form-item">
+              <span class="f-label">私钥文件路径 <span style="opacity:.6">SSL_KEY_FILE</span></span>
+              <input class="s-input" value="./data/cert/privkey.pem">
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:16px">
+              <button class="btn-primary" data-toast="SSL 设置已保存，重启服务后生效">💾 保存</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 任务记录（前端 /settings/tasks） ===== -->
+      <section class="set-page wide" id="page-tasks">
+        <h1>任务记录</h1>
+        <div class="page-sub">查看并管理后台任务</div>
+
+        <div class="toolbar">
+          <div class="ftabs" id="task-tabs" style="margin:0">
+            <button class="on" data-f="all">全部 <span class="badge b-gray">128</span></button>
+            <button data-f="pending">🕐 待执行</button>
+            <button data-f="running">⟳ 执行中</button>
+            <button data-f="waiting">⏸ 等待中</button>
+            <button data-f="completed">✓ 已完成</button>
+            <button data-f="failed">✕ 失败</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn-ghost" data-toast="已刷新">⟳ 刷新</button>
+        </div>
+
+        <div id="task-list">
+          <!-- 执行中 -->
+          <div class="task-card" data-status="running">
+            <div class="task-head">
+              <span class="task-name">扫描分类「同人志」</span>
+              <span class="badge b-blue">⟳ 执行中</span>
+              <span style="flex:1"></span>
+              <span class="badge b-outline"><code>Job #1284</code></span>
+              <span class="badge b-red">P10</span>
+              <span class="badge b-purple">扫描分类</span>
+              <span class="badge b-outline">手动</span>
+              <button class="btn-danger btn-sm" data-confirm="⏹|取消任务|确定要取消这个任务吗？|任务已取消">⏹ 取消</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-dim)">
+              <span style="flex:none">进度</span><div class="pbar"><i style="width:62%"></i></div><span style="flex:none">62%</span>
+            </div>
+            <div class="mini-log">[10:22:01] 开始扫描 /library/doujinshi
+[10:22:03] 发现新档案: (C105) [Starlight] Summer Days
+[10:23:15] 已处理 301/486 个档案，新增 3 个</div>
+            <div class="time-grid">
+              <div><div class="k">创建时间</div>10:21:58</div>
+              <div><div class="k">开始时间</div>10:22:01</div>
+              <div><div class="k">完成时间</div>-</div>
+              <div><div class="k">超时时间</div>12:22:01</div>
+            </div>
+          </div>
+
+          <!-- 等待中 -->
+          <div class="task-card" data-status="waiting">
+            <div class="task-head">
+              <span class="task-name">资源上传: [Starlight] Summer Days.zip</span>
+              <span class="badge b-orange">⏸ 等待中</span>
+              <span class="badge b-outline">等待分片</span>
+              <span style="flex:1"></span>
+              <span class="badge b-outline"><code>Job #1283</code></span>
+              <span class="badge b-orange">P20</span>
+              <span class="badge b-cyan">资源上传</span>
+              <span class="badge b-outline">上传</span>
+              <button class="btn-danger btn-sm" data-confirm="⏹|取消任务|确定要取消这个任务吗？|任务已取消">⏹ 取消</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-dim)">
+              <span style="flex:none">进度</span><div class="pbar"><i style="width:45%"></i></div><span style="flex:none">45%</span>
+            </div>
+            <div class="mini-log">[10:18:44] 已接收分片 21/48，等待客户端继续上传…</div>
+            <div class="time-grid">
+              <div><div class="k">文件名</div>Summer Days.zip</div>
+              <div><div class="k">文件大小</div>482 MB</div>
+              <div><div class="k">分片数量</div>48</div>
+              <div><div class="k">分片大小</div>10 MB</div>
+            </div>
+          </div>
+
+          <!-- 待执行 -->
+          <div class="task-card" data-status="pending">
+            <div class="task-head">
+              <span class="task-name">下载URL: https://e-h.example/g/3012345/abcdef01/</span>
+              <span class="badge">🕐 待执行</span>
+              <span style="flex:1"></span>
+              <span class="badge b-outline"><code>Job #1282</code></span>
+              <span class="badge b-yellow">P30</span>
+              <span class="badge b-cyan">下载URL</span>
+              <button class="btn-danger btn-sm" data-confirm="⏹|取消任务|确定要取消这个任务吗？|任务已取消">⏹ 取消</button>
+            </div>
+            <div class="mini-log">[10:24:02] 任务已创建，等待调度…</div>
+            <div class="time-grid">
+              <div><div class="k">创建时间</div>10:24:02</div>
+              <div><div class="k">开始时间</div>-</div>
+              <div><div class="k">完成时间</div>-</div>
+              <div><div class="k">超时时间</div>12:24:02</div>
+            </div>
+          </div>
+
+          <!-- 已完成 -->
+          <div class="task-card" data-status="completed">
+            <div class="task-head">
+              <span class="task-name">E站元数据拉取「(C105) [Starlight] Summer Days」</span>
+              <span class="badge b-green">✓ 已完成</span>
+              <span style="flex:1"></span>
+              <span class="badge b-outline"><code>Job #1281</code></span>
+              <span class="badge b-yellow">P30</span>
+              <span class="badge b-purple">元数据插件</span>
+              <span class="badge b-outline">插件: ehmeta</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-dim)">
+              <span style="flex:none">进度</span><div class="pbar"><i style="width:100%"></i></div><span style="flex:none">100%</span>
+            </div>
+            <div class="mini-log">结果: {"title":"(C105) [Starlight] Summer Days","tags":42,"cost":"1.8s"}</div>
+            <div class="time-grid">
+              <div><div class="k">创建时间</div>09:58:11</div>
+              <div><div class="k">开始时间</div>09:58:12</div>
+              <div><div class="k">完成时间</div>09:58:14</div>
+              <div><div class="k">超时时间</div>11:58:12</div>
+            </div>
+          </div>
+
+          <!-- 失败 -->
+          <div class="task-card" data-status="failed">
+            <div class="task-head">
+              <span class="task-name">生成缩略图「画集」批次 #47</span>
+              <span class="badge b-red">✕ 失败</span>
+              <span style="flex:1"></span>
+              <span class="badge b-outline"><code>Job #1279</code></span>
+              <span class="badge b-blue">P50</span>
+              <span class="badge b-cyan">生成缩略图</span>
+              <button class="btn-ghost btn-sm" style="color:#6ea8e8;border-color:rgba(110,168,232,.35)" data-toast="已重新加入任务队列">▶ 重试</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-dim)">
+              <span style="flex:none">进度</span><div class="pbar"><i style="width:34%"></i></div><span style="flex:none">34%</span>
+            </div>
+            <div class="mini-log"><span class="lv-err">[08:12:40] ERROR 缩略图解码失败：不支持的格式 (page 12, archive=青の記憶)
+[08:12:40] 任务失败：连续 3 次重试未成功</span></div>
+            <div class="time-grid">
+              <div><div class="k">创建时间</div>08:10:02</div>
+              <div><div class="k">开始时间</div>08:10:05</div>
+              <div><div class="k">完成时间</div>08:12:40</div>
+              <div><div class="k">超时时间</div>10:10:05</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pager">
+          <span style="font-size:11.5px;color:var(--text-dim)">共 128 个任务</span>
+          <div class="pages">
+            <button>«</button><button>‹</button>
+            <button class="on">1</button><button>2</button><button>3</button>
+            <span style="color:var(--text-dim);font-size:11px">…</span>
+            <button>13</button>
+            <button>›</button><button>»</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 任务管理 / 定时任务（前端 /settings/cron） ===== -->
+      <section class="set-page wide" id="page-cron">
+        <h1>定时任务管理</h1>
+        <div class="page-sub">配置定时执行的任务和启动时触发的任务</div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:14px">
+          <button class="btn-ghost" data-toast="已刷新">⟳ 刷新</button>
+          <button class="btn-primary" data-open-modal="modal-cron">＋ 创建定时任务</button>
+        </div>
+
+        <div class="s-card s-card-pad" style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px">服务状态</span>
+            <span class="badge b-green" id="cron-status" data-running="1">运行中</span>
+            <span style="flex:1"></span>
+            <span style="font-size:11.5px;color:var(--text-dim)">总任务数: 4 · 已启用: 3</span>
+            <button class="btn-ghost btn-sm" id="btn-cron-toggle">⏹ 停止服务</button>
+          </div>
+        </div>
+
+        <div class="ftabs" id="cron-tabs">
+          <button class="on" data-tab="list">定时任务列表</button>
+          <button data-tab="startup">启动任务设置</button>
+        </div>
+
+        <div id="cron-list">
+          <div class="task-card" data-row>
+            <div class="task-head">
+              <span class="task-name">每日全库扫描</span>
+              <span class="badge b-green">启用</span>
+              <span class="badge b-outline">扫描所有分类</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini blue" title="立即执行" data-toast="已手动触发任务">▶</button>
+              <div class="switch on" data-switch title="启用/禁用"></div>
+              <button class="ico-mini" title="编辑" data-open-modal="modal-cron">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|删除定时任务|确定要删除此定时任务吗？此操作无法撤销。|定时任务已删除">🗑</button>
+            </div>
+            <div class="time-grid">
+              <div><div class="k">Cron 表达式</div><code>0 2 * * *</code></div>
+              <div><div class="k">优先级</div>50</div>
+              <div><div class="k">执行次数</div>46</div>
+              <div><div class="k">上次执行</div>07-19 02:00 <span style="color:var(--success)">✓</span></div>
+            </div>
+            <div style="margin-top:8px;font-size:11.5px;color:var(--accent)">下次执行: 2026-07-20 02:00</div>
+          </div>
+
+          <div class="task-card" data-row>
+            <div class="task-head">
+              <span class="task-name">每6小时元数据回填</span>
+              <span class="badge b-green">启用</span>
+              <span class="badge b-outline">回填元数据</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini blue" title="立即执行" data-toast="已手动触发任务">▶</button>
+              <div class="switch on" data-switch title="启用/禁用"></div>
+              <button class="ico-mini" title="编辑" data-open-modal="modal-cron">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|删除定时任务|确定要删除此定时任务吗？此操作无法撤销。|定时任务已删除">🗑</button>
+            </div>
+            <div class="time-grid">
+              <div><div class="k">Cron 表达式</div><code>0 */6 * * *</code></div>
+              <div><div class="k">优先级</div>60</div>
+              <div><div class="k">执行次数</div>182</div>
+              <div><div class="k">上次执行</div>07-19 12:00 <span style="color:var(--success)">✓</span></div>
+            </div>
+            <div style="margin-top:8px;font-size:11.5px;color:var(--accent)">下次执行: 2026-07-19 18:00</div>
+          </div>
+
+          <div class="task-card" data-row>
+            <div class="task-head">
+              <span class="task-name">每周清理缓存</span>
+              <span class="badge b-green">启用</span>
+              <span class="badge b-outline">清理缓存</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini blue" title="立即执行" data-toast="已手动触发任务">▶</button>
+              <div class="switch on" data-switch title="启用/禁用"></div>
+              <button class="ico-mini" title="编辑" data-open-modal="modal-cron">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|删除定时任务|确定要删除此定时任务吗？此操作无法撤销。|定时任务已删除">🗑</button>
+            </div>
+            <div class="time-grid">
+              <div><div class="k">Cron 表达式</div><code>0 3 * * 1</code></div>
+              <div><div class="k">优先级</div>80</div>
+              <div><div class="k">执行次数</div>12</div>
+              <div><div class="k">上次执行</div>07-14 03:00 <span style="color:var(--danger)">✗</span></div>
+            </div>
+            <div style="margin-top:8px;font-size:11.5px;color:var(--accent)">下次执行: 2026-07-21 03:00</div>
+          </div>
+
+          <div class="task-card" data-row>
+            <div class="task-head">
+              <span class="task-name">日志清理</span>
+              <span class="badge b-gray">禁用</span>
+              <span class="badge b-outline">清理日志</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini blue" title="立即执行" data-toast="已手动触发任务">▶</button>
+              <div class="switch" data-switch title="启用/禁用"></div>
+              <button class="ico-mini" title="编辑" data-open-modal="modal-cron">✎</button>
+              <button class="ico-mini danger" title="删除" data-remove-row
+                data-confirm="🗑|删除定时任务|确定要删除此定时任务吗？此操作无法撤销。|定时任务已删除">🗑</button>
+            </div>
+            <div class="time-grid">
+              <div><div class="k">Cron 表达式</div><code>0 4 * * *</code></div>
+              <div><div class="k">优先级</div>90</div>
+              <div><div class="k">执行次数</div>0</div>
+              <div><div class="k">上次执行</div>从未执行</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="cron-startup" style="display:none">
+          <div class="s-card">
+            <div class="card-head"><h3>启动任务配置</h3><div class="sub">配置应用启动时自动执行的任务，改动即保存</div></div>
+            <div class="s-row">
+              <div class="row-ico">🗂</div>
+              <div class="row-main">
+                <div class="row-label">启动时扫描目录</div>
+                <div class="row-desc">应用启动时自动扫描档案目录</div>
+              </div>
+              <div class="switch startup-sw" data-switch></div>
+            </div>
+            <div class="s-row">
+              <div class="row-ico">🩺</div>
+              <div class="row-main">
+                <div class="row-label">启动时检查数据库</div>
+                <div class="row-desc">应用启动时自动检查数据库一致性</div>
+              </div>
+              <div class="switch on startup-sw" data-switch></div>
+            </div>
+            <div class="s-row">
+              <div class="row-ico">🧩</div>
+              <div class="row-main">
+                <div class="row-label">启动时扫描插件</div>
+                <div class="row-desc">应用启动时自动扫描并加载插件</div>
+              </div>
+              <div class="switch on startup-sw" data-switch></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 插件管理（前端 /settings/plugins） ===== -->
+      <section class="set-page wide" id="page-plugins">
+        <h1>插件管理</h1>
+        <div class="page-sub">管理系统插件的启用、禁用和配置</div>
+
+        <div class="toolbar">
+          <div class="ftabs" id="plugin-tabs" style="margin:0">
+            <button class="on" data-f="all">全部</button>
+            <button data-f="metadata">元数据</button>
+            <button data-f="download">下载</button>
+            <button data-f="login">登录</button>
+            <button data-f="script">脚本</button>
+            <button data-f="source">在线源</button>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn-ghost" id="btn-check-updates">🔍 检查更新</button>
+          <button class="btn-primary" data-open-modal="modal-plugin-install">⇩ 安装插件</button>
+        </div>
+
+        <div class="grid-3" id="plugin-grid">
+          <div class="m-card" data-type="metadata" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">🧩</div>
+                <div style="flex:1;min-width:0"><b>EhMeta</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: ehmeta</div></div>
+                <span class="badge b-blue">元数据</span>
+                <div class="switch on" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: lanlup</div><div>📅 版本: 1.4.2</div>
+              </div>
+              <div class="m-desc">从 E-Hentai 拉取档案元数据与标签，支持中文翻译映射</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <span class="badge b-gray">ehentai</span><span class="badge b-gray">metadata</span>
+                <span class="badge b-blue">🛡 network</span>
+              </div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="插件已是最新">🔍</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 EhMeta 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-card" data-type="metadata" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">📚</div>
+                <div style="flex:1;min-width:0"><b>BzMeta</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: bzmeta</div></div>
+                <span class="badge b-blue">元数据</span>
+                <div class="switch on" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: lanlup</div><div>📅 版本: 0.9.1</div>
+              </div>
+              <div class="m-desc">哔咔漫画元数据插件，自动补全标签、艺术家与简介</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <span class="badge b-gray">picacomic</span>
+                <span class="badge b-blue">🛡 network</span>
+              </div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="插件已是最新">🔍</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 BzMeta 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-card" data-type="source" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">🎨</div>
+                <div style="flex:1;min-width:0"><b>Pixiv Source</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: pixiv</div></div>
+                <span class="badge b-cyan">在线源</span>
+                <div class="switch" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: community</div><div>📅 版本: 2.0.0</div>
+              </div>
+              <div class="m-desc">在线浏览与下载 Pixiv 插画，支持按画师与排行榜订阅</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <span class="badge b-gray">pixiv</span><span class="badge b-gray">illust</span>
+                <span class="badge b-blue">🛡 network</span><span class="badge b-blue">🛡 storage</span>
+              </div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="插件已是最新">🔍</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 Pixiv Source 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-card" data-type="login" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">🔐</div>
+                <div style="flex:1;min-width:0"><b>BZ 登录</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: bzlogin</div></div>
+                <span class="badge b-purple">登录</span>
+                <div class="switch on" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: lanlup</div><div>📅 版本: 1.1.0</div>
+              </div>
+              <div class="m-desc">哔咔账号登录态管理，自动刷新 Cookie 保持会话</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <span class="badge b-blue">🛡 network</span><span class="badge b-blue">🛡 cookie</span>
+              </div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="插件已是最新">🔍</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 BZ 登录 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-card" data-type="download" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">⬇</div>
+                <div style="flex:1;min-width:0"><b>Batch Download</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: batchdl</div></div>
+                <span class="badge b-green">下载</span>
+                <div class="switch" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: community</div><div>📅 版本: 0.5.3</div>
+              </div>
+              <div class="m-desc">批量下载列表页全部档案，支持断点续传与限速</div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap">
+                <span class="badge b-blue">🛡 network</span>
+              </div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="插件已是最新">🔍</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 Batch Download 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="m-card" data-type="script" data-row>
+            <div class="m-body">
+              <div class="m-title">
+                <div class="row-ico" style="width:34px;height:34px">📜</div>
+                <div style="flex:1;min-width:0"><b>Tag Translator</b><div style="font-size:10.5px;color:var(--text-dim)">命名空间: tagtrans</div></div>
+                <span class="badge b-orange">脚本</span>
+                <div class="switch on" data-switch></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);line-height:1.9">
+                <div>👤 作者: lanlup</div><div>📅 版本: 1.0.0</div>
+              </div>
+              <div style="border:1px solid rgba(232,176,75,.3);background:var(--accent-soft);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--accent)">发现更新: 1.0.0 → 1.1.0</div>
+              <div class="m-desc">标签中文翻译映射脚本，内置离线词库，可自定义增补</div>
+              <div class="m-actions">
+                <button class="ico-mini blue" title="检查更新" data-toast="已是最新版本之外无可更新项">🔍</button>
+                <button class="ico-mini blue" title="更新" data-confirm="⟳|强制更新插件|将更新 Tag Translator 到 1.1.0（保留参数）。|插件已更新到 1.1.0">⟳</button>
+                <button class="ico-mini danger" title="删除" data-remove-row
+                  data-confirm="🗑|删除插件|确定要删除插件 Tag Translator 吗？此操作将同时删除插件文件，不可恢复。|插件已删除">🗑</button>
+                <span style="flex:1"></span>
+                <button class="btn-ghost btn-sm" data-open-modal="modal-plugin-config">⚙ 配置</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 统计信息（前端 /settings/stats，含原 server-info） ===== -->
+      <section class="set-page wide" id="page-stats">
+        <h1>统计信息</h1>
+        <div class="page-sub">查看系统信息与标签词云</div>
+
+        <div class="s-card s-card-pad">
+          <div style="display:flex;align-items:center;margin-bottom:10px">
+            <h3 style="flex:1">系统信息</h3>
+            <button class="btn-ghost btn-sm" data-toast="已刷新">⟳ 刷新</button>
+          </div>
+          <div class="kv-grid">
+            <div class="info-row"><span class="k">服务器名称</span><span class="v">兰鹿</span></div>
+            <div class="info-row"><span class="k">版本</span><span class="v">1.3.2 (REI-AYANAMI)</span></div>
+            <div class="info-row"><span class="k">档案总数</span><span class="v">1,286</span></div>
+            <div class="info-row"><span class="k">总阅读页数</span><span class="v">18,964</span></div>
+            <div class="info-row" style="grid-column:1/-1"><span class="k">数据库扩展</span><span class="v">
+              <span class="badge b-green">kv 0.3</span>
+              <span class="badge b-green">fts 0.2</span>
+              <span class="badge b-outline" title="vector 0.1（未启用）">vector</span>
+            </span></div>
+          </div>
+          <div style="margin-top:10px;font-size:11.5px;color:var(--text-dim);white-space:pre-wrap">兰鹿轻盈，自在如风</div>
+        </div>
+
+        <div class="s-card s-card-pad">
+          <h3 style="margin-bottom:2px">标签词云</h3>
+          <div class="cloud" id="tag-cloud"></div>
+        </div>
+      </section>
+
+      <!-- ===== 关于 ===== -->
+      <section class="set-page" id="page-about">
+        <h1>关于</h1>
+        <div class="page-sub">版本信息与项目链接</div>
+
+        <div class="s-card">
+          <div class="about-hero">
+            <div class="mark">🦌</div>
+            <h2>Lanlu 桌面客户端</h2>
+            <div class="ver">v0.1.0 · CangjieGUI</div>
+          </div>
+          <div class="s-row clickable link-row">
+            <div class="row-ico">⌂</div>
+            <div class="row-main"><div class="row-label">项目主页</div></div>
+            <span class="chev">›</span>
+          </div>
+          <div class="s-row clickable link-row">
+            <div class="row-ico">⚖</div>
+            <div class="row-main"><div class="row-label">开源许可</div></div>
+            <span class="chev">›</span>
+          </div>
+          <div class="s-row clickable" id="row-check-update">
+            <div class="row-ico">⟳</div>
+            <div class="row-main">
+              <div class="row-label">检查更新</div>
+              <div class="row-desc" id="update-desc">当前已是最新版本</div>
+            </div>
+            <span class="chev">›</span>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- ===== 诊断日志 Modal ===== -->
+  <div class="mask" id="modal-log">
+    <div class="modal-card">
+      <h3>📄 诊断日志</h3>
+      <div class="log-box" id="log-box">[2026-07-19 10:12:03] INFO  启动 lanlu-client-next v0.1.0
+[2026-07-19 10:12:03] INFO  加载配置 ~/.config/lanlu-client-next/config.json
+[2026-07-19 10:12:04] INFO  连接服务器 https://lanlu.home.lan:8082 …
+[2026-07-19 10:12:04] INFO  服务器版本 1.3.2 (REI-AYANAMI)
+[2026-07-19 10:12:05] INFO  会话有效，用户 admin
+<span class="lv-warn">[2026-07-19 10:15:41] WARN  封面加载超时 (archive_id=8f2c…)，已重试 1 次</span>
+[2026-07-19 10:15:42] INFO  重试成功
+<span class="lv-err">[2026-07-19 10:22:17] ERROR 缩略图解码失败：不支持的格式 (page 12)</span>
+[2026-07-19 10:22:17] INFO  已回退到原始页面渲染</div>
+      <div class="modal-actions">
+        <button class="btn-danger" id="btn-modal-clear">清 空</button>
+        <button class="btn-ghost" id="btn-modal-export">⇪ 导出</button>
+        <button class="btn-primary" data-close-modal>关 闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 通用确认框（内容由 JS 动态填充） ===== -->
+  <div class="mask top" id="confirm-mask">
+    <div class="confirm-card">
+      <div class="big" id="confirm-emoji">👋</div>
+      <h3 id="confirm-title">确认操作</h3>
+      <p id="confirm-desc"></p>
+      <div class="row">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-danger" id="confirm-ok">确 定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 编辑头像 Modal ===== -->
+  <div class="mask" id="modal-avatar">
+    <div class="modal-card">
+      <h3>编辑头像</h3>
+      <div style="display:flex;gap:20px">
+        <div style="flex:1;min-width:0">
+          <div class="crop-box"><div class="face">A</div><div class="ring"></div></div>
+          <div style="font-size:11px;color:var(--text-dim);text-align:center;margin-top:8px">拖动图片以调整裁剪位置</div>
+          <div class="f-label" style="margin-top:12px">缩放</div>
+          <input type="range" min="1" max="3" step="0.01" value="1.4" style="width:100%;margin-top:4px">
+          <button class="btn-ghost btn-sm" style="margin-top:12px" data-toast="已选择图片（演示）">⇪ 上传头像</button>
+        </div>
+        <div style="width:120px;flex:none">
+          <div class="f-label" style="margin-bottom:10px">预览</div>
+          <div style="width:96px;height:96px;border-radius:50%;background:linear-gradient(135deg,#4a6fa5,#2b3a55);display:flex;align-items:center;justify-content:center;font-size:40px;color:#fff;margin-bottom:14px">A</div>
+          <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#4a6fa5,#2b3a55);display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff">A</div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="头像已更新">保 存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 创建/编辑分类 Modal ===== -->
+  <div class="mask" id="modal-category">
+    <div class="modal-card lg">
+      <h3>📂 创建新分类</h3>
+      <div class="form-grid">
+        <div class="form-item"><span class="f-label">分类名称 *</span><input class="s-input" placeholder="输入分类名称"></div>
+        <div class="form-item"><span class="f-label">扫描路径 *</span><input class="s-input" placeholder="输入扫描目录路径"></div>
+        <div class="form-item full"><span class="f-label">描述</span><textarea class="s-textarea" rows="2" placeholder="输入分类描述（可选）"></textarea></div>
+        <div class="form-item"><span class="f-label">排序</span><input class="s-input" type="number" value="0"></div>
+        <div class="form-item"><span class="f-label">已启用</span><div class="switch on" data-switch style="margin-top:6px"></div></div>
+        <div class="form-item full">
+          <span class="f-label">元数据插件</span>
+          <span class="f-hint">选择扫描档案时自动运行的元数据插件；按顺序逐个尝试，当前插件执行成功时不会继续运行后续插件</span>
+          <div class="s-card" style="margin:8px 0 0">
+            <div class="s-row" style="padding:9px 14px">
+              <input type="checkbox" checked>
+              <span style="font-size:12.5px">1. EhMeta</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini" style="width:24px;height:24px" title="上移插件">↑</button>
+              <button class="ico-mini" style="width:24px;height:24px" title="下移插件">↓</button>
+            </div>
+            <div class="s-row" style="padding:9px 14px">
+              <input type="checkbox" checked>
+              <span style="font-size:12.5px">2. BzMeta</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini" style="width:24px;height:24px" title="上移插件">↑</button>
+              <button class="ico-mini" style="width:24px;height:24px" title="下移插件">↓</button>
+            </div>
+            <div class="s-row" style="padding:9px 14px">
+              <input type="checkbox">
+              <span style="font-size:12.5px">ChaikaMeta</span>
+              <span style="flex:1"></span>
+              <button class="ico-mini" style="width:24px;height:24px" title="上移插件">↑</button>
+              <button class="ico-mini" style="width:24px;height:24px" title="下移插件">↓</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="分类已保存">创建分类</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 创建/编辑标签 Modal ===== -->
+  <div class="mask" id="modal-tag">
+    <div class="modal-card lg">
+      <h3>🏷 编辑标签</h3>
+      <div style="height:56px;border-radius:10px;background:linear-gradient(120deg,#3d4a6b,#23232a);position:relative;margin-bottom:14px">
+        <button class="btn-ghost btn-sm" style="position:absolute;right:10px;top:10px" data-toast="已选择背景图（演示）">🖼 更换背景图</button>
+        <div style="position:absolute;left:14px;bottom:-14px;width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,#4a5a7a,#2b2b3a);border:2px solid var(--bg-card);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px">a</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin:20px 0 14px">
+        <span style="font-size:13px;font-weight:600">artist:alpha</span>
+        <button class="btn-ghost btn-sm" data-toast="已选择图标（演示）">更换图片</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-item"><span class="f-label">命名空间 *</span><input class="s-input" value="artist" placeholder="例如：artist, female, male" maxlength="64"></div>
+        <div class="form-item"><span class="f-label">名称 *</span><input class="s-input" value="alpha" placeholder="例如：艺术家名称" maxlength="255"></div>
+        <div class="form-item full">
+          <div class="seg" id="tag-lang" style="width:max-content">
+            <button class="on" data-tab="zh">中文</button><button data-tab="en">English</button>
+          </div>
+        </div>
+        <div class="form-item full" id="tag-zh">
+          <div class="form-item"><span class="f-label">中文名称</span><input class="s-input" value="阿尔法" placeholder="中文翻译"></div>
+          <div class="form-item" style="margin-top:10px"><span class="f-label">中文简介</span><textarea class="s-textarea" rows="2" placeholder="中文描述"></textarea></div>
+        </div>
+        <div class="form-item full" id="tag-en" style="display:none">
+          <div class="form-item"><span class="f-label">英文名称</span><input class="s-input" value="alpha" placeholder="English name"></div>
+          <div class="form-item" style="margin-top:10px"><span class="f-label">英文简介</span><textarea class="s-textarea" rows="2" placeholder="English description"></textarea></div>
+        </div>
+        <div class="form-item full"><span class="f-label">外部链接</span><input class="s-input" placeholder="外部链接（可选）"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="标签已保存">保存更改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 创建/编辑智能分类 Modal ===== -->
+  <div class="mask" id="modal-filter">
+    <div class="modal-card">
+      <h3>✦ 编辑智能分类</h3>
+      <div class="form-grid">
+        <div class="form-item"><span class="f-label">名称 (中文)</span><input class="s-input" value="本周新增" placeholder="输入分类名称"></div>
+        <div class="form-item"><span class="f-label">名称 (English)</span><input class="s-input" value="New This Week" placeholder="English name"></div>
+        <div class="form-item full"><span class="f-label">图标</span>
+          <div class="sel-wrap"><select class="s-select">
+            <option>📖 BookOpen</option><option>🏷 Tag</option><option>📅 Calendar</option>
+            <option>🔍 Search</option><option>🕐 Clock</option><option>⭐ Star</option><option>✦ Filter</option>
+          </select></div></div>
+        <div class="form-item full"><span class="f-label">关键词</span><input class="s-input" placeholder="输入搜索关键词..."></div>
+        <div class="form-item"><span class="f-label">排序方式</span>
+          <div class="sel-wrap"><select class="s-select">
+            <option>默认</option><option selected>创建时间</option><option>发行时间</option>
+            <option>更新时间</option><option>最后阅读</option><option>标题</option><option>页数</option>
+          </select></div></div>
+        <div class="form-item"><span class="f-label">排序</span>
+          <div class="sel-wrap"><select class="s-select"><option>升序</option><option selected>降序</option></select></div></div>
+        <div class="form-item"><span class="f-label">开始日期</span><input class="s-input" value="-7" placeholder="-7 (7 days ago)"><span class="f-hint">相对天数，如 -7 表示7天前</span></div>
+        <div class="form-item"><span class="f-label">结束日期</span><input class="s-input" placeholder="0 (today)"></div>
+        <div class="form-item row-between full"><span class="f-label">仅显示新档案</span><div class="switch" data-switch></div></div>
+        <div class="form-item row-between full"><span class="f-label">仅显示无标签档案</span><div class="switch" data-switch></div></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="智能分类已保存">保 存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 重置密码 Modal ===== -->
+  <div class="mask" id="modal-reset-pw">
+    <div class="modal-card sm">
+      <h3>重置密码</h3>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px">为 alice 重置密码</p>
+      <div class="form-item" style="margin-bottom:12px">
+        <span class="f-label">新密码</span>
+        <input class="s-input" type="password" placeholder="请输入新密码（至少6位）">
+      </div>
+      <div class="form-item">
+        <span class="f-label">确认密码</span>
+        <input class="s-input" type="password" placeholder="请再次输入新密码">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="密码已重置">重置密码</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 创建/编辑定时任务 Modal ===== -->
+  <div class="mask" id="modal-cron">
+    <div class="modal-card lg">
+      <h3>🕐 创建定时任务</h3>
+      <div class="form-grid">
+        <div class="form-item full"><span class="f-label">任务名称 *</span><input class="s-input" placeholder="输入任务名称"></div>
+        <div class="form-item full"><span class="f-label">任务类型 *</span>
+          <div class="sel-wrap"><select class="s-select">
+            <option>扫描所有分类 — 扫描所有启用的分类，发现新文件</option>
+            <option>扫描单个分类</option><option>扫描档案</option><option>生成缩略图</option>
+            <option>数据库检查</option><option>清理缓存</option><option>清理日志</option>
+            <option>重建封面</option><option>回填元数据</option><option>插件扫描</option>
+            <option>标签导入</option><option>下载URL</option><option>自定义类型</option>
+          </select></div></div>
+        <div class="form-item full">
+          <span class="f-label">Cron 表达式 *</span>
+          <div style="display:flex;gap:8px">
+            <input class="s-input" id="cron-expr" placeholder="例如: 0 2 * * * (每天凌晨2点)">
+            <button class="btn-ghost" style="flex:none" id="btn-cron-verify">验证表达式</button>
+          </div>
+          <span class="f-hint">支持5字段格式: 分 时 日 月 周</span>
+          <div id="cron-valid" style="display:none;margin-top:8px;background:rgba(76,175,125,.1);border:1px solid rgba(76,175,125,.35);border-radius:9px;padding:9px 12px;font-size:11.5px;color:var(--success);line-height:1.7">
+            ✓ 表达式有效
+            <div style="color:var(--text-dim);margin-top:4px">接下来的执行时间：<br>2026-07-20 02:00:00<br>2026-07-21 02:00:00<br>2026-07-22 02:00:00</div>
+          </div>
+        </div>
+        <div class="form-item full">
+          <span class="f-label">常用预设</span>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <button class="badge b-outline cron-preset" data-cron="0 * * * *">每小时 (0 * * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 */6 * * *">每6小时 (0 */6 * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 */12 * * *">每12小时 (0 */12 * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 1 * * *">每天凌晨1点 (0 1 * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 2 * * *">每天凌晨2点 (0 2 * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 3 * * *">每天凌晨3点 (0 3 * * *)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 2 * * 1">每周一凌晨2点 (0 2 * * 1)</button>
+            <button class="badge b-outline cron-preset" data-cron="0 2 1 * *">每月1日凌晨2点 (0 2 1 * *)</button>
+          </div>
+        </div>
+        <div class="form-item full">
+          <span class="f-label">任务参数 <button class="btn-ghost btn-sm" style="float:right;padding:2px 10px" data-toast="已格式化">格式化JSON</button></span>
+          <textarea class="s-textarea" rows="4" placeholder='JSON格式的任务参数（可选），如 {"catid": "doujin"}'></textarea>
+        </div>
+        <div class="form-item"><span class="f-label">优先级</span><input class="s-input" type="number" value="50"><span class="f-hint">数值越小优先级越高（1-100）</span></div>
+        <div class="form-item"><span class="f-label">超时时间（秒）</span><input class="s-input" type="number" value="3600"><span class="f-hint">任务执行的最大时长</span></div>
+        <div class="form-item row-between full"><span class="f-label">启用</span><div class="switch on" data-switch></div></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="定时任务已保存">保 存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 插件配置 Modal ===== -->
+  <div class="mask" id="modal-plugin-config">
+    <div class="modal-card">
+      <h3>⚙ 配置插件 · EhMeta</h3>
+      <div class="form-item" style="margin-bottom:14px">
+        <span class="f-label">Member Cookie <span class="badge b-outline">string</span></span>
+        <input class="s-input" placeholder="igneous / member id cookie">
+      </div>
+      <div class="form-item" style="margin-bottom:14px">
+        <span class="f-label">请求间隔（秒） <span class="badge b-outline">int</span></span>
+        <input class="s-input" type="number" value="3">
+      </div>
+      <div class="form-item row-between" style="margin-bottom:14px">
+        <span class="f-label">启用标签翻译 <span class="badge b-outline">bool</span></span>
+        <span style="font-size:11.5px;color:var(--text-dim)">已启用</span>
+        <div class="switch on" data-switch></div>
+      </div>
+      <div class="form-item">
+        <span class="f-label">排除命名空间 <span class="badge b-outline">array</span></span>
+        <div class="tagbox" id="tagbox">
+          <span class="badge b-gray">temp<b class="x">×</b></span>
+          <span class="badge b-gray">misc<b class="x">×</b></span>
+          <input id="tagbox-input" placeholder="按回车添加项目">
+        </div>
+        <span class="f-hint">输入内容后回车添加普通项，直接回车添加空项。点击标签上的 × 删除。</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+        <button class="btn-primary" data-close-modal data-toast="插件配置已保存">保 存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 安装插件 Modal ===== -->
+  <div class="mask" id="modal-plugin-install">
+    <div class="modal-card sm">
+      <h3>⇩ 安装插件</h3>
+      <div class="dropzone" id="dropzone">拖拽 .wasm 文件到这里，或点击选择文件</div>
+      <button class="btn-primary" style="width:100%;justify-content:center;margin-top:10px" data-close-modal data-toast="插件安装任务已提交">上传插件</button>
+      <div class="or-sep"><span>或</span></div>
+      <input class="s-input" placeholder="输入插件的直链地址（必须以 .wasm 结尾）">
+      <button class="btn-primary" style="width:100%;justify-content:center;margin-top:10px" data-close-modal data-toast="插件安装任务已提交">安装插件</button>
+      <div class="modal-actions">
+        <button class="btn-ghost" data-close-modal>取 消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"><span class="ok">✓</span><span id="toast-text">已完成</span></div>
+</div>
+<script>
+  const win = document.getElementById('window');
+  const $ = id => document.getElementById(id);
+
+  // ===== 顶栏明暗切换 =====
+  $('btn-theme').onclick = () => win.classList.toggle('light');
+
+  // ===== 左导航切换页面 =====
+  const navItems = document.querySelectorAll('#set-nav .side-item');
+  navItems.forEach(item => {
+    item.onclick = () => {
+      navItems.forEach(i => i.classList.remove('on'));
+      item.classList.add('on');
+      document.querySelectorAll('.set-page').forEach(p => p.classList.remove('on'));
+      $('page-' + item.dataset.page).classList.add('on');
+      $('set-main').scrollTop = 0;
+    };
+  });
+
+  // ===== 主题分段：暗/亮直接切换窗口主题 =====
+  const segTheme = $('seg-theme');
+  segTheme.querySelectorAll('button').forEach(b => {
+    b.onclick = () => {
+      segTheme.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      if (b.dataset.theme === 'light') win.classList.add('light');
+      else win.classList.remove('light');   // dark / system 演示均回到暗色
+    };
+  });
+
+  // ===== 开关 =====
+  document.querySelectorAll('[data-switch]').forEach(sw =>
+    sw.onclick = () => sw.classList.toggle('on'));
+
+  // ===== 语言单选 =====
+  document.querySelectorAll('#lang-list .s-row').forEach(row => {
+    row.onclick = () => {
+      document.querySelectorAll('#lang-list .s-row').forEach(r => r.classList.remove('sel'));
+      row.classList.add('sel');
+      toast('语言已切换');
+    };
+  });
+
+  // ===== Toast =====
+  const toastEl = $('toast'), toastText = $('toast-text');
+  let toastTimer = null;
+  function toast(msg) {
+    toastText.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  // ===== 通用：data-toast 按钮 =====
+  document.querySelectorAll('[data-toast]').forEach(b =>
+    b.addEventListener('click', () => toast(b.dataset.toast)));
+
+  // ===== 通用 Modal：data-open-modal / data-close-modal / 点击遮罩关闭 =====
+  document.querySelectorAll('[data-open-modal]').forEach(b =>
+    b.addEventListener('click', () => $(b.dataset.openModal).classList.add('show')));
+  document.querySelectorAll('[data-close-modal]').forEach(b =>
+    b.addEventListener('click', () => b.closest('.mask').classList.remove('show')));
+  document.querySelectorAll('.mask').forEach(m =>
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); }));
+
+  // ===== 通用确认框：data-confirm="emoji|标题|描述|完成提示" =====
+  const confirmMask = $('confirm-mask'), confirmOk = $('confirm-ok');
+  let confirmTarget = null;
+  document.querySelectorAll('[data-confirm]').forEach(b =>
+    b.addEventListener('click', () => {
+      const p = b.dataset.confirm.split('|');
+      $('confirm-emoji').textContent = p[0] || '❓';
+      $('confirm-title').textContent = p[1] || '确认操作';
+      $('confirm-desc').innerHTML = (p[2] || '').replace(/\\n/g, '<br>');
+      confirmOk.dataset.msg = p[3] || '已完成';
+      confirmTarget = b;
+      confirmMask.classList.add('show');
+    }));
+  confirmOk.onclick = () => {
+    confirmMask.classList.remove('show');
+    if (!confirmTarget) return;
+    if (confirmTarget.hasAttribute('data-remove-row')) {
+      const row = confirmTarget.closest('[data-row]');
+      if (row) row.remove();
+    }
+    if (confirmTarget.dataset.after === 'totp-off') {
+      $('totp-on').style.display = 'none';
+      $('totp-off').style.display = 'block';
+    }
+    toast(confirmOk.dataset.msg);
+  };
+
+  // ===== 清理缓存：loading → 用量条归零 → toast =====
+  const btnClear = $('btn-clear-cache');
+  btnClear.onclick = () => {
+    if (btnClear.disabled) return;
+    btnClear.disabled = true;
+    btnClear.innerHTML = '<span class="spinner"></span>正在清理…';
+    setTimeout(() => {
+      $('cache-fill').style.width = '0%';
+      $('cache-used').textContent = '已用 0 MB';
+      btnClear.disabled = false;
+      btnClear.textContent = '清理图片缓存';
+      toast('缓存已清理，释放 342 MB');
+    }, 900);
+  };
+
+  // ===== 诊断日志 Modal =====
+  $('row-view-log').onclick = () => $('modal-log').classList.add('show');
+  $('row-clear-log').onclick = () => $('modal-log').classList.add('show');
+  $('row-export-log').onclick = () => toast('日志已导出');
+  $('btn-modal-export').onclick = () => { $('modal-log').classList.remove('show'); toast('日志已导出'); };
+  $('btn-modal-clear').onclick = () => {
+    $('log-box').textContent = '（暂无日志）';
+    $('modal-log').classList.remove('show');
+    toast('日志已清空');
+  };
+
+  // ===== 双重验证：未启用 → 开始设置 → 扫码启用 =====
+  $('btn-totp-setup').onclick = () => $('totp-enroll').style.display = 'block';
+  $('btn-totp-cancel').onclick = () => $('totp-enroll').style.display = 'none';
+  $('btn-totp-enable').onclick = () => {
+    $('totp-enroll').style.display = 'none';
+    $('totp-off').style.display = 'none';
+    $('totp-on').style.display = 'block';
+    toast('双重验证已启用');
+  };
+
+  // ===== 通用 Tabs 绑定（按钮 data-tab 对应面板 id） =====
+  function bindTabs(tabsId, panes) {
+    const wrap = $(tabsId);
+    wrap.querySelectorAll('button').forEach(b => b.onclick = () => {
+      wrap.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      Object.entries(panes).forEach(([k, id]) =>
+        $(id).style.display = k === b.dataset.tab ? '' : 'none');
+    });
+  }
+  bindTabs('sys-tabs', { storage: 'sys-storage', perf: 'sys-perf', server: 'sys-server', ssl: 'sys-ssl' });
+  bindTabs('cron-tabs', { list: 'cron-list', startup: 'cron-startup' });
+  bindTabs('tag-lang', { zh: 'tag-zh', en: 'tag-en' });
+
+  // ===== 任务记录：状态筛选 =====
+  const taskTabs = $('task-tabs');
+  taskTabs.querySelectorAll('button').forEach(b => b.onclick = () => {
+    taskTabs.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    const f = b.dataset.f;
+    document.querySelectorAll('#task-list [data-status]').forEach(c =>
+      c.style.display = (f === 'all' || c.dataset.status === f) ? '' : 'none');
+  });
+
+  // ===== 插件管理：类型筛选 =====
+  const pluginTabs = $('plugin-tabs');
+  pluginTabs.querySelectorAll('button').forEach(b => b.onclick = () => {
+    pluginTabs.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    const f = b.dataset.f;
+    document.querySelectorAll('#plugin-grid [data-type]').forEach(c =>
+      c.style.display = (f === 'all' || c.dataset.type === f) ? '' : 'none');
+  });
+
+  // ===== 分类管理：搜索 + 状态筛选 =====
+  const catSearch = $('cat-search');
+  let catFilter = 'all';
+  function filterCats() {
+    const q = catSearch.value.trim().toLowerCase();
+    document.querySelectorAll('#cat-grid [data-name]').forEach(c => {
+      const okQ = c.dataset.name.toLowerCase().includes(q);
+      const okF = catFilter === 'all' || (catFilter === 'on') === (c.dataset.enabled === '1');
+      c.style.display = okQ && okF ? '' : 'none';
+    });
+  }
+  catSearch.addEventListener('input', filterCats);
+  document.querySelectorAll('#cat-status button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('#cat-status button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    catFilter = b.dataset.f;
+    filterCats();
+  });
+
+  // ===== 标签管理：搜索 + 命名空间筛选 =====
+  const tagSearch = $('tag-search'), tagNs = $('tag-ns');
+  function filterTags() {
+    const q = tagSearch.value.trim().toLowerCase();
+    const ns = tagNs.value;
+    document.querySelectorAll('#tag-list [data-ns]').forEach(r => {
+      const okQ = r.dataset.name.toLowerCase().includes(q);
+      const okN = !ns || r.dataset.ns === ns;
+      r.style.display = okQ && okN ? '' : 'none';
+    });
+  }
+  tagSearch.addEventListener('input', filterTags);
+  tagNs.addEventListener('change', filterTags);
+  $('tag-clear').onclick = () => { tagSearch.value = ''; tagNs.value = ''; filterTags(); };
+
+  // ===== 智能分类：上移 / 下移 =====
+  document.querySelectorAll('#filter-list .mv-up').forEach(b => b.onclick = () => {
+    const r = b.closest('[data-row]'), p = r.previousElementSibling;
+    if (p) r.parentNode.insertBefore(r, p);
+  });
+  document.querySelectorAll('#filter-list .mv-down').forEach(b => b.onclick = () => {
+    const r = b.closest('[data-row]'), n = r.nextElementSibling;
+    if (n) r.parentNode.insertBefore(n, r);
+  });
+
+  // ===== 定时任务：服务启停 / 预设 / 验证表达式 =====
+  $('btn-cron-toggle').onclick = function () {
+    const st = $('cron-status');
+    const running = st.dataset.running === '1';
+    st.dataset.running = running ? '0' : '1';
+    st.textContent = running ? '已停止' : '运行中';
+    st.className = 'badge ' + (running ? 'b-gray' : 'b-green');
+    this.innerHTML = running ? '▶ 启动服务' : '⏹ 停止服务';
+    toast(running ? '定时任务服务已停止' : '定时任务服务已启动');
+  };
+  document.querySelectorAll('.cron-preset').forEach(b =>
+    b.onclick = () => { $('cron-expr').value = b.dataset.cron; });
+  $('btn-cron-verify').onclick = () => { $('cron-valid').style.display = 'block'; };
+
+  // ===== 启动任务设置：改动即保存 =====
+  document.querySelectorAll('.startup-sw').forEach(sw =>
+    sw.addEventListener('click', () => toast('启动任务设置已保存')));
+
+  // ===== 插件配置：array 参数标签输入 =====
+  const tagbox = $('tagbox'), tagboxInput = $('tagbox-input');
+  tagbox.addEventListener('click', e => {
+    if (e.target.classList.contains('x')) e.target.parentElement.remove();
+  });
+  tagboxInput.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const v = tagboxInput.value.trim() || '（空）';
+    const s = document.createElement('span');
+    s.className = 'badge b-gray';
+    s.innerHTML = v + '<b class="x">×</b>';
+    tagbox.insertBefore(s, tagboxInput);
+    tagboxInput.value = '';
+  });
+
+  // ===== 检查插件更新 =====
+  $('btn-check-updates').onclick = () => toast('检查完成：1 个可更新，5 个已最新，0 个失败');
+
+  // ===== 概览：阅读趋势折线图（SVG 渲染） =====
+  (function () {
+    const data = [2, 0, 5, 8, 3, 12, 9, 15, 6, 0, 4, 11, 18, 22, 14, 7, 9, 16, 25, 31, 38, 12, 8, 19, 24, 10, 6, 13, 17, 9];
+    const svg = $('trend-svg');
+    const W = 560, H = 170, pl = 26, pr = 10, pt = 12, pb = 20, max = 40;
+    const x = i => pl + (W - pl - pr) * i / (data.length - 1);
+    const y = v => pt + (H - pt - pb) * (1 - v / max);
+    let line = '';
+    data.forEach((v, i) => { line += (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(v).toFixed(1); });
+    const area = line + `L${x(data.length - 1)},${y(0)}L${x(0)},${y(0)}Z`;
+    let grid = '';
+    [0, 10, 20, 30, 40].forEach(v => {
+      grid += `<line x1="${pl}" y1="${y(v)}" x2="${W - pr}" y2="${y(v)}" stroke="rgba(128,128,128,.15)" stroke-width="1"/>` +
+              `<text x="${pl - 5}" y="${y(v) + 3}" fill="var(--text-dim)" font-size="8" text-anchor="end">${v}</text>`;
+    });
+    let labels = '';
+    ['6/20', '6/27', '7/4', '7/11', '7/18'].forEach((d, i) => {
+      labels += `<text x="${x(i * 7)}" y="${H - 5}" fill="var(--text-dim)" font-size="8" text-anchor="middle">${d}</text>`;
+    });
+    svg.innerHTML =
+      `<defs><linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">` +
+      `<stop offset="0" stop-color="#e8b04b" stop-opacity=".35"/><stop offset="1" stop-color="#e8b04b" stop-opacity="0"/>` +
+      `</linearGradient></defs>${grid}` +
+      `<path d="${area}" fill="url(#tg)"/>` +
+      `<path d="${line}" fill="none" stroke="#e8b04b" stroke-width="2" stroke-linejoin="round"/>` +
+      `<circle cx="${x(20)}" cy="${y(38)}" r="3" fill="#e8b04b"/>${labels}`;
+  })();
+
+  // ===== 统计信息：标签词云 =====
+  (function () {
+    const words = [
+      ['汉化', 44], ['原创', 38], ['同人志', 34], ['全彩', 30], ['纯爱', 28], ['彩色', 26],
+      ['泳装', 24], ['画集', 22], ['黑白', 20], ['东方', 19], ['水手服', 18], ['百合', 17],
+      ['偶像大师', 16], ['舰娘', 15], ['猫耳', 14], ['校园', 13], ['眼镜', 12], ['幻想', 11],
+      ['写真集', 10], ['短篇', 9], ['长篇', 8], ['设定集', 7]
+    ];
+    const colors = ['#e8b04b', '#c8c8ce', '#6ea8e8', '#4caf7d', '#9a9aa2', '#9a7ae0'];
+    const box = $('tag-cloud');
+    box.innerHTML = words.map((w, i) =>
+      `<span style="font-size:${(11 + w[1] * 0.45).toFixed(0)}px;color:${colors[i % colors.length]}">${w[0]}</span>`
+    ).join('');
+    box.querySelectorAll('span').forEach(s =>
+      s.onclick = () => toast('搜索: "' + s.textContent + '"'));
+  })();
+
+  // ===== 切换服务器 / 检查更新（演示） =====
+  $('btn-switch-srv').onclick = () => toast('返回服务器列表（登录页）');
+  $('row-check-update').onclick = () => toast('当前已是最新版本');
+</script>
+</body>
+</html>

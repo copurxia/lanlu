@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>夜航西飞 · 技术博客</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --bg-elev: #ffffff;
+    --bg-soft: #eef0f4;
+    --text: #1c2333;
+    --text-2: #55607a;
+    --text-3: #8a94ad;
+    --border: #e3e6ee;
+    --accent: #4c6ef5;
+    --accent-soft: rgba(76, 110, 245, .1);
+    --code-bg: #f0f2f7;
+    --shadow: 0 6px 24px -8px rgba(30, 40, 80, .12);
+    --toggle-ring: rgba(76, 110, 245, .55);
+    color-scheme: light;
+  }
+  html.dark {
+    --bg: #0d1117;
+    --bg-elev: #161c26;
+    --bg-soft: #1b2230;
+    --text: #e6e9f2;
+    --text-2: #a3adc2;
+    --text-3: #6b7488;
+    --border: #262f3f;
+    --accent: #7c9aff;
+    --accent-soft: rgba(124, 154, 255, .14);
+    --code-bg: #11161f;
+    --shadow: 0 8px 30px -10px rgba(0, 0, 0, .55);
+    --toggle-ring: rgba(255, 209, 102, .5);
+    color-scheme: dark;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.75;
+    transition: background-color .45s ease, color .45s ease;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  /* ============ View Transition 核心：禁用默认交叉淡入，交给 clip-path 扩散 ============ */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+  ::view-transition-old(root) { z-index: 1; }
+  ::view-transition-new(root) { z-index: 2147483646; }
+
+  /* ============ 顶部导航 ============ */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: color-mix(in srgb, var(--bg-elev) 82%, transparent);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    transition: background-color .45s ease, border-color .45s ease;
+  }
+  .nav {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; align-items: center; gap: 28px;
+    padding: 0 24px; height: 62px;
+  }
+  .logo {
+    font-weight: 800; font-size: 19px; letter-spacing: .5px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .logo .dot {
+    width: 12px; height: 12px; border-radius: 4px;
+    background: linear-gradient(135deg, var(--accent), #a970ff);
+    box-shadow: 0 0 12px var(--accent);
+  }
+  .nav a {
+    color: var(--text-2); text-decoration: none; font-size: 14.5px;
+    transition: color .3s;
+    position: relative;
+  }
+  .nav a:hover, .nav a.active { color: var(--accent); }
+  .nav a.active::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -19px;
+    height: 2px; background: var(--accent); border-radius: 2px;
+  }
+  .nav .spacer { flex: 1; }
+  .search-box {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: 10px; padding: 6px 14px;
+    color: var(--text-3); font-size: 13.5px; cursor: pointer;
+    transition: background-color .45s, border-color .45s;
+  }
+  kbd {
+    font-family: inherit; font-size: 11px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 5px; color: var(--text-3);
+  }
+
+  /* ============ 主题切换按钮：太阳/月亮形变 ============ */
+  #theme-toggle {
+    position: relative;
+    width: 42px; height: 42px; border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    cursor: pointer; display: grid; place-items: center;
+    transition: background-color .45s, border-color .45s, transform .15s;
+    overflow: visible;
+    view-transition-name: none;
+  }
+  #theme-toggle:hover { transform: scale(1.07) rotate(8deg); }
+  #theme-toggle:active { transform: scale(.92); }
+  #theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #theme-toggle svg { width: 22px; height: 22px; overflow: visible; }
+  .sun-core { fill: var(--accent); transition: fill .45s; }
+  .moon-mask { fill: var(--bg-soft); transition: fill .45s; }
+  .sun-rays line {
+    stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round;
+    transition: stroke .45s;
+  }
+  #theme-toggle .icon-sun { transform-origin: center; }
+
+  /* 点击时外扩的辉光圆环（非 view transition，独立 DOM 元素） */
+  .glow-ring {
+    position: fixed; z-index: 2147483647; pointer-events: none;
+    border-radius: 50%;
+    border: 3px solid var(--toggle-ring);
+    box-shadow: 0 0 30px var(--toggle-ring), inset 0 0 20px var(--toggle-ring);
+    transform: translate(-50%, -50%);
+  }
+
+  /* ============ 主体布局 ============ */
+  .layout {
+    max-width: 1200px; margin: 36px auto 80px;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 32px;
+  }
+
+  /* 文章卡片 */
+  .article {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 44px 52px;
+    box-shadow: var(--shadow);
+    transition: background-color .45s, border-color .45s;
+  }
+  .article-meta { display: flex; gap: 14px; align-items: center; color: var(--text-3); font-size: 13.5px; margin-bottom: 18px; }
+  .badge {
+    background: var(--accent-soft); color: var(--accent);
+    padding: 2px 10px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+  }
+  h1 { font-size: 30px; line-height: 1.35; margin-bottom: 20px; letter-spacing: .3px; }
+  .article p { color: var(--text-2); margin-bottom: 18px; font-size: 15.5px; }
+  .article h2 {
+    font-size: 21px; margin: 34px 0 14px;
+    padding-left: 12px; border-left: 4px solid var(--accent);
+  }
+  blockquote {
+    border-left: 4px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 12px 12px 0;
+    padding: 14px 20px; margin: 20px 0;
+    color: var(--text-2); font-size: 15px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+    margin: 20px 0; overflow-x: auto;
+    font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+    font-size: 13.5px; line-height: 1.7;
+    color: var(--text-2);
+    transition: background-color .45s, border-color .45s;
+  }
+  .tok-k { color: var(--accent); }
+  .tok-s { color: #3ba86a; }
+  .tok-c { color: var(--text-3); font-style: italic; }
+  code.inline {
+    background: var(--code-bg); padding: 2px 7px; border-radius: 6px;
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 13.5px;
+    color: var(--accent);
+  }
+  .tags { display: flex; gap: 10px; margin-top: 34px; flex-wrap: wrap; }
+  .tag {
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 4px 14px; font-size: 13px; color: var(--text-3);
+    cursor: pointer; transition: all .25s;
+  }
+  .tag:hover { color: var(--accent); border-color: var(--accent); transform: translateY(-2px); }
+
+  /* 右侧边栏 */
+  aside { display: flex; flex-direction: column; gap: 22px; }
+  .panel {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px;
+    box-shadow: var(--shadow);
+    transition: background-color .45s, border-color .45s;
+  }
+  .panel h3 {
+    font-size: 14px; color: var(--text-3); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px;
+  }
+  .toc a {
+    display: block; color: var(--text-2); text-decoration: none;
+    font-size: 14px; padding: 7px 10px; border-radius: 8px;
+    transition: all .2s; border-left: 2px solid transparent;
+  }
+  .toc a:hover { background: var(--accent-soft); color: var(--accent); border-left-color: var(--accent); }
+  .author { display: flex; gap: 14px; align-items: center; }
+  .avatar {
+    width: 52px; height: 52px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), #a970ff);
+    display: grid; place-items: center;
+    color: #fff; font-weight: 800; font-size: 20px;
+  }
+  .author-info b { font-size: 15px; }
+  .author-info div { font-size: 12.5px; color: var(--text-3); }
+
+  /* 底部推荐卡片 */
+  .cards {
+    max-width: 1200px; margin: 0 auto 90px; padding: 0 24px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px;
+  }
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 16px; padding: 26px;
+    box-shadow: var(--shadow);
+    transition: background-color .45s, border-color .45s, transform .3s, box-shadow .3s;
+    cursor: pointer;
+  }
+  .card:hover { transform: translateY(-5px); box-shadow: 0 16px 40px -12px rgba(76,110,245,.28); }
+  .card .badge { margin-bottom: 12px; display: inline-block; }
+  .card h4 { font-size: 16.5px; margin-bottom: 8px; }
+  .card p { font-size: 13.5px; color: var(--text-3); }
+
+  footer {
+    text-align: center; color: var(--text-3); font-size: 13px;
+    padding: 36px 0 44px; border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .article { padding: 30px 24px; }
+    aside { flex-direction: column; }
+    .search-box { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="nav">
+    <div class="logo"><span class="dot"></span>夜航西飞</div>
+    <a href="#" class="active">首页</a>
+    <a href="#">归档</a>
+    <a href="#">系列</a>
+    <a href="#">关于</a>
+    <div class="spacer"></div>
+    <div class="search-box">🔍 搜索文章 <kbd>Ctrl K</kbd></div>
+    <button id="theme-toggle" aria-label="切换明暗主题" title="切换明暗主题">
+      <svg viewBox="0 0 24 24" class="icon-sun">
+        <defs>
+          <mask id="moon-cut">
+            <rect x="0" y="0" width="24" height="24" fill="white"/>
+            <circle class="moon-hole" cx="30" cy="4" r="8" fill="black"/>
+          </mask>
+        </defs>
+        <circle class="sun-core" cx="12" cy="12" r="6" mask="url(#moon-cut)"/>
+        <g class="sun-rays">
+          <line x1="12" y1="1.5" x2="12" y2="4"/>
+          <line x1="12" y1="20" x2="12" y2="22.5"/>
+          <line x1="1.5" y1="12" x2="4" y2="12"/>
+          <line x1="20" y1="12" x2="22.5" y2="12"/>
+          <line x1="4.6" y1="4.6" x2="6.4" y2="6.4"/>
+          <line x1="17.6" y1="17.6" x2="19.4" y2="19.4"/>
+          <line x1="4.6" y1="19.4" x2="6.4" y2="17.6"/>
+          <line x1="17.6" y1="6.4" x2="19.4" y2="4.6"/>
+        </g>
+      </svg>
+    </button>
+  </nav>
+</header>
+
+<div class="layout">
+  <main>
+    <article class="article">
+      <div class="article-meta">
+        <span class="badge">前端工程</span>
+        <span>2026 年 7 月 25 日</span>
+        <span>·</span>
+        <span>阅读约 8 分钟</span>
+      </div>
+      <h1>View Transitions API：把「切主题」做成一场小型演出</h1>
+      <p>大多数博客的明暗切换只是一次 <code class="inline">classList.toggle</code>，颜色在 300ms 内生硬地插值过去。而 View Transitions API 给了我们把整页快照「撕开」的能力——从点击点荡开一个圆，新的主题像光一样漫出来。</p>
+
+      <h2>核心思路</h2>
+      <p>浏览器在 <code class="inline">startViewTransition</code> 回调执行前后各拍一张「照片」：旧主题一张、新主题一张。我们要做的，就是接管默认的交叉淡入，改用 <code class="inline">clip-path: circle()</code> 让新主题从鼠标点击处向外扩张。</p>
+      <pre><span class="tok-k">const</span> transition = document.<span class="tok-k">startViewTransition</span>(() =&gt; {
+  document.documentElement.classList.toggle(<span class="tok-s">'dark'</span>);
+});
+<span class="tok-c">// 等快照就绪，接管 ::view-transition-new(root)</span>
+<span class="tok-k">await</span> transition.ready;
+document.documentElement.animate({
+  clipPath: [
+    <span class="tok-s">`circle(0px at ${x}px ${y}px)`</span>,
+    <span class="tok-s">`circle(${radius}px at ${x}px ${y}px)`</span>,
+  ],
+}, { duration: 850, pseudoElement: <span class="tok-s">'::view-transition-new(root)'</span> });</pre>
+
+      <blockquote>半径不用 <code class="inline">Math.max</code> 取视口宽或高，而要取「点击点到四个角落的最远距离」——用勾股定理算 hypot，圆才能盖满整屏。</blockquote>
+
+      <h2>让它「灵动」起来的三件事</h2>
+      <p>第一，缓动别用线性。<code class="inline">cubic-bezier(.2,.9,.25,1.05)</code> 带一点点过冲，圆在收尾处微微「弹」一下，像水面涟漪拍上岸边。第二，配一个独立的辉光圆环，比主动画更快、更淡，先行一步。第三，主题按钮本身做太阳/月亮的形变，让整个交互有首尾呼应。</p>
+      <p>对不支持 View Transitions 的浏览器，静默降级回普通的 class 切换即可——功能不丢，只是少了演出。</p>
+
+      <div class="tags">
+        <span class="tag"># View Transitions</span>
+        <span class="tag"># CSS clip-path</span>
+        <span class="tag"># 暗色模式</span>
+        <span class="tag"># 动效设计</span>
+      </div>
+    </article>
+  </main>
+
+  <aside>
+    <div class="panel author-panel">
+      <h3>作者</h3>
+      <div class="author">
+        <div class="avatar">夜</div>
+        <div class="author-info">
+          <b>西飞</b>
+          <div>全栈工程师 · 动效爱好者</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>目录</h3>
+      <div class="toc">
+        <a href="#">核心思路</a>
+        <a href="#">让它「灵动」起来的三件事</a>
+        <a href="#">兼容性降级</a>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>订阅</h3>
+      <p style="font-size:13.5px;color:var(--text-3)">每周一封，只谈前端与动画，不发广告。</p>
+    </div>
+  </aside>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <span class="badge">CSS</span>
+    <h4>用 clip-path 做液态加载动画</h4>
+    <p>border-radius 做不到的形状，交给 clip-path 和 @property。</p>
+  </div>
+  <div class="card">
+    <span class="badge">动画</span>
+    <h4>弹簧物理在 Web 动效中的应用</h4>
+    <p>为什么 cubic-bezier 模拟不出真正的「Q 弹」？</p>
+  </div>
+  <div class="card">
+    <span class="badge">浏览器</span>
+    <h4>精读 View Transitions 规范草案</h4>
+    <p>快照树、伪元素层级与跨文档导航的来龙去脉。</p>
+  </div>
+</div>
+
+<footer>© 2026 夜航西飞 · Powered by 好奇心</footer>
+
+<script>
+(function () {
+  const html = document.documentElement;
+  const btn = document.getElementById('theme-toggle');
+
+  // 初始化：localStorage 优先，其次系统偏好
+  const saved = localStorage.getItem('theme');
+  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  if (saved === 'dark' || (!saved && prefersDark)) html.classList.add('dark');
+
+  const setTheme = () => {
+    const dark = !html.classList.contains('dark');
+    html.classList.toggle('dark', dark);
+    localStorage.setItem('theme', dark ? 'dark' : 'light');
+  };
+
+  // 太阳/月亮形变（dark 为目标状态）
+  const morphIcon = (dark) => {
+    const core = btn.querySelector('.sun-core');
+    const hole = btn.querySelector('.moon-hole');
+    const rays = btn.querySelector('.sun-rays');
+    core.animate(
+      dark
+        ? [{ transform: 'scale(1) rotate(0deg)' }, { transform: 'scale(.82) rotate(-25deg)' }]
+        : [{ transform: 'scale(.82) rotate(25deg)' }, { transform: 'scale(1) rotate(0deg)' }],
+      { duration: 550, easing: 'cubic-bezier(.34,1.56,.64,1)', fill: 'forwards' }
+    );
+    // SVG 几何属性用 rAF 驱动，保证往返方向都正确
+    animateAttr(hole, 'cx', dark ? [30, 17] : [17, 30], 550);
+    animateAttr(hole, 'cy', dark ? [4, 7] : [7, 4], 550);
+    rays.animate(
+      dark
+        ? [{ opacity: 1, transform: 'scale(1) rotate(0deg)' }, { opacity: 0, transform: 'scale(.3) rotate(-60deg)' }]
+        : [{ opacity: 0, transform: 'scale(.3) rotate(60deg)' }, { opacity: 1, transform: 'scale(1) rotate(0deg)' }],
+      { duration: 480, easing: 'cubic-bezier(.34,1.56,.64,1)', fill: 'forwards' }
+    );
+  };
+
+  function animateAttr(el, attr, [from, to], dur) {
+    const t0 = performance.now();
+    const ease = t => 1 + 1.56 * Math.pow(t - 1, 3) + 0.56 * Math.pow(t - 1, 2); // easeOutBack 近似
+    (function tick(now) {
+      const t = Math.min((now - t0) / dur, 1);
+      el.setAttribute(attr, from + (to - from) * ease(t));
+      if (t < 1) requestAnimationFrame(tick);
+    })(t0);
+  }
+
+  // 辉光圆环：先行一步的涟漪
+  function spawnRing(x, y) {
+    const ring = document.createElement('div');
+    ring.className = 'glow-ring';
+    const maxR = Math.hypot(
+      Math.max(x, innerWidth - x),
+      Math.max(y, innerHeight - y)
+    );
+    ring.style.left = x + 'px';
+    ring.style.top = y + 'px';
+    document.body.appendChild(ring);
+    ring.animate(
+      [
+        { width: '0px', height: '0px', opacity: .9 },
+        { width: maxR * 2 + 'px', height: maxR * 2 + 'px', opacity: 0 }
+      ],
+      { duration: 650, easing: 'cubic-bezier(.15,.8,.3,1)', fill: 'forwards' }
+    ).onfinish = () => ring.remove();
+  }
+
+  // 页面加载时把图标校准到当前主题（无动画）
+  (function syncIcon() {
+    const dark = html.classList.contains('dark');
+    const hole = btn.querySelector('.moon-hole');
+    const rays = btn.querySelector('.sun-rays');
+    const core = btn.querySelector('.sun-core');
+    if (dark) {
+      hole.setAttribute('cx', 17); hole.setAttribute('cy', 7);
+      rays.style.opacity = 0;
+      core.style.transform = 'scale(.82)';
+    }
+  })();
+
+  btn.addEventListener('click', (e) => {
+    const x = e.clientX, y = e.clientY;
+    const targetDark = !html.classList.contains('dark');
+    morphIcon(targetDark);
+
+    // 不支持 View Transitions 时降级
+    if (!document.startViewTransition) {
+      setTheme();
+      return;
+    }
+
+    const maxR = Math.hypot(
+      Math.max(x, innerWidth - x),
+      Math.max(y, innerHeight - y)
+    );
+
+    const vt = document.startViewTransition(() => {
+      setTheme();
+      spawnRing(x, y); // 在新主题里生成，环色取新主题变量
+    });
+
+    vt.ready.then(() => {
+      // 新主题从点击处荡开，带轻微过冲
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${maxR}px at ${x}px ${y}px)`] },
+        {
+          duration: 850,
+          easing: 'cubic-bezier(.2,.9,.25,1.05)',
+          pseudoElement: '::view-transition-new(root)'
+        }
+      );
+      // 旧主题轻微缩小淡出，制造「被推开」的纵深
+      document.documentElement.animate(
+        { opacity: [1, 0.6], transform: ['scale(1)', 'scale(.985)'] },
+        {
+          duration: 500,
+          easing: 'ease-out',
+          pseudoElement: '::view-transition-old(root)'
+        }
+      );
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+node_modules/
+target/
+data/assets/
+data/cache/
+data/logs/
+dist/
+.next/
+out/
+client/node_modules/
+client-next/target/
+mcp/target/
+build-script-cache/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+ref/
+lanlup/

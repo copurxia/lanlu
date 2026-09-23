@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu client-next 登录页重设计 · 多服务器交互原型</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-card: #131316;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;
+    --accent-soft: rgba(232,176,75,.16);
+    --danger: #e05d5d;
+    --success: #4caf7d;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+  button { font-family: inherit; color: var(--text); background: transparent; border: none; cursor: pointer; }
+
+  #window {
+    width: min(1320px, 96vw); height: min(860px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏（登录态精简版：仅品牌 + 主题切换 + 窗口控制） ============ */
+  #topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-capsule); backdrop-filter: blur(18px); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .brand b { font-size: 15px; letter-spacing: .02em; }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      color: var(--text-dim); transition: .15s; }
+  .icon-btn:hover { background: rgba(255,255,255,.06); color: var(--text); }
+
+  /* ============ 窗口控制 ============ */
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+  #window.light .win-btn:hover { background: rgba(0,0,0,.07); }
+  #window.light .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 登录舞台：左右分栏 ============ */
+  #login-stage {
+    flex: 1; position: relative; display: flex; overflow: hidden;
+  }
+  /* 背景装饰：金色光晕，二期可换毛玻璃封面墙 */
+  .glow { position: absolute; border-radius: 50%; filter: blur(120px); pointer-events: none; }
+  .glow.g1 { width: 520px; height: 520px; top: -180px; right: -120px;
+      background: radial-gradient(circle, rgba(232,176,75,.14), transparent 70%); }
+  .glow.g2 { width: 460px; height: 460px; bottom: -200px; left: -100px;
+      background: radial-gradient(circle, rgba(232,176,75,.09), transparent 70%); }
+
+  /* ============ 左栏：服务器列表 ============ */
+  #server-panel {
+    width: 320px; flex: none; position: relative; z-index: 1;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--bg-card);
+  }
+  #server-panel .panel-head {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 20px 18px 14px;
+  }
+  .panel-head h2 { font-size: 15px; font-weight: 700; flex: 1; letter-spacing: .02em; }
+  .btn-add {
+    width: 30px; height: 30px; border-radius: 8px; font-size: 16px;
+    background: var(--accent-soft); color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center; transition: .15s;
+  }
+  .btn-add:hover { background: var(--accent); color: #1a1206; }
+
+  #server-list { flex: 1; overflow-y: auto; padding: 0 12px 16px;
+      display: flex; flex-direction: column; gap: 8px; }
+  #server-list::-webkit-scrollbar { width: 6px; }
+  #server-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .server-card {
+    position: relative; display: flex; align-items: center; gap: 11px;
+    padding: 12px 13px; border-radius: 11px; cursor: pointer;
+    border: 1px solid transparent; transition: .15s;
+  }
+  .server-card:hover { background: rgba(255,255,255,.04); }
+  #window.light .server-card:hover { background: rgba(0,0,0,.04); }
+  .server-card.active {
+    background: var(--accent-soft); border-color: rgba(232,176,75,.35);
+  }
+  .server-card .srv-ico {
+    width: 36px; height: 36px; flex: none; border-radius: 10px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .server-card.active .srv-ico { border-color: rgba(232,176,75,.4); }
+  .srv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .srv-name { font-size: 13.5px; font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srv-url { font-size: 11.5px; color: var(--accent);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srv-last { font-size: 10.5px; color: var(--text-dim); }
+  /* 卡片操作按钮：悬停浮现 */
+  .srv-actions { flex: none; display: none; gap: 4px; }
+  .server-card:hover .srv-actions, .server-card.active .srv-actions { display: flex; }
+  .srv-act {
+    width: 26px; height: 26px; border-radius: 7px; font-size: 12px;
+    color: var(--text-dim); display: inline-flex; align-items: center;
+    justify-content: center; transition: .13s;
+  }
+  .srv-act:hover { background: rgba(255,255,255,.09); color: var(--text); }
+  .srv-act.del:hover { background: rgba(224,93,93,.15); color: var(--danger); }
+  /* 已存会话标记：token 有效的服务器显示小圆点 */
+  .srv-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+
+  /* 空列表引导 */
+  .srv-empty {
+    margin: 40px 8px; padding: 28px 20px; border-radius: 12px; text-align: center;
+    border: 1px dashed var(--border); color: var(--text-dim);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+  }
+  .srv-empty .big { font-size: 26px; }
+  .srv-empty b { color: var(--text); font-size: 13.5px; }
+  .srv-empty p { font-size: 12px; line-height: 1.6; }
+  .btn-empty-add {
+    margin-top: 4px; padding: 8px 18px; border-radius: 9px;
+    background: var(--accent); color: #1a1206; font-weight: 600; font-size: 12.5px;
+  }
+
+  /* ============ 右栏：登录表单舞台 ============ */
+  #form-stage {
+    flex: 1; position: relative; display: flex;
+    align-items: center; justify-content: center; overflow: hidden;
+  }
+
+  /* ============ 登录卡片 ============ */
+  .login-card {
+    width: 400px; position: relative; z-index: 1;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 32px 36px 30px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  }
+  /* 当前服务器头部 */
+  .login-srv-head {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+  }
+  .login-srv-head .mark {
+    width: 44px; height: 44px; flex: none; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), #b0782a);
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    box-shadow: 0 8px 24px rgba(232,176,75,.25);
+  }
+  .login-srv-head .txt { flex: 1; min-width: 0; }
+  .login-srv-head h1 { font-size: 16px; font-weight: 700;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .login-srv-head .url { font-size: 12px; color: var(--accent);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .login-srv-head .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  /* 表单 */
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .field label { font-size: 12px; color: var(--text-dim); letter-spacing: .02em; }
+  .field .input {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; transition: .15s; cursor: text;
+  }
+  .field .input:focus-within, .field .input:hover { border-color: rgba(232,176,75,.4); }
+  .field .input:focus-within { box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field .input .ico { font-size: 13px; color: var(--text-dim); flex: none; }
+  .field input { flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 13.5px; font-family: inherit; user-select: text; }
+  .field input::placeholder { color: var(--text-dim); opacity: .6; }
+
+  /* 错误提示 */
+  .login-error {
+    display: none; align-items: center; gap: 8px;
+    background: rgba(224,93,93,.1); border: 1px solid rgba(224,93,93,.35);
+    color: var(--danger); font-size: 12.5px; border-radius: 9px;
+    padding: 9px 12px; margin-bottom: 16px;
+  }
+  .login-error.show { display: flex; }
+
+  /* 主按钮 */
+  #form-password, #form-totp { display: flex; flex-direction: column; align-items: stretch; }
+  .btn-primary {
+    margin-top: 6px; height: 42px; border-radius: 10px;
+    background: var(--accent); color: #1a1206; font-weight: 600; font-size: 14px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: .15s;
+  }
+  .btn-primary:hover { filter: brightness(1.07); }
+  .btn-primary:active { transform: translateY(1px); }
+  .btn-primary.loading { opacity: .75; pointer-events: none; }
+  .spinner { width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid rgba(26,18,6,.3); border-top-color: #1a1206;
+      animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 次按钮（幽灵） */
+  .btn-ghost {
+    height: 42px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); color: var(--text-dim);
+    display: flex; align-items: center; justify-content: center; gap: 7px; transition: .15s;
+  }
+  .btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  #window.light .btn-ghost:hover { border-color: rgba(0,0,0,.25); }
+
+  /* 返回密码登录链接（TOTP 态） */
+  .back-link { margin-top: 14px; text-align: center; font-size: 12.5px;
+      color: var(--accent); cursor: pointer; display: none; }
+  .back-link.show { display: block; }
+  .back-link:hover { text-decoration: underline; }
+
+  .login-foot { margin-top: 18px; text-align: center;
+      font-size: 11.5px; color: var(--text-dim); }
+  .login-foot a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .login-foot a:hover { text-decoration: underline; }
+
+  /* TOTP 提示条 */
+  .totp-hint {
+    display: none; align-items: center; gap: 8px;
+    background: var(--accent-soft); border: 1px solid rgba(232,176,75,.3);
+    color: var(--accent); font-size: 12.5px; border-radius: 9px;
+    padding: 9px 12px; margin-bottom: 16px;
+  }
+  .totp-hint.show { display: flex; }
+
+  /* ============ 添加/编辑服务器 Modal ============ */
+  #modal-mask {
+    position: absolute; inset: 0; z-index: 40; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); backdrop-filter: blur(4px);
+  }
+  #modal-mask.show { display: flex; }
+  .modal-card {
+    width: 380px; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 26px 28px 24px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  .modal-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-actions .btn-ghost, .modal-actions .btn-primary { flex: 1; margin-top: 0; }
+
+  /* 测试连接结果 */
+  .test-result { display: none; align-items: center; gap: 7px;
+      font-size: 12px; border-radius: 8px; padding: 8px 11px; margin-top: 12px; }
+  .test-result.show { display: flex; }
+  .test-result.ok { background: rgba(76,175,125,.1); border: 1px solid rgba(76,175,125,.35);
+      color: var(--success); }
+  .test-result.fail { background: rgba(224,93,93,.1); border: 1px solid rgba(224,93,93,.35);
+      color: var(--danger); }
+  .btn-test { margin-top: 4px; align-self: flex-start; padding: 7px 14px;
+      border-radius: 8px; font-size: 12px; font-weight: 600;
+      border: 1px solid var(--border); color: var(--text-dim);
+      display: inline-flex; align-items: center; gap: 6px; transition: .15s; }
+  .btn-test:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+
+  /* ============ demo 工具条（原型用，非设计部分） ============ */
+  #demo-bar { position: fixed; left: 12px; bottom: 12px; z-index: 99;
+      display: flex; gap: 6px; background: #1c1c1f; padding: 6px;
+      border-radius: 10px; border: 1px solid #333; flex-wrap: wrap; max-width: 90vw; }
+  #demo-bar button { padding: 5px 10px; font-size: 12px; border-radius: 7px;
+      color: #ddd; border: 1px solid #444; }
+  #demo-bar button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-card: #ffffff;
+    --bg-capsule: rgba(255,255,255,.88);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+  }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .login-card, #window.light .modal-card { box-shadow: 0 18px 50px rgba(0,0,0,.12); }
+  #window.light .glow.g1 { background: radial-gradient(circle, rgba(199,138,30,.16), transparent 70%); }
+  #window.light .glow.g2 { background: radial-gradient(circle, rgba(199,138,30,.1), transparent 70%); }
+</style>
+</head>
+<body>
+
+<div id="demo-bar">
+  <span style="font-size:11px;color:#888;padding:5px 4px">状态:</span>
+  <button data-state="default" class="on">默认</button>
+  <button data-state="loading">连接中</button>
+  <button data-state="error">登录失败</button>
+  <button data-state="totp">TOTP 验证</button>
+  <button data-state="empty">空列表</button>
+  <button data-state="modal-add">添加服务器</button>
+  <button data-state="modal-edit">编辑服务器</button>
+</div>
+
+<div id="window">
+  <!-- 顶栏（登录态精简版） -->
+  <div id="topbar">
+    <div class="brand"><div class="brand-mark">🦌</div><b>Lanlu</b></div>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <span class="win-sep"></span>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <!-- 登录舞台：左服务器列表 + 右登录表单 -->
+  <div id="login-stage">
+    <div class="glow g1"></div>
+    <div class="glow g2"></div>
+
+    <!-- 左栏：服务器列表 -->
+    <aside id="server-panel">
+      <div class="panel-head">
+        <h2>服务器</h2>
+        <button class="btn-add" id="btn-add-server" title="添加服务器">＋</button>
+      </div>
+      <div id="server-list">
+        <!-- 服务器卡片（选中态 .active；有已存会话显示绿点） -->
+        <div class="server-card active" data-user="admin">
+          <div class="srv-ico">🖥</div>
+          <div class="srv-main">
+            <div class="srv-name">家里 NAS</div>
+            <div class="srv-url">https://lanlu.home.lan:8082</div>
+            <div class="srv-last">上次使用 2026-07-18 22:41</div>
+          </div>
+          <span class="srv-dot" title="已保存会话"></span>
+          <div class="srv-actions">
+            <button class="srv-act edit" title="编辑">✎</button>
+            <button class="srv-act del" title="删除">🗑</button>
+          </div>
+        </div>
+        <div class="server-card" data-user="reader">
+          <div class="srv-ico">☁</div>
+          <div class="srv-main">
+            <div class="srv-name">公司服务器</div>
+            <div class="srv-url">https://comics.example.com</div>
+            <div class="srv-last">上次使用 2026-07-12 09:03</div>
+          </div>
+          <div class="srv-actions">
+            <button class="srv-act edit" title="编辑">✎</button>
+            <button class="srv-act del" title="删除">🗑</button>
+          </div>
+        </div>
+        <div class="server-card" data-user="">
+          <div class="srv-ico">🧪</div>
+          <div class="srv-main">
+            <div class="srv-name">本地测试</div>
+            <div class="srv-url">http://127.0.0.1:8082</div>
+            <div class="srv-last">从未使用</div>
+          </div>
+          <div class="srv-actions">
+            <button class="srv-act edit" title="编辑">✎</button>
+            <button class="srv-act del" title="删除">🗑</button>
+          </div>
+        </div>
+
+        <!-- 空列表引导（demo「空列表」状态时仅显示它） -->
+        <div class="srv-empty" id="srv-empty" style="display:none">
+          <div class="big">🖥</div>
+          <b>还没有服务器</b>
+          <p>添加一个 Lanlu 服务器开始使用<br>支持保存多个服务器，随时切换</p>
+          <button class="btn-empty-add" id="btn-empty-add">＋ 添加服务器</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右栏：登录表单 -->
+    <div id="form-stage">
+      <div class="login-card">
+        <!-- 当前选中服务器头部 -->
+        <div class="login-srv-head">
+          <div class="mark">🦌</div>
+          <div class="txt">
+            <h1 id="cur-name">家里 NAS</h1>
+            <div class="url" id="cur-url">https://lanlu.home.lan:8082</div>
+            <div class="sub">登录以浏览你的漫画库</div>
+          </div>
+        </div>
+
+        <div class="login-error" id="login-error">
+          <span>⚠</span><span id="error-text">无法连接服务器，请检查地址后重试</span>
+        </div>
+
+        <div class="totp-hint" id="totp-hint">
+          <span>🛡</span><span>该账号已开启两步验证，请输入身份验证器中的验证码</span>
+        </div>
+
+        <!-- 密码登录表单（TOTP 态隐藏） -->
+        <div id="form-password">
+          <div class="field">
+            <label>用户名</label>
+            <div class="input">
+              <span class="ico">👤</span>
+              <input id="in-user" placeholder="输入用户名" value="admin">
+            </div>
+          </div>
+          <div class="field">
+            <label>密码</label>
+            <div class="input">
+              <span class="ico">🔒</span>
+              <input id="in-pass" type="password" placeholder="输入密码">
+            </div>
+          </div>
+          <button class="btn-primary" id="btn-login">登 录</button>
+        </div>
+
+        <!-- TOTP 验证表单 -->
+        <div id="form-totp" style="display:none">
+          <div class="field">
+            <label>验证码</label>
+            <div class="input">
+              <span class="ico">🛡</span>
+              <input id="in-totp" placeholder="6 位数字验证码" maxlength="6">
+            </div>
+          </div>
+          <div class="field">
+            <label>恢复码（可选，二选一）</label>
+            <div class="input">
+              <span class="ico">🔑</span>
+              <input id="in-recovery" placeholder="丢失设备时使用恢复码">
+            </div>
+          </div>
+          <button class="btn-primary" id="btn-verify">验 证</button>
+        </div>
+
+        <a class="back-link" id="back-to-password">← 返回密码登录</a>
+
+        <div class="login-foot">还没有服务器？<a>了解自建 Lanlu 服务</a></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加/编辑服务器 Modal -->
+  <div id="modal-mask">
+    <div class="modal-card">
+      <h3 id="modal-title">添加服务器</h3>
+      <div class="field">
+        <label>名称（可选，留空用地址代替）</label>
+        <div class="input">
+          <span class="ico">🏷</span>
+          <input id="in-srv-name" placeholder="例如：家里 NAS">
+        </div>
+      </div>
+      <div class="field">
+        <label>服务器地址</label>
+        <div class="input">
+          <span class="ico">⇄</span>
+          <input id="in-srv-url" placeholder="http://127.0.0.1:8082">
+        </div>
+      </div>
+      <button class="btn-test" id="btn-test">📶 测试连接</button>
+      <div class="test-result ok" id="test-ok">✓ 连接成功：Lanlu v1.3.2</div>
+      <div class="test-result fail" id="test-fail">✕ 连接失败：目标地址不是 Lanlu 服务器</div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="btn-modal-cancel">取 消</button>
+        <button class="btn-primary" id="btn-modal-save">保 存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const win = document.getElementById('window');
+  document.getElementById('btn-theme').onclick = () => win.classList.toggle('light');
+
+  const err = document.getElementById('login-error');
+  const totpHint = document.getElementById('totp-hint');
+  const formPass = document.getElementById('form-password');
+  const formTotp = document.getElementById('form-totp');
+  const backLink = document.getElementById('back-to-password');
+  const btnLogin = document.getElementById('btn-login');
+  const mask = document.getElementById('modal-mask');
+  const modalTitle = document.getElementById('modal-title');
+
+  // 服务器卡片选中：右侧头部联动、用户名带出该服务器上次账号
+  const curName = document.getElementById('cur-name');
+  const curUrl = document.getElementById('cur-url');
+  const inUser = document.getElementById('in-user');
+  document.querySelectorAll('.server-card').forEach(card => {
+    card.onclick = e => {
+      if (e.target.closest('.srv-act')) return;
+      document.querySelectorAll('.server-card').forEach(c => c.classList.remove('active'));
+      card.classList.add('active');
+      curName.textContent = card.querySelector('.srv-name').textContent;
+      curUrl.textContent = card.querySelector('.srv-url').textContent;
+      inUser.value = card.dataset.user || '';
+    };
+  });
+
+  // Modal 开合
+  const openModal = title => { modalTitle.textContent = title; mask.classList.add('show'); };
+  document.getElementById('btn-add-server').onclick = () => openModal('添加服务器');
+  document.getElementById('btn-empty-add').onclick = () => openModal('添加服务器');
+  document.querySelectorAll('.srv-act.edit').forEach(b =>
+    b.onclick = () => openModal('编辑服务器'));
+  document.getElementById('btn-modal-cancel').onclick = () => mask.classList.remove('show');
+  mask.onclick = e => { if (e.target === mask) mask.classList.remove('show'); };
+  document.getElementById('btn-modal-save').onclick = () => mask.classList.remove('show');
+
+  // 测试连接演示：交替成功/失败
+  let testFlip = false;
+  document.getElementById('btn-test').onclick = () => {
+    testFlip = !testFlip;
+    document.getElementById('test-ok').classList.toggle('show', testFlip);
+    document.getElementById('test-fail').classList.toggle('show', !testFlip);
+  };
+
+  // demo 状态切换（原型演示用）
+  const cards = document.querySelectorAll('.server-card');
+  const empty = document.getElementById('srv-empty');
+  document.querySelectorAll('#demo-bar button').forEach(b => {
+    b.onclick = () => {
+      document.querySelectorAll('#demo-bar button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      const s = b.dataset.state;
+      const totp = s === 'totp';
+      err.classList.toggle('show', s === 'error');
+      totpHint.classList.toggle('show', totp);
+      formPass.style.display = totp ? 'none' : '';
+      formTotp.style.display = totp ? '' : 'none';
+      backLink.classList.toggle('show', totp);
+      btnLogin.classList.toggle('loading', s === 'loading');
+      btnLogin.innerHTML = s === 'loading' ? '<span class="spinner"></span>正在连接…' : '登 录';
+      cards.forEach(c => c.style.display = s === 'empty' ? 'none' : '');
+      empty.style.display = s === 'empty' ? '' : 'none';
+      mask.classList.toggle('show', s === 'modal-add' || s === 'modal-edit');
+      if (s === 'modal-add') modalTitle.textContent = '添加服务器';
+      if (s === 'modal-edit') modalTitle.textContent = '编辑服务器';
+    };
+  });
+
+  // TOTP 态返回密码登录
+  backLink.onclick = () => document.querySelector('#demo-bar [data-state="default"]').click();
+</script>
+</body>
+</html>

@@ -13,16 +13,24 @@ public struct VipsImage {
 public type VipsImagePtr = CPointer<VipsImage>
 
 foreign func vips_init(argv0: CString): Int32
+
 foreign func vips_shutdown(): Unit
 
 foreign func vips_error_buffer(): CString
+
 foreign func vips_error_clear(): Unit
 
 // Load image from file. Options are passed as a NULL-terminated varargs list.
 foreign func vips_image_new_from_file(filename: CString, ...): VipsImagePtr
 
+// Create an owned image by copying an interleaved pixel buffer.
+foreign func vips_image_new_from_memory_copy(data: CPointer<Unit>, size: UIntNative, width: Int32, height: Int32,
+    bands: Int32, format: Int32): VipsImagePtr
+
 foreign func vips_image_get_width(image: VipsImagePtr): Int32
+
 foreign func vips_image_get_height(image: VipsImagePtr): Int32
+
 foreign func vips_image_get_bands(image: VipsImagePtr): Int32
 
 // Auto-rotate using image metadata (EXIF orientation, etc).
@@ -31,8 +39,12 @@ foreign func vips_autorot(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, ...): 
 // Resize by a scale factor.
 foreign func vips_resize(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, scale: Float64, ...): Int32
 
+// Gaussian blur with sigma in pixels (vips_gaussblur, convolution.h)。
+foreign func vips_gaussblur(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, sigma: Float64, ...): Int32
+
 // Crop/extract.
-foreign func vips_extract_area(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32, ...): Int32
+foreign func vips_extract_area(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32,
+    height: Int32, ...): Int32
 
 // Extract a single band from a multi-band image.
 foreign func vips_extract_band(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, band: Int32, ...): Int32
@@ -43,6 +55,8 @@ foreign func vips_text(out: CPointer<VipsImagePtr>, text: CString, ...): Int32
 
 // Colorspace conversion (we use sRGB for a stable pixel space).
 public const VIPS_INTERPRETATION_sRGB: Int32 = 22
+public const VIPS_FORMAT_UCHAR: Int32 = 0
+
 foreign func vips_colourspace(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, space: Int32, ...): Int32
 
 // Cast to 8-bit unsigned.
@@ -62,7 +76,12 @@ foreign func vips_image_write_to_memory(image: VipsImagePtr, size: CPointer<UInt
 
 // libvips objects are GObjects; unref to release.
 foreign func g_object_unref(obj: CPointer<Unit>): Unit
+
 foreign func g_free(mem: CPointer<Unit>): Unit
+
+// libvips 全局并发度（vips_concurrency_set）：控制 vips 内部线程池大小，避免与
+// 应用层多个解码 worker 叠加造成 CPU 过度订阅（见 client-next P1.6 流水线）。
+foreign func vips_concurrency_set(n: Int32): Unit
 
 /**
  * Public wrapper API.
@@ -73,6 +92,11 @@ foreign func g_free(mem: CPointer<Unit>): Unit
 public class VipsApi {
     public static func initialize(argv0: CString): Int32 {
         return unsafe { vips_init(argv0) }
+    }
+
+    // libvips 内部并发度：n <= 0 恢复默认。应在 vips_init 成功后调用一次。
+    public static func setConcurrency(n: Int32): Unit {
+        unsafe { vips_concurrency_set(n) }
     }
 
     public static func shutdown(): Unit {
@@ -95,6 +119,15 @@ public class VipsApi {
         return unsafe { vips_image_new_from_file(filename, CPointer<Unit>()) }
     }
 
+    /**
+     * Copies an interleaved RGBA byte buffer into a Vips image.
+     *
+     * The copy makes the returned image independent from the caller's pinned array.
+     */
+    public static func imageNewFromRgbaMemory(data: CPointer<Unit>, size: UIntNative, width: Int32, height: Int32): VipsImagePtr {
+        return unsafe { vips_image_new_from_memory_copy(data, size, width, height, 4, VIPS_FORMAT_UCHAR) }
+    }
+
     public static func imageWidth(image: VipsImagePtr): Int32 {
         return unsafe { vips_image_get_width(image) }
     }
@@ -115,7 +148,12 @@ public class VipsApi {
         return unsafe { vips_resize(_in, out, scale, CPointer<Unit>()) }
     }
 
-    public static func extractArea(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32): Int32 {
+    public static func gaussblur(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, sigma: Float64): Int32 {
+        return unsafe { vips_gaussblur(_in, out, sigma, CPointer<Unit>()) }
+    }
+
+    public static func extractArea(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32,
+        width: Int32, height: Int32): Int32 {
         return unsafe { vips_extract_area(_in, out, left, top, width, height, CPointer<Unit>()) }
     }
 
@@ -150,8 +188,16 @@ public class VipsApi {
         let kRgba = unsafe { LibC.mallocCString("rgba") }
         let kWrap = unsafe { LibC.mallocCString("wrap") }
         let kSpacing = unsafe { LibC.mallocCString("spacing") }
-        let wrap = if (wrapChar) { TEXT_WRAP_CHAR } else { TEXT_WRAP_WORD }
-        let rgbaI = if (rgba) { 1i32 } else { 0i32 }
+        let wrap = if (wrapChar) {
+            TEXT_WRAP_CHAR
+        } else {
+            TEXT_WRAP_WORD
+        }
+        let rgbaI = if (rgba) {
+            1i32
+        } else {
+            0i32
+        }
         try {
             return unsafe {
                 vips_text(

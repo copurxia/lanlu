@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lanlu 首页视图切换重设计 · 交互原型（分类 / 瀑布流 / 列表 / 推文 / 频道）</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --bg-elev: #16161a;
+    --bg-card: #131316;
+    --bg-capsule: rgba(22,22,26,.82);
+    --border: rgba(255,255,255,.08);
+    --text: #e8e8ea;
+    --text-dim: #9a9aa2;
+    --accent: #e8b04b;
+    --accent-soft: rgba(232,176,75,.16);
+    --danger: #e05d5d;
+    --success: #4caf7d;
+    --radius: 14px;
+    --font: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html,body { height: 100%; }
+  body { background: #333; font-family: var(--font);
+         display: flex; align-items: center; justify-content: center; }
+  button { font-family: inherit; color: var(--text); background: transparent; border: none; cursor: pointer; }
+
+  #window {
+    width: min(1320px, 96vw); height: min(860px, 94vh);
+    color: var(--text);  /* 文字色必须在 #window 层解析，主题切换才会级联 */
+    background: var(--bg); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    position: relative; display: flex; flex-direction: column;
+  }
+
+  /* ============ 顶栏（全局，与各 redesign 一致） ============ */
+  #topbar {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 0 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg-capsule); backdrop-filter: blur(18px); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; margin-right: 6px; }
+  .brand-mark { width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent), #b0782a);
+      display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .brand b { font-size: 15px; letter-spacing: .02em; }
+  .search-shell { flex: 0 1 460px; margin: 0 auto; display: flex; align-items: center; gap: 8px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
+      padding: 8px 12px; color: var(--text-dim); font-size: 13px; cursor: text; transition: .15s; }
+  .search-shell:focus-within, .search-shell:hover { border-color: rgba(232,176,75,.4); }
+  .search-shell input { flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 13px; font-family: inherit; }
+  .nav-pill { display: flex; background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; gap: 2px; }
+  .nav-pill button { padding: 6px 14px; font-size: 12.5px; border-radius: 999px; color: var(--text-dim); }
+  .nav-pill button.on { background: var(--accent-soft); color: var(--accent); }
+  .icon-btn { width: 34px; height: 34px; border-radius: 9px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 16px;
+      color: var(--text-dim); transition: .15s; flex: none; }
+  .icon-btn:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  .icon-btn.active { color: var(--accent); background: var(--accent-soft); }
+  .user-chip { display: flex; align-items: center; gap: 7px; padding: 4px 10px 4px 4px;
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: 999px;
+      font-size: 12px; color: var(--text-dim); }
+  .avatar { width: 24px; height: 24px; border-radius: 50%;
+      background: linear-gradient(135deg,#4a6fa5,#2b3a55);
+      display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; }
+
+  /* ============ 视图切换：点击循环 + 悬停下拉 ============ */
+  .vswitch { position: relative; flex: none; }
+  .vswitch .vmenu {
+    position: absolute; top: 42px; right: 0; width: 188px; z-index: 40;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 6px; box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    opacity: 0; transform: translateY(-6px); pointer-events: none; transition: .16s;
+  }
+  .vswitch:hover .vmenu, .vswitch:focus-within .vmenu { opacity: 1; transform: none; pointer-events: auto; }
+  .vmenu .vk { font-size: 10.5px; color: var(--text-dim); letter-spacing: .08em; padding: 6px 10px 4px; }
+  .vmenu button { display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 8px 10px; border-radius: 8px; font-size: 12.5px; color: var(--text-dim); transition: .13s; }
+  .vmenu button:hover { background: rgba(255,255,255,.06); color: var(--text); }
+  .vmenu button.on { background: var(--accent-soft); color: var(--accent); }
+  .vmenu button .vi { width: 18px; text-align: center; font-size: 13px; flex: none; }
+  .vmenu button .ck { margin-left: auto; font-size: 11px; opacity: 0; }
+  .vmenu button.on .ck { opacity: 1; }
+  .vmenu .vhint { border-top: 1px solid var(--border); margin-top: 5px; padding: 7px 10px 4px;
+      font-size: 10.5px; color: var(--text-dim); line-height: 1.5; }
+
+  /* ============ 主体布局 ============ */
+  #home-body { flex: 1; display: flex; min-height: 0; }
+
+  /* 左侧分类栏 */
+  #home-side { width: 224px; flex: none; border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .side-sec { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; padding: 12px 10px 6px; }
+  .side-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+      border-radius: 9px; font-size: 13px; color: var(--text-dim); cursor: pointer; transition: .13s; }
+  .side-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .side-item.on { background: var(--accent-soft); color: var(--accent); }
+  .side-item .cnt { margin-left: auto; font-size: 11px; opacity: .7; }
+
+  /* 主区 */
+  #home-main { flex: 1; overflow-y: auto; padding: 18px 22px 40px; scroll-behavior: smooth; }
+
+  /* 信息流工具行：标题 + 统计 + 排序 */
+  .feed-tools { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .feed-tools h2 { font-size: 20px; font-weight: 600; min-width: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+  .feed-tools .sp { flex: 1; }
+  .feed-tools .lb { font-size: 12px; color: var(--text-dim); }
+  .sel { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 9px;
+      padding: 7px 10px; font-size: 12.5px; color: var(--text-dim);
+      display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .sel:hover { border-color: rgba(232,176,75,.4); color: var(--text); }
+
+  /* ============ 视图容器 ============ */
+  .vview { display: none; animation: fadeUp .35s ease both; }
+  .vview.on { display: block; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } }
+
+  /* ============ 卡片（分类横排 / 瀑布流共用） ============ */
+  .card { width: 168px; flex: none; cursor: pointer; }
+  .card .cover { width: 100%; aspect-ratio: 3/4; border-radius: 12px; position: relative;
+      overflow: hidden; border: 1px solid var(--border);
+      transition: transform .18s ease, box-shadow .18s ease; }
+  .card:hover .cover { transform: translateY(-4px);
+      box-shadow: 0 14px 32px rgba(0,0,0,.5); outline: 1px solid rgba(232,176,75,.45); }
+  .cover .ph { position: absolute; inset: 0; display: flex; align-items: center;
+      justify-content: center; font-size: 34px; opacity: .4; }
+  .cover .badge-new { position: absolute; top: 8px; right: 8px; background: var(--danger);
+      color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+  .badge-type { background: rgba(0,0,0,.65);
+      backdrop-filter: blur(6px); font-size: 10.5px; padding: 3px 8px; border-radius: 6px;
+      color: #f2f2f4;  /* 叠层语义：封面上的 chip 不随主题翻转 */
+      display: flex; gap: 4px; align-items: center; }
+  .badge-type.tank { color: var(--accent); }
+  .cover .badge-type { position: absolute; top: 8px; left: 8px; }
+  .cover .fav { position: absolute; bottom: 8px; right: 8px; width: 28px; height: 28px;
+      border-radius: 50%; background: rgba(0,0,0,.6); backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center; font-size: 13px;
+      color: #fff; opacity: 0; transition: .15s; }
+  .card:hover .fav, .fav.on { opacity: 1; }
+  .fav.on { color: var(--accent); }
+  .cover .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+      background: rgba(255,255,255,.15); }
+  .cover .prog i { display: block; height: 100%; background: var(--accent); }
+  /* 合集叠层效果 */
+  .card.tank .stack { position: absolute; inset: 0; }
+  .card.tank .stack::before, .card.tank .stack::after {
+      content: ""; position: absolute; inset: 0; border-radius: 12px;
+      background: linear-gradient(160deg,#22304a,#10151f); border: 1px solid var(--border); }
+  .card.tank .stack::before { transform: translate(5px,-5px) scale(.96); z-index: -1; }
+  .card .t { margin-top: 8px; font-size: 12.5px; line-height: 1.4;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .m { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  /* ============ 视图 1：分类（随机推荐 + 分类横排） ============ */
+  .row-sec { margin-bottom: 30px; }
+  .row-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .row-head h2 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .row-head h2 .chev { font-size: 13px; color: var(--text-dim); }
+  .row-head .more { font-size: 12px; color: var(--text-dim); margin-left: auto;
+      display: flex; align-items: center; gap: 3px; }
+  .row-head .more:hover { color: var(--accent); }
+  .btn-refresh { display: inline-flex; align-items: center; gap: 7px; font-size: 12px;
+      padding: 6px 13px; border-radius: 9px; border: 1px solid var(--border);
+      color: var(--text-dim); transition: .15s; margin-left: auto; }
+  .btn-refresh:hover { color: var(--text); border-color: rgba(255,255,255,.2); }
+  .btn-refresh.spin .r-ico { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .card-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+  .card-row::-webkit-scrollbar { height: 6px; }
+  #view-category h2.big { font-size: 20px; font-weight: 600; }
+
+  /* ============ 视图 2：瀑布流 ============ */
+  .masonry { columns: 5 180px; column-gap: 14px; }
+  .masonry .card { width: 100%; margin-bottom: 14px; break-inside: avoid; }
+  .masonry .card .cover { aspect-ratio: auto; }
+
+  /* ============ 视图 3：列表 ============ */
+  .list-wrap { max-width: 1024px; margin: 0 auto; }
+  .lrow { display: flex; gap: 14px; padding: 12px; border-radius: 12px; cursor: pointer;
+      border: 1px solid transparent; transition: .14s; align-items: center; }
+  .lrow:hover { background: var(--bg-card); border-color: var(--border); }
+  .lrow .lc { width: 52px; height: 70px; border-radius: 8px; flex: none;
+      border: 1px solid var(--border); position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .lrow .lmid { flex: 1; min-width: 0; }
+  .lrow .lt { font-size: 13.5px; font-weight: 600; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+  .lrow .lt .badge-new-inline { background: var(--danger); color: #fff; font-size: 9.5px;
+      font-weight: 700; padding: 1px 6px; border-radius: 5px; flex: none; }
+  .lrow .lt .tank-chip { font-size: 10px; color: var(--accent); background: var(--accent-soft);
+      padding: 1px 7px; border-radius: 5px; flex: none; font-weight: 400; }
+  .lrow .lm { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+  .lrow .ltags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .lrow .ltags .tag { font-size: 10.5px; padding: 2px 9px; border-radius: 999px;
+      background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text-dim); }
+  .lrow .r { flex: none; width: 130px; text-align: right; }
+  .lrow .r .pct { font-size: 11.5px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .lrow .r .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.1); margin-top: 6px; }
+  .lrow .r .bar i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+  .lrow .r .pgs { font-size: 10.5px; color: var(--text-dim); margin-top: 5px; }
+  .feed-foot { display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin-top: 18px; }
+  .stats { font-size: 12px; color: var(--text-dim); }
+  .pager { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); }
+  .pager button { min-width: 30px; padding: 6px 10px; border: 1px solid var(--border);
+      border-radius: 8px; font-size: 12px; }
+  .pager button:hover { border-color: var(--accent); color: var(--accent); }
+  .pager button.on { background: var(--accent-soft); color: var(--accent); border-color: rgba(232,176,75,.4); }
+
+  /* ============ 视图 4：推文 ============ */
+  .tweet-col { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .tweet { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px 16px; cursor: pointer; transition: .14s; }
+  .tweet:hover { border-color: rgba(232,176,75,.35); }
+  .tweet .tw-av { width: 44px; height: 44px; border-radius: 50%; flex: none;
+      border: 1px solid var(--border); display: flex; align-items: center;
+      justify-content: center; font-size: 18px; overflow: hidden; }
+  .tweet .tw-body { flex: 1; min-width: 0; }
+  .tweet .tw-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .tweet .tw-head b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tweet .tw-head .tm { font-size: 11px; color: var(--text-dim); flex: none; margin-left: auto; }
+  .tweet .tw-text { font-size: 12.5px; color: var(--text-dim); line-height: 1.6; margin-top: 4px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* 推文图片网格：对齐 frontend TweetPreviewMedia —— 按数量固定网格，图片 object-cover 裁切，gap-px 细缝 */
+  .tw-grid { margin-top: 10px; display: grid; gap: 1px; background: var(--border);
+      border: 1px solid var(--border); border-radius: 10px; overflow: hidden; position: relative; }
+  .tw-grid.g1 { aspect-ratio: 16/10; grid-template-columns: 1fr; }
+  .tw-grid.g2 { aspect-ratio: 16/10; grid-template-columns: 1fr 1fr; }
+  .tw-grid.g3 { aspect-ratio: 16/10; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .tw-grid.g3 .tw-tile:first-child { grid-row: span 2; }
+  .tw-grid.g4 { aspect-ratio: 16/10; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .tw-grid.g6 { aspect-ratio: 3/2; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+  .tw-grid.g9 { aspect-ratio: 1/1; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+  .tw-tile { position: relative; display: flex; align-items: center; justify-content: center;
+      font-size: 22px; min-height: 0; }
+  .tw-tile .pg { position: absolute; bottom: 5px; right: 6px; font-size: 9.5px;
+      color: rgba(255,255,255,.75); background: rgba(0,0,0,.45); padding: 1px 6px; border-radius: 5px; }
+  .tw-grid .grid-note { position: absolute; top: 8px; left: 8px; z-index: 2; font-size: 10px;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(6px); color: #f2f2f4;
+      padding: 3px 8px; border-radius: 6px; }
+  .tw-grid .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 2;
+      background: rgba(255,255,255,.15); }
+  .tw-grid .prog i { display: block; height: 100%; background: var(--accent); }
+  .tweet .tw-tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .tweet .tw-tags .tag { font-size: 10.5px; padding: 2px 9px; border-radius: 999px;
+      background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text-dim); }
+  .tweet .tw-acts { display: flex; gap: 4px; margin-top: 10px; }
+  .tweet .tw-acts button { flex: 1; display: flex; align-items: center; justify-content: center;
+      gap: 6px; font-size: 11.5px; color: var(--text-dim); padding: 6px 0;
+      border-radius: 8px; transition: .13s; }
+  .tweet .tw-acts button:hover { background: rgba(255,255,255,.05); color: var(--accent); }
+  .tweet .tw-acts button.on { color: var(--accent); }
+
+  /* ============ 视图 5：频道 ============ */
+  .chan-col { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .chan { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; cursor: pointer; transition: .14s; }
+  .chan:hover { border-color: rgba(232,176,75,.35); }
+  /* 频道图片拼贴：对齐 frontend computeChannelPreviewLayout —— 按真实宽高比驱动
+     single / rows(均分行) / hero-top(顶部主图+均分行) / hero-side(左侧竖版主图+右侧行) */
+  .ch-collage { position: relative; overflow: hidden; background: var(--border);
+      display: flex; flex-direction: column; gap: 1px; max-height: 460px; }
+  .ch-collage.side { flex-direction: row; }
+  .ch-row { display: flex; gap: 1px; flex: none; }
+  .ch-tile { position: relative; flex: none; display: flex; align-items: center;
+      justify-content: center; font-size: 24px; overflow: hidden; }
+  .ch-tile .pg { position: absolute; bottom: 5px; right: 6px; font-size: 9.5px;
+      color: rgba(255,255,255,.75); background: rgba(0,0,0,.45); padding: 1px 6px; border-radius: 5px; }
+  .ch-tile .ar { position: absolute; top: 5px; left: 6px; font-size: 9px;
+      color: rgba(255,255,255,.6); background: rgba(0,0,0,.4); padding: 1px 5px; border-radius: 4px; }
+  .ch-collage .layout-note { position: absolute; bottom: 8px; right: 8px; z-index: 2; font-size: 10px;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(6px); color: var(--accent);
+      padding: 3px 8px; border-radius: 6px; }
+  .ch-collage .badge-new { position: absolute; top: 10px; right: 10px; z-index: 2; background: var(--danger);
+      color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 6px; }
+  .ch-collage .badge-type { position: absolute; top: 10px; left: 10px; z-index: 2; }
+  .ch-collage .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 2;
+      background: rgba(255,255,255,.15); }
+  .ch-collage .prog i { display: block; height: 100%; background: var(--accent); }
+  .chan .ch-info { padding: 14px 16px; }
+  .chan .ch-t { font-size: 14.5px; font-weight: 600; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+  .chan .ch-m { font-size: 11.5px; color: var(--text-dim); margin-top: 5px; display: flex;
+      align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chan .ch-m .dot::before { content: "·"; margin-right: 8px; opacity: .5; }
+  .chan .ch-tags { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .chan .ch-tags .tag { font-size: 10.5px; padding: 2px 9px; border-radius: 999px;
+      background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--text-dim); }
+  .chan .ch-acts { display: flex; align-items: center; gap: 4px; padding: 8px 12px;
+      border-top: 1px solid var(--border); }
+  .chan .ch-acts button { display: flex; align-items: center; gap: 6px; font-size: 11.5px;
+      color: var(--text-dim); padding: 6px 10px; border-radius: 8px; transition: .13s; }
+  .chan .ch-acts button:hover { background: rgba(255,255,255,.05); color: var(--accent); }
+  .chan .ch-acts button.on { color: var(--accent); }
+  .chan .ch-acts .sp { flex: 1; }
+
+  /* 无限滚动加载 */
+  .feed-loading { display: flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 26px 0; font-size: 12.5px; color: var(--text-dim); }
+  .spinner { width: 15px; height: 15px; border-radius: 50%; flex: none;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      animation: spin .8s linear infinite; }
+  #sentinel { height: 2px; }
+
+  /* demo 工具条 */
+  #demo-bar { position: fixed; top: 8px; left: 8px; z-index: 99; display: flex; gap: 6px;
+      background: rgba(0,0,0,.7); border: 1px solid #444; border-radius: 10px; padding: 6px; }
+  #demo-bar button { font-size: 11px; color: #ccc; padding: 5px 9px; border-radius: 7px;
+      border: 1px solid #444; }
+  #demo-bar button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+
+  /* ============ 窗口控制 ============ */
+  .win-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+  .win-controls { display: flex; gap: 2px; flex: none; }
+  .win-btn { width: 38px; height: 30px; border-radius: 7px; font-size: 12px;
+      color: var(--text-dim); display: inline-flex; align-items: center;
+      justify-content: center; transition: .13s; }
+  .win-btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+  .win-btn.close:hover { background: #e81123; color: #fff; }
+  #window.light .win-btn:hover { background: rgba(0,0,0,.07); }
+  #window.light .win-btn.close:hover { background: #e81123; color: #fff; }
+
+  /* ============ 明亮主题 ============ */
+  #window.light {
+    --bg: #f4f4f6; --bg-elev: #ffffff; --bg-card: #ffffff;
+    --bg-capsule: rgba(255,255,255,.88);
+    --border: rgba(0,0,0,.1); --text: #1d1d21; --text-dim: #6d6d76;
+    --accent: #c78a1e; --accent-soft: rgba(199,138,30,.14);
+  }
+  #window.light .icon-btn:hover { background: rgba(0,0,0,.06); }
+  #window.light .side-item:hover { background: rgba(0,0,0,.05); }
+  #window.light .vmenu { box-shadow: 0 18px 50px rgba(0,0,0,.14); }
+  #window.light .vmenu button:hover { background: rgba(0,0,0,.05); }
+  #window.light .lrow .ltags .tag, #window.light .tweet .tw-tags .tag,
+  #window.light .chan .ch-tags .tag { background: rgba(0,0,0,.05); }
+  #window.light .lrow .r .bar, #window.light .cover .prog,
+  #window.light .tw-grid .prog, #window.light .ch-collage .prog {
+      background: rgba(0,0,0,.12); }
+  #window.light .tweet .tw-acts button:hover, #window.light .chan .ch-acts button:hover {
+      background: rgba(0,0,0,.05); }
+  #window.light .cover .fav { color: #fff; }
+  #window.light .avatar { color: #fff; }
+  #window.light .pager button:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div id="demo-bar">
+  <span style="font-size:11px;color:#888;padding:5px 4px">视图:</span>
+  <button data-v="category" class="on">分类</button>
+  <button data-v="masonry">瀑布流</button>
+  <button data-v="list">列表</button>
+  <button data-v="tweet">推文</button>
+  <button data-v="channel">频道</button>
+</div>
+
+<div id="window">
+  <!-- 全局顶栏 -->
+  <div id="topbar">
+    <div class="brand"><div class="brand-mark">🦌</div><b>Lanlu</b></div>
+    <div class="search-shell">
+      <span>⌕</span>
+      <input id="search-input" placeholder="搜索标题 / 标签 / 艺术家…">
+    </div>
+    <button class="icon-btn" title="筛选">🎚</button>
+    <div class="nav-pill">
+      <button class="on">首页</button><button>随机</button><button>来源</button>
+    </div>
+    <!-- 视图切换：点击循环，悬停下拉 -->
+    <div class="vswitch" id="vswitch">
+      <button class="icon-btn" id="vswitch-btn" title="切换视图">▤</button>
+      <div class="vmenu" id="vmenu">
+        <div class="vk">首页视图</div>
+        <button data-v="category"><span class="vi">▤</span>分类<span class="ck">✓</span></button>
+        <button data-v="masonry"><span class="vi">▦</span>瀑布流<span class="ck">✓</span></button>
+        <button data-v="list"><span class="vi">☰</span>列表<span class="ck">✓</span></button>
+        <button data-v="tweet"><span class="vi">💬</span>推文<span class="ck">✓</span></button>
+        <button data-v="channel"><span class="vi">📺</span>频道<span class="ck">✓</span></button>
+        <div class="vhint">点击图标循环切换 · 选择已记忆</div>
+      </div>
+    </div>
+    <button class="icon-btn" title="设置">⚙</button>
+    <button class="icon-btn" id="btn-theme" title="明暗切换">◐</button>
+    <div class="user-chip"><div class="avatar">U</div>user</div>
+    <div class="win-sep"></div>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化">—</button>
+      <button class="win-btn" title="最大化">▢</button>
+      <button class="win-btn close" title="关闭">✕</button>
+    </div>
+  </div>
+
+  <div id="home-body">
+    <!-- 左侧分类栏 -->
+    <aside id="home-side">
+      <div class="side-sec">档案库</div>
+      <div class="side-item on" data-cat="all">🏠 全部档案<span class="cnt">909</span></div>
+      <div class="side-item">⭐ 收藏<span class="cnt">56</span></div>
+      <div class="side-item">🕘 最近阅读</div>
+      <div class="side-sec">分类</div>
+      <div class="side-item" data-cat="doujin">📚 同人志<span class="cnt">342</span></div>
+      <div class="side-item" data-cat="illust">🎨 插画集<span class="cnt">128</span></div>
+      <div class="side-item" data-cat="manga">📖 漫画<span class="cnt">256</span></div>
+      <div class="side-item" data-cat="anime">🎬 动画<span class="cnt">64</span></div>
+      <div class="side-item" data-cat="game">🎮 游戏<span class="cnt">41</span></div>
+      <div class="side-sec">其他</div>
+      <div class="side-item">🗂 合集<span class="cnt">78</span></div>
+      <div class="side-item">🏷 标签</div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main id="home-main">
+
+      <!-- 视图 1：分类 -->
+      <section class="vview on" id="view-category">
+        <div class="row-sec">
+          <div class="row-head">
+            <h2 class="big">🎲 随机推荐</h2>
+            <button class="btn-refresh" id="btn-reroll"><span class="r-ico">⟳</span>换一批</button>
+          </div>
+          <div class="card-row" id="random-row"></div>
+        </div>
+        <div id="cat-rows"></div>
+      </section>
+
+      <!-- 视图 2~5：信息流（瀑布流 / 列表 / 推文 / 频道）共用工具行 -->
+      <div id="feed-shell" style="display:none">
+        <div class="feed-tools">
+          <h2 id="feed-title">全部档案</h2>
+          <div class="sp"></div>
+          <span class="lb">排序</span>
+          <div class="sel">最近阅读 ▾</div>
+          <div class="sel">降序 ▾</div>
+        </div>
+
+        <!-- 视图 2：瀑布流 -->
+        <section class="vview" id="view-masonry">
+          <div class="masonry" id="masonry-grid"></div>
+        </section>
+
+        <!-- 视图 3：列表 -->
+        <section class="vview" id="view-list">
+          <div class="list-wrap" id="list-wrap"></div>
+          <div class="feed-foot" style="max-width:1024px;margin-left:auto;margin-right:auto">
+            <div class="stats" id="list-stats"></div>
+            <div class="pager" id="list-pager"></div>
+          </div>
+        </section>
+
+        <!-- 视图 4：推文 -->
+        <section class="vview" id="view-tweet">
+          <div class="tweet-col" id="tweet-col"></div>
+        </section>
+
+        <!-- 视图 5：频道 -->
+        <section class="vview" id="view-channel">
+          <div class="chan-col" id="chan-col"></div>
+        </section>
+
+        <!-- 连续信息流：哨兵 + 加载 -->
+        <div id="cont-foot" style="display:none">
+          <div id="sentinel"></div>
+          <div class="feed-loading" id="feed-loading"><div class="spinner"></div>加载中…</div>
+          <div class="feed-foot">
+            <div class="stats" id="feed-stats"></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script>
+/* ================= 演示数据 ================= */
+const CATS = [
+  { id: 'doujin', name: '同人志', icon: '📚' },
+  { id: 'illust', name: '插画集', icon: '🎨' },
+  { id: 'manga',  name: '漫画',   icon: '📖' },
+  { id: 'anime',  name: '动画',   icon: '🎬' },
+];
+const TITLES = [
+  '夏日彼方的约定', '星尘收藏夹', '月见草与猫', '苍蓝回路', '雾岛夜话',
+  '白箱绘卷', '幻奏图书馆', '砂时计少女', '遥远群岛的信', '绯色庭院',
+  '雨停之后的晴空', '机械心脏与人偶', '鹿鸣馆异闻录', '深海观测日记',
+  '纸飞机航路', '银河铁道之夜·改', '薄荷色快门', '夜樱巡礼',
+];
+const ARTISTS = ['藤原ここあ', 'みつみ美里', 'TONY', '深崎暮人', 'カントク', 'ぽんかん⑧', '监督', '比村奇石'];
+const TAG_POOL = ['全彩', '汉化', '无修正', '纯爱', '奇幻', '校园', '原创', '同人', '4K', '长篇', '短篇集', '限定版'];
+const EMOJIS = ['📕','📗','📘','📙','📔','📒','🖼','🌸','🌙','⭐','🎴','📚'];
+const PAGE_KINDS = ['全 24P', '全 36P', '全 48P', '全 180P', '全 212P'];
+
+/* 预览图宽高比池：漫画页以竖版为主，混入方图/横图/超宽图 */
+const AR_POOL = [0.5, 0.66, 0.71, 0.71, 0.71, 0.75, 1.0, 1.33, 1.33, 1.78, 2.1];
+function makePreviews(n, hue) {
+  return Array.from({ length: n }, (_, i) => ({
+    ar: AR_POOL[Math.floor(Math.random() * AR_POOL.length)],
+    hue: (hue + i * 24) % 360,
+  }));
+}
+
+let _id = 0;
+function makeItem(catId) {
+  const hue = Math.floor(Math.random() * 360);
+  const tank = Math.random() < .18;
+  return {
+    id: ++_id,
+    cat: catId || CATS[Math.floor(Math.random() * CATS.length)].id,
+    title: TITLES[Math.floor(Math.random() * TITLES.length)] + (Math.random() < .5 ? ' ' + (1 + Math.floor(Math.random() * 9)) : ''),
+    artist: ARTISTS[Math.floor(Math.random() * ARTISTS.length)],
+    pages: PAGE_KINDS[Math.floor(Math.random() * PAGE_KINDS.length)],
+    emoji: EMOJIS[Math.floor(Math.random() * EMOJIS.length)],
+    hue,
+    isNew: Math.random() < .25,
+    tank,
+    fav: Math.random() < .2,
+    prog: Math.random() < .55 ? Math.floor(Math.random() * 95) + 5 : 0,
+    tags: TAG_POOL.slice().sort(() => Math.random() - .5).slice(0, 2 + Math.floor(Math.random() * 3)),
+    date: `${Math.floor(Math.random() * 12) + 1}月${Math.floor(Math.random() * 28) + 1}日`,
+    previews: makePreviews(1 + Math.floor(Math.random() * 9), hue),
+    ratio: [.62, .72, .8, .9, 1, 1.12, 1.28][Math.floor(Math.random() * 7)], // 瀑布流封面高宽比
+  };
+}
+function makeItems(n, catId) { return Array.from({ length: n }, () => makeItem(catId)); }
+
+const coverBg = it => `background:linear-gradient(160deg,hsl(${it.hue} 38% 34%),hsl(${it.hue} 46% 14%))`;
+
+/* ================= 卡片片段 ================= */
+function coverBadges(it) {
+  return `
+    ${it.tank ? '<div class="stack"></div>' : ''}
+    <span class="badge-type ${it.tank ? 'tank' : ''}">${it.tank ? '🗂 合集' : '📄 档案'}</span>
+    ${it.isNew ? '<span class="badge-new">NEW</span>' : ''}`;
+}
+function cardHTML(it) {
+  return `
+  <div class="card ${it.tank ? 'tank' : ''}">
+    <div class="cover" style="${coverBg(it)}">
+      ${coverBadges(it)}
+      <span class="ph">${it.emoji}</span>
+      <span class="fav ${it.fav ? 'on' : ''}">♥</span>
+      ${it.prog ? `<span class="prog"><i style="width:${it.prog}%"></i></span>` : ''}
+    </div>
+    <div class="t">${it.title}</div>
+    <div class="m">${it.artist} · ${it.pages}</div>
+  </div>`;
+}
+
+/* ================= 视图 1：分类 ================= */
+let randomItems = makeItems(10);
+function renderRandom() {
+  document.getElementById('random-row').innerHTML = randomItems.map(cardHTML).join('');
+}
+function renderCatRows() {
+  document.getElementById('cat-rows').innerHTML = CATS.map(c => {
+    const items = makeItems(9, c.id);
+    return `
+    <div class="row-sec">
+      <div class="row-head">
+        <h2>${c.icon} ${c.name}<span class="chev">›</span></h2>
+        <span class="more">查看更多 ›</span>
+      </div>
+      <div class="card-row">${items.map(cardHTML).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ================= 视图 2：瀑布流 ================= */
+function masonryCardHTML(it) {
+  const h = Math.round(230 * it.ratio);
+  return `
+  <div class="card ${it.tank ? 'tank' : ''}">
+    <div class="cover" style="${coverBg(it)};height:${h}px">
+      ${coverBadges(it)}
+      <span class="ph">${it.emoji}</span>
+      <span class="fav ${it.fav ? 'on' : ''}">♥</span>
+      ${it.prog ? `<span class="prog"><i style="width:${it.prog}%"></i></span>` : ''}
+    </div>
+    <div class="t">${it.title}</div>
+    <div class="m">${it.artist} · ${it.pages}</div>
+  </div>`;
+}
+function renderMasonry(items, append) {
+  const el = document.getElementById('masonry-grid');
+  const html = items.map(masonryCardHTML).join('');
+  if (append) el.insertAdjacentHTML('beforeend', html); else el.innerHTML = html;
+}
+
+/* ================= 视图 3：列表 ================= */
+const LIST_PAGE_SIZE = 7, LIST_TOTAL = 128, LIST_PAGES = Math.ceil(LIST_TOTAL / LIST_PAGE_SIZE);
+let listPage = 1;
+function renderList() {
+  const items = makeItems(LIST_PAGE_SIZE);
+  document.getElementById('list-wrap').innerHTML = items.map(it => `
+    <div class="lrow">
+      <div class="lc" style="${coverBg(it)}">${it.emoji}</div>
+      <div class="lmid">
+        <div class="lt">${it.title}
+          ${it.tank ? '<span class="tank-chip">🗂 合集 · 12 本</span>' : ''}
+          ${it.isNew ? '<span class="badge-new-inline">NEW</span>' : ''}
+        </div>
+        <div class="lm">${it.artist} · ${it.pages} · 更新于 ${it.date}</div>
+        <div class="ltags">${it.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+      </div>
+      <div class="r">
+        ${it.prog ? `<div class="pct">${it.prog}%</div><div class="bar"><i style="width:${it.prog}%"></i></div>` : '<div class="pct" style="color:var(--text-dim)">未读</div>'}
+        <div class="pgs">${it.fav ? '♥ 已收藏' : ''}</div>
+      </div>
+    </div>`).join('');
+  document.getElementById('list-stats').textContent =
+    `共 ${LIST_TOTAL} 个档案 · 第 ${listPage}/${LIST_PAGES} 页`;
+  const p = document.getElementById('list-pager');
+  let btns = `<button ${listPage === 1 ? 'disabled' : ''} data-pg="prev">‹</button>`;
+  for (let i = 1; i <= Math.min(LIST_PAGES, 7); i++) {
+    btns += `<button class="${i === listPage ? 'on' : ''}" data-pg="${i}">${i}</button>`;
+  }
+  btns += `<button ${listPage === LIST_PAGES ? 'disabled' : ''} data-pg="next">›</button>`;
+  p.innerHTML = btns;
+  p.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const v = b.dataset.pg;
+    if (v === 'prev') listPage = Math.max(1, listPage - 1);
+    else if (v === 'next') listPage = Math.min(LIST_PAGES, listPage + 1);
+    else listPage = +v;
+    renderList();
+    document.getElementById('home-main').scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
+/* ================= 视图 4：推文 ================= */
+/* 图片网格分档：对齐 frontend TweetPreviewMedia
+   1→16/10 单图；2→16/10 两列；3→16/10 首图纵跨两行；4→16/10 2×2；
+   5~6→3/2 三列两行；7~9→方形 3×3。图片 object-cover 裁切，不看原图宽高比 */
+function tweetGridHTML(it) {
+  const n = it.previews.length;
+  const cls = n === 1 ? 'g1' : n === 2 ? 'g2' : n === 3 ? 'g3' : n === 4 ? 'g4' : n <= 6 ? 'g6' : 'g9';
+  const tiles = it.previews.slice(0, 9).map((p, i) => `
+    <div class="tw-tile" style="background:linear-gradient(160deg,hsl(${p.hue} 38% 34%),hsl(${p.hue} 46% 14%))">
+      ${i === 0 ? it.emoji : ''}<span class="pg">P${i + 1}</span>
+    </div>`).join('');
+  return `
+  <div class="tw-grid ${cls}">
+    <span class="grid-note">${n} 图 · ${cls === 'g3' ? '首图跨行' : cls === 'g6' ? '3列×2行' : cls === 'g9' ? '3×3' : cls === 'g4' ? '2×2' : cls === 'g2' ? '2列' : '单图 16:10'}</span>
+    ${tiles}
+    ${it.prog ? `<span class="prog"><i style="width:${it.prog}%"></i></span>` : ''}
+  </div>`;
+}
+function tweetHTML(it) {
+  return `
+  <div class="tweet">
+    <div class="tw-av" style="${coverBg(it)}">${it.emoji}</div>
+    <div class="tw-body">
+      <div class="tw-head"><b>${it.title}</b><span class="tm">${it.date}</span></div>
+      <div class="tw-text">${it.artist} 的新作已入库 · ${it.pages} · ${it.tank ? '合集收录 12 本，已按卷序排列。' : '已加入书库，点击封面开始阅读。'}</div>
+      ${tweetGridHTML(it)}
+      <div class="tw-tags">${it.tags.map(t => `<span class="tag">#${t}</span>`).join('')}</div>
+      <div class="tw-acts">
+        <button>▶ 继续阅读</button>
+        <button class="${it.fav ? 'on' : ''}">♥ 收藏</button>
+        <button>🏷 标签</button>
+        <button>⋯</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renderTweet(items, append) {
+  const el = document.getElementById('tweet-col');
+  const html = items.map(tweetHTML).join('');
+  if (append) el.insertAdjacentHTML('beforeend', html); else el.innerHTML = html;
+}
+
+/* ================= 视图 5：频道 ================= */
+/* 以下完整移植 frontend/src/lib/utils/channel-preview-layout.ts：
+   按每张图真实宽高比（clamp 0.45~2.4）驱动拼贴，最大高度 460px。
+   - 1 图：single，高 = min(360, 宽/ar)
+   - 2 图：rows，单行均分，限高 260
+   - 3+ 图：选主图（横图偏 hero-top ar≈1.55，竖图偏 hero-side ar≈0.78，顺序加权）；
+     hero-side 需 ≥4 图且主图 ar<1 且得分显著更高，左侧主图 + 右侧均分行（二分对齐总高）；
+     否则 hero-top，顶部主图（120~260，目标 220）+ 下方均分行（≤2图1行/≤4图2行/否则3行）。
+   均分行：枚举切分使每行 Σar 最接近目标比，行高=(宽-缝)/Σar，末图吸收残差；
+   行数选择罚函数：偏离首选行数×48 + 未填满高度。 */
+const CH = { GAP: 1, MAX_H: 460, TOP_TARGET: 220, SIDE_MIN: 4, MIN_AR: .45, MAX_AR: 2.4,
+  MIN_ROW_H: 92, MIN_TILE_W: 96, MIN_HERO_H: 120, MAX_HERO_H: 260, MIN_SIDE_W: 120, STEPS: 18, TOL: .25 };
+
+const clampAR = ar => (!Number.isFinite(ar) || ar <= 0) ? 1.2 : Math.max(CH.MIN_AR, Math.min(ar, CH.MAX_AR));
+
+function normRowItems(row, rowWidth, height) {
+  const avail = Math.max(0, rowWidth - CH.GAP * Math.max(0, row.length - 1));
+  const raw = row.map(it => height * it.ar);
+  const residual = avail - raw.reduce((s, w) => s + w, 0);
+  return row.map((it, i) => ({ ...it, width: raw[i] + (i === raw.length - 1 ? residual : 0) }));
+}
+
+function buildRows(items, rowWidth, rowCount, maxTotalHeight) {
+  if (items.length === 1) {
+    const width = Math.max(CH.MIN_TILE_W, rowWidth);
+    return [{ height: width / Math.max(items[0].ar, .1), items: [{ ...items[0], width }] }];
+  }
+  const rc = Math.max(1, Math.min(rowCount, items.length));
+  const targetH = Math.max(CH.MIN_ROW_H, (maxTotalHeight - CH.GAP * (rc - 1)) / rc);
+  const targetRatio = rowWidth / targetH;
+  let bestCuts = null, bestScore = Infinity;
+  (function search(start, left, cuts) {
+    if (left === 1) {
+      if (start >= items.length) return;
+      const next = [...cuts, items.length];
+      const slices = []; let s = 0;
+      for (const c of next) { slices.push(items.slice(s, c)); s = c; }
+      const score = slices.reduce((sum, row, idx) => {
+        const rs = row.reduce((a, it) => a + it.ar, 0);
+        const dev = Math.abs(rs - targetRatio);
+        return sum + dev * dev + (row.length > 4 ? (row.length - 4) * 12 : 0)
+          + (idx === slices.length - 1 && row.length === 1 ? 6 : 0);
+      }, 0);
+      if (score < bestScore) { bestScore = score; bestCuts = next; }
+      return;
+    }
+    for (let c = start + 1; c <= items.length - left + 1; c++) search(c, left - 1, [...cuts, c]);
+  })(0, rc, []);
+  const cuts = bestCuts || [items.length];
+  const rows = []; let s = 0;
+  for (const c of cuts) { rows.push(items.slice(s, c)); s = c; }
+  return rows.map(row => {
+    const rs = Math.max(row.reduce((a, it) => a + it.ar, 0), .1);
+    const height = (rowWidth - CH.GAP * (row.length - 1)) / rs;
+    return { height, items: normRowItems(row, rowWidth, height) };
+  });
+}
+
+const rowsHeight = rows => rows.reduce((s, r) => s + r.height, 0) + CH.GAP * Math.max(0, rows.length - 1);
+
+function selectRows(items, rowWidth, preferred, maxTotalHeight) {
+  const maxRC = Math.max(1, Math.min(preferred, items.length));
+  let best = null, bestScore = Infinity;
+  for (let rc = 1; rc <= maxRC; rc++) {
+    const rows = buildRows(items, rowWidth, rc, maxTotalHeight);
+    const total = rowsHeight(rows);
+    if (total > maxTotalHeight + CH.TOL) continue;
+    const score = Math.abs(preferred - rc) * 48 + Math.abs(maxTotalHeight - total);
+    if (score < bestScore) { bestScore = score; best = { rows, totalHeight: total }; }
+  }
+  return best;
+}
+
+function chooseHero(items) {
+  let topIdx = 0, topScore = -Infinity, sideIdx = 0, sideScore = -Infinity;
+  items.forEach((it, i) => {
+    const bonus = Math.max(0, .12 - i * .02);
+    const ts = (2.2 - Math.abs(it.ar - 1.55)) + (it.ar >= 1.08 ? .8 : 0) + bonus;
+    const ss = (2.1 - Math.abs(it.ar - .78)) + (it.ar <= .95 ? 1.05 : 0) + bonus;
+    if (ts > topScore) { topScore = ts; topIdx = i; }
+    if (ss > sideScore) { sideScore = ss; sideIdx = i; }
+  });
+  const preferSide = items.length >= CH.SIDE_MIN && items[sideIdx].ar < 1 && sideScore > topScore + .18;
+  return { heroIndex: preferSide ? sideIdx : topIdx, placement: preferSide ? 'side' : 'top' };
+}
+
+function solveSide(hero, rest, W) {
+  const desired = rest.length <= 3 ? 2 : 3;
+  const maxRC = Math.max(1, Math.min(desired, rest.length));
+  const maxHByW = Math.min(CH.MAX_H, (W - CH.GAP - CH.MIN_SIDE_W) / Math.max(hero.ar, .1));
+  if (!Number.isFinite(maxHByW) || maxHByW <= CH.MIN_HERO_H) return null;
+  let best = null, bestScore = Infinity;
+  for (let rc = 1; rc <= maxRC; rc++) {
+    const evaluate = h => {
+      const heroW = h * hero.ar, rightW = W - heroW - CH.GAP;
+      if (heroW < CH.MIN_TILE_W || rightW < CH.MIN_SIDE_W) return null;
+      const rows = buildRows(rest, rightW, rc, h);
+      return { heroW, rows, totalHeight: rowsHeight(rows) };
+    };
+    const upper = Math.min(CH.MAX_H, maxHByW);
+    const maxEval = evaluate(upper);
+    if (!maxEval || maxEval.totalHeight > upper + CH.TOL) continue;
+    let low = CH.MIN_HERO_H, high = upper, resolved = maxEval;
+    for (let step = 0; step < CH.STEPS; step++) {
+      const h = (low + high) / 2, ev = evaluate(h);
+      if (!ev) { high = h; continue; }
+      const diff = ev.totalHeight - h; resolved = ev;
+      if (Math.abs(diff) <= CH.TOL) break;
+      diff > 0 ? low = h : high = h;
+    }
+    if (resolved.totalHeight > CH.MAX_H + CH.TOL) continue;
+    const score = Math.abs(desired - rc) * 48 + Math.abs(CH.MAX_H - resolved.totalHeight);
+    if (score < bestScore) { bestScore = score; best = resolved; }
+  }
+  return best ? { kind: 'hero-side', hero, heroWidth: best.heroW, totalHeight: best.totalHeight, rows: best.rows } : null;
+}
+
+function heroTop(hero, rest, W) {
+  const preferred = Math.min(CH.MAX_HERO_H, Math.max(CH.TOP_TARGET, W / Math.max(hero.ar, .1)));
+  const minRows = selectRows(rest, W, 1, CH.MAX_H)?.totalHeight || 0;
+  const maxHeroH = Math.max(CH.MIN_HERO_H, CH.MAX_H - (rest.length ? CH.GAP : 0) - minRows);
+  const heroH = Math.max(CH.MIN_HERO_H, Math.min(preferred, maxHeroH));
+  const remaining = Math.max(0, CH.MAX_H - heroH - (rest.length ? CH.GAP : 0));
+  const rc = rest.length <= 2 ? 1 : rest.length <= 4 ? 2 : 3;
+  const sel = selectRows(rest, W, rc, remaining) || { rows: [] };
+  return { kind: 'hero-top', hero, heroHeight: heroH, rows: sel.rows };
+}
+
+function channelLayout(previews, W) {
+  const items = previews.map((p, i) => ({ ...p, ar: clampAR(p.ar), idx: i }));
+  const width = Math.max(W, 320);
+  if (items.length === 0) return { kind: 'rows', rows: [] };
+  if (items.length === 1) return { kind: 'single', hero: items[0], heroHeight: Math.min(360, width / Math.max(items[0].ar, .1)) };
+  if (items.length === 2) return { kind: 'rows', rows: buildRows(items, width, 1, 260) };
+  const { heroIndex, placement } = chooseHero(items);
+  const hero = items[heroIndex];
+  const rest = items.filter((_, i) => i !== heroIndex);
+  if (placement === 'side') {
+    const side = solveSide(hero, rest, width);
+    if (side) return side;
+  }
+  return heroTop(hero, rest, width);
+}
+
+const CH_COL_WIDTH = 640; // 频道列宽（对齐 frontend max-w-2xl 内容宽）
+const tileBg = p => `background:linear-gradient(160deg,hsl(${p.hue} 38% 34%),hsl(${p.hue} 46% 14%))`;
+const tileHTML = (p, w, h) => `
+  <div class="ch-tile" style="${tileBg(p)};width:${w}px;height:${h}px">
+    <span class="ar">${p.ar.toFixed(2)}</span><span class="pg">P${p.idx + 1}</span>
+  </div>`;
+
+function chanCollageHTML(it) {
+  const L = channelLayout(it.previews, CH_COL_WIDTH);
+  const n = it.previews.length;
+  const note = { single: 'single · 单图', rows: 'rows · 均分行', 'hero-top': 'hero-top · 顶部主图', 'hero-side': 'hero-side · 左侧主图' }[L.kind];
+  let body = '';
+  if (L.kind === 'single') {
+    body = `<div class="ch-row" style="height:${L.heroHeight}px">${tileHTML(L.hero, CH_COL_WIDTH, L.heroHeight)}</div>`;
+  } else if (L.kind === 'rows') {
+    body = L.rows.map(r => `<div class="ch-row" style="height:${r.height}px">${r.items.map(p => tileHTML(p, p.width, r.height)).join('')}</div>`).join('');
+  } else if (L.kind === 'hero-top') {
+    body = `<div class="ch-row" style="height:${L.heroHeight}px">${tileHTML(L.hero, CH_COL_WIDTH, L.heroHeight)}</div>`
+      + L.rows.map(r => `<div class="ch-row" style="height:${r.height}px">${r.items.map(p => tileHTML(p, p.width, r.height)).join('')}</div>`).join('');
+  } else {
+    body = `<div class="ch-tile" style="${tileBg(L.hero)};width:${L.heroWidth}px;height:${L.totalHeight}px">
+        <span class="ar">${L.hero.ar.toFixed(2)}</span><span class="pg">P${L.hero.idx + 1}</span>
+      </div>`
+      + `<div style="display:flex;flex-direction:column;gap:1px">`
+      + L.rows.map(r => `<div class="ch-row" style="height:${r.height}px">${r.items.map(p => tileHTML(p, p.width, r.height)).join('')}</div>`).join('')
+      + `</div>`;
+  }
+  return `
+  <div class="ch-collage ${L.kind === 'hero-side' ? 'side' : ''}">
+    <span class="badge-type ${it.tank ? 'tank' : ''}">${it.tank ? '🗂 合集' : '📄 档案'}</span>
+    ${it.isNew ? '<span class="badge-new">NEW</span>' : ''}
+    ${body}
+    <span class="layout-note">${note} · ${n} 图</span>
+    ${it.prog ? `<span class="prog"><i style="width:${it.prog}%"></i></span>` : ''}
+  </div>`;
+}
+
+function chanHTML(it) {
+  return `
+  <div class="chan">
+    ${chanCollageHTML(it)}
+    <div class="ch-info">
+      <div class="ch-t">${it.title}</div>
+      <div class="ch-m"><span>${it.artist}</span><span class="dot">${it.pages}</span><span class="dot">更新于 ${it.date}</span></div>
+      <div class="ch-tags">${it.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+    </div>
+    <div class="ch-acts">
+      <button>▶ 阅读</button>
+      <button class="${it.fav ? 'on' : ''}">♥ 收藏</button>
+      <button>↗ 详情</button>
+      <div class="sp"></div>
+      <button>⋯</button>
+    </div>
+  </div>`;
+}
+function renderChannel(items, append) {
+  const el = document.getElementById('chan-col');
+  const html = items.map(chanHTML).join('');
+  if (append) el.insertAdjacentHTML('beforeend', html); else el.innerHTML = html;
+}
+
+/* ================= 视图切换核心 ================= */
+const VIEWS = ['category', 'masonry', 'list', 'tweet', 'channel'];
+const VIEW_META = {
+  category: { icon: '▤', name: '分类' },
+  masonry:  { icon: '▦', name: '瀑布流' },
+  list:     { icon: '☰', name: '列表' },
+  tweet:    { icon: '💬', name: '推文' },
+  channel:  { icon: '📺', name: '频道' },
+};
+const CONTINUOUS = new Set(['masonry', 'tweet', 'channel']); // 无限滚动视图
+const STORE_KEY = 'lanlu-home-view-mode';
+let currentView = localStorage.getItem(STORE_KEY) || 'category';
+if (!VIEWS.includes(currentView)) currentView = 'category';
+let searching = false;
+
+const mainEl = document.getElementById('home-main');
+
+function applyView(v, opts = {}) {
+  // 对齐 frontend：搜索态下分类视图不可用，落到瀑布流连续信息流
+  if (searching && v === 'category') v = 'masonry';
+  currentView = v;
+  localStorage.setItem(STORE_KEY, v);
+
+  document.querySelectorAll('.vview').forEach(el => el.classList.remove('on'));
+  document.getElementById('view-' + v).classList.add('on');
+  document.getElementById('feed-shell').style.display = v === 'category' ? 'none' : '';
+  document.getElementById('cont-foot').style.display = CONTINUOUS.has(v) ? '' : 'none';
+  document.getElementById('feed-title').textContent =
+    searching ? '搜索结果' : (activeCatName || '全部档案');
+
+  // 顶栏按钮图标 + 菜单勾选态 + demo-bar
+  const btn = document.getElementById('vswitch-btn');
+  const next = VIEWS[(VIEWS.indexOf(v) + 1) % VIEWS.length];
+  btn.textContent = VIEW_META[v].icon;
+  btn.title = `切换视图 · ${VIEW_META[v].name} → ${VIEW_META[next].name}`;
+  document.querySelectorAll('#vmenu button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === v));
+  document.querySelectorAll('#demo-bar button').forEach(b =>
+    b.classList.toggle('on', b.dataset.v === v));
+
+  // 渲染/重置
+  if (v === 'category' && !opts.skipRender) { renderRandom(); renderCatRows(); }
+  if (v === 'masonry') renderMasonry(makeItems(20), false);
+  if (v === 'list') { listPage = 1; renderList(); }
+  if (v === 'tweet') renderTweet(makeItems(6), false);
+  if (v === 'channel') renderChannel(makeItems(5), false);
+  updateFeedStats();
+  mainEl.scrollTo({ top: 0 });
+}
+
+function updateFeedStats() {
+  const s = document.getElementById('feed-stats');
+  if (s) s.textContent = `共 909 个档案 · 已加载 ${loadedCount} 条`;
+}
+
+/* 顶栏按钮：点击循环 */
+document.getElementById('vswitch-btn').addEventListener('click', () => {
+  const next = VIEWS[(VIEWS.indexOf(currentView) + 1) % VIEWS.length];
+  applyView(next);
+});
+/* 下拉菜单：直接选择 */
+document.querySelectorAll('#vmenu button').forEach(b =>
+  b.addEventListener('click', () => applyView(b.dataset.v)));
+/* demo-bar */
+document.querySelectorAll('#demo-bar button').forEach(b =>
+  b.addEventListener('click', () => applyView(b.dataset.v)));
+
+/* 换一批随机推荐 */
+document.getElementById('btn-reroll').addEventListener('click', function () {
+  this.classList.add('spin');
+  setTimeout(() => {
+    randomItems = makeItems(10);
+    renderRandom();
+    this.classList.remove('spin');
+  }, 450);
+});
+
+/* ================= 无限滚动（瀑布流/推文/频道） ================= */
+let loadedCount = 20;
+const io = new IntersectionObserver(entries => {
+  if (!entries.some(e => e.isIntersecting)) return;
+  if (!CONTINUOUS.has(currentView)) return;
+  const loading = document.getElementById('feed-loading');
+  loading.style.visibility = 'visible';
+  setTimeout(() => {
+    if (currentView === 'masonry') { renderMasonry(makeItems(12), true); loadedCount += 12; }
+    if (currentView === 'tweet') { renderTweet(makeItems(3), true); loadedCount += 3; }
+    if (currentView === 'channel') { renderChannel(makeItems(3), true); loadedCount += 3; }
+    updateFeedStats();
+    loading.style.visibility = 'hidden';
+  }, 500);
+}, { root: mainEl, rootMargin: '0px 0px 480px 0px' });
+io.observe(document.getElementById('sentinel'));
+
+/* ================= 搜索态 ================= */
+document.getElementById('search-input').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  searching = !!e.target.value.trim();
+  applyView(currentView); // 搜索态下分类视图自动落瀑布流
+});
+document.getElementById('search-input').addEventListener('input', e => {
+  if (!e.target.value.trim() && searching) { searching = false; applyView(currentView); }
+});
+
+/* ================= 侧栏分类 ================= */
+let activeCatName = '';
+document.querySelectorAll('#home-side .side-item[data-cat]').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('#home-side .side-item').forEach(x => x.classList.remove('on'));
+    el.classList.add('on');
+    activeCatName = el.dataset.cat === 'all' ? '' : el.textContent.replace(/\d+$/, '').trim();
+    // 选择具体分类 → 进入信息流（对齐 frontend：非落地态不再显示分类行）
+    applyView(el.dataset.cat === 'all' ? currentView : (currentView === 'category' ? 'masonry' : currentView));
+  });
+});
+
+/* ================= 主题切换 ================= */
+document.getElementById('btn-theme').addEventListener('click', () =>
+  document.getElementById('window').classList.toggle('light'));
+
+/* ================= 初始化 ================= */
+applyView(currentView);
+</script>
+</body>
+</html>

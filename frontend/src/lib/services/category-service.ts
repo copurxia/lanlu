@@ -50,10 +50,21 @@ export class CategoryService {
   private static baseUrl = '/api/categories';
 
   /**
-   * Get all categories
+   * Get all enabled categories (user-facing; disabled categories are not returned)
    */
   static async getAllCategories(): Promise<Category[]> {
     const response = await apiClient.get<CategoryResponse>(this.baseUrl);
+    if (isSuccessResponse(response.data.success)) {
+      return normalizeArrayResponse(response.data.data);
+    }
+    return [];
+  }
+
+  /**
+   * Get all categories including disabled ones (admin only)
+   */
+  static async getAllCategoriesAdmin(): Promise<Category[]> {
+    const response = await apiClient.get<CategoryResponse>('/api/admin/categories');
     if (isSuccessResponse(response.data.success)) {
       return normalizeArrayResponse(response.data.data);
     }
