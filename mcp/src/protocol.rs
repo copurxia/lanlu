@@ -127,6 +127,7 @@ mod tests {
 
 /// initialize request params.
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct InitializeParams {
     #[serde(default)]
@@ -138,6 +139,7 @@ pub struct InitializeParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Implementation {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,6 +148,7 @@ pub struct Implementation {
 
 /// initialize response result.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub protocol_version: &'static str,
     pub capabilities: ServerCapabilities,
@@ -158,12 +161,14 @@ pub struct ServerCapabilities {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolsCapability {
     pub list_changed: bool,
 }
 
 /// Tool definition for tools/list.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Tool {
     pub name: &'static str,
     pub description: &'static str,
@@ -180,6 +185,7 @@ pub struct CallToolParams {
 
 /// tools/call response result.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
     pub content: Vec<ToolContent>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
