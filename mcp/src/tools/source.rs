@@ -19,7 +19,7 @@ pub fn home_tool() -> Tool {
         input_schema: object_schema(
             "Return the source plugin home listing.",
             &["namespace"],
-            vec![("namespace", string_prop("Source plugin namespace."))],
+            vec![("namespace", string_prop("Source plugin namespace; list available ones via lanlu_source_list."))],
         ),
     }
 }
@@ -32,10 +32,13 @@ pub fn search_tool() -> Tool {
             "Search a source plugin.",
             &["namespace"],
             vec![
-                ("namespace", string_prop("Source plugin namespace.")),
-                ("query", string_prop("Search query.")),
-                ("page", integer_prop("Page number.")),
-                ("filters", string_prop("Filter conditions as JSON string.")),
+                ("namespace", string_prop("Source plugin namespace; list available ones via lanlu_source_list.")),
+                ("query", string_prop("Search query keywords.")),
+                ("page", integer_prop("Page number, default 1.")),
+                (
+                    "filters",
+                    string_prop("Plugin-specific filter conditions as a JSON object string; available keys come from lanlu_source_filters."),
+                ),
             ],
         ),
     }
@@ -48,7 +51,7 @@ pub fn filters_tool() -> Tool {
         input_schema: object_schema(
             "Return the source plugin filters.",
             &["namespace"],
-            vec![("namespace", string_prop("Source plugin namespace."))],
+            vec![("namespace", string_prop("Source plugin namespace; list available ones via lanlu_source_list."))],
         ),
     }
 }
@@ -61,10 +64,10 @@ pub fn download_tool() -> Tool {
             "Submit a source-plugin download task.",
             &["namespace", "remote_id", "category_id"],
             vec![
-                ("namespace", string_prop("Source plugin namespace.")),
-                ("remote_id", string_prop("Remote item ID.")),
-                ("category_id", string_prop("Target category ID.")),
-                ("kind", string_prop("Item kind, default archive.")),
+                ("namespace", string_prop("Source plugin namespace; list available ones via lanlu_source_list.")),
+                ("remote_id", string_prop("Remote item ID from lanlu_source_search results.")),
+                ("category_id", string_prop("Target category ID; list IDs via lanlu_category_list.")),
+                ("kind", string_prop("Item kind for the downloaded entry, default archive.")),
                 ("wait", boolean_prop("Wait for task completion.")),
                 (
                     "interval",

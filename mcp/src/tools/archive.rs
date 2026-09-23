@@ -13,7 +13,12 @@ pub fn tool() -> Tool {
             "Return metadata for a single archive.",
             &["id"],
             vec![
-                ("id", string_prop("Archive ID.")),
+                (
+                    "id",
+                    string_prop(
+                        "Archive ID from lanlu_search results, or a composite online-source ID 'source:<namespace>:<remote_id>' (read-only preview).",
+                    ),
+                ),
                 (
                     "include_pages",
                     boolean_prop("Also return the list of pages."),

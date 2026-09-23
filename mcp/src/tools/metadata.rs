@@ -7,19 +7,31 @@ use serde_json::Value;
 pub fn tool() -> Tool {
     Tool {
         name: "lanlu_update_metadata",
-        description: "Update metadata (title, description, tags, release date, cover) for an archive or tankoubon.",
+        description: "Update metadata (title, description, tags, release date, cover) for a local archive or tankoubon. Online-source items are read-only.",
         input_schema: object_schema(
             "Update metadata for a target archive or tankoubon.",
             &["id"],
             vec![
-                ("id", string_prop("Archive or tankoubon ID.")),
+                (
+                    "id",
+                    string_prop("Archive or tankoubon ID (local IDs only; online-source IDs are read-only)."),
+                ),
                 ("target_type", string_prop("Target type: archive (default) or tankoubon.")),
                 ("title", string_prop("New title.")),
                 ("description", string_prop("New description.")),
-                ("tags", string_prop("New tags as comma-separated string or JSON array.")),
-                ("release_at", string_prop("Release date string.")),
+                (
+                    "tags",
+                    string_prop("Replacement tags as a comma-separated string ('a, b') or a JSON array string ('[\"a\",\"b\"]')."),
+                ),
+                (
+                    "release_at",
+                    string_prop("Release date string, e.g. 2024-01-31 (stored as given)."),
+                ),
                 ("cover", string_prop("Cover asset ID.")),
-                ("namespace", string_prop("Metadata namespace.")),
+                (
+                    "namespace",
+                    string_prop("Metadata plugin namespace recorded as the source of this update; omit for the default base metadata."),
+                ),
             ],
         ),
     }

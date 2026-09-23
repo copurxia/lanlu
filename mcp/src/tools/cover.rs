@@ -12,8 +12,16 @@ pub fn tool() -> Tool {
             "Return cover information.",
             &[],
             vec![
-                ("id", string_prop("Archive or tankoubon ID.")),
-                ("asset_id", string_prop("Known cover asset ID.")),
+                (
+                    "id",
+                    string_prop("Archive or tankoubon ID. Required unless asset_id is given."),
+                ),
+                (
+                    "asset_id",
+                    string_prop(
+                        "Known cover asset ID; takes precedence over id and returns its direct asset URL.",
+                    ),
+                ),
             ],
         ),
     }

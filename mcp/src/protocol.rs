@@ -96,7 +96,8 @@ mod tests {
     fn call_tool_error_result_sets_is_error() {
         let r = CallToolResult::error("boom".to_string());
         let v = serde_json::to_value(&r).unwrap();
-        assert_eq!(v["is_error"], true);
+        assert_eq!(v["isError"], true);
+        assert_eq!(v["is_error"], serde_json::Value::Null);
         assert_eq!(v["content"][0]["type"], "text");
         assert_eq!(v["content"][0]["text"], "boom");
     }

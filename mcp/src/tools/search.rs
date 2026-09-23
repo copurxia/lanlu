@@ -50,23 +50,33 @@ pub fn build_search_params(args: &Value) -> HashMap<&'static str, String> {
 pub fn tool() -> Tool {
     Tool {
         name: "lanlu_search",
-        description: "Search archives with optional filters, pagination and sorting.",
+        description: "Search the local archive library by keyword. Search keywords go in `filter`: free text, \"quoted phrases\", -exclusions, field:term (title:foo, tag:artist:bar).",
         input_schema: object_schema(
             "Search archives in the Lanlu library.",
             &[],
             vec![
                 (
                     "filter",
-                    string_prop("Search filter, e.g. title:foo or tag:artist:bar."),
+                    string_prop(
+                        "The search query. Free-text terms, \"exact phrases\", -excluded words, and field:term filters such as title:foo or tag:artist:bar.",
+                    ),
                 ),
-                ("category", string_prop("Category ID to filter by.")),
-                ("page", integer_prop("Page number.")),
-                ("page_size", integer_prop("Number of items per page.")),
+                (
+                    "category",
+                    string_prop("Category ID to limit results to; list IDs via lanlu_category_list."),
+                ),
+                ("page", integer_prop("Page number, default 1.")),
+                (
+                    "page_size",
+                    integer_prop("Items per page, default 20, max 200."),
+                ),
                 (
                     "sortby",
-                    string_prop("Sort field such as created_at, release_at, title, pagecount."),
+                    string_prop(
+                        "Sort field: created_at, release_at, title or pagecount. Default title.",
+                    ),
                 ),
-                ("order", string_prop("Sort order: asc or desc.")),
+                ("order", string_prop("Sort direction: asc or desc. Default asc.")),
                 ("new_only", boolean_prop("Only show new archives.")),
                 (
                     "untagged_only",

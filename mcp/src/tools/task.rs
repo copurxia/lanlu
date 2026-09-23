@@ -13,7 +13,7 @@ pub fn tool() -> Tool {
             "Return task status and progress.",
             &["id"],
             vec![
-                ("id", string_prop("Task ID.")),
+                ("id", string_prop("Numeric task ID returned when submitting a download/upload task.")),
                 (
                     "interval",
                     integer_prop("Poll interval in ms if waiting, default 1000."),

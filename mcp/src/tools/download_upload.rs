@@ -22,7 +22,7 @@ pub fn download_url_tool() -> Tool {
             &["url", "category_id"],
             vec![
                 ("url", string_prop("URL to download.")),
-                ("category_id", string_prop("Target category ID.")),
+                ("category_id", string_prop("Target category ID; list IDs via lanlu_category_list.")),
                 ("wait", boolean_prop("Wait for task completion.")),
                 (
                     "interval",
@@ -42,13 +42,16 @@ pub fn upload_tool() -> Tool {
             "Upload a local file.",
             &["file", "category_id"],
             vec![
-                ("file", string_prop("Local file path to upload.")),
-                ("category_id", string_prop("Target category ID.")),
+                (
+                    "file",
+                    string_prop("Absolute path of the file to upload, on the machine where lanlu-mcp runs (it reads the file locally and uploads in chunks)."),
+                ),
+                ("category_id", string_prop("Target category ID; list IDs via lanlu_category_list.")),
                 (
                     "chunk_size",
                     integer_prop("Chunk size in bytes, default 8388608 (8MB)."),
                 ),
-                ("target_type", string_prop("Target type, default archive.")),
+                ("target_type", string_prop("Target type: archive (default) or tankoubon.")),
                 ("overwrite", boolean_prop("Overwrite if exists.")),
                 ("wait", boolean_prop("Wait for task completion.")),
                 (
@@ -69,10 +72,10 @@ pub fn metadata_run_tool() -> Tool {
             "Run a metadata plugin.",
             &["namespace", "target_id"],
             vec![
-                ("namespace", string_prop("Metadata plugin namespace.")),
-                ("target_id", string_prop("Target ID.")),
-                ("target_type", string_prop("Target type, default archive.")),
-                ("param", string_prop("Plugin parameter.")),
+                ("namespace", string_prop("Namespace of the metadata plugin to run.")),
+                ("target_id", string_prop("Archive or tankoubon ID to run the plugin against.")),
+                ("target_type", string_prop("Target type: archive (default) or tankoubon.")),
+                ("param", string_prop("Plugin-specific parameter string, passed through unchanged; omit if the plugin needs none.")),
                 (
                     "write_back",
                     boolean_prop("Write results back to metadata."),
