@@ -7,7 +7,7 @@ output-type = "executable"
 
 [dependencies]
 cui = { path = "../packages/cangjie-gui" }
-vips_ffi = { path = "../packages/vips_ffi" }
+vips_ffi = { git = "https://git.copur.xyz/ai/vips-ffi.git", branch = "main" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
 webview = { path = "../packages/webview" }
 rocksdb_ffi = { path = "../packages/rocksdb_ffi" }
