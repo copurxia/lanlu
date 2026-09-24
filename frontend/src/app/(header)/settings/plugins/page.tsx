@@ -12,7 +12,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Package, Download, Search } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useConfirm } from '@/hooks/use-confirm';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useToast } from '@/hooks/use-toast';
 import { extractApiError } from '@/lib/utils/api-utils';
 
@@ -20,7 +20,7 @@ const TYPE_ORDER = ['metadata', 'download', 'login', 'script', 'source'];
 
 export default function SettingsPluginsPage() {
   const { t } = useLanguage();
-  const { confirm } = useConfirm();
+  const { confirm } = useConfirmContext();
   const { success, error: showError } = useToast();
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
