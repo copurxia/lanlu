@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{ArchivePageView, SearchItem, SearchItemProjectionView, SearchItemView, TankoubonInfo,
     TankoubonView, PageInfo, percentEncode}
@@ -66,9 +66,9 @@ class Spinner <: Widget {
     }
 }
 
-// 阴影卡片铺底层：cui 的 .background 修饰符只有填充没有阴影/描边，drawSurface 是
-// cui.core 内部件（protected，应用层不可见），这里用 renderer 原语自绘：
-// 两层 feather 圆角矩形叠出软阴影（对齐 cui.core surface_draw.cj 的 drawSoftShadow），
+// 阴影卡片铺底层：lanlu_ui 的 .background 修饰符只有填充没有阴影/描边，drawSurface 是
+// lanlu_ui.core 内部件（protected，应用层不可见），这里用 renderer 原语自绘：
+// 两层 feather 圆角矩形叠出软阴影（对齐 lanlu_ui.core surface_draw.cj 的 drawSoftShadow），
 // 再画圆角填充与 1px 描边。自身不托管子树（buildChild 未导出），用法同 ClickArea：
 // ZStack 底层放 SurfaceCard，上层放内容。
 class SurfaceCard <: Widget {
@@ -161,8 +161,8 @@ class ClickSensor <: Widget {
     }
 }
 
-// 可点击区域：框架没有通用 onClick 修饰器；cui.core 的 buildChild 是模块内部助手
-// （未对应用导出，cui 伞包只重导出 emit），应用层自定义 Widget 无法包裹 builder 子树，
+// 可点击区域：框架没有通用 onClick 修饰器；lanlu_ui.core 的 buildChild 是模块内部助手
+// （未对应用导出，lanlu_ui 伞包只重导出 emit），应用层自定义 Widget 无法包裹 builder 子树，
 // 因此以 ZStack 叠层代替包裹——底层传感器随 ZStack 拉伸充满整个区域，内容绘制在上层；
 // 事件自顶向下分发，内容未消费的左键抬起最终落到传感器触发 onClick。
 public class ClickArea {
@@ -942,7 +942,7 @@ public func remoteImage(model: AppModel, key: String, url: String, w: Length, h:
             imagePlaceholder(model, w, h, "加载失败，点击重试")
         }
     } else {
-        // 状态为 "ready"：像素已 stage 进 cui 像素纹理缓存，PixelImageView 首帧惰性建纹理。
+        // 状态为 "ready"：像素已 stage 进 lanlu_ui 像素纹理缓存，PixelImageView 首帧惰性建纹理。
         // 封面用 Cover 裁满卡片；width/height 为首选尺寸；zoom 仅作用在成品图上。
         if (startAligned) {
             StartAlignedPixelImage(key, w, h)
@@ -1000,7 +1000,7 @@ func edgeOf(model: AppModel): Color {
 }
 
 // 幽灵按钮样式（设计稿 .btn-ghost：透明底 + 1px 描边），次要动作用——
-// cui Button 默认 buttonSurface 填充色在卡片里显得过重。
+// lanlu_ui Button 默认 buttonSurface 填充色在卡片里显得过重。
 func ghostStyleOf(model: AppModel): SurfaceStyle {
     SurfaceStyle(Color.rgba(0, 0, 0, 0), border: edgeOf(model), radius: 10.0, borderWidth: 1.0)
 }
@@ -1947,7 +1947,7 @@ class StaticBorder <: Widget {
 }
 
 // 封面软投影（原型 .cover-big box-shadow:0 18px 48px rgba(0,0,0,.55)）：
-// 两层 fillRoundedRectSoft feather 光晕（对齐 cui.core drawSoftShadow / SurfaceCard 的
+// 两层 fillRoundedRectSoft feather 光晕（对齐 lanlu_ui.core drawSoftShadow / SurfaceCard 的
 // 阴影部分，只画阴影不画面）；暗色累计 ≈.45、亮色压到 ≈.10。套在 hero 封面 ZStack 底层。
 // 注意：不要用阶梯 alpha 多层矩形（有带状感）——框架原语 fillRoundedRectSoft 自带 feather。
 class CoverShadow <: Widget {

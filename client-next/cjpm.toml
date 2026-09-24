@@ -6,7 +6,7 @@ description = "lanlu desktop client built on CangjieGUI"
 output-type = "executable"
 
 [dependencies]
-cui = { path = "../packages/cangjie-gui" }
+lanlu_ui = { path = "../packages/cangjie-gui" }
 vips_ffi = { git = "https://git.copur.xyz/ai/vips-ffi.git", branch = "main" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
 webview = { path = "../packages/webview" }

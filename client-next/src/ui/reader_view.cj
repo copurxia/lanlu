@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 
 // 阅读页（T2 重写）：舞台 + 底部 dock 的组合壳。
@@ -12,7 +12,7 @@ import lanlu_client_next.app.*
 //   webtoon 在单一纵向内容面内连续滚动并按可见位置同步页码；其余模式 spread 步进。
 // - 点击区：左 30% 上一页 / 中央 40% 显隐 chrome / 右 30% 下一页（原型 30/40/30）；
 //   tapTurnPage == false 时左右两区不挂（中央显隐恒在）。双击缩放与失败重试在
-//   ReaderStage 自身 handle 里（cui clickCount 判定，见 reader_stage.cj）。
+//   ReaderStage 自身 handle 里（lanlu_ui clickCount 判定，见 reader_stage.cj）。
 // - 舞台为自绘 ReaderStage（双页/翻页动画/音频舞台/媒体信息浮层），dock 为底部
 //   lane 胶囊（reader_dock.cj），随 chrome 显隐滑动——顶栏显隐由 main.cj 不渲染实现，
 //   dock 在视图内部叠层实现（不进 main.cj）。

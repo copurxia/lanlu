@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.SubtitleAttachment
 import std.collection.{ArrayList, HashMap}
@@ -407,7 +407,7 @@ class ReaderDock <: Widget {
         ctx.renderer.fillRoundedRect(Rect(sr.x, sr.centerY() - 2.0, sr.w * amount, 4.0), 2.0,
             ctx.theme.accent.withAlpha(a))
         ctx.renderer.fillCircle(sr.x + sr.w * amount, sr.centerY(), 5.0, ctx.theme.accent.withAlpha(a))
-        // cur / total（tabular 语义即可，cui 无 font-variant-numeric 原语）。
+        // cur / total（tabular 语义即可，lanlu_ui 无 font-variant-numeric 原语）。
         let num = if (r.onVirtualEnd) {
             model.t("reader.finishedShort")
         } else {

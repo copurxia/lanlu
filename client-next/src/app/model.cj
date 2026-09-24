@@ -1,6 +1,6 @@
 package lanlu_client_next.app
 
-import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache,
+import lanlu_ui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache,
     clearPixelImages, onPixelImageEvicted, pixelUploadPerfReset, pixelUploadPerfStats, stageNativePixelImage}
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
@@ -186,7 +186,7 @@ private class ImageWriter <: CacheWriter {
     }
 }
 
-// NativeDecodedImage 的释放适配器：把 vips 原生像素的释放权交给 cui 的 staged 条目
+// NativeDecodedImage 的释放适配器：把 vips 原生像素的释放权交给 lanlu_ui 的 staged 条目
 //（接口而非闭包：规避仓颉 1.1.3 闭包作为参数跨线程写字段触发 GC 屏障 SIGSEGV）。
 private class NativeImageReleaser <: PixelReleaser {
     let img: NativeDecodedImage
@@ -1169,8 +1169,8 @@ public class AppModel {
             case None => ()
         }
         persistSettings(settings)
-        clearImageCache() // cui 路径纹理缓存（按文件路径解码的 GPU 纹理）
-        clearPixelImages() // cui 像素纹理缓存（含已建纹理与 staged 像素）
+        clearImageCache() // lanlu_ui 路径纹理缓存（按文件路径解码的 GPU 纹理）
+        clearPixelImages() // lanlu_ui 像素纹理缓存（含已建纹理与 staged 像素）
         synchronized(imageMutex) {
             imageStates.clear()
         }
@@ -2444,7 +2444,7 @@ public class AppModel {
     }
 
     // LANLU_PERF=1：每 5s 滚动输出样本分位数（flushSamples 输出后清空，即上一窗口的
-    // 分布），并拉取 cui 纹理上传计数（UI 线程惰性上传，帧成本热点）。
+    // 分布），并拉取 lanlu_ui 纹理上传计数（UI 线程惰性上传，帧成本热点）。
     private func perfFlushTick(): Unit {
         if (!SubtitlePerf.enabled()) {
             return
@@ -2919,7 +2919,7 @@ public class AppModel {
         true
     }
 
-    // 方向键翻页（T2 阅读舞台接线）：cui Key 已在视图层映射为 KeyCode，方向换算
+    // 方向键翻页（T2 阅读舞台接线）：lanlu_ui Key 已在视图层映射为 KeyCode，方向换算
     //（RTL 反转/TTB 上下/webtoon 不响应）全部在 ReaderModel.keyDirection 内；
     // None（webtoon/无效键）自然不翻页。命中后同步 1 基镜像并 bump readerVersion——
     // 舞台的自绘翻页动画靠 readerVersion 触发的重建检测 index 变化。
@@ -4169,13 +4169,13 @@ public class AppModel {
         cacheInfo.value = t("cache.size", params: [("size", "${bytes / 1048576}")])
     }
 
-    // 清图片缓存：磁盘目录 + cui 纹理缓存（路径纹理 + 像素纹理）+ imageStates 三处一起复位。
-    // 注意命名：cui 有全局 clearImageCache()（路径纹理缓存），model 方法起名 clearCache 避免遮蔽歧义。
+    // 清图片缓存：磁盘目录 + lanlu_ui 纹理缓存（路径纹理 + 像素纹理）+ imageStates 三处一起复位。
+    // 注意命名：lanlu_ui 有全局 clearImageCache()（路径纹理缓存），model 方法起名 clearCache 避免遮蔽歧义。
     public func clearCache(): Unit {
         cache().clear()
         subtitleCache().clear()
-        clearImageCache() // cui 路径纹理缓存（按文件路径解码的 GPU 纹理）
-        clearPixelImages() // cui 像素纹理缓存（含已建纹理与 staged 像素）
+        clearImageCache() // lanlu_ui 路径纹理缓存（按文件路径解码的 GPU 纹理）
+        clearPixelImages() // lanlu_ui 像素纹理缓存（含已建纹理与 staged 像素）
         synchronized(imageMutex) {
             imageStates.clear()
         }
@@ -5407,7 +5407,7 @@ public class AppModel {
                     match (d) {
                         case Some(img) =>
                             // 像素已在工作线程解好（圆角也已就地完成）；这里只登记 staged
-                            // 原生像素（UI 线程，所有权交 cui 释放），纹理由 PixelImageView
+                            // 原生像素（UI 线程，所有权交 lanlu_ui 释放），纹理由 PixelImageView
                             // 首帧绘制时惰性创建。
                             stageNativePixelImage(k, img.width, img.height, img.pointer(), NativeImageReleaser(img))
                             imageState(k).value = "ready"

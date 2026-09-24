@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import fontkit_ffi.systemFonts
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SearchItem, SearchItemView, TrendPoint, PasskeyItem, SessionItem, TokenItem}
@@ -779,7 +779,7 @@ private func pillColors(model: AppModel, tone: PillTone): (Color, Color) {
 }
 
 // 表单字段（原型 .form-item）：标签 + 输入框。
-// cui TextField 无 placeholder 具名参数：ZStack 上叠一层不消费事件的 muted Label 实现
+// lanlu_ui TextField 无 placeholder 具名参数：ZStack 上叠一层不消费事件的 muted Label 实现
 // （Label.handle 返回 false，点击穿透到 TextField；文本与框内同位：左 8vp、38vp 高内垂直居中）。
 func formField(label: String, text: State<String>, placeholder: String, masked!: Bool = false): Unit {
     VStack {
@@ -1012,7 +1012,7 @@ private func authPage(model: AppModel): Unit {
     let tokenName = rememberState<String>("auth.tokenName", {=> ""})
     detailCard(model, "API Token 管理") {
         HStack {
-            // cui TextField 无 placeholder 具名参数，沿用 formField 的叠层占位做法。
+            // lanlu_ui TextField 无 placeholder 具名参数，沿用 formField 的叠层占位做法。
             HStack {
                 ZStack {
                     TextField(tokenName.project(get: {v => v}, set: {_, v => v}))

@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 
 // 长图滚动纯函数用例（reader_stage.cj 的宽适配高/最大偏移；滚动钳制在舞台内联，
 // 边界语义 = maxOffset 处继续下滚翻页、0 处继续上滚翻页）。

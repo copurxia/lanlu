@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{PageInfo, SearchItem, percentEncode}
 import std.collection.ArrayList

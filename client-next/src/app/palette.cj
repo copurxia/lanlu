@@ -1,6 +1,6 @@
 package lanlu_client_next.app
 
-import cui.Color
+import lanlu_ui.Color
 
 // lanlu 三层语义调色板常量：设计事实来源是仓库根目录的高保真原型
 // reader-redesign.html / home-detail-redesign.html（金色系，--accent:#e8b04b 暗 /

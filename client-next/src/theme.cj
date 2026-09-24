@@ -1,6 +1,6 @@
 package lanlu_client_next
 
-import cui.{Color, Theme}
+import lanlu_ui.{Color, Theme}
 import lanlu_client_next.app.*
 
 // lanlu 主题组装：调色板常量在 app/palette.cj（单一来源，那里附有原型令牌对照），

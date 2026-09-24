@@ -1,6 +1,6 @@
 package lanlu_client_next.i18n
 
-import cui.{LocalePreference, SystemLocales}
+import lanlu_ui.{LocalePreference, SystemLocales}
 import std.collection.HashMap
 import std.env.getVariable
 

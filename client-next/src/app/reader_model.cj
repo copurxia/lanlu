@@ -56,8 +56,8 @@ public func parseReadingMode(s: String): ReadingMode {
     }
 }
 
-// 阅读器方向键。独立定义而不复用 cui 的 Key：本模型不依赖 UI 框架，
-// T13 事件层负责把 cui Key 映射到本枚举。
+// 阅读器方向键。独立定义而不复用 lanlu_ui 的 Key：本模型不依赖 UI 框架，
+// T13 事件层负责把 lanlu_ui Key 映射到本枚举。
 public enum KeyCode {
     | KeyLeft | KeyRight | KeyUp | KeyDown
 }

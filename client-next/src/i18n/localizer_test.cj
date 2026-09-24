@@ -1,6 +1,6 @@
 package lanlu_client_next.i18n
 
-import cui.LocalePreference
+import lanlu_ui.LocalePreference
 
 @Test
 func languagePreferencesNormalizeAndResolve(): Unit {

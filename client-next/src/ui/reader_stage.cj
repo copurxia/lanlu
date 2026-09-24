@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.percentEncode
 import std.collection.ArrayList
@@ -1762,7 +1762,7 @@ class ReaderStage <: Widget {
                     ctx.beginDrag("reader:stage:html-scroll")
                     return true
                 }
-                // 双击缩放（cui 自带 clickCount：2=双击，见 UiContext）：
+                // 双击缩放（lanlu_ui 自带 clickCount：2=双击，见 UiContext）：
                 // 仅图片舞台且设置开启时 1×/2× 切换。消费 MouseDown 不阻断配套
                 // MouseUp——中央区双击=chrome 两次翻转（净零）+缩放切换，可接受。
                 if (audioPage.isNone() && videoPage.isNone() && htmlPage.isNone() && model.reader.doubleTapZoom &&

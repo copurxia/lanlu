@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.AppModel
 import lanlu_client_next.net.TagSuggestion
 import std.collection.ArrayList

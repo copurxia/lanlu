@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{AdminCategoryItem, AdminTagItem, SmartFilterItem}
 import std.collection.ArrayList
@@ -22,7 +22,7 @@ func categoriesPage(model: AppModel): Unit {
     let status = rememberState<Int64>("cats.status", {=> 0})  // 0 全部 1 已启用 2 已禁用
     HStack {
         HStack {
-            // cui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
+            // lanlu_ui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
             ZStack {
                 TextField(q.project(get: {v => v }, set: {_, v => v }))
                 if (q.value.size == 0) {
@@ -40,7 +40,7 @@ func categoriesPage(model: AppModel): Unit {
     }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
 
     // 卡片网格（原型 .grid-3：三列，封面横幅 + 名称/数量/开关 + 操作行）。
-    // cui LazyGrid 行高固定且自身虚拟化滚动（measure 占满可用高），与页层 ScrollView
+    // lanlu_ui LazyGrid 行高固定且自身虚拟化滚动（measure 占满可用高），与页层 ScrollView
     // 嵌套会拿到无限高、视口计算失效，故退化为 HStack 三列等宽分行布局（brief 允许）。
     let delCat = rememberState<String>("cats.delCat", {=> ""})
     let delOpen = rememberState<Bool>("cats.delOpen", {=> false})
@@ -123,14 +123,14 @@ private func categoryCard(model: AppModel, c: AdminCategoryItem, delCat: State<S
                     Label("${c.archiveCount} 个档案").fontSize(10.fp).muted()
                 }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start)
                 Spacer()
-                // cui Switch 两参数均位置参数；绑定件按 catid 唯一化 key（见 switchBindKeyed）。
+                // lanlu_ui Switch 两参数均位置参数；绑定件按 catid 唯一化 key（见 switchBindKeyed）。
                 Switch("", switchBindKeyed("cats.${c.catid}", c.enabled, {v => model.actToggleCategory(c.catid, v) }))
             }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()
             Label(if (c.description.size > 0) { c.description } else { "暂无描述" })
                 .fontSize(11.fp).muted().maxLines(2)
             HStack {
                 // 「扫描」均分整行（设计稿 flex-1），行尾「编辑/删除」不再贴卡片右缘。
-                // cui Button 无 flex 修饰，故包一层 HStack 兜底。
+                // lanlu_ui Button 无 flex 修饰，故包一层 HStack 兜底。
                 HStack { IconButton(IconName.Play, label: Some("扫描"), style: Some(ghostStyleOf(model)),
                     onClick: {=> model.actScanCategory(c.catid) }).enabled(c.enabled) }.flex()
                 Button("编辑", {=> model.todoToast("分类编辑弹窗") }).style(ghostStyleOf(model))
@@ -164,7 +164,7 @@ func tagsPage(model: AppModel): Unit {
     // 筛选行（原型：搜索 + 命名空间下拉 + 清空 + 创建）。
     HStack {
         HStack {
-            // cui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
+            // lanlu_ui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
             ZStack {
                 TextField(q.project(get: {v => v }, set: {_, v => pageIdx.value = 0; return v }))
                 if (q.value.size == 0) {
@@ -305,7 +305,7 @@ func filtersPage(model: AppModel): Unit {
                     onClick: {=> model.actMoveFilter(f.id, true) }).enabled(i > 0)
                 IconButton(IconName.ChevronDown, style: Some(ghostStyleOf(model)),
                     onClick: {=> model.actMoveFilter(f.id, false) }).enabled(i < list.size - 1)
-                // cui Switch 两参数均位置参数；绑定件按 filter id 唯一化 key（见 switchBindKeyed）。
+                // lanlu_ui Switch 两参数均位置参数；绑定件按 filter id 唯一化 key（见 switchBindKeyed）。
                 Switch("", switchBindKeyed("filters.${f.id}", f.enabled, {v => model.actToggleFilter(f.id) }))
                 Button("编辑", {=> model.todoToast("智能分类编辑弹窗") }).style(ghostStyleOf(model))
                 Button("删除", {=>

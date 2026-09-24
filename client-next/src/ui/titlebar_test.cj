@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 
 private func expectRect(rect: (Int32, Int32, Int32, Int32), x: Int32, w: Int32): Unit {
     @Expect(rect[0], x)

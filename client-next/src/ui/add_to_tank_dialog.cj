@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.TankoubonInfo
 import std.collection.ArrayList
@@ -62,7 +62,7 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                 Label(model.t("dialog.addSelected", params: [("count", "${arcids.value.size}")]))
                     .fontSize(12.fp)
                     .muted()
-                // 名称过滤： cui TextField 无 placeholder 参数，沿用 formField 的叠层占位做法。
+                // 名称过滤： lanlu_ui TextField 无 placeholder 参数，沿用 formField 的叠层占位做法。
                 ZStack {
                     TextField(filter)
                     if (filter.value.size == 0) {

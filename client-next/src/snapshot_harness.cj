@@ -1,6 +1,6 @@
 package lanlu_client_next
 
-import cui.stagePixelImage
+import lanlu_ui.stagePixelImage
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{ArchivePageView, CategoryItem, SearchItem, SearchItemView, ArchiveMeta, TankoubonInfo,
     TankoubonView, PageInfo, ServerInfo,

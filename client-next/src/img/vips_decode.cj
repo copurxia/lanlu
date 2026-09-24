@@ -38,7 +38,7 @@ private func ensureVips(): Unit {
 // vips 解码产物（原生内存版）：RGBA 像素（R,G,B,A 字节序，长度 == width*height*4）直接
 // 保存在 libvips 分配的内存中，不再 memcpy 成整图 Array<UInt8>。指针所有权唯一：
 // close() 幂等释放（vips_free）；释放点覆盖被替换/淘汰/上传完成/清缓存/退出等全部路径。
-// 所有权转移纪律：工作线程创建，UI 线程经 stageNativePixelImage 接管后由 cui 释放。
+// 所有权转移纪律：工作线程创建，UI 线程经 stageNativePixelImage 接管后由 lanlu_ui 释放。
 public class NativeDecodedImage {
     public let width: Int32
     public let height: Int32
@@ -64,7 +64,7 @@ public class NativeDecodedImage {
         ptr.isNone()
     }
 
-    // 幂等释放：已释放则忽略。UI 线程调用（cui 的 staged 释放路径）。
+    // 幂等释放：已释放则忽略。UI 线程调用（lanlu_ui 的 staged 释放路径）。
     public func close(): Unit {
         match (ptr) {
             case Some(p) =>

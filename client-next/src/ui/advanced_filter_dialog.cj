@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 
 // 与 app 包 SEARCH_SORT_FIELDS 按下标一一对应；弹窗与书库工具条共享同一组查询状态。

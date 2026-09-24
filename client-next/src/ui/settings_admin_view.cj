@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{SysSetting, TaskRecord, PluginItem, AdminUserItem, CronTask, ServerInfo, jsonQuote}
 import std.collection.ArrayList
@@ -78,7 +78,7 @@ func usersPage(model: AppModel): Unit {
                                 resetOpen.value = true
                         }
                     ).style(ghostStyleOf(model)).enabled(!self)
-                    // 角色开关：cui Bindable 仅 State.project 一种产出途径，按 brief 备选方案——
+                    // 角色开关：lanlu_ui Bindable 仅 State.project 一种产出途径，按 brief 备选方案——
                     // 本地 rememberState 初值取 u.isAdmin，set 里直接提交服务端（同外观页主题分段写法），
                     // 失败由 handleError 提示，列表随 act.* 内部 reload 刷新。
                     Switch(
@@ -218,7 +218,7 @@ private func sysSettingRow(model: AppModel, s: SysSetting): State<String> {
     }
     if (s.valueType == "boolean") {
         settingRow(model, title, "") {
-            // cui Switch 两参数均位置参数；"true"/"false" 字符串与布尔互转。
+            // lanlu_ui Switch 两参数均位置参数；"true"/"false" 字符串与布尔互转。
             Switch("", draft.project(get: {v => v == "true"}, set: {
                 _, v => if (v) {
                     "true"
@@ -239,7 +239,7 @@ private func sysSettingRow(model: AppModel, s: SysSetting): State<String> {
             ""
         }) {
             HStack {
-                // cui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
+                // lanlu_ui TextField 无 placeholder 参数：ZStack 叠 muted Label 实现（同 formField）。
                 ZStack {
                     TextField(draft.project(get: {v => v}, set: {_, v => v}))
                     if (draft.value.size == 0 && s.value.size > 0) {
@@ -883,7 +883,7 @@ private func pluginCard(model: AppModel, p: PluginItem, delNs: State<String>, de
                 Label("命名空间: ${p.namespace}").fontSize(10.fp).muted()
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
             pill(model, typeText, typeTone)
-            // cui Switch 两参数均位置参数；绑定件按插件命名空间唯一化 key（见 switchBindKeyed）。
+            // lanlu_ui Switch 两参数均位置参数；绑定件按插件命名空间唯一化 key（见 switchBindKeyed）。
             Switch("", switchBindKeyed("plugin.${p.namespace}", p.enabled, {v => model.actPluginEnabled(p.namespace, v)}))
                 .enabled(p.installed)
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth()

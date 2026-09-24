@@ -1,11 +1,11 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import std.collection.{ArrayList, HashSet}
 
 // ── 阅读器两个边缘抽屉（reader-redesign.html #sidebar / #settings，T3）──
-// 右侧 #settings 阅读设置 / 左侧 #sidebar 页面导航，均直接复用 cui Drawer：
+// 右侧 #settings 阅读设置 / 左侧 #sidebar 页面导航，均直接复用 lanlu_ui Drawer：
 // 弹簧滑入滑出（stiffness 260/damping 26）、scrim 淡入、点击 scrim 或 Esc 关闭、
 // 非模态（面板外事件落回底层阅读页）都由 Drawer 自带，这里只提供面板内容。
 // presented 直接绑 AppModel 的 State（互斥由 toggleReaderSettings/toggleReaderSidebar
@@ -24,7 +24,7 @@ private let READER_THUMB_W: Float32 = 99.0
 private let READER_THUMB_H: Float32 = 132.0
 private let READER_THUMB_ROW_H: Float32 = 140.0
 
-// ── #settings 控件精确几何/色值（原型 275-295 行 CSS；cui 标准 Switch/SegmentedControl
+// ── #settings 控件精确几何/色值（原型 275-295 行 CSS；lanlu_ui 标准 Switch/SegmentedControl
 // 规格与设计稿不符，故自绘）──
 // .switch：38×22、圆角 999、off 底 15% 白（亮色 18% 黑）、on 底 accent、
 // 滑块 16×16 白、top 3、x 3→19（中心 11→27）。
@@ -94,7 +94,7 @@ private class ReaderSwitch <: Widget {
         this.on = on
         this.onToggle = onToggle
         this.hoverId = "readerswitch:${key}"
-        // 弹簧初值取当前态（静态首帧即停稳，快照稳定，同 cui Switch 惯例）。
+        // 弹簧初值取当前态（静态首帧即停稳，快照稳定，同 lanlu_ui Switch 惯例）。
         this.spring = rememberState<Spring>("readerswitch:${key}:knob", {
             => Spring(if (on) {
                 1.0
@@ -207,7 +207,7 @@ private class ReaderModeSeg <: Widget {
 }
 
 // 小节标题（原型 .set-sec：11px dim、letter-spacing .1em、margin 18/8；
-// cui 无字距原语，中文小节字少，字距省略）。
+// lanlu_ui 无字距原语，中文小节字少，字距省略）。
 private func panelSection(text: String): Unit {
     VStack {
         Label(text).fontSize(11.fp).muted()

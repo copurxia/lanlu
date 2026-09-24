@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{formatTimestamp, sourceNamespace, ArchiveMeta, ArchivePageView, TankoubonInfo, SearchItem,
     SearchItemProjectionView, SearchItemView}
@@ -888,7 +888,7 @@ private func countFinishedMembers(model: AppModel, memo: MemberDoneCountMemo): I
 
 // ---- 数据装配辅助 ----
 
-// 简介单行化：服务端 description 可能含换行符；cui Label 的 wrapText 不按 '\n' 分行
+// 简介单行化：服务端 description 可能含换行符；lanlu_ui Label 的 wrapText 不按 '\n' 分行
 // （按宽度折行），但 SDL_ttf 绘制时会渲染换行——视觉行数超过 maxLines 量测的行高，
 // 文本溢出与下方标签 chips 重叠（实机反馈）。换行/制表折叠为单个空格，对齐设计稿
 // `.summary` 单行段落 + line-clamp:3 的行为。

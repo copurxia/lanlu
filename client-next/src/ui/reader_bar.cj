@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 
 // ── 阅读器专用顶栏（reader-redesign.html #topbar，与其他界面的通用 titleBar 完全不同）──
@@ -88,7 +88,7 @@ private class ReaderTitle <: Widget {
     }
 }
 
-// 单行省略号截断（cui.core 的 ellipsize 未对应用导出，这里按同一思路二分前缀）。
+// 单行省略号截断（lanlu_ui.core 的 ellipsize 未对应用导出，这里按同一思路二分前缀）。
 private func ellipsizeText(ctx: UiContext, text: String, maxWidth: Float32, ps: Float32): String {
     if (text.size == 0 || maxWidth <= 0.0) { return "" }
     if (ctx.renderer.textWidth(text, pointSize: ps) <= maxWidth) { return text }
@@ -233,7 +233,7 @@ private func pagePill(model: AppModel): Unit {
 public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
     let light = model.isLight()
     let bg = if (light) { LANLU_L_BG } else { LANLU_BG }
-    // 标题区：档案名（主文字色；原型 <b> 粗体，cui 无字重原语，以色彩分层代替）
+    // 标题区：档案名（主文字色；原型 <b> 粗体，lanlu_ui 无字重原语，以色彩分层代替）
     // + 当前页标题（muted，前置「 · 」）。元数据未到货/不是当前档案时不显示档案名。
     let archiveTitle = match (model.meta.value) {
         case Some(m) => if (m.arcid == model.readerArcid) { m.title } else { "" }
@@ -288,10 +288,10 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
 // 位移走 .offset 修饰器（layout 期平移子树，命中测试随位移——滑出屏的 chrome 不可点，
 // 见 widget.cj offset 注释）；不用「布局高度随动画收放」方案——那会让页面区跟动画重排、
 // 图像反复缩放闪动，原型也是舞台全高、顶栏叠层浮在上面（main.cj ZStack 方案 b）。
-// 应用层无法 buildChild 包裹子树做自绘位移容器（cui.core 未导出，见 widgets.cj ClickArea
+// 应用层无法 buildChild 包裹子树做自绘位移容器（lanlu_ui.core 未导出，见 widgets.cj ClickArea
 // 注释），故 Spring 由一个零尺寸叶子（ReaderChromeTicker）在 draw 里逐帧推进，构建期读
 // 上一帧推进后的值决定本帧位移（弹簧逐帧差一帧无感）。原型 topbar 只有位移没有淡入，
-// 且 cui 的 opacity 修饰器只淡 surface 不淡文字，故不叠透明度。
+// 且 lanlu_ui 的 opacity 修饰器只淡 surface 不淡文字，故不叠透明度。
 
 // chrome 滑动画弹簧的逐帧推进器：零尺寸、不绘不交互，只在 draw 里 animate 并续帧。
 private class ReaderChromeTicker <: Widget {

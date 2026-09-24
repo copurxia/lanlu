@@ -1,6 +1,6 @@
 package lanlu_client_next.ui
 
-import cui.*
+import lanlu_ui.*
 import lanlu_client_next.app.*
 
 // 登录页（多服务器版，设计事实来源：仓库根 login-redesign.html）：
@@ -198,7 +198,7 @@ func loginFormPanel(model: AppModel): Unit {
 }
 
 // 幽灵按钮样式（原型 .btn-ghost）：透明底 + 1px 描边，融入卡片背景；
-// cui Button Normal 默认带 buttonSurface 填充色，在弹窗里显得突兀。
+// lanlu_ui Button Normal 默认带 buttonSurface 填充色，在弹窗里显得突兀。
 
 // tinted 提示条（错误红/TOTP 金/测试绿）：SurfaceCard 填充+描边，阴影给全透明。宽度与输入框对齐。
 func tintBar(text: String, fg: Color, bg: Color, border: Color, icon!: ?IconName = None): Unit {
