@@ -1,3 +1,4 @@
 version = 0
 
 [requires]
+  vips_ffi = {git = "https://git.copur.xyz/ai/vips-ffi.git", commitId = "46c30a647244bf58b12f66ed08188346551f087a", branch = "main"}
