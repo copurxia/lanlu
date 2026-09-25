@@ -234,6 +234,10 @@ main(): Int64 {
     model.worker.onResult = { => app.requestWake() }
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
+    // 安装应用主题资源字典（AppKeys 笔刷表）：绘制期的 themeResource(ctx, key) 从此
+    // 读应用 key；与 model.appResources 同一实例——构建期（model.brush）与绘制期
+    // 查的是同一张表。字典内容只依赖 palette 常量、运行期不变，装一次即可。
+    app.setThemeResources(model.appResources)
     app.setMinimumSize(960, 640)
     // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
     // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。

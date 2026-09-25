@@ -102,7 +102,7 @@ public func libraryView(model: AppModel): Unit {
 // 品牌块与「设置」项已上移顶栏（#topbar 的品牌区与 ⚙ 钮），侧栏只留浏览/分类两组。
 
 private func sidebar(model: AppModel): Unit {
-    let bg = if (model.isLight()) { LANLU_L_BG } else { LANLU_BG }
+    let bg = model.brush(AppKeys.Bg)
     VStack {
         // 「浏览」分组：互斥单选，点击即生效。
         // 计数只展示有真实数据源的项：后端对「全部/仅收藏/仅未读/仅无标签」均无独立
@@ -282,7 +282,7 @@ private func rowTrailing(model: AppModel, row: BrowseRow): Unit {
 // 「换一批」：无边框 icon+文字链接（原型 .row-head .more：muted 12fp，hover accent；
 // 与「查看更多」同为行头轻量操作，不用带边框的 IconButton）。
 private func reshuffleLink(model: AppModel, onClick: () -> Unit): Unit {
-    let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
+    let muted = model.brush(AppKeys.Muted)
     ClickArea(onClick: onClick) {
         HStack {
             Icon(IconName.Refresh, size: 13.vp, color: muted)
@@ -293,7 +293,7 @@ private func reshuffleLink(model: AppModel, onClick: () -> Unit): Unit {
 
 private func moreLink(model: AppModel, text: String, onClick: () -> Unit): Unit {
     // 原型 .row-head .more：常态 muted、hover 才 accent（构建期无 hover 上下文，取常态色）。
-    let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
+    let muted = model.brush(AppKeys.Muted)
     ClickArea(onClick: onClick) {
         HStack {
             Label(text).fontSize(12.fp).foregroundColor(muted)
@@ -370,7 +370,7 @@ private func loadingState(model: AppModel): Unit {
 
 // 空态：居中 muted 图标 + 引导文案 + 主色重试按钮。
 private func emptyState(model: AppModel): Unit {
-    let muted = if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
+    let muted = model.brush(AppKeys.Muted)
     VStack {
         Icon(IconName.OpenFolder, size: 40.vp, color: muted)
         Label(model.t("library.empty")).fontSize(16.fp)

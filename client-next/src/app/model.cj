@@ -1,7 +1,9 @@
 package lanlu_client_next.app
 
-import lanlu_ui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, ToastKind, clearImageCache,
-    clearPixelImages, onPixelImageEvicted, pixelUploadPerfReset, pixelUploadPerfStats, stageNativePixelImage}
+import lanlu_ui.{Color, FileDialogRequest, FileDialogResult, PixelReleaser, State, THEME_KEY_MISSING_COLOR,
+    ThemeResources, ThemeValue, Toaster, ToastKind, clearImageCache, clearPixelImages, onPixelImageEvicted,
+    pixelUploadPerfReset, pixelUploadPerfStats, stageNativePixelImage}
+import std.env.getStdErr
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
 import lanlu_client_next.net.*
@@ -437,6 +439,8 @@ public class AppModel {
     public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()},
         offlineCachePrewarm!: ?Future<?OfflineCache> = None) {
         settings = s
+        // 应用主题资源字典：构造期组装一次（内容只依赖 palette 常量，运行期不变）。
+        appResources = appThemeResources()
         this.offlineCachePrewarm = offlineCachePrewarm
         language = State<String>(resolveLanguage(s.languagePreference))
         this.persistSettings = persistSettings
@@ -3133,6 +3137,8 @@ public class AppModel {
     }
 
     // 深浅色与排版档位统一的 UA CSS 应用出口（init / 主题切换 / 档位变更共用）。
+    // 白名单：该布尔查询件在此保留——webview 的 HTML 主题是外部渲染器的布尔开关
+    //（CSS 变量明/暗两套），不是颜色决策，不经主题资源字典。
     private func applyHtmlThemeCss(): Unit {
         htmlPage.setDoublePage(reader.doublePage)
         htmlPage.setThemeCss(
@@ -4028,8 +4034,52 @@ public class AppModel {
 
     // ---- 主题 ----
 
-    // 构建期主题判定：视图构建时拿不到 ctx.theme（绘制期上下文），需要铺底/描边色时
-    // 用本判定在 palette.cj 的明/暗常量间二选一（settings.theme 由 setTheme 即时更新并触发重绘）。
+    // 应用主题资源字典（app/theme_tokens.cj 组装）：构建期视图拿不到 ctx.theme，
+    // 经 brush(key) 在这里查表取色；main.cj 启动时会把同一实例装进 DesktopApp，
+    // 供绘制期的 themeResource(ctx, key) 查询。
+    public var appResources: ThemeResources
+
+    /*
+     * 字典选择器：明/暗选典只发生在这一处（构建期）。视图只引用 AppKeys，不再出现
+     * 明暗布尔分支；每次调用 = 一次 HashMap 查表（构建期每帧几十次，可接受），刻意
+     * 不加缓存或通知——settings.theme 变更即重建树，下一帧查询自然读到新分册。
+     * 判定采用内联比较而非复用下方布尔查询件：后者只保留给 webview 的 HTML 主题开关。
+     */
+    private func appThemeValue(key: String): ThemeValue {
+        let found = if (settings.theme == "light") {
+            appResources.lightValue(key)
+        } else {
+            appResources.darkValue(key)
+        }
+        match (found) {
+            case Some(value) => value
+            case None =>
+                getStdErr().write("brush: missing key \"${key}\" in ${settings.theme} dictionary\n")
+                ThemeValue.Color(THEME_KEY_MISSING_COLOR)
+        }
+    }
+
+    /** 构建期笔刷查询：按当前主题把 AppKeys 颜色 key 解析成 Color（绘制期走 themeColor(ctx, key)）。 */
+    public func brush(key: String): Color {
+        match (appThemeValue(key)) {
+            case ThemeValue.Color(c) => c
+            case _ => THEME_KEY_MISSING_COLOR
+        }
+    }
+
+    /** 构建期数值查询：非颜色 token（渐变融合拐点等，见 AppKeys.DetailScrimFade）。 */
+    public func fade(key: String): Float32 {
+        match (appThemeValue(key)) {
+            case ThemeValue.Double(v) => Float32(v)
+            case _ => 0.0
+        }
+    }
+
+    /*
+     * 白名单保留（全仓仅此一处定义 + applyHtmlThemeCss 一处调用）：webview 的 HTML
+     * 主题是外部渲染器的布尔开关（CSS 变量明/暗两套），不是取色决策，不经主题资源
+     * 字典；颜色决策一律走上面的字典选择器（brush/fade）。
+     */
     public func isLight(): Bool {
         settings.theme == "light"
     }

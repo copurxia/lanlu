@@ -42,22 +42,8 @@ private let SEG_BTN_RADIUS: Float32 = 8.0
 private let SEG_BTN_VPAD: Float32 = 7.0
 private let SEG_PS: Float32 = 12.0
 
-// 轨道/底槽的透明白黑（主题分支；palette.cj 无对应 token，属原型 CSS 直接换算）。
-private func segTrackColor(light: Bool): Color {
-    if (light) {
-        Color.rgba(0, 0, 0, 15)
-    } else {
-        Color.rgba(255, 255, 255, 18)
-    }
-}
-
-private func switchOffColor(light: Bool): Color {
-    if (light) {
-        Color.rgba(0, 0, 0, 46)
-    } else {
-        Color.rgba(255, 255, 255, 38)
-    }
-}
+// 轨道/底槽的透明白黑（原主题分支字面量已提取为 palette 的 SEG_TRACK / SWITCH_OFF 对，
+// 经主题资源字典按 key 解析；原型 CSS 直接换算）。
 
 private func readerModeIndex(m: ReadingMode): Int64 {
     match (m) {
@@ -82,15 +68,15 @@ private func readerModeAt(i: Int64): ReadingMode {
 // 不驻留 rememberState 镜像）；只有滑块弹簧按 key 驻留（200ms 量级的过渡，
 // stiffness 300/damping 30 比 Drawer 的 260/26 略快，贴原型 transition .2s）。
 private class ReaderSwitch <: Widget {
-    private let light: Bool
+    private let offColor: Color
     private let onToggle: () -> Unit
     private let spring: Spring
     private let hoverId: String
     private var on: Bool
     private var frame = Rect.zero()
 
-    public init(key: String, light: Bool, on: Bool, onToggle: () -> Unit) {
-        this.light = light
+    public init(key: String, offColor: Color, on: Bool, onToggle: () -> Unit) {
+        this.offColor = offColor
         this.on = on
         this.onToggle = onToggle
         this.hoverId = "readerswitch:${key}"
@@ -119,7 +105,7 @@ private class ReaderSwitch <: Widget {
         } else {
             0.0
         })
-        ctx.renderer.fillRoundedRect(frame, SWITCH_H / 2.0, switchOffColor(light).lerp(ctx.theme.accent, t))
+        ctx.renderer.fillRoundedRect(frame, SWITCH_H / 2.0, offColor.lerp(ctx.theme.accent, t))
         let kx = frame.x + SWITCH_KNOB_OFF_CX + (SWITCH_KNOB_ON_CX - SWITCH_KNOB_OFF_CX) * t
         ctx.renderer.fillCircle(kx, frame.centerY(), SWITCH_KNOB_R, Color.rgb(255, 255, 255))
     }
@@ -171,7 +157,7 @@ private class ReaderModeSeg <: Widget {
         let labels = [model.t("reader.ltr"), model.t("reader.rtl"), model.t("reader.vertical"),
             model.t("reader.webtoon")]
         let current = readerModeIndex(model.reader.mode)
-        ctx.renderer.fillRoundedRect(frame, SEG_RADIUS, segTrackColor(model.isLight()))
+        ctx.renderer.fillRoundedRect(frame, SEG_RADIUS, themeColor(ctx, AppKeys.SegTrack))
         let pos = spring.animate(ctx, target: Float32(current))
         let pill = Rect(frame.x + SEG_PAD + pos * (segW + SEG_GAP), frame.y + SEG_PAD, segW, frame.h - SEG_PAD * 2.0)
         ctx.renderer.fillRoundedRect(pill, SEG_BTN_RADIUS, ctx.theme.accentSoft)
@@ -220,7 +206,7 @@ private func panelSection(text: String): Unit {
 private func panelSwitchRow(model: AppModel, key: String, label: String, on: Bool, onToggle: () -> Unit): Unit {
     HStack {
         Label(label).fontSize(13.fp).flex()
-        ReaderSwitch(key, model.isLight(), on, onToggle)
+        ReaderSwitch(key, model.brush(AppKeys.SwitchOff), on, onToggle)
     }.crossAxisAlignment(CrossAxisAlignment.Center).hug().fillWidth().padding(2.0, 9.0)
 }
 

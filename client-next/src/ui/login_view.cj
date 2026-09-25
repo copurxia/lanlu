@@ -16,31 +16,31 @@ public func loginView(model: AppModel): Unit {
     serverEditModal(model)
 }
 
-// ---- 主题色助手（构建期拿不到 ctx.theme，明暗二选一走 palette 常量）----
+// ---- 主题色助手（构建期拿不到 ctx.theme，按 key 查主题资源字典，见 app/theme_tokens.cj）----
 
 private func accentOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_ACCENT } else { LANLU_ACCENT }
+    model.brush(AppKeys.Accent)
 }
 
 private func accentSoftOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_ACCENT_SOFT } else { LANLU_ACCENT_SOFT }
+    model.brush(AppKeys.AccentSoft)
 }
 
 private func panelOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    model.brush(AppKeys.Panel)
 }
 
 private func raisedOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_PANEL_RAISED } else { LANLU_PANEL_RAISED }
+    model.brush(AppKeys.PanelRaised)
 }
 
 private func cardBgOf(model: AppModel): Color {
     // --bg-card：暗 #131316（=LANLU_FIELD），亮 #FFFFFF。
-    if (model.isLight()) { LANLU_L_PANEL } else { LANLU_FIELD }
+    model.brush(AppKeys.CardBg)
 }
 
 private func mutedOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED }
+    model.brush(AppKeys.Muted)
 }
 
 private func probeColorOf(model: AppModel, id: String): Color {
@@ -54,8 +54,9 @@ private func probeColorOf(model: AppModel, id: String): Color {
 
 private func shadowOf(model: AppModel): Color {
     // 原型：暗 0 18px 50px rgba(0,0,0,.45)，亮 rgba(0,0,0,.12)——双层光晕叠加后视觉偏重，
-    // 亮色再压低到 ~.08（暗色维持 .45 不变）。
-    if (model.isLight()) { Color.rgba(0, 0, 0, 20) } else { Color.rgba(0, 0, 0, 115) }
+    // 亮色再压低到 ~.08（暗色维持 .45 不变）。数值已逐字提取为 palette 的
+    // LANLU_L_LOGIN_SHADOW / LANLU_LOGIN_SHADOW 对。
+    model.brush(AppKeys.LoginShadow)
 }
 
 // ---- 左栏：服务器列表 ----
@@ -108,7 +109,7 @@ func serverCard(model: AppModel, p: ServerProfile): Unit {
     // 原型选中态有 1px 金色描边（rgba(232,176,75,.35)），.background 画不了描边，
     // 用 SurfaceCard（阴影给全透明，只取填充+描边）。
     let edge = if (selected) {
-        if (model.isLight()) { Color.rgba(199, 138, 30, 89) } else { Color.rgba(232, 176, 75, 89) }
+        model.brush(AppKeys.LoginEdge)
     } else {
         Color.rgba(0, 0, 0, 0)
     }
@@ -229,7 +230,7 @@ func busyPrimaryButton(model: AppModel, title: String, onClick: () -> Unit): Uni
 }
 
 private func accentTextOf(model: AppModel): Color {
-    if (model.isLight()) { LANLU_L_ACCENT_TEXT } else { LANLU_ACCENT_TEXT }
+    model.brush(AppKeys.AccentText)
 }
 
 // 卡片头部：品牌 logo（brandLogo，widgets.cj）+ 服务器名 / 金色地址。
@@ -278,8 +279,7 @@ func totpFormPanel(model: AppModel): Unit {
     let code = rememberState<String>("login.totp", {=> "" })
     let recovery = rememberState<String>("login.recovery", {=> "" })
     // TOTP 提示条（原型 .totp-hint 金底金边）。
-    tintBar(model.t("login.totpHint"), accentOf(model), accentSoftOf(model),
-        if (model.isLight()) { Color.rgba(199, 138, 30, 76) } else { Color.rgba(232, 176, 75, 76) })
+    tintBar(model.t("login.totpHint"), accentOf(model), accentSoftOf(model), model.brush(AppKeys.LoginEdgeSoft))
     VStack {
         Label(model.t("login.code")).fontSize(12.fp).muted().tight()
         TextField(code, key: "login-totp", leadingIcon: IconName.Lock).width(320.vp)

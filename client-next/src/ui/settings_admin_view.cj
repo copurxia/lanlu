@@ -190,16 +190,8 @@ func systemPage(model: AppModel): Unit {
 
 // 提示条（原型 .notice）：警告色左边框说明文字。
 func noticeRow(model: AppModel, text: String): Unit {
-    let soft = if (model.isLight()) {
-        LANLU_L_ACCENT_SOFT
-    } else {
-        LANLU_ACCENT_SOFT
-    }
-    let accent = if (model.isLight()) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
+    let soft = model.brush(AppKeys.AccentSoft)
+    let accent = model.brush(AppKeys.Accent)
     Label(text).fontSize(11.fp).foregroundColor(accent).padding(12.vp, 10.vp).background(soft, 10.vp)
 }
 
@@ -308,16 +300,8 @@ private func taskStatusOf(tab: Int64): String {
 
 // 任务卡（原型 .task-card：名称 + 状态/编号/优先级/类型徽章 + 取消/重试 + 进度 + 日志 + 时间）。
 private func taskCard(model: AppModel, t: TaskRecord, cancelId: State<Int64>, cancelOpen: State<Bool>): Unit {
-    let panel = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
-    let logBg = if (model.isLight()) {
-        LANLU_L_PANEL_RAISED
-    } else {
-        LANLU_PANEL_RAISED
-    }
+    let panel = model.brush(AppKeys.Panel)
+    let logBg = model.brush(AppKeys.PanelRaised)
     VStack {
         HStack {
             Label(t.name).fontSize(13.fp).maxLines(1)
@@ -562,11 +546,7 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
     }
     ForEach(tasks, key: {t: CronTask => "${t.id}"}) {
         t =>
-            let panel = if (model.isLight()) {
-                LANLU_L_PANEL
-            } else {
-                LANLU_PANEL
-            }
+            let panel = model.brush(AppKeys.Panel)
             VStack {
                 HStack {
                     Label(t.name).fontSize(14.fp).maxLines(1)
@@ -600,11 +580,7 @@ private func cronTaskList(model: AppModel, onEdit!: (CronTask) -> Unit): Unit {
                     cronLastRunCell(t)
                 }.spacing(24.vp).hug().fillWidth()
                 if (t.enabled && t.nextRunAt.size > 0) {
-                    Label("下次执行: ${t.nextRunAt}").fontSize(11.fp).foregroundColor(if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
+                    Label("下次执行: ${t.nextRunAt}").fontSize(11.fp).foregroundColor(model.brush(AppKeys.Accent))
                 }
             }
                 .spacing(8.vp)
@@ -870,11 +846,7 @@ private func pluginTypeLabel(v: String): (String, PillTone) {
 // 插件卡（原型 .m-card：名称/命名空间/类型徽章/开关 + 作者/版本/描述 + 操作行）。
 private func pluginCard(model: AppModel, p: PluginItem, delNs: State<String>, delOpen: State<Bool>,
     cfgNs: State<String>, cfgOpen: State<Bool>): Unit {
-    let panel = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
+    let panel = model.brush(AppKeys.Panel)
     let (typeText, typeTone) = pluginTypeLabel(p.pluginType)
     VStack {
         HStack {
@@ -1022,11 +994,7 @@ private func statsSystemInfo(model: AppModel, info: ServerInfo): Unit {
 }
 
 private func statsMetric(model: AppModel, label: String, value: String): Unit {
-    let sep = if (model.isLight()) {
-        Color.rgba(0, 0, 0, 15)
-    } else {
-        Color.rgba(255, 255, 255, 10)
-    }
+    let sep = model.brush(AppKeys.Separator)
     HStack {
         Label(label).fontSize(12.fp).muted()
         Spacer()

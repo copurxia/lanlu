@@ -63,11 +63,7 @@ public func shelfView(model: AppModel): Unit {
 }
 
 private func shelfSidebar(model: AppModel): Unit {
-    let bg = if (model.isLight()) {
-        LANLU_L_BG
-    } else {
-        LANLU_BG
-    }
+    let bg = model.brush(AppKeys.Bg)
     VStack {
         VStack {
             Label(model.t("shelf.section")).fontSize(11.fp).muted().padding(10.vp, 6.vp)
@@ -316,11 +312,7 @@ private func historyGroup(model: AppModel, title: String, items: ArrayList<Searc
 }
 
 private func resumeBanner(model: AppModel, item: SearchItem): Unit {
-    let panel = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
+    let panel = model.brush(AppKeys.Panel)
     let pct = if (item.pagecount > 0) {
         min(100, max(0, item.progress * 100 / item.pagecount))
     } else {
@@ -342,20 +334,12 @@ private func resumeBanner(model: AppModel, item: SearchItem): Unit {
                     .crossAxisAlignment(CrossAxisAlignment.Center)
                     .width(64.vp)
                     .height(86.vp)
-                    .background(if (model.isLight()) {
-                        LANLU_L_FIELD
-                    } else {
-                        LANLU_FIELD
-                    }, 9.vp)
+                    .background(model.brush(AppKeys.Field), 9.vp)
             }
             VStack {
                 Label(model.t("shelf.resumeKicker", params: [("page", "${start}"), ("total", "${item.pagecount}")]))
                     .fontSize(11.fp)
-                    .foregroundColor(if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
+                    .foregroundColor(model.brush(AppKeys.Accent))
                 Label(item.title).fontSize(14.5.fp).maxLines(1)
                 Label(
                     model.t("shelf.resumeMeta",
@@ -385,11 +369,7 @@ private func relativeReadTime(model: AppModel, now: Int64, timestamp: Int64): St
 
 private func shelfMessage(model: AppModel, icon: IconName, title: String, detail: String): Unit {
     VStack {
-        Icon(icon, size: 42.vp, color: if (model.isLight()) {
-            LANLU_L_MUTED
-        } else {
-            LANLU_MUTED
-        })
+        Icon(icon, size: 42.vp, color: model.brush(AppKeys.Muted))
         Label(title).fontSize(14.fp)
         if (detail.size > 0) {
             Label(detail).fontSize(11.5.fp).muted()

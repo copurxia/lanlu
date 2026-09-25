@@ -156,11 +156,7 @@ private func dateField(model: AppModel): Unit {
 
 private func metadataAssets(model: AppModel): Unit {
     let coverId = metadataCoverId(model)
-    let field = if (model.isLight()) {
-        LANLU_L_FIELD
-    } else {
-        LANLU_FIELD
-    }
+    let field = model.brush(AppKeys.Field)
     VStack {
         ZStack {
             VStack {
@@ -463,11 +459,7 @@ private func pagePreview(model: AppModel): Unit {
             }).fontSize(11.fp).foregroundColor(if (page.thumbAssetId > 0) {
                 Color.rgb(34, 158, 92)
             } else {
-                if (model.isLight()) {
-                    LANLU_L_MUTED
-                } else {
-                    LANLU_MUTED
-                }
+                model.brush(AppKeys.Muted)
             })
             Label("条目路径：${page.sourcePath}").fontSize(10.fp).muted().maxLines(1)
             Button("替换缩略图", {=> model.todoToast("缩略图上传")}).style(ghostStyleOf(model))
@@ -532,11 +524,7 @@ private func splitTags(raw: String): ArrayList<String> {
 }
 
 private func metadataPlugin(model: AppModel): Unit {
-    let field = if (model.isLight()) {
-        LANLU_L_FIELD
-    } else {
-        LANLU_FIELD
-    }
+    let field = model.brush(AppKeys.Field)
     let labels = ArrayList<String>()
     let namespaces = ArrayList<String>()
     for (plugin in model.plugins.value) {
@@ -574,28 +562,16 @@ private func metadataPlugin(model: AppModel): Unit {
         }.spacing(8.vp).hug().fillWidth()
         if (model.metadataPluginRunning.value) {
             HStack {
-                Spinner(14.0, if (model.isLight()) {
-                    LANLU_L_ACCENT
-                } else {
-                    LANLU_ACCENT
-                })
+                Spinner(14.0, model.brush(AppKeys.Accent))
                 Label("正在创建插件任务…").fontSize(11.fp).muted()
             }.spacing(8.vp).hug()
         }
         if (model.metadataPluginPreview.value) {
             HStack {
-                Icon(IconName.Sparkle, size: 14.vp).foregroundColor(if (model.isLight()) {
-                    LANLU_L_ACCENT
-                } else {
-                    LANLU_ACCENT
-                })
+                Icon(IconName.Sparkle, size: 14.vp).foregroundColor(model.brush(AppKeys.Accent))
                 Label("插件任务已提交：结果由服务端写回元数据，任务完成后重新打开详情即可查看。")
                     .fontSize(11.fp)
-                    .foregroundColor(if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
+                    .foregroundColor(model.brush(AppKeys.Accent))
                     .wrap()
                     .flex()
             }.spacing(8.vp).padding(12.vp, 8.vp).background(field, 9.vp).fillWidth()
@@ -684,11 +660,7 @@ private func tankMemberRow(model: AppModel, item: SearchItem, index: Int64): Uni
                 Label("${item.pagecount} 页").fontSize(10.fp).muted()
             }.spacing(3.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
             Badge("Vol.${index + 1}", kind: BadgeKind.Accent)
-            Icon(IconName.Pencil, size: 13.vp, color: Some(if (model.isLight()) {
-                LANLU_L_MUTED
-            } else {
-                LANLU_MUTED
-            }))
+            Icon(IconName.Pencil, size: 13.vp, color: Some(model.brush(AppKeys.Muted)))
         }.spacing(9.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(8.vp, 6.vp).fillWidth()
     }
 }
@@ -701,11 +673,7 @@ private func metadataPageRow(model: AppModel, page: PageInfo, index: Int64): Uni
                 Label(pageDisplayTitle(page, index)).fontSize(12.fp).maxLines(1)
                 Label(pageDisplaySummary(page)).fontSize(10.fp).muted().maxLines(1)
             }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).flex()
-            Icon(IconName.Pencil, size: 13.vp, color: Some(if (model.isLight()) {
-                LANLU_L_MUTED
-            } else {
-                LANLU_MUTED
-            }))
+            Icon(IconName.Pencil, size: 13.vp, color: Some(model.brush(AppKeys.Muted)))
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(8.vp, 7.vp).fillWidth()
     }
 }

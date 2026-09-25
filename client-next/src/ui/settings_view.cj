@@ -82,11 +82,7 @@ private func sectionName(model: AppModel, i: Int64): String {
 
 // 左侧分类导航（原型 #set-nav：个人区 / 客户端 / 服务器(管理员) / 其他）。
 private func settingsNav(model: AppModel, section: State<Int64>): Unit {
-    let bg = if (model.isLight()) {
-        LANLU_L_BG
-    } else {
-        LANLU_BG
-    }
+    let bg = model.brush(AppKeys.Bg)
     // 导航必须定宽非弹性：ScrollView.isFlexible 恒 true 且 .width() 修饰不改变弹性，
     // 直接挂进根 HStack 会与内容 ScrollView 按权重平分窗口宽（导航一侧 224 内容贴右）。
     VStack {
@@ -198,16 +194,8 @@ private func settingRowBody(model: AppModel, label: String, desc: String, icon: 
     HStack {
         match (icon) {
             case Some(g) =>
-                let raised = if (model.isLight()) {
-                    LANLU_L_PANEL_RAISED
-                } else {
-                    LANLU_PANEL_RAISED
-                }
-                let muted = if (model.isLight()) {
-                    LANLU_L_MUTED
-                } else {
-                    LANLU_MUTED
-                }
+                let raised = model.brush(AppKeys.PanelRaised)
+                let muted = model.brush(AppKeys.Muted)
                 VStack {
                     GlyphIcon(g, size: 14.0, color: muted)
                 }
@@ -334,21 +322,9 @@ private func overviewPage(model: AppModel, logoutOpen: State<Bool>): Unit {
 
 // 统计卡（原型 .stat-card）：矢量图标 + 大数字 + 小标题。
 private func statCard(model: AppModel, ico: GhostGlyph, num: String, label: String): Unit {
-    let cardBg = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_FIELD
-    }
-    let panel = if (model.isLight()) {
-        LANLU_L_PANEL_RAISED
-    } else {
-        LANLU_PANEL_RAISED
-    }
-    let accent = if (model.isLight()) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
+    let cardBg = model.brush(AppKeys.CardBg)
+    let panel = model.brush(AppKeys.PanelRaised)
+    let accent = model.brush(AppKeys.Accent)
     HStack {
         VStack {
             GlyphIcon(ico, size: 15.0, color: accent)
@@ -383,11 +359,7 @@ private func trendLine(model: AppModel, data: ArrayList<TrendPoint>): Unit {
     for (p in data) {
         total += p.count
     }
-    let accent = if (model.isLight()) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
+    let accent = model.brush(AppKeys.Accent)
     Label("最近 30 天 · 总阅读: ${total}").fontSize(11.fp).muted()
     // fillWidth 撑满卡片内容区（同柱图容器须显式占宽的原因）。
     TrendLineChart(accent, data).fillWidth()
@@ -533,11 +505,7 @@ private func recentList(model: AppModel, items: SearchItemView, emptyText: Strin
                     .crossAxisAlignment(CrossAxisAlignment.Center)
                     .width(36.vp)
                     .height(48.vp)
-                    .background(if (model.isLight()) {
-                        LANLU_L_PANEL_RAISED
-                    } else {
-                        LANLU_PANEL_RAISED
-                    }, 6.vp)
+                    .background(model.brush(AppKeys.PanelRaised), 6.vp)
             }
             VStack {
                 Label(it.title).fontSize(12.fp).maxLines(1)
@@ -688,11 +656,7 @@ private func cachePage(model: AppModel): Unit {
 }
 
 private func aboutPage(model: AppModel): Unit {
-    let muted = if (model.isLight()) {
-        LANLU_L_MUTED
-    } else {
-        LANLU_MUTED
-    }
+    let muted = model.brush(AppKeys.Muted)
     pageHeader(model.t("settings.about"), model.t("about.subtitle"))
     detailCard(model, model.t("about.client")) {
         Label("v0.1.0 · CangjieGUI").fontSize(12.fp).muted()
@@ -752,21 +716,9 @@ func pill(model: AppModel, text: String, tone: PillTone): Unit {
 }
 
 private func pillColors(model: AppModel, tone: PillTone): (Color, Color) {
-    let accent = if (model.isLight()) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
-    let accentSoft = if (model.isLight()) {
-        LANLU_L_ACCENT_SOFT
-    } else {
-        LANLU_ACCENT_SOFT
-    }
-    let muted = if (model.isLight()) {
-        LANLU_L_MUTED
-    } else {
-        LANLU_MUTED
-    }
+    let accent = model.brush(AppKeys.Accent)
+    let accentSoft = model.brush(AppKeys.AccentSoft)
+    let muted = model.brush(AppKeys.Muted)
     match (tone) {
         case PillTone.Accent => (accentSoft, accent)
         case PillTone.Blue => (Color.rgba(80, 140, 220, 40), Color.rgb(0x6E, 0xA8, 0xE8))

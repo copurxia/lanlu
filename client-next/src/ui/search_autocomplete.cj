@@ -1,7 +1,7 @@
 package lanlu_client_next.ui
 
 import lanlu_ui.*
-import lanlu_client_next.app.AppModel
+import lanlu_client_next.app.{AppKeys, AppModel, themeColor}
 import lanlu_client_next.net.TagSuggestion
 import std.collection.ArrayList
 
@@ -223,7 +223,7 @@ class SearchAutocomplete <: Widget {
     }
 
     private func drawPopup(ctx: UiContext, popup: Rect): Unit {
-        let surface = if (model.isLight()) { ctx.theme.panel } else { ctx.theme.panelRaised }
+        let surface = themeColor(ctx, AppKeys.PopupSurface)
         ctx.renderer.fillRoundedRect(popup, 9.0, surface)
         ctx.renderer.strokeRoundedRect(popup.inset(0.5), 8.5, Pen(width: 1.0, color: ctx.theme.panelEdge))
         let suggestions = model.autocompleteSuggestions.value

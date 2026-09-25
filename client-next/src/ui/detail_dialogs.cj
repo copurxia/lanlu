@@ -240,17 +240,8 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
         open,
         body: {
             =>
-                let light = model.isLight()
-                let accent = if (light) {
-                    LANLU_L_ACCENT
-                } else {
-                    LANLU_ACCENT
-                }
-                let accentSoft = if (light) {
-                    LANLU_L_ACCENT_SOFT
-                } else {
-                    LANLU_ACCENT_SOFT
-                }
+                let accent = model.brush(AppKeys.Accent)
+                let accentSoft = model.brush(AppKeys.AccentSoft)
                 // 已是成员的 id 不列出（合集不重复收录同一档案）。
                 let memberIds = HashSet<String>()
                 for (it in model.tankMembers.value) {

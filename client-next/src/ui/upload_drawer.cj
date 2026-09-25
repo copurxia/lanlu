@@ -39,11 +39,7 @@ private func uploadTabContent(window: SdlWindow, model: AppModel): Unit {
 private func uploadListContent(model: AppModel): Unit {
     if (model.uploadFiles.value.size == 0) {
         VStack {
-            Icon(IconName.NewDocument, size: 30.vp, color: Some(if (model.isLight()) {
-                LANLU_L_MUTED
-            } else {
-                LANLU_MUTED
-            }))
+            Icon(IconName.NewDocument, size: 30.vp, color: Some(model.brush(AppKeys.Muted)))
             Label("尚未添加档案").fontSize(13.fp).muted()
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(28.vp).fillWidth()
     } else {
@@ -72,11 +68,7 @@ private func downloadTabContent(model: AppModel): Unit {
 private func downloadListContent(model: AppModel): Unit {
     if (model.downloadTasks.value.size == 0) {
         VStack {
-            Icon(IconName.Download, size: 30.vp, color: Some(if (model.isLight()) {
-                LANLU_L_MUTED
-            } else {
-                LANLU_MUTED
-            }))
+            Icon(IconName.Download, size: 30.vp, color: Some(model.brush(AppKeys.Muted)))
             Label("尚未添加下载任务").fontSize(13.fp).muted()
         }.spacing(8.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(28.vp).fillWidth()
     } else {
@@ -103,27 +95,15 @@ private func uploadCategoryPicker(model: AppModel): Unit {
     VStack {
         HStack {
             Label("目标分类").fontSize(12.fp)
-            Label("必选").fontSize(10.fp).foregroundColor(if (model.isLight()) {
-                LANLU_L_ACCENT
-            } else {
-                LANLU_ACCENT
-            })
+            Label("必选").fontSize(10.fp).foregroundColor(model.brush(AppKeys.Accent))
         }.spacing(6.vp).hug()
         if (model.categories.value.size > 0) {
             Dropdown(uploadCategoryLabels(model), model.uploadCategoryIndex, key: "upload:category").fillWidth()
         } else {
             HStack {
-                Spinner(14.0, if (model.isLight()) {
-                    LANLU_L_ACCENT
-                } else {
-                    LANLU_ACCENT
-                })
+                Spinner(14.0, model.brush(AppKeys.Accent))
                 Label("正在加载可用分类…").fontSize(11.fp).muted()
-            }.spacing(8.vp).hug().padding(10.vp, 12.vp).fillWidth().background(if (model.isLight()) {
-                LANLU_L_FIELD
-            } else {
-                LANLU_FIELD
-            }, 10.vp)
+            }.spacing(8.vp).hug().padding(10.vp, 12.vp).fillWidth().background(model.brush(AppKeys.Field), 10.vp)
         }
         Label("新档案将在服务器端处理完成后出现在所选分类中").fontSize(10.5.fp).muted()
     }.spacing(7.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().fillWidth()
@@ -247,11 +227,7 @@ private func orderedDownloads(tasks: ArrayList<DownloadTaskItem>): ArrayList<Dow
 }
 
 private func downloadTaskCard(model: AppModel, item: DownloadTaskItem): Unit {
-    let cardBg = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_FIELD
-    }
+    let cardBg = model.brush(AppKeys.CardBg)
     VStack {
         HStack {
             Icon(IconName.Download, size: 18.vp).foregroundColor(uploadStatusColor(model, item.status))
@@ -287,11 +263,7 @@ private func downloadTaskCard(model: AppModel, item: DownloadTaskItem): Unit {
 }
 
 private func uploadFileCard(model: AppModel, item: UploadFileItem): Unit {
-    let cardBg = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_FIELD
-    }
+    let cardBg = model.brush(AppKeys.CardBg)
     VStack {
         HStack {
             Icon(IconName.NewDocument, size: 18.vp).foregroundColor(uploadStatusColor(model, item.status))
@@ -349,18 +321,8 @@ private func uploadStatusColor(model: AppModel, status: String): Color {
     match (status) {
         case "success" => LANLU_SUCCESS
         case "error" => LANLU_DANGER
-        case "fileExists" | "queued" | "uploading" | "downloading" | "processing" =>
-            if (model.isLight()) {
-                LANLU_L_ACCENT
-            } else {
-                LANLU_ACCENT
-            }
-        case _ =>
-            if (model.isLight()) {
-                LANLU_L_MUTED
-            } else {
-                LANLU_MUTED
-            }
+        case "fileExists" | "queued" | "uploading" | "downloading" | "processing" => model.brush(AppKeys.Accent)
+        case _ => model.brush(AppKeys.Muted)
     }
 }
 
@@ -399,21 +361,13 @@ private class ArchiveDropZone <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let hovered = ctx.isHovered(hoverId)
-        let accent = if (model.isLight()) {
-            LANLU_L_ACCENT
-        } else {
-            LANLU_ACCENT
-        }
+        let accent = themeColor(ctx, AppKeys.Accent)
         let edge = if (hovered) {
             accent
         } else {
             ctx.theme.panelEdge
         }
-        ctx.renderer.fillRoundedRect(frame, 12.0, if (model.isLight()) {
-            LANLU_L_FIELD
-        } else {
-            LANLU_FIELD
-        })
+        ctx.renderer.fillRoundedRect(frame, 12.0, themeColor(ctx, AppKeys.Field))
         drawDashedBorder(ctx, edge)
         let iconRect = Rect(frame.centerX() - 12.0, frame.y + 25.0, 24.0, 24.0)
         drawIcon(ctx.renderer, IconName.Upload, iconRect, if (hovered) {

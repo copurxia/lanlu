@@ -101,8 +101,8 @@ private func chunkCats(items: ArrayList<AdminCategoryItem>, cols: Int64): ArrayL
 
 // 分类卡（原型 .m-card：横幅封面 + 名称 + 档案数 + 启用开关 + 扫描/编辑/删除）。
 private func categoryCard(model: AppModel, c: AdminCategoryItem, delCat: State<String>, delOpen: State<Bool>): Unit {
-    let panel = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
-    let raised = if (model.isLight()) { LANLU_L_PANEL_RAISED } else { LANLU_PANEL_RAISED }
+    let panel = model.brush(AppKeys.Panel)
+    let raised = model.brush(AppKeys.PanelRaised)
     let cellW = Float64(model.contentWidth.value - 24.0) / 3.0
     let bannerW = if (cellW > 100.0) { cellW } else { 100.0 }
     VStack {
@@ -216,7 +216,7 @@ func tagsPage(model: AppModel): Unit {
                     }).role(ButtonRole.Danger)
                 }.spacing(10.vp).crossAxisAlignment(CrossAxisAlignment.Center).flexible(false).fillWidth()
                     .padding(10.vp, 12.vp)
-                    .background(if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }, 12.vp)
+                    .background(model.brush(AppKeys.Panel), 12.vp)
             }
             // 分页（原型 .pager：左侧统计 + 右侧页码）
             HStack {
@@ -296,7 +296,7 @@ func filtersPage(model: AppModel): Unit {
         ForEachIndexed(list) { i, f =>
             HStack {
                 Icon(IconName.Grip, size: 14.vp,
-                    color: if (model.isLight()) { LANLU_L_MUTED } else { LANLU_MUTED })
+                    color: model.brush(AppKeys.Muted))
                 VStack {
                     Label(if (f.name.size > 0) { f.name } else { "未命名" }).fontSize(13.fp)
                     Label(filterSummary(f)).fontSize(10.fp).muted().maxLines(1)

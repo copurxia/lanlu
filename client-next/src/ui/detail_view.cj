@@ -279,11 +279,7 @@ private func detailLoadPanel(model: AppModel, state: String, message: String, re
                 }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             } else {
                 VStack {
-                    Spinner(22.0, if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
+                    Spinner(22.0, model.brush(AppKeys.Accent))
                     Label(model.t("common.loading")).muted()
                 }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             }
@@ -595,11 +591,7 @@ private func tankDetailBody(model: AppModel, t: TankoubonInfo): Unit {
         }) {
             => if (model.tankMembersState.value == "loading") {
                 HStack {
-                    Spinner(16.0, if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
+                    Spinner(16.0, model.brush(AppKeys.Accent))
                     Label(model.t("common.loading")).muted()
                 }.spacing(8.vp).hug().padding(12.vp)
             } else if (model.tankMembersState.value == "error") {
@@ -723,11 +715,7 @@ private func oneArcid(id: String): ArrayList<String> {
 // 移除/删除为 destructive 动作，先落确认框（open 状态由 tankDetailBody 持有）。
 private func tankMemberBatchBar(model: AppModel, members: SearchItemView, removeOpen: State<Bool>,
     batchDelOpen: State<Bool>, batchEditOpen: State<Bool>): Unit {
-    let elev = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
+    let elev = model.brush(AppKeys.Panel)
     let selected = selectedArcidList(model)
     let allFavorite = selectedAll(model, members, {it => it.isfavorite})
     let allNew = selectedAll(model, members, {it => it.isnew})

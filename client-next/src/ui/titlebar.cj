@@ -129,10 +129,11 @@ private let USER_SERVER_MENU_WIDTH: Float32 = 228.0
 private let USER_SERVER_MENU_ROW_HEIGHT: Float32 = 46.0
 private let USER_SERVER_MENU_ANIMATION_MS: Int64 = 160
 private let USER_SERVER_MENU_OVERLAP: Float32 = 2.0
-private let USER_MENU_LIGHT_SURFACE = Color.rgb(255, 255, 255)
-private let USER_MENU_LIGHT_BORDER = Color.rgba(0, 0, 0, 28)
-private let USER_MENU_LIGHT_TEXT = Color.rgb(0x1D, 0x1D, 0x21)
-private let USER_MENU_LIGHT_HOVER = Color.rgb(0xF2, 0xF2, 0xF4)
+// 用户/服务器菜单弹层的明暗取色走主题资源字典（AppKeys.PopupSurface /
+// UserMenuBorder / Text / UserMenuHover）：亮支原 USER_MENU_LIGHT_* 字面量已提取为
+// palette 的 LANLU_L_USER_MENU_BORDER / LANLU_L_USER_MENU_HOVER（表面/文字与
+// LANLU_L_PANEL / LANLU_L_TEXT 同值，直接复用），暗支走 panelRaised/panelEdge/
+// text/overlayHover token。
 
 // 控制钮图形种类（右侧固定的窗口控制三钮；主题钮已改为 GhostIconButton.Theme 风格）。
 // public：阅读器顶栏（reader_bar.cj）复用同一组窗口控制钮。
@@ -818,26 +819,10 @@ private class UserMenuChip <: Widget {
         }
         let progress = popupAnim.animate(ctx, target: target)
         let shell = animatedPopupRect(menu, progress)
-        let surface = if (model.isLight()) {
-            USER_MENU_LIGHT_SURFACE
-        } else {
-            ctx.theme.panelRaised
-        }
-        let border = if (model.isLight()) {
-            USER_MENU_LIGHT_BORDER
-        } else {
-            ctx.theme.panelEdge
-        }
-        let textColor = if (model.isLight()) {
-            USER_MENU_LIGHT_TEXT
-        } else {
-            ctx.theme.text
-        }
-        let hover = if (model.isLight()) {
-            USER_MENU_LIGHT_HOVER
-        } else {
-            ctx.theme.overlayHover
-        }
+        let surface = themeColor(ctx, AppKeys.PopupSurface)
+        let border = themeColor(ctx, AppKeys.UserMenuBorder)
+        let textColor = themeColor(ctx, AppKeys.Text)
+        let hover = themeColor(ctx, AppKeys.UserMenuHover)
         // 与普通 Dropdown 一样，表面和阴影随进度渐入；右上角保持锚定，避免横向漂移。
         ctx
             .renderer
@@ -898,26 +883,10 @@ private class UserMenuChip <: Widget {
         }
         let progress = serverMenuAnim.animate(ctx, target: target)
         let shell = animatedServerPopupRect(parent, menu, progress)
-        let surface = if (model.isLight()) {
-            USER_MENU_LIGHT_SURFACE
-        } else {
-            ctx.theme.panelRaised
-        }
-        let border = if (model.isLight()) {
-            USER_MENU_LIGHT_BORDER
-        } else {
-            ctx.theme.panelEdge
-        }
-        let textColor = if (model.isLight()) {
-            USER_MENU_LIGHT_TEXT
-        } else {
-            ctx.theme.text
-        }
-        let hover = if (model.isLight()) {
-            USER_MENU_LIGHT_HOVER
-        } else {
-            ctx.theme.overlayHover
-        }
+        let surface = themeColor(ctx, AppKeys.PopupSurface)
+        let border = themeColor(ctx, AppKeys.UserMenuBorder)
+        let textColor = themeColor(ctx, AppKeys.Text)
+        let hover = themeColor(ctx, AppKeys.UserMenuHover)
         ctx
             .renderer
             .fillRoundedRectSoft(shell.shift(0.0, 4.0), 10.0, userMenuAlpha(ctx.theme.shadow, progress), feather: 8.0)

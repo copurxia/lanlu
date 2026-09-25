@@ -600,7 +600,9 @@ public class ThemeToggleButton <: Widget {
         }
         let cx = frame.centerX()
         let cy = frame.centerY()
-        if (model.isLight()) {
+        // 图标形态（太阳/月牙）跟当前主题走：settings.theme 与已安装的 ctx.theme 恒一致
+        //（applyPendingTheme 同步双写），绘制期直接读 ctx.theme.isDark 即可，不涉颜色决策。
+        if (!ctx.theme.isDark) {
             ctx.renderer.fillCircle(cx, cy, 3.8, color)
             let pen = Pen(width: 1.4, color: color)
             for (i in 0..8) {
@@ -908,13 +910,9 @@ public class NavItem <: Widget {
 
 // 图片占位：扁平 field 色块（不用 Panel——raised 描边+阴影与扁平卡片设计冲突），
 // 圆角随封面规格（短边 7.2%，对齐原型 .card .cover 的 12px），与 alpha 烘焙的成品封面圆角一致。
-// 构建期拿不到 ctx.theme，底色按 model.isLight() 在 palette 明/暗常量间二选一。
+// 构建期拿不到 ctx.theme，底色按 key 查主题资源字典（app/theme_tokens.cj）。
 private func imagePlaceholder(model: AppModel, w: Length, h: Length, text: String): Unit {
-    let field = if (model.isLight()) {
-        LANLU_L_FIELD
-    } else {
-        LANLU_FIELD
-    }
+    let field = model.brush(AppKeys.Field)
     let radius = Length(min(w.value, h.value) * 0.072, w.unit)
     VStack {
         Label(text).fontSize(12.fp).muted()
@@ -992,11 +990,7 @@ private class StartAlignedPixelImage <: Widget {
 
 // 描边色（明/暗双主题；原 login_view 私有件，提升为设置区/登录页共享）。
 func edgeOf(model: AppModel): Color {
-    if (model.isLight()) {
-        LANLU_L_PANEL_EDGE
-    } else {
-        LANLU_PANEL_EDGE
-    }
+    model.brush(AppKeys.PanelEdge)
 }
 
 // 幽灵按钮样式（设计稿 .btn-ghost：透明底 + 1px 描边），次要动作用——
@@ -1404,7 +1398,7 @@ class CardHoverActions <: Widget {
 
 // 合集叠层（原型 .card.tank .stack::before/::after）：封面底下两张错位垫底面板，
 // 近层 translate(5,-5) scale(.96)、远层 translate(10,-10) scale(.92)，圆角同封面。
-// 颜色随主题两组（palette 的 TANK_STACK_HI/LO），构建期按 isLight 选好传入。
+// 颜色随主题两组（palette 的 TANK_STACK_HI/LO），构建期经主题资源字典解析好传入。
 class TankBackdrop <: Widget {
     private let hi: Color
     private let lo: Color
@@ -1563,22 +1557,8 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
             VStack {
                 ZStack {
                     if (tank) {
-                        let hi = if (model.isLight()) {
-                            LANLU_L_TANK_STACK_HI
-                        } else {
-                            LANLU_TANK_STACK_HI
-                        }
-                        let lo = if (model.isLight()) {
-                            LANLU_L_TANK_STACK_LO
-                        } else {
-                            LANLU_TANK_STACK_LO
-                        }
-                        let edge = if (model.isLight()) {
-                            LANLU_L_PANEL_EDGE
-                        } else {
-                            LANLU_PANEL_EDGE
-                        }
-                        TankBackdrop(hi, lo, edge)
+                        TankBackdrop(model.brush(AppKeys.TankStackHi), model.brush(AppKeys.TankStackLo),
+                            model.brush(AppKeys.PanelEdge))
                     }
                     HoverLift(hoverId, zoomSpring, overlayTween, overlayHovered)
                     if (coverAssetId > 0) {
@@ -1726,11 +1706,7 @@ private func cardMeta(item: SearchItem): String {
 }
 
 private func noCoverBox(model: AppModel, w: Float32, h: Float32): Unit {
-    let field = if (model.isLight()) {
-        LANLU_L_FIELD
-    } else {
-        LANLU_FIELD
-    }
+    let field = model.brush(AppKeys.Field)
     VStack {
         Label("无封面").fontSize(12.fp).muted()
     }
@@ -1753,11 +1729,7 @@ private func newBadge(): Unit {
 // 合集类型角标（原型 .badge-type.tank）：accent 色字 + rgba(0,0,0,.65) 底
 // （叠在封面上不随主题翻转，仅文字色随主题 accent）。
 private func tankBadge(model: AppModel): Unit {
-    let accent = if (model.isLight()) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
+    let accent = model.brush(AppKeys.Accent)
     HStack {
         GlyphIcon(GhostGlyph.Book, size: 13.0, color: accent)
         Label("合集").fontSize(10.5.fp).foregroundColor(accent)
@@ -1856,11 +1828,7 @@ public func splitSelection(model: AppModel): (ArrayList<String>, ArrayList<Strin
 // 「加入合集」仅档案可加入，无档案选中时禁用。胶囊造型同阅读器页码 pill（panel 底 +
 // 全圆角 + StaticBorder 描边）。
 public func batchActionBar(model: AppModel, onAddToTank: () -> Unit, onDelete: () -> Unit): Unit {
-    let panel = if (model.isLight()) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
+    let panel = model.brush(AppKeys.Panel)
     let (arcids, tankIds) = splitSelection(model)
     ZStack {
         HStack {
@@ -1952,12 +1920,12 @@ class StaticBorder <: Widget {
 // 注意：不要用阶梯 alpha 多层矩形（有带状感）——框架原语 fillRoundedRectSoft 自带 feather。
 class CoverShadow <: Widget {
     private let radius: Float32
-    private let light: Bool
+    private let shadowColor: Color
     private var frame = Rect.zero()
 
-    public init(radius: Float32, light: Bool) {
+    public init(radius: Float32, shadowColor: Color) {
         this.radius = radius
-        this.light = light
+        this.shadowColor = shadowColor
         emit(this)
     }
 
@@ -1971,20 +1939,16 @@ class CoverShadow <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         // 原型 blur 48px → spread 取 20（feather 渐隐带的视觉等效，目检微调）；
-        // y-offset 18 直接平移。暗色 alpha 140≈.55（原型）、亮色 26≈.10。
+        // y-offset 18 直接平移。基色 alpha 暗 140≈.55（原型）、亮 26≈.10（palette 的
+        // COVER_SHADOW 对，经主题资源字典解析）；两层光晕的 alpha 由基色派生。
         let spread: Float32 = 20.0
-        let alpha: Int64 = if (light) {
-            26
-        } else {
-            140
-        }
+        let alpha: Int64 = Int64(shadowColor.a)
         let base = frame.shift(0.0, 18.0)
-        let shadow = Color.rgba(0, 0, 0, alpha)
         ctx
             .renderer
-            .fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3, shadow.withAlpha(alpha * 3 / 5),
+            .fillRoundedRectSoft(base.inset(-spread * 0.3), radius + spread * 0.3, shadowColor.withAlpha(alpha * 3 / 5),
                 feather: spread)
-        ctx.renderer.fillRoundedRectSoft(base, radius, shadow.withAlpha(alpha / 2), feather: spread * 0.5)
+        ctx.renderer.fillRoundedRectSoft(base, radius, shadowColor.withAlpha(alpha / 2), feather: spread * 0.5)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -2115,17 +2079,8 @@ public func memberReadPct(pagecount: Int64, progress: Int64): Int64 {
 // backdropKey 空串表示无封面（纯色底 + scrim）。
 public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHeroData, coverAssetId: Int64,
     actionIcons: () -> Unit, mainCards: Array<() -> Unit>, sideCards: Array<() -> Unit>, tank!: Bool): Unit {
-    let light = model.isLight()
-    let panel = if (light) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_PANEL
-    }
-    let bg = if (light) {
-        LANLU_L_BG
-    } else {
-        LANLU_BG
-    }
+    let panel = model.brush(AppKeys.Panel)
+    let bg = model.brush(AppKeys.Bg)
     ScrollView {
         VStack {
             // backdrop 带（高 300，顶对齐）+ hero 上叠 128（原型 .backdrop 300px / .hero margin-top:-128px）：
@@ -2139,19 +2094,14 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
                             fit: ImageFit.Cover).fillWidth()
                     }
                     // 双层 scrim（原型 .backdrop .scrim；明暗两组）：横向左侧压暗 + 底部融入页面底。
-                    if (light) {
-                        GradientScrim(direction: GradientDirection.Right,
-                            stops: [(0.0, Color.rgba(244, 244, 246, 140)), (0.4, Color.rgba(244, 244, 246, 0)),
-                                (1.0, Color.rgba(244, 244, 246, 0))])
-                        GradientScrim(direction: GradientDirection.Bottom,
-                            stops: [(0.0, Color.rgba(244, 244, 246, 115)), (0.92, bg), (1.0, bg)])
-                    } else {
-                        GradientScrim(direction: GradientDirection.Right,
-                            stops: [(0.0, Color.rgba(11, 11, 13, 128)), (0.4, Color.rgba(11, 11, 13, 0)),
-                                (1.0, Color.rgba(11, 11, 13, 0))])
-                        GradientScrim(direction: GradientDirection.Bottom,
-                            stops: [(0.0, Color.rgba(11, 11, 13, 0)), (0.96, bg), (1.0, bg)])
-                    }
+                    // 颜色对提取为 palette 的 DETAIL_SCRIM 组；底部拐点位置是随主题的数值
+                    //（亮 0.92 / 暗 0.96），走字典的 Double token（AppKeys.DetailScrimFade）。
+                    GradientScrim(direction: GradientDirection.Right,
+                        stops: [(0.0, model.brush(AppKeys.DetailScrimSide)), (0.4, model.brush(AppKeys.DetailScrimSideClear)),
+                            (1.0, model.brush(AppKeys.DetailScrimSideClear))])
+                    GradientScrim(direction: GradientDirection.Bottom,
+                        stops: [(0.0, model.brush(AppKeys.DetailScrimBottom)), (model.fade(AppKeys.DetailScrimFade), bg),
+                            (1.0, bg)])
                 }.alignment(Alignment.TopLeading).height(DETAIL_BACKDROP_H).fillWidth()
                 // hero 顶占位 172（= 300-128），hero 自 172 起排。
                 VStack {
@@ -2193,7 +2143,6 @@ public func detailSkeleton(model: AppModel, backdropKey: String, hero: DetailHer
 // 中列（与封面顶对齐：badges/标题/meta/内联进度/3 行简介/标签 chips）｜
 // 玻璃操作卡（底对齐，主按钮 + 图标行）。
 public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int64, actionIcons: () -> Unit, tank!: Bool): Unit {
-    let light = model.isLight()
     // 标题字号（原型 clamp(24px,3vw,36px)）：windowWidth 未就绪时回退 30。
     let w = model.windowWidth.value
     let titleSize: Float32 = if (w <= 0) {
@@ -2221,24 +2170,10 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
             // 封面（2:3，圆角 14，1px 描边；合集叠两层错位垫底面板）
             ZStack {
                 // 软投影恒有（无封面时占位色块同样有卡片感）；设计稿投影仅 .cover-big，操作卡不加
-                CoverShadow(14.0, light)
+                CoverShadow(14.0, model.brush(AppKeys.CoverShadow))
                 if (tank) {
-                    let hi = if (light) {
-                        LANLU_L_TANK_STACK_HI
-                    } else {
-                        LANLU_TANK_STACK_HI
-                    }
-                    let lo = if (light) {
-                        LANLU_L_TANK_STACK_LO
-                    } else {
-                        LANLU_TANK_STACK_LO
-                    }
-                    let edge = if (light) {
-                        LANLU_L_PANEL_EDGE
-                    } else {
-                        LANLU_PANEL_EDGE
-                    }
-                    TankBackdrop(hi, lo, edge)
+                    TankBackdrop(model.brush(AppKeys.TankStackHi), model.brush(AppKeys.TankStackLo),
+                        model.brush(AppKeys.PanelEdge))
                 }
                 if (coverAssetId > 0) {
                     remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
@@ -2255,36 +2190,17 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 HStack {
                     ForEachIndexed(data.badges) {
                         i, b => if (i == 0) {
-                            let accentSoft = if (light) {
-                                LANLU_L_ACCENT_SOFT
-                            } else {
-                                LANLU_ACCENT_SOFT
-                            }
-                            let accent = if (light) {
-                                LANLU_L_ACCENT
-                            } else {
-                                LANLU_ACCENT
-                            }
                             Label(b)
                                 .fontSize(11.fp)
-                                .foregroundColor(accent)
+                                .foregroundColor(model.brush(AppKeys.Accent))
                                 .padding(10.vp, 3.vp)
-                                .background(accentSoft, 12.vp)
+                                .background(model.brush(AppKeys.AccentSoft), 12.vp)
                         } else {
-                            let elev = if (light) {
-                                LANLU_L_PANEL
-                            } else {
-                                LANLU_PANEL
-                            }
                             Label(b)
                                 .fontSize(11.fp)
-                                .foregroundColor(if (light) {
-                                    LANLU_L_MUTED
-                                } else {
-                                    LANLU_MUTED
-                                })
+                                .foregroundColor(model.brush(AppKeys.Muted))
                                 .padding(10.vp, 3.vp)
-                                .background(elev, 12.vp)
+                                .background(model.brush(AppKeys.Panel), 12.vp)
                         }
                     }
                     if (data.isNew) {
@@ -2312,12 +2228,7 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                 if (data.progressPct > 0) {
                     HStack {
                         ProgressTrack(data.progressPct, 5.0).width(320.vp)
-                        let accent = if (light) {
-                            LANLU_L_ACCENT
-                        } else {
-                            LANLU_ACCENT
-                        }
-                        Label(data.progressText).fontSize(12.fp).foregroundColor(accent)
+                        Label(data.progressText).fontSize(12.fp).foregroundColor(model.brush(AppKeys.Accent))
                     }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(0.0, 12.0, 0.0, 0.0)
                 }
 
@@ -2350,11 +2261,7 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
                         }.spacing(4.vp).mainAxisAlignment(MainAxisAlignment.SpaceBetween).hug()
                     }.spacing(9.vp).padding(14.vp)
                     StaticBorder(14.0)
-                }.width(actionCardW).background(if (light) {
-                    LANLU_L_OVERLAY_SURFACE
-                } else {
-                    LANLU_OVERLAY_SURFACE
-                }, 14.vp)
+                }.width(actionCardW).background(model.brush(AppKeys.OverlaySurface), 14.vp)
             }.hug()
         }.padding(0.0, 0.0, 32.0, 4.0)
     }.alignment(Alignment.TopLeading)
@@ -2364,17 +2271,8 @@ public func detailHero(model: AppModel, data: DetailHeroData, coverAssetId: Int6
 // 头部 = 标题 + 可选计数 pill + 右侧工具位（mini-seg/筛选框等）。
 public func detailCard(model: AppModel, title: String, count!: String = "", tools!: () -> Unit = {=> ()},
     body!: () -> Unit): Unit {
-    let light = model.isLight()
-    let bg = if (light) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_FIELD
-    }
-    let elev = if (light) {
-        LANLU_L_PANEL_RAISED
-    } else {
-        LANLU_PANEL
-    }
+    let bg = model.brush(AppKeys.CardBg)
+    let elev = model.brush(AppKeys.DetailCardElev)
     ZStack {
         VStack {
             HStack {
@@ -2396,11 +2294,7 @@ public func detailCard(model: AppModel, title: String, count!: String = "", tool
 // 字段列表（原型 .info-list .info-row）：k 76vp muted 定宽，v 占满剩余宽度并按需换行；
 // 行与分割线都铺满卡片内容宽度，避免按各行自然内容宽度收缩。
 public func infoList(model: AppModel, rows: Array<(String, String)>): Unit {
-    let sep = if (model.isLight()) {
-        Color.rgba(0, 0, 0, 15)
-    } else {
-        Color.rgba(255, 255, 255, 10)
-    }
+    let sep = model.brush(AppKeys.Separator)
     VStack {
         ForEachIndexed(rows) {
             i, row =>
@@ -2420,15 +2314,15 @@ public func infoList(model: AppModel, rows: Array<(String, String)>): Unit {
 // hover 字/边转 accent（边 accent 40%）；点击触发 onTap（详情页：携标签跳搜索）。
 class TagChip <: Widget {
     private let text: String
-    private let light: Bool
+    private let bgColor: Color
     private let hoverId: String
     private let onTap: () -> Unit
     private let interactive: Bool
     private var frame = Rect.zero()
 
-    public init(text: String, light: Bool, hoverId: String, onTap: () -> Unit, interactive!: Bool = true) {
+    public init(text: String, bgColor: Color, hoverId: String, onTap: () -> Unit, interactive!: Bool = true) {
         this.text = text
-        this.light = light
+        this.bgColor = bgColor
         this.hoverId = hoverId
         this.onTap = onTap
         this.interactive = interactive
@@ -2445,12 +2339,7 @@ class TagChip <: Widget {
 
     public func draw(ctx: UiContext): Unit {
         let hovered = interactive && ctx.isHovered(hoverId)
-        let bg = if (light) {
-            Color.rgba(0, 0, 0, 13)
-        } else {
-            Color.rgba(255, 255, 255, 15)
-        }
-        ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, bg)
+        ctx.renderer.fillRoundedRect(frame, frame.h / 2.0, bgColor)
         let accent = ctx.theme.accent
         let edge = if (hovered) {
             accent.withAlpha(102)
@@ -2497,12 +2386,12 @@ public func tagFlow(model: AppModel, tags: ArrayList<String>): Unit {
         while (i < shown) {
             let t = tags[i]
             Keyed(t) {
-                TagChip(t, model.isLight(), "tf:${t}", {=> model.searchExactTag(t)}, interactive: true)
+                TagChip(t, model.brush(AppKeys.TagChipBg), "tf:${t}", {=> model.searchExactTag(t)}, interactive: true)
             }
             i += 1
         }
         if (tags.size > 10) {
-            TagChip("+${tags.size - 10}", model.isLight(), "tf:overflow", {=> ()}, interactive: false)
+            TagChip("+${tags.size - 10}", model.brush(AppKeys.TagChipBg), "tf:overflow", {=> ()}, interactive: false)
         }
     }.spacing(7.vp)
 }
@@ -2517,8 +2406,8 @@ public func tagGroups(model: AppModel, tags: ArrayList<String>): Unit {
                 Label(gk).fontSize(11.fp).muted().padding(0.vp, 8.vp, 0.vp, 2.vp)
                 FlowRow {
                     ForEach(values, key: {v: (String, String) => v[1]}) {
-                        v => TagChip(v[0], model.isLight(), "tg:${gk}:${v[1]}", {=> model.searchExactTag(v[1])},
-                            interactive: true)
+                        v => TagChip(v[0], model.brush(AppKeys.TagChipBg), "tg:${gk}:${v[1]}",
+                            {=> model.searchExactTag(v[1])}, interactive: true)
                     }
                 }.spacing(7.vp)
         }
@@ -2577,17 +2466,8 @@ private func tagGroupLabel(ns: String): String {
 
 // 侧栏进度大卡（原型 .prog-card）：居中大数字 + 说明行 + 6vp 轨道条。
 public func progressCard(model: AppModel, big: String, ofText: String, pct: Int64): Unit {
-    let light = model.isLight()
-    let bg = if (light) {
-        LANLU_L_PANEL
-    } else {
-        LANLU_FIELD
-    }
-    let accent = if (light) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
+    let bg = model.brush(AppKeys.CardBg)
+    let accent = model.brush(AppKeys.Accent)
     ZStack {
         VStack {
             Label(big).fontSize(38.fp).foregroundColor(accent)
@@ -2771,40 +2651,17 @@ func pagePreviewThumbUrl(arcid: String, page: PageInfo): String {
 
 private func pvThumb(model: AppModel, arcid: String, no: Int64, page: PageInfo, read: Bool, w: Float32, h: Float32,
     onOpen: () -> Unit): Unit {
-    let light = model.isLight()
-    // 原型 .pv-thumb 渐变近色（扁平近似），明暗两组。
-    let thumbBg = if (light) {
-        Color.rgb(0xD0, 0xD9, 0xE6)
-    } else {
-        Color.rgb(0x1D, 0x26, 0x35)
-    }
-    let badgeBg = if (light) {
-        Color.rgba(255, 255, 255, 179)
-    } else {
-        Color.rgba(0, 0, 0, 153)
-    }
-    let badgeFg = if (light) {
-        LANLU_L_TEXT
-    } else {
-        LANLU_ON_MEDIA
-    }
+    // 原型 .pv-thumb 渐变近色（扁平近似）与页码/图标前景：明暗两组按 key 查字典
+    //（数值来源 palette 的 PV_* 对）。
+    let thumbBg = model.brush(AppKeys.PvThumbBg)
+    let badgeBg = model.brush(AppKeys.PvBadgeBg)
+    // 页码前景：亮 = text、暗 = onMedia（缩略图上的白字恒深语义）。
+    let badgeFg = model.brush(AppKeys.PvBadgeFg)
     // 已读变淡：ZStack.opacity 只淡 surface（色块/pill 底），页码与图标是纯 Label——
     // 文字色显式换 45% 透明度色（115≈0.45*255），未读色保持原值。
-    let badgeFgRead = if (light) {
-        Color.rgba(0x1D, 0x1D, 0x21, 115)
-    } else {
-        Color.rgba(0xF2, 0xF2, 0xF4, 115)
-    }
-    let iconFg = if (light) {
-        LANLU_L_TEXT
-    } else {
-        LANLU_TEXT
-    }
-    let iconFgRead = if (light) {
-        Color.rgba(0x1D, 0x1D, 0x21, 115)
-    } else {
-        Color.rgba(0xE8, 0xE8, 0xEA, 115)
-    }
+    let badgeFgRead = model.brush(AppKeys.PvBadgeFgRead)
+    let iconFg = model.brush(AppKeys.Text)
+    let iconFgRead = model.brush(AppKeys.PvIconFgRead)
     let icon = pageTypeIcon(page.pageType)
     let thumbKey = pagePreviewThumbKey(arcid, page)
     let thumbUrl = pagePreviewThumbUrl(arcid, page)
@@ -2934,35 +2791,18 @@ private func pvTree(model: AppModel, pages: ArchivePageView, readUpTo: Int64, on
 // 列表/树共用行：indent 为左侧额外缩进（树态成员行用）；点击进阅读器对应页。
 private func pvRow(model: AppModel, no: Int64, name: String, icon: ?IconName, read: Bool, indent: Float32,
     onOpen: () -> Unit): Unit {
-    let light = model.isLight()
     // 已读变淡：整行是纯 Label，opacity 修饰器只作用 surface 填充（对行是死代码）——
     // 改为显式 45% 透明度文字色（115≈0.45*255），对齐原型 .pv-row.read{opacity:.45}；
-    // 未读色与主题 text/muted token 同值，明暗两套随 isLight() 二选一。
+    // 未读色与主题 text/muted token 同值，明暗两组按 key 查字典取。
     let fg = if (read) {
-        if (light) {
-            Color.rgba(0x6D, 0x6D, 0x76, 115)
-        } else {
-            Color.rgba(0x9A, 0x9A, 0xA2, 115)
-        }
+        model.brush(AppKeys.PvRowFgRead)
     } else {
-        if (light) {
-            LANLU_L_MUTED
-        } else {
-            LANLU_MUTED
-        }
+        model.brush(AppKeys.Muted)
     }
     let iconFg = if (read) {
-        if (light) {
-            Color.rgba(0x1D, 0x1D, 0x21, 115)
-        } else {
-            Color.rgba(0xE8, 0xE8, 0xEA, 115)
-        }
+        model.brush(AppKeys.PvIconFgRead)
     } else {
-        if (light) {
-            LANLU_L_TEXT
-        } else {
-            LANLU_TEXT
-        }
+        model.brush(AppKeys.Text)
     }
     ClickArea(onClick: onOpen) {
         ZStack {
@@ -3067,17 +2907,8 @@ private func memberCard(model: AppModel, item: SearchItem, coverW: Float32, onEn
 // 选择模式成员卡（网格态）：不走 homeCoverCard（该卡归书库多选改造），用简化卡——
 // 封面 + 标题/meta，点击 = 切换选中；选中态为 accentSoft 高亮底 + 标题行勾选图标。
 private func memberSelectCard(model: AppModel, item: SearchItem, coverW: Float32): Unit {
-    let light = model.isLight()
-    let accent = if (light) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
-    let accentSoft = if (light) {
-        LANLU_L_ACCENT_SOFT
-    } else {
-        LANLU_ACCENT_SOFT
-    }
+    let accent = model.brush(AppKeys.Accent)
+    let accentSoft = model.brush(AppKeys.AccentSoft)
     let selected = model.isSelected(item.arcid)
     let coverH = coverW * 4.0 / 3.0
     ClickArea(onClick: {=> model.toggleSelected(item.arcid)}) {
@@ -3117,17 +2948,8 @@ private let MEMBER_LIST_MAX_H: Float32 = 736.0
 // 选择模式并选中本行（onEnterSelection，tank 详情由调用方记录选择归属）。
 public func memberListContent(model: AppModel, members: SearchItemProjectionView, onEnterSelection: (String) -> Unit,
     onRemove: (String) -> Unit): Unit {
-    let light = model.isLight()
-    let accent = if (light) {
-        LANLU_L_ACCENT
-    } else {
-        LANLU_ACCENT
-    }
-    let accentSoft = if (light) {
-        LANLU_L_ACCENT_SOFT
-    } else {
-        LANLU_ACCENT_SOFT
-    }
+    let accent = model.brush(AppKeys.Accent)
+    let accentSoft = model.brush(AppKeys.AccentSoft)
     let contentH = Float32(members.size) * MEMBER_ROW_H + Float32(max(0, members.size - 1)) * 2.0
     LazyList(members.size, {_ => MEMBER_ROW_H}, spacing: 2.0, key: {i => members[i].arcid}, id: "member-list") {
         i =>

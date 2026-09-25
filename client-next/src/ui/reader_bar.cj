@@ -211,7 +211,7 @@ private class ReaderModeButton <: Widget {
 private func pagePill(model: AppModel): Unit {
     // 显示语义：seamless 开 = segment 内页码/页数，关 = 全局；虚拟结束页显示「完」。
     if (model.reader.onVirtualEnd) {
-        let elev0 = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+        let elev0 = model.brush(AppKeys.Panel)
         ZStack {
             Label(model.t("reader.finishedShort")).fontSize(12.5.fp).muted()
                 .padding(10.vp, 4.vp).background(elev0, 999.vp)
@@ -221,7 +221,7 @@ private func pagePill(model: AppModel): Unit {
     }
     let cur = model.reader.displayPage
     let total = model.reader.displayTotal
-    let elev = if (model.isLight()) { LANLU_L_PANEL } else { LANLU_PANEL }
+    let elev = model.brush(AppKeys.Panel)
     ZStack {
         Label("${cur} / ${total}").fontSize(12.5.fp).muted()
             .padding(10.vp, 4.vp).background(elev, 999.vp)
@@ -231,8 +231,6 @@ private func pagePill(model: AppModel): Unit {
 
 // 阅读器顶栏。window 仅用于窗口控制三钮（最小化/最大化/关闭）。
 public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
-    let light = model.isLight()
-    let bg = if (light) { LANLU_L_BG } else { LANLU_BG }
     // 标题区：档案名（主文字色；原型 <b> 粗体，lanlu_ui 无字重原语，以色彩分层代替）
     // + 当前页标题（muted，前置「 · 」）。元数据未到货/不是当前档案时不显示档案名。
     let archiveTitle = match (model.meta.value) {
@@ -252,13 +250,10 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
     }
     ZStack {
         // 底：bg 95%→75% 纵向渐隐（原型 linear-gradient；亮色 .96→.80）。
-        if (light) {
-            GradientScrim(direction: GradientDirection.Bottom,
-                stops: [(0.0, bg.withAlpha(245)), (1.0, bg.withAlpha(204))])
-        } else {
-            GradientScrim(direction: GradientDirection.Bottom,
-                stops: [(0.0, bg.withAlpha(242)), (1.0, bg.withAlpha(191))])
-        }
+        // 明暗两组 stop 已提取为 palette 的 READER_BAR_SCRIM 对（bg 按支路 alpha 烘焙），
+        // 经主题资源字典按 key 解析。
+        GradientScrim(direction: GradientDirection.Bottom,
+            stops: [(0.0, model.brush(AppKeys.ReaderBarScrimTop)), (1.0, model.brush(AppKeys.ReaderBarScrimBottom))])
         // 底边 1px panelEdge（原型 border-bottom）。
         ReaderBarEdge()
         HStack {

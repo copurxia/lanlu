@@ -68,3 +68,63 @@ public let LANLU_L_STAGE_BG = Color.rgb(0xEC, 0xEC, 0xF1)
 // 合集卡叠层面板亮色组（原型 #window.light .card.tank .stack 覆写）。
 public let LANLU_L_TANK_STACK_HI = Color.rgb(0xD5, 0xDC, 0xEA)
 public let LANLU_L_TANK_STACK_LO = Color.rgb(0xC0, 0xC9, 0xD9)
+
+// ── Phase 4 从视图逐字提取的内联字面量对 ──
+// 以下各对原先以视图内「明暗布尔分支 + 字面量」形式散落，
+// 现收进调色板做唯一数值来源（值逐字搬移，一位未改），明/暗选典交给主题资源字典
+//（app/theme_tokens.cj）。注释标注原出处，便于对照。
+
+// 登录页（login_view.cj）
+public let LANLU_L_LOGIN_SHADOW = Color.rgba(0, 0, 0, 20)     // 原 login_view shadowOf 亮支
+public let LANLU_LOGIN_SHADOW = Color.rgba(0, 0, 0, 115)      // 原 login_view shadowOf 暗支
+public let LANLU_L_LOGIN_EDGE = Color.rgba(199, 138, 30, 89)  // 原 serverCard 服务器卡片描边亮支
+public let LANLU_LOGIN_EDGE = Color.rgba(232, 176, 75, 89)    // 原 serverCard 服务器卡片描边暗支
+public let LANLU_L_LOGIN_EDGE_SOFT = Color.rgba(199, 138, 30, 76) // 原 totpFormPanel 描边亮支
+public let LANLU_LOGIN_EDGE_SOFT = Color.rgba(232, 176, 75, 76)   // 原 totpFormPanel 描边暗支
+
+// 标题栏用户/服务器菜单（titlebar.cj；亮支为原 USER_MENU_LIGHT_* 字面量，暗支走既有 token）
+public let LANLU_L_USER_MENU_BORDER = Color.rgba(0, 0, 0, 28)  // 原 USER_MENU_LIGHT_BORDER
+public let LANLU_L_USER_MENU_HOVER = Color.rgb(0xF2, 0xF2, 0xF4) // 原 USER_MENU_LIGHT_HOVER
+
+// 阅读器设置面板（reader_panels.cj）：轨道/开关底槽的透明白黑（原型 CSS 直接换算）
+public let LANLU_L_SEG_TRACK = Color.rgba(0, 0, 0, 15)
+public let LANLU_SEG_TRACK = Color.rgba(255, 255, 255, 18)
+public let LANLU_L_SWITCH_OFF = Color.rgba(0, 0, 0, 46)
+public let LANLU_SWITCH_OFF = Color.rgba(255, 255, 255, 38)
+
+// 阅读器顶栏纵向渐隐（reader_bar.cj；底色 = BG 按支路 alpha 烘焙，值与原 withAlpha 逐位一致）
+public let LANLU_L_READER_BAR_SCRIM_TOP = LANLU_L_BG.withAlpha(245)
+public let LANLU_READER_BAR_SCRIM_TOP = LANLU_BG.withAlpha(242)
+public let LANLU_L_READER_BAR_SCRIM_BOTTOM = LANLU_L_BG.withAlpha(204)
+public let LANLU_READER_BAR_SCRIM_BOTTOM = LANLU_BG.withAlpha(191)
+
+// 分割线（widgets.cj infoList / settings_admin_view.cj statsMetric）
+public let LANLU_L_SEPARATOR = Color.rgba(0, 0, 0, 15)
+public let LANLU_SEPARATOR = Color.rgba(255, 255, 255, 10)
+
+// 标签 chip 底（widgets.cj TagChip）
+public let LANLU_L_TAG_CHIP_BG = Color.rgba(0, 0, 0, 13)
+public let LANLU_TAG_CHIP_BG = Color.rgba(255, 255, 255, 15)
+
+// 详情 hero 封面投影基色（widgets.cj CoverShadow；两层软阴影的 alpha 由该色派生）
+public let LANLU_L_COVER_SHADOW = Color.rgba(0, 0, 0, 26)
+public let LANLU_COVER_SHADOW = Color.rgba(0, 0, 0, 140)
+
+// 详情 backdrop 双层 scrim（widgets.cj detailSkeleton；横向压暗 + 底部融入页面底）
+public let LANLU_L_DETAIL_SCRIM_SIDE = Color.rgba(244, 244, 246, 140)
+public let LANLU_DETAIL_SCRIM_SIDE = Color.rgba(11, 11, 13, 128)
+public let LANLU_L_DETAIL_SCRIM_SIDE_CLEAR = Color.rgba(244, 244, 246, 0)
+public let LANLU_DETAIL_SCRIM_SIDE_CLEAR = Color.rgba(11, 11, 13, 0)
+public let LANLU_L_DETAIL_SCRIM_BOTTOM = Color.rgba(244, 244, 246, 115)
+public let LANLU_DETAIL_SCRIM_BOTTOM = Color.rgba(11, 11, 13, 0)
+
+// 页面预览（widgets.cj pvThumb/pvRow；已读态 = 未读色按 45% 透明度烘焙，115≈0.45*255）
+public let LANLU_L_PV_THUMB_BG = Color.rgb(0xD0, 0xD9, 0xE6)      // 原型 .pv-thumb 渐变近色
+public let LANLU_PV_THUMB_BG = Color.rgb(0x1D, 0x26, 0x35)
+public let LANLU_L_PV_BADGE_BG = Color.rgba(255, 255, 255, 179)
+public let LANLU_PV_BADGE_BG = Color.rgba(0, 0, 0, 153)
+public let LANLU_L_PV_READ_FG = Color.rgba(0x1D, 0x1D, 0x21, 115) // 页码已读 / 图标已读（亮）
+public let LANLU_PV_PAGE_FG_READ = Color.rgba(0xF2, 0xF2, 0xF4, 115) // 页码已读（暗）
+public let LANLU_PV_ICON_FG_READ = Color.rgba(0xE8, 0xE8, 0xEA, 115) // 图标/行文字已读（暗）
+public let LANLU_L_PV_ROW_FG_READ = Color.rgba(0x6D, 0x6D, 0x76, 115) // 行文字已读（亮）
+public let LANLU_PV_ROW_FG_READ = Color.rgba(0x9A, 0x9A, 0xA2, 115)   // 行文字已读（暗）
