@@ -54,11 +54,13 @@ jobs:
           wget -O s.zip "${{ vars.STDX_URL }}"
           unzip s.zip -d stdx
       - name: Checkout WasmEdge source (public)
-        uses: actions/checkout@v4
-        with:
-          repository: WasmEdge/WasmEdge
-          path: build-script-cache/WasmEdge
-          fetch-depth: 0
+        # 不用 actions/checkout 拉：默认向本实例查询 wasmedge 用户，
+        # 报 "user redirect does not exist [name: wasmedge]"（run 985/993）。
+        # 公开仓库直接 clone；不带 --depth 等价 fetch-depth: 0（全历史+tags）。
+        run: |
+          set -eux
+          mkdir -p build-script-cache
+          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
@@ -164,11 +166,16 @@ jobs:
         run: |
           set -eux
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
+          sudo apt-get install -y --no-install-recommends musl-tools curl
+          # runner 镜像不带 Rust 工具链，rustup/cargo 均需自装（run 983/986 教训）
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "$HOME/.cargo/env"
           rustup target add x86_64-unknown-linux-musl
 
       - name: Build lanlu-mcp (static musl)
         run: |
+          # PATH 不跨 step 持久，cargo 前必须再 source 一次
+          . "$HOME/.cargo/env"
           cd mcp
           CC_x86_64_unknown_linux_musl=musl-gcc \
             cargo build --release --target x86_64-unknown-linux-musl
