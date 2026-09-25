@@ -306,6 +306,10 @@ $:
         - mcp/**
       runner:
         tags: cnb:arch:amd64
+      docker:
+        # 默认镜像 cnbcool/default-build-env 没有 rustup/cargo（rustup: command not found, exit 127），
+        # mcp 构建需要自带 Rust 工具链的官方镜像。
+        image: rust:1.98.1-slim
       env:
         TZ: Asia/Shanghai
       stages:
@@ -314,7 +318,7 @@ $:
             bash -lc '
               set -eux
               apt-get update
-              apt-get install -y --no-install-recommends musl-tools
+              apt-get install -y --no-install-recommends musl-tools zip
               rustup target add x86_64-unknown-linux-musl
             '
 
