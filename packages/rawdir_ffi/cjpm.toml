@@ -1,0 +1,14 @@
+[package]
+  cjc-version = "1.1.0"
+  name = "rawdir_ffi"
+  description = "POSIX raw-byte directory listing, GB18030 fallback decoding, byte-safe rename"
+  version = "0.1.0"
+  output-type = "static"
+
+[dependencies]
+
+[ffi.c]
+lanlu_rawdir_bridge = { path = "./native" }
+
+[target.x86_64-unknown-linux-gnu]
+link-option = "-L ./native -llanlu_rawdir_bridge"
