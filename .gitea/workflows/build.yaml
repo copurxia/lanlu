@@ -111,7 +111,9 @@ jobs:
           cp target/release/bin/main app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
+        # v4 的 @actions/artifact 2.x 走 GitHub Artifact v2 协议，Forgejo 未实现，
+        # 报 GHESNotSupportedError（run #1264）；v3 旧协议 Forgejo 兼容。
+        uses: actions/upload-artifact@v3
         with:
           name: release
           path: |
@@ -124,7 +126,7 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           name: release
           path: ./app/
@@ -203,7 +205,7 @@ jobs:
           ls -lah .
 
       - name: Upload lanlu-mcp artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: lanlu-mcp
           path: dist/lanlu-mcp-*.zip
