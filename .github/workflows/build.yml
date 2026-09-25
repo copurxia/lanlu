@@ -61,6 +61,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: WasmEdge/WasmEdge
+          # 不指定则默认向本实例查询，git.copur.xyz 上没有 wasmedge 用户，
+          # 报 "user redirect does not exist [name: wasmedge]"（run 985）。
+          github-server-url: https://github.com
           path: build-script-cache/WasmEdge
           fetch-depth: 0
 
@@ -184,11 +187,16 @@ jobs:
         run: |
           set -eux
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
+          sudo apt-get install -y --no-install-recommends musl-tools curl
+          # runner 镜像不带 Rust 工具链，rustup/cargo 均需自装（run 983/986 教训）
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "$HOME/.cargo/env"
           rustup target add x86_64-unknown-linux-musl
 
       - name: Build lanlu-mcp (static musl)
         run: |
+          # PATH 不跨 step 持久，cargo 前必须再 source 一次
+          . "$HOME/.cargo/env"
           cd mcp
           CC_x86_64_unknown_linux_musl=musl-gcc \
             cargo build --release --target x86_64-unknown-linux-musl
