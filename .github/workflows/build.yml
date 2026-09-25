@@ -58,14 +58,14 @@ jobs:
           xmake --version
 
       - name: Checkout WasmEdge source (public)
-        uses: actions/checkout@v4
-        with:
-          repository: WasmEdge/WasmEdge
-          # 不指定则默认向本实例查询，git.copur.xyz 上没有 wasmedge 用户，
-          # 报 "user redirect does not exist [name: wasmedge]"（run 985）。
-          github-server-url: https://github.com
-          path: build-script-cache/WasmEdge
-          fetch-depth: 0
+        # 不用 actions/checkout：runner 拉到的兼容版 checkout（上游 < v4.1.0）
+        # 不支持 github-server-url 输入，remote 仍会落到本实例并报
+        # "user redirect does not exist [name: wasmedge]"（run 985/993）。
+        # 公开仓库直接 clone 即可；不带 --depth 等价原 fetch-depth: 0（全历史+tags）。
+        run: |
+          set -eux
+          mkdir -p build-script-cache
+          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
 
       - name: Build backend
         env:
