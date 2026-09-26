@@ -23,6 +23,7 @@
   epub = { path = "packages/epub" }
   archive_ffi = { path = "packages/archive_ffi" }
   rocksdb_ffi = { path = "packages/rocksdb_ffi" }
+  rawdir_ffi = { path = "packages/rawdir_ffi" }
   argon2_ffi = { path = "packages/argon2_ffi" }
   avif_ffi = { path = "packages/avif_ffi" }
   vips_ffi = { path = "packages/vips_ffi" }

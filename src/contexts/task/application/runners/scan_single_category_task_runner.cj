@@ -129,6 +129,13 @@ public class ScanSingleCategoryTaskRunner {
             return (total, created)
         }
 
+        // 入口规范化：非 UTF-8（GBK/GB18030）文件名在此改名落盘，
+        // 避免单条坏名让整个目录扫不出来；幂等，二次扫描零动作。
+        let normalized = DirectoryScanner.normalizeDirectoryEntryNames(dirPath)
+        if (normalized.size > 0) {
+            logger.info("scan: normalized ${normalized.size} non-UTF-8 name(s) in ${dirPath}")
+        }
+
         let entries = DirectoryScanner.listDirectory(dirPath)
 
         // Optimization: if FolderHandler recognizes the current directory as a folder archive,
