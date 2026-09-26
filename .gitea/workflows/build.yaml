@@ -134,44 +134,16 @@ jobs:
         run: chmod +x ./app/main
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Configure BuildKit builder (registry mirror + runner proxy)
-        # 两件事，缺一不可：
-        # 1) buildkitd 是 dind 内的独立容器，不读 dockerd 那套代理/镜像加速配置，
-        #    国内网络下直连 registry-1.docker.io 被拒（run 1680：FROM ubuntu:26.04
-        #    处 dial tcp 108.160.162.104:443: connect: connection refused）。
-        #    所以用 --config 把 .gitea/buildkitd.toml 的 docker.io mirror 交给它。
-        # 2) 顺带把 job 侧 *_PROXY 通过 --driver-opt env.<key>=<value>（官方文档
-        #    driver-opt 表格）灌进 buildkitd 容器，保证它访问 mirror 与外部网络通畅。
-        #    注意 --driver-opt 是 stringSlice（按 CSV 解析），含逗号的 NO_PROXY
-        #    整项必须再套一层双引号，否则被逗号切碎后报
-        #    `invalid value "xxx", expecting k=v`（run 1268 就是这么挂的）。
-        run: |
-          set -eux
-          set --
-          for k in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy; do
-            eval "v=\${$k:-}"
-            if [ -n "$v" ]; then
-              set -- "$@" --driver-opt "env.$k=$v"
-            fi
-          done
-          no_proxy="${NO_PROXY:-${no_proxy:-}}"
-          for h in git.copur.xyz localhost 127.0.0.1 192.168.0.0/16 172.16.0.0/12 10.0.0.0/8; do
-            case ",${no_proxy}," in
-              *",$h,"*) ;;
-              *) no_proxy="${no_proxy:+${no_proxy},}$h" ;;
-            esac
-          done
-          set -- "$@" --driver-opt "\"env.NO_PROXY=$no_proxy\"" --driver-opt "\"env.no_proxy=$no_proxy\""
-          if docker buildx inspect lanlu-proxy >/dev/null 2>&1; then
-            docker buildx use lanlu-proxy
-          else
-            docker buildx create --name lanlu-proxy --driver docker-container --use \
-              --config "$PWD/.gitea/buildkitd.toml" "$@"
-          fi
-          docker buildx inspect --bootstrap
-          # setup-buildx-action 会把 BUILDX_BUILDER 指向它自己那个未配 mirror/代理的
-          # builder，这里覆盖掉，后续 build-push-action 才会用我们配置过的 buildkitd。
-          echo "BUILDX_BUILDER=lanlu-proxy" >> "$GITHUB_ENV"
+        with:
+          # buildkitd 跑在 dind 内的独立容器里，不读 dockerd 的 registry 加速配置；
+          # 国内直连 registry-1.docker.io 被拒（run 1680：FROM ubuntu:26.04 处
+          #   dial tcp 108.160.162.104:443: connect: connection refused），
+          # 所以在这里直接把 docker.io 的 mirror 交给 buildkitd。
+          # 官方输入：docker/setup-buildx-action 的 buildkitd-config-inline
+          # （action.yml: "Inline BuildKit daemon config"）。
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["docker.1ms.run"]
       - name: Resolve image metadata
         id: image_meta
         env:
