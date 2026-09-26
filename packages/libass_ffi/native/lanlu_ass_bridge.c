@@ -163,7 +163,7 @@ LLASSTrack *llass_track_new(LLASSRenderer *renderer, const uint8_t *codec_privat
         return NULL;
     }
     if (codec_private_size > 0) {
-        ass_process_codec_private(value->track, (const char *)codec_private, (int)codec_private_size);
+        ass_process_codec_private(value->track, (char *)codec_private, (int)codec_private_size);
     }
     return value;
 }
@@ -176,7 +176,7 @@ int32_t llass_track_process_chunk(LLASSTrack *track, const uint8_t *data, int64_
         if (error) *error = llass_strdup("invalid ASS event chunk");
         return -1;
     }
-    ass_process_chunk(track->track, (const char *)data, (int)size, start_ms, duration_ms);
+    ass_process_chunk(track->track, (char *)data, (int)size, start_ms, duration_ms);
     return 0;
 }
 

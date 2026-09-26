@@ -23,3 +23,4 @@ dist
 lanlup
 # build.cj 自动生成的内嵌 logo 字节
 client-next/src/ui/embedded_logo.cj
+packages/cangjie-gui
