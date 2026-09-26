@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils/utils"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { useAutocomplete, TagSuggestion } from "@/hooks/use-autocomplete"
 import { useLanguage } from "@/contexts/LanguageContext"
 
@@ -30,10 +30,8 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
 }, ref) => {
   const { language } = useLanguage()
   const [inputValue, setInputValue] = React.useState("")
-  const [dropdownPosition, setDropdownPosition] = React.useState({ top: 0, left: 0, width: 0 })
   const [mounted, setMounted] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
-  const containerRef = React.useRef<HTMLDivElement>(null)
   const suggestionsRef = React.useRef<HTMLDivElement>(null)
   const isProcessingRef = React.useRef(false)
 
@@ -49,32 +47,7 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
     }
   }, [value, inputValue])
 
-  const updateDropdownPosition = React.useCallback(() => {
-    if (containerRef.current && typeof window !== 'undefined') {
-      const rect = containerRef.current.getBoundingClientRect()
-      setDropdownPosition({
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
-        width: rect.width
-      })
-    }
-  }, [])
-
-  React.useEffect(() => {
-    if (!autocomplete.showSuggestions || !mounted) return
-    const handleScroll = () => updateDropdownPosition()
-    const handleResize = () => updateDropdownPosition()
-    if (typeof window !== 'undefined') {
-      window.addEventListener('scroll', handleScroll, true)
-      window.addEventListener('resize', handleResize)
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('scroll', handleScroll, true)
-        window.removeEventListener('resize', handleResize)
-      }
-    }
-  }, [autocomplete.showSuggestions, updateDropdownPosition, mounted])
+  const dropdownOpen = mounted && autocomplete.showSuggestions && autocomplete.suggestions.length > 0
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value
@@ -83,7 +56,6 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
     const words = newValue.split(/\s+/).filter(w => w.trim())
     const lastWord = words[words.length - 1] || ""
     autocomplete.fetchSuggestions(lastWord)
-    updateDropdownPosition()
   }
 
   const handleSelectSuggestion = (suggestion: TagSuggestion) => {
@@ -123,7 +95,6 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
   const handleInputFocus = () => {
     if (!mounted) return
     if (inputValue && autocomplete.suggestions.length > 0) {
-      updateDropdownPosition()
       autocomplete.setShowSuggestions(true)
     }
   }
@@ -145,54 +116,61 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
     [inputValue]
   )
 
-  const dropdownContent = mounted && autocomplete.showSuggestions && autocomplete.suggestions.length > 0 && (
-    <div
-      ref={suggestionsRef}
-      className="fixed z-9999 max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
-      style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
-    >
-      {autocomplete.suggestions.map((suggestion, index) => (
-        <div
-          key={suggestion.value}
-          className={cn(
-            "px-3 py-2 cursor-pointer text-sm",
-            index === autocomplete.selectedIndex
-              ? "bg-accent text-accent-foreground"
-              : "hover:bg-accent hover:text-accent-foreground"
-          )}
-          onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(suggestion) }}
-          onMouseEnter={() => autocomplete.setSelectedIndex(index)}
-        >
-          <span className="font-medium">{suggestion.label}</span>
-          {suggestion.label !== suggestion.value && (
-            <span className="ml-2 text-muted-foreground text-xs">({suggestion.value})</span>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-
   return (
-    <div className="relative" ref={containerRef}>
-      <Input
-        ref={inputRef}
-        value={inputValue}
-        onChange={handleInputChange}
-        onKeyDown={handleInputKeyDown}
-        onBlur={handleInputBlur}
-        onFocus={handleInputFocus}
-        placeholder={placeholder}
-        className={cn(className, compact && "h-8 text-sm")}
-        autoComplete="off"
-        {...props}
-      />
-      {mounted && typeof document !== 'undefined' && createPortal(dropdownContent, document.body)}
-      {autocomplete.loading && inputValue && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    <Popover
+      open={dropdownOpen}
+      onOpenChange={(open) => {
+        if (!open) autocomplete.setShowSuggestions(false)
+      }}
+    >
+      <PopoverAnchor asChild>
+        <div className="relative">
+          <Input
+            ref={inputRef}
+            value={inputValue}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onBlur={handleInputBlur}
+            onFocus={handleInputFocus}
+            placeholder={placeholder}
+            className={cn(className, compact && "h-8 text-sm")}
+            autoComplete="off"
+            {...props}
+          />
+          {autocomplete.loading && inputValue && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </PopoverAnchor>
+      <PopoverContent
+        ref={suggestionsRef}
+        align="start"
+        sideOffset={4}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="z-9999 w-(--radix-popover-trigger-width) max-h-60 overflow-auto rounded-md border border-input dark:border-input bg-popover dark:bg-popover p-0 shadow-lg backdrop-blur-none"
+      >
+        {autocomplete.suggestions.map((suggestion, index) => (
+          <div
+            key={suggestion.value}
+            className={cn(
+              "px-3 py-2 cursor-pointer text-sm",
+              index === autocomplete.selectedIndex
+                ? "bg-accent text-accent-foreground"
+                : "hover:bg-accent hover:text-accent-foreground"
+            )}
+            onMouseDown={(e) => { e.preventDefault(); handleSelectSuggestion(suggestion) }}
+            onMouseEnter={() => autocomplete.setSelectedIndex(index)}
+          >
+            <span className="font-medium">{suggestion.label}</span>
+            {suggestion.label !== suggestion.value && (
+              <span className="ml-2 text-muted-foreground text-xs">({suggestion.value})</span>
+            )}
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
   )
 })
 
