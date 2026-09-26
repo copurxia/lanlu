@@ -1,0 +1,12 @@
+# Forgejo CI（dind）里的 buildkitd 配置。
+#
+# 为什么需要：buildkitd 是 dind 内的独立容器，拉基础镜像时不走 dind 自己那套
+# dockerd 代理/镜像加速配置；国内网络下直连 registry-1.docker.io 会被拒
+# （run 1680：`dial tcp 108.160.162.104:443: connect: connection refused`，
+# 表现为 `FROM ubuntu:26.04` 无法解析）。
+#
+# 这里把 docker.io 的拉取指向 1ms.run 镜像站（buildkitd.toml 是 buildkit 侧的
+# 镜像加速入口，等价于 dockerd 的 registry-mirrors）。
+# Docker Hub 官方镜像的 library/ 前缀由 mirror 语义自动补全。
+[registry."docker.io"]
+  mirrors = ["docker.1ms.run"]
