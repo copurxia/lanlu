@@ -781,6 +781,87 @@ public static func setMetadataAssetId(entityType: String, entityId: String, slot
         })
     }
 
+    /**
+     * 批量删除多个实体的 metadata（含 page 级子 metadata 及其标签/资产关联）。
+     *
+     * 背景：archives 表没有指向 metadata_objects 的外键，删除 archives 行不会级联清理档案
+     * metadata 及其标签；批量移除档案的场景（如删除整个分类）必须显式调用本方法，否则标签
+     * 会残留并在重新扫描（arcid 稳定）时被 upsertRootMetadataObject 复用而"复活"。
+     *
+     * 语义等价于对每个 id 依次执行 deletePageMetadata + deleteEntity。
+     * 返回被删除的根级 metadata_objects 行数；类型/入参为空返回 0。
+     */
+    public static func deleteEntitiesBatch(entityType: String, entityIds: Array<String>): Int64 {
+        let normalizedType = entityType.trimAscii().toAsciiLower()
+        if (normalizedType.size == 0 || entityIds.size == 0) {
+            return 0
+        }
+
+        let ids = ArrayList<String>()
+        for (id in entityIds) {
+            let normalizedId = id.trimAscii()
+            if (normalizedId.size > 0) {
+                ids.add(normalizedId)
+            }
+        }
+        if (ids.isEmpty()) {
+            return 0
+        }
+
+        // 分批（每批一个事务）执行，避免超长 IN 列表超出驱动参数上限、也避免单个大事务长时间持锁
+        let chunkSize = 500
+        var deleted: Int64 = 0
+        var offset = 0
+        while (offset < ids.size) {
+            let end = if (offset + chunkSize < ids.size) { offset + chunkSize } else { ids.size }
+            let chunk = ArrayList<String>()
+            for (i in offset..end) {
+                chunk.add(ids[i])
+            }
+            deleted += deleteEntitiesChunk(normalizedType, chunk.toArray())
+            offset = end
+        }
+        return deleted
+    }
+
+    /** deleteEntitiesBatch 的单批实现：一个事务内清理一批实体的 page 级与根级 metadata。 */
+    private static func deleteEntitiesChunk(entityType: String, entityIds: Array<String>): Int64 {
+        if (entityIds.size == 0) {
+            return 0
+        }
+
+        var placeholders = ""
+        let params = ArrayList<Value>()
+        for (i in 0..entityIds.size) {
+            if (i > 0) {
+                placeholders += ","
+            }
+            placeholders += "${'$'}${(i + 1).toString()}"
+            params.add(vtext(entityIds[i]))
+        }
+        let typePlaceholder = "${'$'}${(entityIds.size + 1).toString()}"
+        params.add(vtext(entityType))
+        let finalParams = params.toArray()
+
+        let rootWhere = "entity_type = ${typePlaceholder} AND entity_id IN (${placeholders})"
+        let pageWhere = "entity_type = 'page' AND parent_entity_type = ${typePlaceholder} AND parent_entity_id IN (${placeholders})"
+
+        let countCell = Array<Int64>(1, { _ => 0 })
+        let ok = DatabaseConfig.withTransaction({ db =>
+            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE ${pageWhere})", finalParams)
+            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE ${pageWhere})", finalParams)
+            db.execRaw("DELETE FROM metadata_objects WHERE ${pageWhere}", finalParams)
+            db.execRaw("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE ${rootWhere})", finalParams)
+            db.execRaw("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE ${rootWhere})", finalParams)
+            countCell[0] = db.execRaw("DELETE FROM metadata_objects WHERE ${rootWhere}", finalParams)
+            return true
+        })
+        if (ok) {
+            return countCell[0]
+        }
+        return 0
+    }
+
     public static func getTankoubonChildren(tankoubonId: String): Array<MetadataChildData> {
         let normalizedId = tankoubonId.trimAscii()
         if (normalizedId.size == 0) {
