@@ -3,6 +3,7 @@ package lanlu.contexts.category.infrastructure.persistence
 import csorm.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.infrastructure.kv.*
 import std.collection.*
 import stdx.log.*
@@ -327,7 +328,15 @@ public class CategoryDao {
                         case None => return (false, 0, "Category not found")
                     }
 
-                    // 先删除该分类下的档案记录（依赖 DB 约束级联清理关联表：收藏/状态/标签/合集关联等）
+                    // 先取出该分类下所有档案的 arcid：archives 表没有指向 metadata_objects 的外键，
+                    // 删除 archives 行不会级联清理档案 metadata/标签，需要在删分类后显式批量清理
+                    let archiveIds = db.raw<String>(
+                        "SELECT arcid FROM archives WHERE category_id = $1",
+                        [vint(categoryInternalId)],
+                        { row => row.getOrNullText(0) ?? "" }
+                    )
+
+                    // 删除该分类下的档案记录（DB 约束只级联以 archives 为父表的关联表：收藏/状态/合集等）
                     let deletedArchives = db.execRaw("DELETE FROM archives WHERE category_id = $1", [vint(categoryInternalId)])
 
                     // 删除分类本身（不删除磁盘文件）
@@ -335,6 +344,16 @@ public class CategoryDao {
                     if (affected <= 0) {
                         return (false, deletedArchives, "Failed to delete category")
                     }
+
+                    // 显式清理档案 metadata（含标签关联）：标签挂在 metadata_objects 上，
+                    // 不清理会在重新扫描（arcid 稳定）时被 upsertRootMetadataObject 复用而"复活"
+                    if (archiveIds.size > 0) {
+                        let cleaned = MetadataDao.deleteEntitiesBatch("archive", archiveIds)
+                        if (cleaned < archiveIds.size) {
+                            logger.warn("分类删除后档案 metadata 未完全清理", ("category", catid), ("archives", archiveIds.size.toString()), ("cleaned", cleaned.toString()))
+                        }
+                    }
+
                     invalidateArchiveBasePath("categoryDelete:${catid}")
                     return (true, deletedArchives, "")
                 } catch (e: Exception) {
