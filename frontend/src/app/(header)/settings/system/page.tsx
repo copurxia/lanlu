@@ -51,6 +51,7 @@ export default function SystemSettingsPage() {
 
   const categories = [
     { id: 'storage', name: t('settings.system.storage'), icon: '📁' },
+    { id: 'plugins', name: t('settings.system.plugins'), icon: '🧩' },
     { id: 'performance', name: t('settings.system.performance'), icon: '⚡' },
     { id: 'server', name: t('settings.system.server'), icon: '🖥️' },
     { id: 'ssl', name: t('settings.system.ssl'), icon: '🔒' },
@@ -317,6 +318,12 @@ export default function SystemSettingsPage() {
                   <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
                     <p>{t('settings.system.performanceNotice')}</p>
                     <p className="mt-2">{t('settings.system.performanceRestartHint')}</p>
+                  </div>
+                )}
+
+                {category.id === 'plugins' && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
+                    <p>{t('settings.system.pluginsNotice')}</p>
                   </div>
                 )}
 

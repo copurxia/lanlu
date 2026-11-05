@@ -979,7 +979,9 @@
       "sslNotice": "When SSL/TLS is enabled, the server will automatically support HTTP/2 via ALPN with no separate toggle.",
       "sslRestartHint": "SSL settings take effect after the service is restarted.",
       "longHint": "Unit: milliseconds",
-      "pathPlaceholder": "Enter directory path, e.g.: /path/to/directory"
+      "pathPlaceholder": "Enter directory path, e.g.: /path/to/directory",
+      "plugins": "Plugin Settings",
+      "pluginsNotice": "The plugin source URL is the nightly release download base used for the online plugin catalog and update checks, e.g. https://github.com/copurxia/lanlup/releases/download/nightly."
     },
     "auth": "Account Security",
     "authTitle": "Account Security",
