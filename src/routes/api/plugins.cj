@@ -23,6 +23,11 @@ private func registerPluginsRoutesAt(router: App, basePath: String) {
         PluginsController.getAllPlugins(ctx)
     })
 
+    // 在线插件列表（从插件源拉取 plugins.json）
+    plugins.get("/catalog", { ctx =>
+        PluginsController.getCatalog(ctx)
+    })
+
     // 获取插件配置
     plugins.get("/:namespace/config", { ctx =>
         PluginsController.getPluginConfig(ctx)

@@ -8,6 +8,7 @@ import stdx.encoding.json.stream.*
 import lanlu.shared.views.*
 import lanlu.contexts.plugin.infrastructure.persistence.*
 import lanlu.contexts.plugin.application.*
+import lanlu.contexts.system.application.*
 import lanlu.shared.utils.*
 
 /**
@@ -54,6 +55,37 @@ public class PluginsController {
             logger.error("获取插件列表失败")
             ResponseView.errorJson(ctx, "Failed to get plugins: ${e.message}")
         }
+    }
+
+    /**
+     * 获取在线插件列表（读取插件源的 plugins.json）
+     * GET /api/admin/plugins/catalog
+     */
+    public static func getCatalog(ctx: Ctx) {
+        let logger = getLogger("plugins_controller")
+
+        var sourceUrl = SystemSettingsService.getString("PLUGIN_SOURCE_URL").trimAscii()
+        while (sourceUrl.endsWith("/")) {
+            sourceUrl = sourceUrl[0..sourceUrl.size - 1]
+        }
+        if (sourceUrl.size == 0) {
+            ResponseView.errorJson(ctx, "Plugin source URL is not configured")
+            return
+        }
+
+        let (ok, catalog, err) = PluginManagerService.fetchPluginCatalog(sourceUrl)
+        if (!ok) {
+            logger.error("拉取在线插件列表失败", [("source", sourceUrl), ("error", err)])
+            ResponseView.errorJson(ctx, "Failed to load plugin catalog: ${err}")
+            return
+        }
+        if (!catalog.contains("\"plugins\"")) {
+            ResponseView.errorJson(ctx, "Invalid plugin catalog from source")
+            return
+        }
+
+        let escapedSource = sourceUrl.replace("\\", "\\\\").replace("\"", "\\\"")
+        ctx.json("{\"source_url\":\"${escapedSource}\",\"catalog\":${catalog}}")
     }
 
     /**

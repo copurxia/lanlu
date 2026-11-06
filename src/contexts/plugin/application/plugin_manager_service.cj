@@ -104,7 +104,7 @@ public class PluginManagerService {
         return trimmed[0..maxLen] + "...(truncated,len=${trimmed.size.toString()})"
     }
 
-    private static func downloadUrlToFileWithCurl(url: String, outFile: Path, ifNoneMatch: String): (Bool, String, String, Bool) {
+    private static func downloadUrlToFileWithCurl(url: String, outFile: Path, ifNoneMatch: String, maxTimeSec!: Int64 = 0): (Bool, String, String, Bool) {
         let tempDir = Path(getPluginTempRoot())
         FileUtils.ensureDirectoryExists(tempDir)
 
@@ -121,6 +121,10 @@ public class PluginManagerService {
             args.add(outFile.toString())
             args.add("-w")
             args.add("%{http_code}")
+            if (maxTimeSec > 0) {
+                args.add("--max-time")
+                args.add(maxTimeSec.toString())
+            }
             let etagTrimmed = ifNoneMatch.trimAscii()
             if (etagTrimmed.size > 0) {
                 args.add("-H")
@@ -333,6 +337,46 @@ public class PluginManagerService {
         result.clear_parameters = upsert.clearParameters
         result.reason = upsert.reason
         return result
+    }
+
+    /**
+     * 拉取插件源清单（<source>/plugins.json）。
+     * sourceUrl 不应带尾部斜杠；返回 (ok, json, error)。
+     */
+    public static func fetchPluginCatalog(sourceUrl: String): (Bool, String, String) {
+        let base = sourceUrl.trimAscii()
+        if (base.size == 0) {
+            return (false, "", "Plugin source URL is empty")
+        }
+
+        let url = "${base}/plugins.json"
+        let tempDir = Path(getPluginTempRoot())
+        FileUtils.ensureDirectoryExists(tempDir)
+        let tempFile = Path("${tempDir.toString()}/catalog_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}.json")
+
+        let (ok, err, _, _) = downloadUrlToFileWithCurl(url, tempFile, "", maxTimeSec: 20)
+        if (!ok) {
+            return (false, "", err)
+        }
+
+        var content = ""
+        var readErr = ""
+        try {
+            let f = File(tempFile, Read)
+            try {
+                let r = StringReader<InputStream>(f)
+                content = r.readToEnd().trimAscii()
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
+        } catch (e: Exception) {
+            readErr = "Failed to read plugin catalog: ${e.message}"
+        }
+        try { if (exists(tempFile)) { remove(tempFile) } } catch (_: Exception) {}
+        if (readErr.size > 0) {
+            return (false, "", readErr)
+        }
+        return (true, content, "")
     }
 
     public static func installFromUploadedFile(filePath: String, originalFilename: String): PluginInstallResult {

@@ -38,6 +38,26 @@ export interface PluginCheckUpdateResult {
   new_etag?: string;
 }
 
+export interface PluginCatalogEntry {
+  plugin: string;
+  artifact: string;
+  size_bytes: number;
+  sha256?: string;
+  version?: string;
+}
+
+export interface PluginCatalog {
+  schema?: number;
+  channel?: string;
+  version?: string;
+  commit?: string;
+  generated_at?: string;
+  created?: string;
+  plugin_count?: number;
+  total_size_bytes?: number;
+  plugins: PluginCatalogEntry[];
+}
+
 export class PluginService {
   static async getAllPlugins(): Promise<Plugin[]> {
     try {
@@ -66,6 +86,22 @@ export class PluginService {
       }
       throw error;
     }
+  }
+
+  /**
+   * 获取在线插件列表（后端从插件源拉取 plugins.json）
+   */
+  static async getCatalog(): Promise<{ sourceUrl: string; catalog: PluginCatalog }> {
+    const response = await apiClient.get('/api/admin/plugins/catalog');
+    const payload = (response.data ?? {}) as {
+      source_url?: string;
+      catalog?: PluginCatalog;
+      message?: string;
+    };
+    if (!payload.catalog || !Array.isArray(payload.catalog.plugins)) {
+      throw new Error(payload.message || 'Invalid plugin catalog response');
+    }
+    return { sourceUrl: payload.source_url || '', catalog: payload.catalog };
   }
 
   static async togglePluginStatus(namespace: string, enabled: boolean): Promise<void> {
