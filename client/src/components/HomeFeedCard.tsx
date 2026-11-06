@@ -56,8 +56,17 @@ type PreviewItem = ChannelPreviewLayoutItem & {
 
 const PREVIEW_LIMIT = 9;
 const PREVIEW_SCAN_LIMIT = 24;
+const MAX_PREVIEW_ENTRIES = 100;
 const previewCache = new Map<string, Promise<PreviewItem[]>>();
 const resolvedPreviewCache = new Map<string, PreviewItem[]>();
+
+function trimCache<K, V>(cache: Map<K, V>, max: number) {
+  while (cache.size > max) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) return;
+    cache.delete(oldest);
+  }
+}
 const CHANNEL_AVATAR_SIZE = 40;
 const CHANNEL_ARTICLE_HORIZONTAL_PADDING = spacing.xs * 2;
 function getChannelPreviewAspectRatioCacheKey(archiveId: string, pageKey: string): string {
@@ -190,9 +199,11 @@ async function loadPreviewItems(archiveId: string): Promise<PreviewItem[]> {
       }),
     );
     resolvedPreviewCache.set(archiveId, items);
+    trimCache(resolvedPreviewCache, MAX_PREVIEW_ENTRIES);
     return items;
   });
   previewCache.set(archiveId, request);
+  trimCache(previewCache, MAX_PREVIEW_ENTRIES);
   return request;
 }
 
@@ -436,6 +447,7 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
     const current = channelPreviewAspectRatioCache.get(measurementKey) || DEFAULT_CHANNEL_ASPECT_RATIO;
     if (Math.abs(current - normalized) < 0.01) return;
     channelPreviewAspectRatioCache.set(measurementKey, normalized);
+    trimCache(channelPreviewAspectRatioCache, MAX_PREVIEW_ENTRIES * 4);
     resolvedPreviewCache.forEach(items => {
       for (const previewItem of items) {
         if (previewItem.measurementKey === measurementKey) {

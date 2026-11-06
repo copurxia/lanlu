@@ -1,8 +1,8 @@
 import axios, {AxiosError, InternalAxiosRequestConfig} from 'axios';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 
-import {getActiveServer} from '../storage/servers';
-import {clearStoredToken, getStoredToken} from '../storage/token';
+import {clearSessionCache, getSession} from '../auth/session';
+import {clearStoredToken} from '../storage/token';
 
 type UnauthorizedHandler = () => void;
 type OfflineHandler = () => void;
@@ -30,12 +30,11 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
-  const server = await getActiveServer();
+  const {server, token} = await getSession();
   if (server) {
     config.baseURL = server.baseUrl;
   }
 
-  const token = await getStoredToken(server?.id);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -49,8 +48,9 @@ apiClient.interceptors.response.use(
   },
   async (error: AxiosError) => {
     if (error.response?.status === 401) {
-      const server = await getActiveServer();
+      const {server} = await getSession();
       await clearStoredToken(server?.id);
+      clearSessionCache();
       onUnauthorized?.();
     } else if (!error.response) {
       onOffline?.();
@@ -89,7 +89,7 @@ export async function buildApiUrl(path: string): Promise<string> {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const server = await getActiveServer();
+  const {server} = await getSession();
   if (!server) {
     return path;
   }
@@ -97,9 +97,12 @@ export async function buildApiUrl(path: string): Promise<string> {
 }
 
 export async function buildAuthorizedImageSource(path: string) {
-  const uri = await buildApiUrl(path);
-  const server = await getActiveServer();
-  const token = await getStoredToken(server?.id);
+  const {server, token} = await getSession();
+  const uri = /^https?:\/\//i.test(path)
+    ? path
+    : server
+      ? `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`
+      : path;
   const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
   return token && shouldAttachAuth
     ? {uri, headers: {Authorization: `Bearer ${token}`}}
@@ -123,9 +126,12 @@ export async function buildAuthorizedAssetImageSource(
 }
 
 export async function buildAuthorizedUri(path: string) {
-  const uri = await buildApiUrl(path);
-  const server = await getActiveServer();
-  const token = await getStoredToken(server?.id);
+  const {server, token} = await getSession();
+  const uri = /^https?:\/\//i.test(path)
+    ? path
+    : server
+      ? `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`
+      : path;
   const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
   return {
     uri,

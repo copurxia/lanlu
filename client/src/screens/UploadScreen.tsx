@@ -23,8 +23,7 @@ import {useTheme} from '../theme/ThemeContext';
 import {FluentCard, FluentTitle} from '../components/fluent';
 import {apiClient, buildApiUrl, extractApiError} from '../api/client';
 import {fetchCategories} from '../api/lanlu';
-import {getActiveServer} from '../storage/servers';
-import {getStoredToken} from '../storage/token';
+import {getSession} from '../auth/session';
 import {useUploadStore, type DownloadTask, type UploadFile} from '../stores/uploadStore';
 import type {Category} from '../types/api';
 import {uploadLocalFileChunk} from '../native/LanluMediaProxy';
@@ -150,8 +149,7 @@ async function uploadArchiveChunk(
   end: number,
 ) {
   const path = `/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}`;
-  const server = await getActiveServer();
-  const token = await getStoredToken(server?.id);
+  const {token} = await getSession();
   const headers = {
     ...(token ? {Authorization: `Bearer ${token}`} : {}),
     'Content-Type': 'application/octet-stream',
@@ -180,9 +178,7 @@ function subscribeTaskSSE(taskId: number, dlId: string, retryAttempt = 0) {
   sseRegistry.get(dlId)?.close();
   sseRegistry.delete(dlId);
 
-  const server = getActiveServer();
-  server.then(async srv => {
-    const tok = await getStoredToken(srv?.id);
+  getSession().then(async ({server: srv, token: tok}) => {
     const baseUrl = srv?.baseUrl || '';
     const streamUrl = `${baseUrl}/api/admin/taskpool/${taskId}/stream`;
 

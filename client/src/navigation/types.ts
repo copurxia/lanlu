@@ -1,3 +1,4 @@
+import type {NavigatorScreenParams} from '@react-navigation/native';
 import type {Archive, Tankoubon} from '../types/api';
 import type {LanluServer} from '../storage/servers';
 
@@ -5,7 +6,7 @@ export type RootStackParamList = {
   ServerList: undefined;
   AddServer: {server?: LanluServer} | undefined;
   Login: undefined;
-  Main: undefined;
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
   // Settings
   AccountSecurity: undefined;
   ThemeSettings: undefined;

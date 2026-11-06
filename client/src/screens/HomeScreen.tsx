@@ -37,10 +37,9 @@ import {
 } from 'lucide-react-native';
 
 import {extractApiError, isNetworkError} from '../api/client';
+import {fetchCategoriesShared, fetchSmartFiltersShared} from '../api/catalog';
 import {
-  fetchCategories,
   fetchDiscover,
-  fetchSmartFilters,
   fetchTagAutocomplete,
   fetchTankoubonMetadata,
   isTankoubon,
@@ -67,6 +66,8 @@ import {BatchActionBar, type BatchAction} from '../components/BatchActionBar';
 import {BatchEditDialog, type BatchEditPayload} from '../components/BatchEditDialog';
 import {useI18n} from '../i18n';
 import {appendDiagnosticLog} from '../storage/diagnostics';
+import {perfMark, perfNow, perfSince} from '../perf/perf';
+import {useScrollPerf} from '../perf/useScrollPerf';
 import {
   DEFAULT_HOME_VIEW_MODE,
   HomeViewMode,
@@ -228,6 +229,13 @@ export function HomeScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
+  const homeMountedRef = useRef(false);
+  if (!homeMountedRef.current) {
+    homeMountedRef.current = true;
+    perfMark('home.mount');
+  }
+  const rowsScrollPerf = useScrollPerf('home.rows');
+  const feedScrollPerf = useScrollPerf('home.feed');
 
   // Selection / batch state
   const [selectionMode, setSelectionMode] = useState(false);
@@ -345,13 +353,14 @@ export function HomeScreen() {
   );
 
   const loadFeed = useCallback(
-    async (nextPage: number, mode: 'replace' | 'append') => {
+    async (nextPage: number, mode: 'replace' | 'append' | 'refresh') => {
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
       const activeFilter = submittedFilter.trim();
       const cacheKey = activeFilter ? `search:${activeFilter}` : 'home';
 
-      if (isOffline && mode === 'replace' && serverId) {
+      let hadCache = false;
+      if (mode === 'replace' && serverId) {
         const cached = getCachedFeed(serverId, cacheKey);
         if (cached && cached.items.length) {
           setItems(cached.items);
@@ -359,7 +368,8 @@ export function HomeScreen() {
           setPage(cached.page);
           setError('');
           setLoading(false);
-          return;
+          hadCache = true;
+          perfMark('home.feed.cache', {items: cached.items.length});
         }
       }
 
@@ -379,7 +389,7 @@ export function HomeScreen() {
         lang: language,
       };
       if (mode === 'append') setLoadingMore(true);
-      else if (!refreshing) setLoading(true);
+      else if (!refreshing && !hadCache && mode === 'replace') setLoading(true);
       setError('');
       try {
         await appendDiagnosticLog('home.feed.start', {requestId, mode, params});
@@ -393,15 +403,30 @@ export function HomeScreen() {
           return;
         }
         setTotal(result.recordsFiltered || result.recordsTotal || 0);
-        setPage(nextPage);
-        setItems(current => (mode === 'append' ? [...current, ...result.data] : result.data));
-        if (serverId && mode === 'replace') {
+        if (mode === 'refresh') {
+          // Replace the first page in place so loaded pages and scroll position survive.
+          const freshIds = new Set(result.data.map(mediaItemId));
+          setItems(current =>
+            current.length
+              ? [...result.data, ...current.slice(PAGE_SIZE).filter(item => !freshIds.has(mediaItemId(item)))]
+              : result.data,
+          );
+        } else {
+          setPage(nextPage);
+          setItems(current => (mode === 'append' ? [...current, ...result.data] : result.data));
+        }
+        if (serverId && (mode === 'replace' || mode === 'refresh')) {
           cacheFeed(serverId, cacheKey, {
             items: result.data,
             total: result.recordsFiltered || result.recordsTotal || 0,
-            page: nextPage,
+            page: mode === 'refresh' ? 1 : nextPage,
           });
         }
+        perfMark('home.feed.ready', {
+          mode,
+          dataCount: result.data.length,
+          ms: perfNow(),
+        });
         await appendDiagnosticLog('home.feed.done', {
           requestId,
           mode,
@@ -415,7 +440,9 @@ export function HomeScreen() {
           requestId,
           message: err instanceof Error ? err.message : String(err),
         });
-        if (serverId && isNetworkError(err) && mode === 'replace') {
+        if (mode === 'refresh') {
+          // Background refresh failed; keep the current list untouched.
+        } else if (serverId && isNetworkError(err) && mode === 'replace') {
           const cached = getCachedFeed(serverId, cacheKey);
           if (cached && cached.items.length) {
             setItems(cached.items);
@@ -440,7 +467,6 @@ export function HomeScreen() {
       dateTo,
       favoriteOnly,
       groupByTanks,
-      isOffline,
       language,
       newOnly,
       refreshing,
@@ -459,7 +485,8 @@ export function HomeScreen() {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
-    if (isOffline && serverId) {
+    let hadCache = false;
+    if (serverId) {
       const cached = getCachedFeed(serverId, 'home');
       if (cached && (cached.items.length || cached.categories.length)) {
         setCategories(cached.categories);
@@ -467,15 +494,22 @@ export function HomeScreen() {
         setRandomItems(cached.randomItems);
         setError('');
         setLoading(false);
-        return;
+        hadCache = true;
+        perfMark('home.rows.cache', {
+          categories: cached.categories.length,
+          rows: Object.keys(cached.categoryRows).length,
+        });
       }
     }
+    if (isOffline && hadCache) {
+      return;
+    }
 
-    setLoading(true);
+    setLoading(!hadCache);
     setError('');
     try {
       const [cats, discover] = await Promise.all([
-        fetchCategories(),
+        fetchCategoriesShared(),
         fetchDiscover(ROW_SIZE).catch(() => []),
       ]);
       if (requestId !== requestIdRef.current) return;
@@ -483,13 +517,10 @@ export function HomeScreen() {
       setCategories(enabled);
       setRandomItems(discover);
 
-      if (serverId) {
-        cacheFeed(serverId, 'home', {
-          items: discover,
-          categories: enabled,
-          randomItems: discover,
-        });
-      }
+      // Header + random row can render while category rows are still loading.
+      setLoading(false);
+      perfMark('home.discover.ready', {categories: enabled.length, discover: discover.length});
+      perfSince('home.discover.ms', 'home.mount');
 
       if (enabled.length) {
         const rows: Record<string, MediaItem[]> = {};
@@ -524,40 +555,44 @@ export function HomeScreen() {
           }
         }
 
+        // Show aggregate rows immediately; fallbacks fill in row by row.
+        setCategoryRows({...rows});
+        perfMark('home.aggregate.ready', {categories: enabled.length});
+
         const missing = enabled.filter(category => {
           const idItems = rows[String(category.id)] || [];
           const catidItems = rows[category.catid] || [];
           return idItems.length === 0 && catidItems.length === 0;
         });
         if (missing.length) {
-          const fallbackResults = await Promise.allSettled(
+          await Promise.all(
             missing.map(async category => {
-              const result = await searchArchives({
-                page: 1,
-                pageSize: ROW_SIZE,
-                sortby,
-                order: sortOrder,
-                groupby_tanks: groupByTanks,
-                category_id: category.catid,
-                date_from: dateFrom,
-                date_to: dateTo,
-                newonly: newOnly,
-                untaggedonly: untaggedOnly,
-                favoriteonly: favoriteOnly,
-                lang: language,
-              });
-              return {category, items: result.data};
+              try {
+                const result = await searchArchives({
+                  page: 1,
+                  pageSize: ROW_SIZE,
+                  sortby,
+                  order: sortOrder,
+                  groupby_tanks: groupByTanks,
+                  category_id: category.catid,
+                  date_from: dateFrom,
+                  date_to: dateTo,
+                  newonly: newOnly,
+                  untaggedonly: untaggedOnly,
+                  favoriteonly: favoriteOnly,
+                  lang: language,
+                });
+                if (requestId !== requestIdRef.current) return;
+                rows[String(category.id)] = result.data;
+                rows[category.catid] = result.data;
+                setCategoryRows({...rows});
+              } catch {
+                // Missing category stays empty; other rows remain usable.
+              }
             }),
           );
           if (requestId !== requestIdRef.current) return;
-          for (const result of fallbackResults) {
-            if (result.status !== 'fulfilled') continue;
-            const {category, items: rowItems} = result.value;
-            rows[String(category.id)] = rowItems;
-            rows[category.catid] = rowItems;
-          }
         }
-        setCategoryRows(rows);
         if (serverId) {
           cacheFeed(serverId, 'home', {
             items: discover,
@@ -566,12 +601,16 @@ export function HomeScreen() {
             randomItems: discover,
           });
         }
+        perfSince('home.rows.ready', 'home.mount', {categories: enabled.length});
       } else {
         setCategoryRows({});
       }
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
-      if (serverId && isNetworkError(err)) {
+      if (hadCache) {
+        // Keep the cached rows visible; the refresh can retry later.
+        setError('');
+      } else if (serverId && isNetworkError(err)) {
         const cached = getCachedFeed(serverId, 'home');
         if (cached && (cached.items.length || cached.categories.length)) {
           setCategories(cached.categories);
@@ -592,7 +631,7 @@ export function HomeScreen() {
   }, [dateFrom, dateTo, favoriteOnly, groupByTanks, isOffline, language, newOnly, sortOrder, sortby, untaggedOnly, cacheFeed, getCachedFeed, serverId]);
 
   const load = useCallback(
-    async (nextPage = 1, mode: 'replace' | 'append' = 'replace') => {
+    async (nextPage = 1, mode: 'replace' | 'append' | 'refresh' = 'replace') => {
       if (showRows) await loadRows();
       else await loadFeed(nextPage, mode);
     },
@@ -617,7 +656,7 @@ export function HomeScreen() {
       return;
     }
 
-    Promise.all([fetchCategories(), fetchSmartFilters()])
+    Promise.all([fetchCategoriesShared(), fetchSmartFiltersShared()])
       .then(([nextCategories, nextSmartFilters]) => {
         if (cancelled) return;
         const enabled = nextCategories.filter(category => category.enabled !== false);
@@ -654,14 +693,24 @@ export function HomeScreen() {
   }, [load, searchVersion]);
 
   const homeHasLoaded = useRef(false);
+  const lastFocusRefreshAt = useRef(0);
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useFocusEffect(
     useCallback(() => {
-      if (homeHasLoaded.current) {
-        load(1, 'replace').catch(err => console.warn('Failed to reload home:', err));
-      } else {
+      if (!homeHasLoaded.current) {
         homeHasLoaded.current = true;
+        lastFocusRefreshAt.current = Date.now();
+        return;
       }
-    }, [load]),
+      const now = Date.now();
+      if (now - lastFocusRefreshAt.current < 15_000) {
+        return;
+      }
+      lastFocusRefreshAt.current = now;
+      // Refresh the first page in place; never reset pagination or scroll.
+      loadRef.current(1, 'refresh').catch(err => console.warn('Failed to refresh home:', err));
+    }, []),
   );
 
   const refresh = useCallback(() => {
@@ -1648,14 +1697,16 @@ export function HomeScreen() {
           ) : null}
         </View>
         {row.items.length ? (
-        <ScrollView
+        <FlatList
           horizontal
           contentContainerStyle={styles.rowScroller}
-          showsHorizontalScrollIndicator={false}>
-          {row.items.map(item => (
+          data={row.items}
+          initialNumToRender={4}
+          keyExtractor={item => mediaItemId(item)}
+          maxToRenderPerBatch={4}
+          renderItem={({item}) => (
             <ArchiveCard
               archive={item}
-              key={mediaItemId(item)}
               variant="row"
               onOpenDetail={() => openDetail(item)}
               onOpenReader={() => openReader(item)}
@@ -1667,8 +1718,10 @@ export function HomeScreen() {
               onToggleSelect={(nextSelected) => (isTankoubon(item) ? setTankoubonSelected(item.tankoubon_id, nextSelected) : setArchiveSelected(item.arcid, nextSelected))}
               onLongPress={() => handleCardLongPress(item)}
             />
-          ))}
-        </ScrollView>
+          )}
+          showsHorizontalScrollIndicator={false}
+          windowSize={3}
+        />
         ) : loading ? (
           <View style={styles.rowSkeleton}>
             {Array.from({length: 4}).map((_, index) => (
@@ -1789,6 +1842,7 @@ export function HomeScreen() {
 
       {showRows ? (
         <ScrollView
+          {...rowsScrollPerf}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           contentContainerStyle={styles.rowsContent}>
           {loading && !randomItems.length ? (
@@ -1801,6 +1855,7 @@ export function HomeScreen() {
         </ScrollView>
       ) : (
         <FlatList
+          {...feedScrollPerf}
           contentContainerStyle={[
             styles.listContent,
             items.length === 0 && styles.emptyList,
@@ -1853,7 +1908,7 @@ export function HomeScreen() {
             )
           }
           ListFooterComponent={
-            loadingMore ? <Text style={styles.footerText}>{t('common.loading')}</Text> : null
+            loadingMore ? <Text style={styles.footerText}>{t('common.loading')}</Text> : undefined
           }
         />
       )}

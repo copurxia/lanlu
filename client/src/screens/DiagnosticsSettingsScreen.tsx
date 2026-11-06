@@ -18,7 +18,7 @@ import {
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {useAuth} from '../auth/AuthContext';
-import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
+import {clearDiagnosticLog, clearPerformanceLog, getDiagnosticLog, getPerformanceLog} from '../storage/diagnostics';
 import {shareLocalTextFile} from '../native/LanluMediaProxy';
 import {spacing, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
@@ -40,8 +40,13 @@ export function DiagnosticsSettingsScreen() {
     transform: [{translateY: (1 - diagnosticsProgress.value) * 28}],
   }));
 
+  async function loadDiagnosticsBundle() {
+    const [log, perf] = await Promise.all([getDiagnosticLog(), getPerformanceLog()]);
+    return [perf, log].filter(Boolean).join('\n\n');
+  }
+
   async function openDiagnostics() {
-    const log = await getDiagnosticLog();
+    const log = await loadDiagnosticsBundle();
     setDiagnosticLog(log || t('settings.diagnosticsEmpty'));
     setDiagnosticsOpen(true);
     diagnosticsProgress.value = withTiming(1, {duration: 160});
@@ -56,7 +61,7 @@ export function DiagnosticsSettingsScreen() {
   }
 
   async function shareDiagnostics() {
-    const log = await getDiagnosticLog();
+    const log = await loadDiagnosticsBundle();
     const text = log || t('settings.diagnosticsEmpty');
     try {
       const sharedUri = await shareLocalTextFile(
@@ -76,7 +81,7 @@ export function DiagnosticsSettingsScreen() {
   }
 
   async function clearDiagnostics() {
-    await clearDiagnosticLog();
+    await Promise.all([clearDiagnosticLog(), clearPerformanceLog()]);
     setDiagnosticLog(t('settings.diagnosticsEmpty'));
   }
 

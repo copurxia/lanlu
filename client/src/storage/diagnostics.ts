@@ -1,8 +1,10 @@
-import {getStoredString, getStoredStringSync, removeStoredValue, setStoredString} from './mmkv';
+import {getStoredString, getStoredStringSync, removeStoredValue, removeStoredValueSync, setStoredString, setStoredStringSync} from './mmkv';
 
 const DIAGNOSTIC_LOG_KEY = 'lanlu.diagnosticLog.v1';
 const DIAGNOSTIC_DEBUG_KEY = 'lanlu.diagnosticDebug';
 const MAX_LOG_LINES = 220;
+const PERFORMANCE_LOG_KEY = 'lanlu.performanceLog';
+const MAX_PERFORMANCE_LINES = 400;
 
 type DiagnosticDetails = Record<string, unknown>;
 type DiagnosticLevel = 'info' | 'warn' | 'error';
@@ -70,6 +72,29 @@ export async function appendDiagnosticLog(event: string, details?: DiagnosticDet
 
 export async function getDiagnosticLog(): Promise<string> {
   return (await getStoredString(DIAGNOSTIC_LOG_KEY)) || '';
+}
+
+/**
+ * Performance marks use their own synchronous ring buffer so they bypass the
+ * diagnostic debug flag and never race with async diagnostic writes.
+ */
+export function appendPerformanceLines(lines: string[]): void {
+  if (!lines.length) return;
+  try {
+    const existing = getStoredStringSync(PERFORMANCE_LOG_KEY) || '';
+    const next = [...existing.split('\n').filter(Boolean), ...lines]
+      .slice(-MAX_PERFORMANCE_LINES)
+      .join('\n');
+    setStoredStringSync(PERFORMANCE_LOG_KEY, next);
+  } catch {}
+}
+
+export async function getPerformanceLog(): Promise<string> {
+  return getStoredStringSync(PERFORMANCE_LOG_KEY) || '';
+}
+
+export async function clearPerformanceLog(): Promise<void> {
+  removeStoredValueSync(PERFORMANCE_LOG_KEY);
 }
 
 export async function clearDiagnosticLog() {

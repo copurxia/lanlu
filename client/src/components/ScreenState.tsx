@@ -28,6 +28,7 @@ export function ScreenState({
   const styles = useMemo(() => StyleSheet.create({
     container: {
       alignItems: 'center',
+      backgroundColor: colors.background,
       flex: 1,
       gap: 12,
       justifyContent: 'center',

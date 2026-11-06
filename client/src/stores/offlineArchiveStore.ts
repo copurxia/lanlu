@@ -11,6 +11,8 @@ type CachedArchive = {
   timestamp: number;
 };
 
+const MAX_ARCHIVE_CACHE_ENTRIES = 40;
+
 type OfflineArchiveState = {
   archives: Record<string, CachedArchive>;
   lastServerId: string | null;
@@ -43,17 +45,26 @@ export const useOfflineArchiveStore = create<OfflineArchiveState>()(
             tankoubons: [],
             timestamp: Date.now(),
           };
-          return {
-            archives: {
-              ...state.archives,
-              [key]: {
-                metadata: data.metadata || existing.metadata,
-                pages: data.pages || existing.pages,
-                related: data.related || existing.related,
-                tankoubons: data.tankoubons || existing.tankoubons,
-                timestamp: Date.now(),
-              },
+          const archives = {
+            ...state.archives,
+            [key]: {
+              metadata: data.metadata || existing.metadata,
+              pages: data.pages || existing.pages,
+              related: data.related || existing.related,
+              tankoubons: data.tankoubons || existing.tankoubons,
+              timestamp: Date.now(),
             },
+          };
+          // Bound the persisted JSON: every zustand write serializes the whole map.
+          const entries = Object.entries(archives);
+          if (entries.length > MAX_ARCHIVE_CACHE_ENTRIES) {
+            entries
+              .sort((a, b) => a[1].timestamp - b[1].timestamp)
+              .slice(0, entries.length - MAX_ARCHIVE_CACHE_ENTRIES)
+              .forEach(([entryKey]) => delete archives[entryKey]);
+          }
+          return {
+            archives,
             lastServerId: serverId,
           };
         });

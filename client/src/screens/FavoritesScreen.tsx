@@ -28,6 +28,8 @@ import {spacing} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 import {useAuth} from '../auth/AuthContext';
 import {useOfflineGeneralStore} from '../stores/offlineGeneralStore';
+import {perfMark, perfNow} from '../perf/perf';
+import {useScrollPerf} from '../perf/useScrollPerf';
 import type {Archive, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -35,6 +37,8 @@ type Tab = 'favorites' | 'history';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Section = {title: string; data: MediaItem[]};
 type TFunction = ReturnType<typeof useI18n>['t'];
+
+const PAGE_SIZE = 60;
 
 function timeValue(item: MediaItem, tab: Tab): number {
   const raw = tab === 'favorites' ? item.favoritetime : (item as Archive).lastreadtime;
@@ -78,13 +82,24 @@ export function FavoritesScreen() {
   const cacheFavorites = useOfflineGeneralStore(s => s.cacheFavorites);
   const getCachedFavorites = useOfflineGeneralStore(s => s.getCachedFavorites);
   const loadIdRef = useRef(0);
+  const mountedRef = useRef(false);
+  if (!mountedRef.current) {
+    mountedRef.current = true;
+    perfMark('favorites.mount');
+  }
+  const scrollPerf = useScrollPerf('favorites.sections');
   const [tab, setTab] = useState<Tab>('favorites');
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
   const [historyItems, setHistoryItems] = useState<MediaItem[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [favoritePage, setFavoritePage] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [favoriteTotal, setFavoriteTotal] = useState(0);
+  const [historyTotal, setHistoryTotal] = useState(0);
 
   const openDetail = useCallback(
     (item: MediaItem) => {
@@ -117,108 +132,193 @@ export function FavoritesScreen() {
     [navigation],
   );
 
-  const loadFavorites = useCallback(async () => {
-    if (isOffline && serverId) {
-      const cached = getCachedFavorites(serverId);
-      if (cached?.favorites.length) {
-        setFavoriteItems(cached.favorites);
-        return;
-      }
-    }
-
-    try {
-      const result = await searchArchives({
-        favoriteonly: true,
-        groupby_tanks: true,
-        sortby: 'created_at',
-        order: 'desc',
-        page: 1,
-        pageSize: 1000,
-      });
-      setFavoriteItems(result.data);
-      if (serverId && result.data.length) {
-        cacheFavorites(serverId, {favorites: result.data});
-      }
-    } catch (err) {
-      if (serverId) {
+  const loadFavorites = useCallback(
+    async (page = 1, mode: 'replace' | 'append' = 'replace') => {
+      const firstPage = page === 1 && mode === 'replace';
+      if (firstPage && serverId) {
         const cached = getCachedFavorites(serverId);
         if (cached?.favorites.length) {
-          setFavoriteItems(cached.favorites);
-          return;
+          setFavoriteItems(cached.favorites.slice(0, PAGE_SIZE));
+          setFavoritePage(1);
+          setFavoriteTotal(cached.favorites.length);
+          perfMark('favorites.cache', {tab: 'favorites', items: cached.favorites.length});
+          if (isOffline) return;
         }
       }
-      throw err;
-    }
-  }, [isOffline, serverId, cacheFavorites, getCachedFavorites]);
 
-  const loadHistory = useCallback(async () => {
-    if (isOffline && serverId) {
-      const cached = getCachedFavorites(serverId);
-      if (cached?.history.length) {
-        setHistoryItems(cached.history);
-        return;
+      try {
+        const result = await searchArchives({
+          favoriteonly: true,
+          groupby_tanks: true,
+          sortby: 'created_at',
+          order: 'desc',
+          page,
+          pageSize: PAGE_SIZE,
+        });
+        const items = result.data;
+        if (mode === 'append') {
+          setFavoriteItems(current => {
+            const seen = new Set(current.map(mediaItemId));
+            return [...current, ...items.filter(item => !seen.has(mediaItemId(item)))];
+          });
+        } else {
+          setFavoriteItems(items);
+        }
+        setFavoritePage(page);
+        setFavoriteTotal(result.recordsFiltered || result.recordsTotal || items.length);
+        perfMark('favorites.page.ready', {
+          tab: 'favorites',
+          page,
+          mode,
+          items: items.length,
+          ms: perfNow(),
+        });
+        if (serverId && firstPage) {
+          cacheFavorites(serverId, {favorites: items});
+        }
+      } catch (err) {
+        if (firstPage && serverId) {
+          const cached = getCachedFavorites(serverId);
+          if (cached?.favorites.length) {
+            setFavoriteItems(cached.favorites.slice(0, PAGE_SIZE));
+            setFavoritePage(1);
+            setFavoriteTotal(cached.favorites.length);
+            return;
+          }
+        }
+        throw err;
       }
-    }
+    },
+    [isOffline, serverId, cacheFavorites, getCachedFavorites],
+  );
 
-    const result = await searchArchives({
-      sortby: 'lastread',
-      order: 'desc',
-      page: 1,
-      pageSize: 1000,
-    });
-    setHistoryItems(result.data);
-    if (serverId) {
-      cacheFavorites(serverId, {history: result.data});
-    }
-  }, [isOffline, serverId, cacheFavorites, getCachedFavorites]);
-
-  const load = useCallback(async () => {
-    const loadId = ++loadIdRef.current;
-    setError('');
-    if (!refreshing) setLoading(true);
-    try {
-      if (tab === 'favorites') await loadFavorites();
-      else await loadHistory();
-    } catch (err) {
-      if (loadId !== loadIdRef.current) return;
-      if (serverId && isNetworkError(err)) {
+  const loadHistory = useCallback(
+    async (page = 1, mode: 'replace' | 'append' = 'replace') => {
+      const firstPage = page === 1 && mode === 'replace';
+      if (firstPage && serverId) {
         const cached = getCachedFavorites(serverId);
-        if (cached) {
-          if (tab === 'favorites' && cached.favorites.length) {
-            setFavoriteItems(cached.favorites);
-            setError('');
-          } else if (tab === 'history' && cached.history.length) {
-            setHistoryItems(cached.history);
-            setError('');
+        if (cached?.history.length) {
+          setHistoryItems(cached.history.slice(0, PAGE_SIZE));
+          setHistoryPage(1);
+          setHistoryTotal(cached.history.length);
+          perfMark('favorites.cache', {tab: 'history', items: cached.history.length});
+          if (isOffline) return;
+        }
+      }
+
+      const result = await searchArchives({
+        sortby: 'lastread',
+        order: 'desc',
+        page,
+        pageSize: PAGE_SIZE,
+      });
+      const items = result.data;
+      if (mode === 'append') {
+        setHistoryItems(current => {
+          const seen = new Set(current.map(mediaItemId));
+          return [...current, ...items.filter(item => !seen.has(mediaItemId(item)))];
+        });
+      } else {
+        setHistoryItems(items);
+      }
+      setHistoryPage(page);
+      setHistoryTotal(result.recordsFiltered || result.recordsTotal || items.length);
+      perfMark('favorites.page.ready', {
+        tab: 'history',
+        page,
+        mode,
+        items: items.length,
+        ms: perfNow(),
+      });
+      if (serverId && firstPage) {
+        cacheFavorites(serverId, {history: items});
+      }
+    },
+    [isOffline, serverId, cacheFavorites, getCachedFavorites],
+  );
+
+  const load = useCallback(
+    async (options?: {refresh?: boolean}) => {
+      const loadId = ++loadIdRef.current;
+      perfMark('favorites.load.start', {tab, refresh: Boolean(options?.refresh)});
+      setError('');
+      if (!options?.refresh) setLoading(true);
+      try {
+        if (tab === 'favorites') await loadFavorites(1, 'replace');
+        else await loadHistory(1, 'replace');
+      } catch (err) {
+        if (loadId !== loadIdRef.current) return;
+        if (serverId && isNetworkError(err)) {
+          const cached = getCachedFavorites(serverId);
+          if (cached) {
+            if (tab === 'favorites' && cached.favorites.length) {
+              setFavoriteItems(cached.favorites.slice(0, PAGE_SIZE));
+              setError('');
+            } else if (tab === 'history' && cached.history.length) {
+              setHistoryItems(cached.history.slice(0, PAGE_SIZE));
+              setError('');
+            } else {
+              setError(extractApiError(err));
+            }
           } else {
             setError(extractApiError(err));
           }
         } else {
           setError(extractApiError(err));
         }
-      } else {
-        setError(extractApiError(err));
+      } finally {
+        if (loadId === loadIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
-    } finally {
-      if (loadId === loadIdRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [loadFavorites, loadHistory, refreshing, tab, serverId, getCachedFavorites]);
+    },
+    [loadFavorites, loadHistory, tab, serverId, getCachedFavorites],
+  );
 
   useEffect(() => {
+    const hasItems = tab === 'favorites' ? favoriteItems.length > 0 : historyItems.length > 0;
+    if (hasItems) {
+      setLoading(false);
+      return;
+    }
     load().catch(err => console.warn('Failed to load library:', err));
-  }, [load]);
+  }, [favoriteItems.length, historyItems.length, load, tab]);
 
   const refresh = useCallback(() => {
+    if (loadingMore) return;
     setRefreshing(true);
-    load().catch(() => {});
-  }, [load]);
+    load({refresh: true}).catch(() => {});
+  }, [load, loadingMore]);
 
-  useEffect(() => {
-    load().catch(() => {});
-  }, [load]);
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore) return;
+    const activePage = tab === 'favorites' ? favoritePage : historyPage;
+    const activeTotal = tab === 'favorites' ? favoriteTotal : historyTotal;
+    const activeItems = tab === 'favorites' ? favoriteItems : historyItems;
+    if (!activeTotal || activeItems.length >= activeTotal) return;
+
+    setLoadingMore(true);
+    const request =
+      tab === 'favorites'
+        ? loadFavorites(activePage + 1, 'append')
+        : loadHistory(activePage + 1, 'append');
+    request
+      .catch(err => setError(extractApiError(err)))
+      .finally(() => setLoadingMore(false));
+  }, [
+    favoriteItems,
+    favoritePage,
+    favoriteTotal,
+    historyItems,
+    historyPage,
+    historyTotal,
+    loadFavorites,
+    loadHistory,
+    loading,
+    loadingMore,
+    tab,
+  ]);
 
   const filteredItems = useMemo(() => {
     const items = tab === 'favorites' ? favoriteItems : historyItems;
@@ -310,6 +410,12 @@ export function FavoritesScreen() {
         column: {
           gap: spacing.md,
         },
+        footerText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          paddingVertical: 16,
+          textAlign: 'center',
+        },
       }),
     [colors],
   );
@@ -361,8 +467,14 @@ export function FavoritesScreen() {
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
 
       <SectionList
+        {...scrollPerf}
         contentContainerStyle={[styles.content, sections.length === 0 && styles.emptyContent]}
         keyExtractor={item => mediaItemId(item)}
+        ListFooterComponent={
+          loadingMore ? <Text style={styles.footerText}>{t('common.loading')}</Text> : undefined
+        }
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
         renderItem={() => null}
         renderSectionFooter={({section}) => (

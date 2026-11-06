@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
-  type ViewToken,
+  type ListViewToken,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {ChevronDown, ChevronRight, FileText, Film, Folder, FolderTree, ImageIcon, LayoutGrid, List, Music} from 'lucide-react-native';
@@ -402,7 +402,7 @@ export function ReaderSidebar({
   );
 
   const handleVisibleItemsChanged = useCallback(
-    ({viewableItems}: {viewableItems: ViewToken[]}) => {
+    ({viewableItems}: {viewableItems: ListViewToken[]}) => {
       if (!onVisiblePagesChange) return;
       const visibleIndexes = [...new Set(
         viewableItems

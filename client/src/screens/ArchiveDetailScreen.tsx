@@ -14,8 +14,8 @@ import {useFocusEffect} from '@react-navigation/native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {buildAuthorizedAssetImageSource, buildAuthorizedImageSource, extractApiError, isNetworkError} from '../api/client';
-import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
+import {buildAuthorizedAssetImageSource, extractApiError, isNetworkError} from '../api/client';
+import {getSession} from '../auth/session';
 import {
   archiveCoverAsset,
   deleteArchive,
@@ -83,8 +83,13 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
     let cancelled = false;
     fetchArchiveFiles(archiveId)
       .then(async pages => {
+        // Resolve auth once; building one source per page should not hit
+        // Keychain or the native proxy in a serial loop.
+        const {server, token} = await getSession();
+        const headers = token ? {Authorization: `Bearer ${token}`} : undefined;
         const sbPages: SbPage[] = [];
         for (let idx = 0; idx < pages.length; idx++) {
+          if (cancelled) return;
           const page = pages[idx];
           const source = getPageDefaultSource(page);
           const path = source?.path || page.path || "";
@@ -95,17 +100,16 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
             || (effectiveType === "image" ? (source?.url || `/api/archives/${encodeURIComponent(archiveId)}/page/${encodeURIComponent(page.id || String(idx+1))}`) : "");
           let thumbnailSource = null;
           if (thumbPath) {
-            try {
-              const authThumb = await buildAuthorizedImageSource(thumbPath);
-              if (authThumb?.uri) {
-                const proxyUri = await createProxiedMediaUrl(authThumb.uri, authThumb.headers as Record<string, string> | undefined, true);
-                thumbnailSource = {
-                  uri: proxyUri || authThumb.uri,
-                  ...(!proxyUri && authThumb.headers ? {headers: authThumb.headers} : {}),
-                  cache: "immutable",
-                } as any;
-              }
-            } catch {}
+            const uri = /^https?:\/\//i.test(thumbPath)
+              ? thumbPath
+              : server
+                ? `${server.baseUrl}${thumbPath.startsWith('/') ? thumbPath : `/${thumbPath}`}`
+                : thumbPath;
+            thumbnailSource = {
+              uri,
+              ...(headers ? {headers} : {}),
+              cache: 'immutable',
+            } as any;
           }
           sbPages.push({
             pageNumber: idx + 1,

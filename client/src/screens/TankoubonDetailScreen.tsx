@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,6 +30,8 @@ import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
 import {useTheme} from '../theme/ThemeContext';
+import {perfMark, perfNow} from '../perf/perf';
+import {useScrollPerf} from '../perf/useScrollPerf';
 import {useAuth} from '../auth/AuthContext';
 import {useOfflineTankoubonStore} from '../stores/offlineTankoubonStore';
 import {spacing} from '../theme/colors';
@@ -42,6 +44,8 @@ import {TankoubonRelated} from './tankoubon-detail/TankoubonRelated';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
 import {TankoubonEditDialog} from './tankoubon-detail/TankoubonEditDialog';
+
+const MEMBER_PAGE_SIZE = 200;
 
 type ViewMode = 'grid' | 'list';
 const TANKOUHON_VIEW_MODE_KEY = 'tankoubon_view_mode';
@@ -73,7 +77,14 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   // Archive list
   const [archives, setArchives] = useState<Archive[]>([]);
   const [archivesLoading, setArchivesLoading] = useState(false);
+  const [archivesLoadingMore, setArchivesLoadingMore] = useState(false);
+  const [preparingReader, setPreparingReader] = useState(false);
+  const [archivesPage, setArchivesPage] = useState(0);
+  const [archivesTotal, setArchivesTotal] = useState(0);
   const [archiveFilter, setArchiveFilter] = useState('');
+  const [visibleCount, setVisibleCount] = useState(60);
+  const allArchiveIdsRef = useRef<string[] | null>(null);
+  const scrollPerf = useScrollPerf('tankoubon.members');
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
@@ -143,50 +154,105 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     }
   }, [language, tankoubon, tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon]);
 
-  const loadArchives = useCallback(async () => {
-    if (!tankoubonId) return;
-    setArchivesLoading(true);
+  const loadArchives = useCallback(
+    async (page = 1, mode: 'replace' | 'append' = 'replace') => {
+      if (!tankoubonId) return;
+      if (mode === 'replace') setArchivesLoading(true);
+      else setArchivesLoadingMore(true);
 
-    if (isOffline && serverId) {
-      const cached = getCachedTankoubon(serverId, tankoubonId);
-      if (cached?.archives.length) {
-        setArchives(cached.archives);
-        setArchivesLoading(false);
-        return;
-      }
-    }
-
-    try {
-      const result = await searchArchives({
-        tankoubon_id: tankoubonId,
-        sortby: 'tank_order',
-        order: 'asc',
-        page: 1,
-        pageSize: 10000,
-        lang: language,
-      });
-      const items = result.data
-        .filter((item): item is Archive => 'arcid' in item)
-        .map(item => item as Archive);
-      setArchives(items);
-      if (serverId) {
-        cacheTankoubon(serverId, tankoubonId, {archives: items});
-      }
-    } catch (err) {
-      if (serverId && isNetworkError(err)) {
+      if (mode === 'replace' && serverId) {
         const cached = getCachedTankoubon(serverId, tankoubonId);
         if (cached?.archives.length) {
-          setArchives(cached.archives);
+          setArchives(cached.archives.slice(0, MEMBER_PAGE_SIZE));
+          setArchivesPage(1);
+          setArchivesTotal(cached.archives.length);
+          allArchiveIdsRef.current = null;
+          if (isOffline) {
+            setArchivesLoading(false);
+            return;
+          }
+        }
+      }
+
+      try {
+        const result = await searchArchives({
+          tankoubon_id: tankoubonId,
+          sortby: 'tank_order',
+          order: 'asc',
+          page,
+          pageSize: MEMBER_PAGE_SIZE,
+          lang: language,
+        });
+        const items = result.data
+          .filter((item): item is Archive => 'arcid' in item)
+          .map(item => item as Archive);
+        if (mode === 'append') {
+          setArchives(current => {
+            const seen = new Set(current.map(item => item.arcid));
+            return [...current, ...items.filter(item => !seen.has(item.arcid))];
+          });
         } else {
+          setArchives(items);
+          allArchiveIdsRef.current = null;
+        }
+        setArchivesPage(page);
+        setArchivesTotal(result.recordsFiltered || result.recordsTotal || items.length);
+        perfMark('tankoubon.members.ready', {
+          page,
+          mode,
+          items: items.length,
+          ms: perfNow(),
+        });
+        if (serverId && page === 1 && mode === 'replace' && items.length <= 1000) {
+          cacheTankoubon(serverId, tankoubonId, {archives: items});
+        }
+      } catch (err) {
+        if (mode === 'replace' && serverId && isNetworkError(err)) {
+          const cached = getCachedTankoubon(serverId, tankoubonId);
+          if (cached?.archives.length) {
+            setArchives(cached.archives.slice(0, MEMBER_PAGE_SIZE));
+            setArchivesPage(1);
+            setArchivesTotal(cached.archives.length);
+            allArchiveIdsRef.current = null;
+          }
+        } else if (mode === 'replace') {
           setArchives([]);
         }
-      } else {
-        setArchives([]);
+      } finally {
+        setArchivesLoading(false);
+        setArchivesLoadingMore(false);
       }
-    } finally {
-      setArchivesLoading(false);
+    },
+    [language, tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon],
+  );
+
+  const ensureAllArchiveIds = useCallback(async () => {
+    if (allArchiveIdsRef.current) {
+      return allArchiveIdsRef.current;
     }
-  }, [language, tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon]);
+    const loadedIds = archives.map(item => item.arcid);
+    const total = archivesTotal || loadedIds.length;
+    if (!tankoubonId || loadedIds.length >= total) {
+      allArchiveIdsRef.current = loadedIds;
+      return loadedIds;
+    }
+
+    // Only collection reader/detail navigation needs the full ordered list.
+    // Fetch it on demand instead of blocking the initial member grid.
+    const result = await searchArchives({
+      tankoubon_id: tankoubonId,
+      sortby: 'tank_order',
+      order: 'asc',
+      page: 1,
+      pageSize: Math.max(1000, total),
+      lang: language,
+    });
+    const ids = result.data
+      .filter((item): item is Archive => 'arcid' in item)
+      .map(item => item.arcid);
+    allArchiveIdsRef.current = ids.length ? ids : loadedIds;
+    return allArchiveIdsRef.current;
+  }, [archives, archivesTotal, language, tankoubonId]);
 
   const loadRelated = useCallback(async () => {
     if (!tankoubonId) return;
@@ -232,6 +298,10 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   }, [loadArchives]);
 
   useEffect(() => {
+    setVisibleCount(60);
+  }, [archiveFilter, tankoubonId, viewMode]);
+
+  useEffect(() => {
     loadRelated().catch(err => console.warn('Failed to load related:', err));
   }, [loadRelated]);
 
@@ -256,18 +326,26 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     }),
     [metadata, tankoubon, tankoubonId],
   );
-  const readerChildren = useMemo(() => archives.map(item => item.arcid), [archives]);
-
-  const handleStartReading = useCallback(() => {
+  const handleStartReading = useCallback(async () => {
     const first = archives[0];
-    if (!first) return;
+    if (!first || preparingReader) return;
+    setPreparingReader(true);
+    let children = archives.map(item => item.arcid);
+    try {
+      children = await ensureAllArchiveIds();
+    } catch {
+      // Fall back to the already loaded members.
+    } finally {
+      setPreparingReader(false);
+    }
+    const archiveId = children[0] || first.arcid;
     navigation.push('Reader', {
-      archiveId: first.arcid,
+      archiveId,
       tankoubonId,
-      children: readerChildren,
+      children,
       childIndex: 0,
     });
-  }, [archives, navigation, tankoubonId, readerChildren]);
+  }, [archives, ensureAllArchiveIds, navigation, preparingReader, tankoubonId]);
 
   const handleFavoriteToggle = useCallback(async () => {
     const next = !favorite;
@@ -313,15 +391,18 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
 
   const handleArchivePress = useCallback(
     (item: Archive) => {
+      // Open immediately; use the already loaded adjacent members. The full
+      // ordered list is only fetched when starting the whole collection.
+      const children = archives.map(entry => entry.arcid);
       navigation.push('ArchiveDetail', {
         archiveId: item.arcid,
         archive: item,
         tankoubonId,
-        children: readerChildren,
-        childIndex: readerChildren.indexOf(item.arcid),
+        children,
+        childIndex: Math.max(0, children.indexOf(item.arcid)),
       });
     },
-    [navigation, readerChildren, tankoubonId],
+    [archives, navigation, tankoubonId],
   );
 
   const filteredArchives = useMemo(() => {
@@ -333,6 +414,30 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         String(a.filename || '').toLowerCase().includes(q),
     );
   }, [archives, archiveFilter]);
+  const visibleArchives = useMemo(
+    () => filteredArchives.slice(0, visibleCount),
+    [filteredArchives, visibleCount],
+  );
+
+  const hasServerMore = archivesTotal > archives.length;
+  const handleLoadMoreMembers = useCallback(() => {
+    if (visibleCount < filteredArchives.length) {
+      setVisibleCount(count => count + 60);
+      return;
+    }
+    if (hasServerMore && !archivesLoadingMore) {
+      loadArchives(archivesPage + 1, 'append')
+        .then(() => setVisibleCount(count => count + 60))
+        .catch(() => undefined);
+    }
+  }, [
+    archivesLoadingMore,
+    archivesPage,
+    filteredArchives.length,
+    hasServerMore,
+    loadArchives,
+    visibleCount,
+  ]);
   const tags = useMemo(() => {
     return Array.isArray(merged.tags)
       ? merged.tags.map(tag => String(tag || '').trim()).filter(Boolean)
@@ -448,6 +553,15 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           fontWeight: '600',
           marginTop: 8,
         },
+        loadMoreButton: {
+          alignItems: 'center',
+          paddingVertical: 16,
+        },
+        loadMoreText: {
+          color: colors.primary,
+          fontSize: 14,
+          fontWeight: '600',
+        },
         grid: {
           flexDirection: 'row',
           flexWrap: 'wrap',
@@ -480,6 +594,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   return (
     <View style={styles.screen}>
       <ScrollView
+        {...scrollPerf}
         contentContainerStyle={[styles.content, {paddingTop: 12 + (isOffline ? 0 : insets.top)}]}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -506,6 +621,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           favorite={favorite}
           favoriteLoading={false}
           onStartReading={handleStartReading}
+          startReadingLoading={preparingReader}
           onToggleFavorite={handleFavoriteToggle}
           onEdit={() => setEditDialogOpen(true)}
           onDelete={handleDelete}
@@ -527,7 +643,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
                 <Text style={styles.archiveCountText}>
                   {archiveFilter.trim()
                     ? `${filteredArchives.length}/${archives.length}`
-                    : String(archives.length)}
+                    : String(archivesTotal || archives.length)}
                 </Text>
               </View>
             </View>
@@ -575,7 +691,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
             </View>
           ) : viewMode === 'grid' ? (
             <View style={styles.grid}>
-              {filteredArchives.map(item => (
+              {visibleArchives.map(item => (
                 <ArchiveCard
                   key={`${item.arcid}-${viewMode}`}
                   archive={item}
@@ -588,7 +704,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
             </View>
           ) : (
             <View style={styles.listContainer}>
-              {filteredArchives.map(item => (
+              {visibleArchives.map(item => (
                 <ArchiveCard
                   key={`${item.arcid}-${viewMode}`}
                   archive={item}
@@ -600,6 +716,22 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
               ))}
             </View>
           )}
+
+          {visibleCount < filteredArchives.length || hasServerMore ? (
+            <TouchableOpacity
+              style={styles.loadMoreButton}
+              disabled={archivesLoadingMore}
+              onPress={handleLoadMoreMembers}>
+              <Text style={styles.loadMoreText}>
+                {archivesLoadingMore
+                  ? t('common.loading')
+                  : `${t('common.loadMore')} (${Math.max(
+                      0,
+                      filteredArchives.length - visibleCount,
+                    ) + Math.max(0, archivesTotal - archives.length)})`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <TankoubonRelated

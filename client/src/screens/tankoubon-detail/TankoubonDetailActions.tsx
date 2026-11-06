@@ -11,6 +11,7 @@ type Props = {
   favorite: boolean;
   favoriteLoading: boolean;
   onStartReading?: () => void;
+  startReadingLoading?: boolean;
   onToggleFavorite: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -23,6 +24,7 @@ export function TankoubonDetailActions({
   favorite,
   favoriteLoading,
   onStartReading,
+  startReadingLoading = false,
   onToggleFavorite,
   onEdit,
   onDelete,
@@ -120,9 +122,16 @@ export function TankoubonDetailActions({
   return (
     <View style={styles.container}>
       <View style={styles.row}>
-        <TouchableOpacity style={styles.primaryButton} onPress={onStartReading}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          disabled={startReadingLoading}
+          onPress={onStartReading}>
           <Text style={styles.primaryButtonText}>
-            {progress > 0 ? t('archive.continue') : t('archive.startReading')}
+            {startReadingLoading
+              ? t('common.loading')
+              : progress > 0
+                ? t('archive.continue')
+                : t('archive.startReading')}
           </Text>
         </TouchableOpacity>
 

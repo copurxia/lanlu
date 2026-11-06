@@ -10,6 +10,8 @@ type CachedTankoubon = {
   timestamp: number;
 };
 
+const MAX_TANKOUBON_CACHE_ENTRIES = 40;
+
 type OfflineTankoubonState = {
   tankoubons: Record<string, CachedTankoubon>;
   lastServerId: string | null;
@@ -40,16 +42,25 @@ export const useOfflineTankoubonStore = create<OfflineTankoubonState>()(
             related: [],
             timestamp: Date.now(),
           };
-          return {
-            tankoubons: {
-              ...state.tankoubons,
-              [key]: {
-                metadata: data.metadata || existing.metadata,
-                archives: data.archives || existing.archives,
-                related: data.related || existing.related,
-                timestamp: Date.now(),
-              },
+          const tankoubons = {
+            ...state.tankoubons,
+            [key]: {
+              metadata: data.metadata || existing.metadata,
+              archives: data.archives || existing.archives,
+              related: data.related || existing.related,
+              timestamp: Date.now(),
             },
+          };
+          // Bound the persisted JSON: every zustand write serializes the whole map.
+          const entries = Object.entries(tankoubons);
+          if (entries.length > MAX_TANKOUBON_CACHE_ENTRIES) {
+            entries
+              .sort((a, b) => a[1].timestamp - b[1].timestamp)
+              .slice(0, entries.length - MAX_TANKOUBON_CACHE_ENTRIES)
+              .forEach(([entryKey]) => delete tankoubons[entryKey]);
+          }
+          return {
+            tankoubons,
             lastServerId: serverId,
           };
         });

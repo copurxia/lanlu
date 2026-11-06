@@ -3,6 +3,7 @@ import {Appearance, useColorScheme} from 'react-native';
 
 import {getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
 import {getColorsByScheme, type ColorScheme, type ThemeColors} from './colors';
+import {setSystemBarTheme} from '../native/SystemBars';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 

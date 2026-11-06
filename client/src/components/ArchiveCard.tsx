@@ -80,6 +80,7 @@ export function ArchiveCard({
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
   const [imageError, setImageError] = useState('');
+  const coverAsset = mediaItemCoverAsset(archive);
   const [favoriteState, setFavoriteState] = useState(Boolean(archive.isfavorite));
   const [tagsOpen, setTagsOpen] = useState(false);
   const [coverTouching, setCoverTouching] = useState(false);
@@ -125,7 +126,7 @@ export function ArchiveCard({
   useEffect(() => {
     let cancelled = false;
     async function loadCover() {
-      const source = await buildAuthorizedAssetImageSource(mediaItemCoverAsset(archive));
+      const source = await buildAuthorizedAssetImageSource(coverAsset);
       if (!cancelled) {
         setImageError('');
         setImageSource(source);
@@ -135,7 +136,7 @@ export function ArchiveCard({
     return () => {
       cancelled = true;
     };
-  }, [archive]);
+  }, [coverAsset]);
 
   useEffect(() => {
     return () => {

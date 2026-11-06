@@ -16,6 +16,8 @@ type CachedFeed = {
 
 type FeedCacheKey = string;
 
+const MAX_FEED_CACHE_ENTRIES = 24;
+
 type OfflineFeedState = {
   feedCache: Record<FeedCacheKey, CachedFeed>;
   lastServerId: string | null;
@@ -54,6 +56,14 @@ export const useOfflineFeedStore = create<OfflineFeedState>()(
             page: feed.page || 1,
             timestamp: Date.now(),
           };
+          // Bound the persisted JSON: every zustand write serializes the whole map.
+          const entries = Object.entries(next);
+          if (entries.length > MAX_FEED_CACHE_ENTRIES) {
+            entries
+              .sort((a, b) => a[1].timestamp - b[1].timestamp)
+              .slice(0, entries.length - MAX_FEED_CACHE_ENTRIES)
+              .forEach(([entryKey]) => delete next[entryKey]);
+          }
           return {
             feedCache: next,
             lastServerId: serverId,

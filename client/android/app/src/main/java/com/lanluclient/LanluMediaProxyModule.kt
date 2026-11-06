@@ -3,6 +3,8 @@ package com.lanluclient
 import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -10,7 +12,10 @@ import android.util.Log
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -47,8 +52,100 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   private val uploadExecutor = Executors.newCachedThreadPool()
+  private val widePageExecutor = Executors.newFixedThreadPool(2) { runnable ->
+    Thread(runnable, "lanlu-wide-page").apply { isDaemon = true }
+  }
 
   override fun getName(): String = "LanluMediaProxy"
+
+  @ReactMethod
+  fun prefetchImage(uri: String, headers: ReadableMap?) {
+    val copiedHeaders = mutableMapOf<String, String>()
+    headers?.let { map ->
+      val iterator = map.keySetIterator()
+      while (iterator.hasNextKey()) {
+        val key = iterator.nextKey()
+        if (map.hasKey(key) && !map.isNull(key)) {
+          copiedHeaders[key] = map.getString(key) ?: ""
+        }
+      }
+    }
+    LanluLongImageStore.prefetch(reactApplicationContext, uri, copiedHeaders)
+  }
+
+  @ReactMethod
+  fun createWidePageImages(
+      uri: String,
+      headers: ReadableMap?,
+      mode: String,
+      invert: Boolean,
+      promise: Promise,
+  ) {
+    val copiedHeaders = mutableMapOf<String, String>()
+    headers?.let { map ->
+      val iterator = map.keySetIterator()
+      while (iterator.hasNextKey()) {
+        val key = iterator.nextKey()
+        if (map.hasKey(key) && !map.isNull(key)) {
+          copiedHeaders[key] = map.getString(key) ?: ""
+        }
+      }
+    }
+    widePageExecutor.execute {
+      try {
+        val output = WidePageService.create(reactApplicationContext, uri, copiedHeaders, mode, invert)
+        val result = Arguments.createMap()
+        result.putBoolean("wide", output.wide)
+        result.putString("mode", output.mode)
+        val urls = Arguments.createArray()
+        output.urls.forEach { urls.pushString(it) }
+        result.putArray("urls", urls)
+        result.putInt("width", output.width)
+        result.putInt("height", output.height)
+        result.putInt("sourceWidth", output.sourceWidth)
+        result.putInt("sourceHeight", output.sourceHeight)
+        promise.resolve(result)
+      } catch (error: Exception) {
+        promise.reject("LANLU_WIDE_PAGE", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun setKeepScreenOn(enabled: Boolean) {
+    val activity = reactApplicationContext.currentActivity ?: return
+    activity.runOnUiThread {
+      if (enabled) {
+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      } else {
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun setSystemBarTheme(backgroundColor: String, lightIcons: Boolean) {
+    val activity = reactApplicationContext.currentActivity ?: return
+    activity.runOnUiThread {
+      try {
+        val color = Color.parseColor(backgroundColor)
+        val window = activity.window
+        window.statusBarColor = color
+        window.navigationBarColor = color
+        // When the React root does not reach under a bar, the window background
+        // is what becomes visible. Keep it in sync with the app theme too.
+        window.setBackgroundDrawable(ColorDrawable(color))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          window.isStatusBarContrastEnforced = false
+          window.isNavigationBarContrastEnforced = false
+        }
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = lightIcons
+        controller.isAppearanceLightNavigationBars = lightIcons
+      } catch (_: Throwable) {
+      }
+    }
+  }
 
   @ReactMethod
   fun setSystemBarsHidden(hidden: Boolean, edgeToEdge: Boolean) {
@@ -62,9 +159,9 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           controller.systemBarsBehavior =
               WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
           if (hidden) {
-            controller.hide(WindowInsets.Type.statusBars())
+            controller.hide(WindowInsets.Type.systemBars())
           } else {
-            controller.show(WindowInsets.Type.statusBars())
+            controller.show(WindowInsets.Type.systemBars())
           }
         }
       } else {

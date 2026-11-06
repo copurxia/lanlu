@@ -2,8 +2,7 @@ import {apiClient, buildApiUrl} from './client';
 import type {ApiEnvelope, Category} from '../types/api';
 import {normalizeCategories} from './lanlu';
 import EventSource from 'react-native-sse';
-import {getStoredToken} from '../storage/token';
-import {getActiveServer} from '../storage/servers';
+import {getSession} from '../auth/session';
 
 // ─── Admin Types ───────────────────────────────────────────────────────────
 
@@ -324,8 +323,7 @@ export async function adminListTasks(params?: {
 
   let authToken: string | null = null;
   try {
-    const server = await getActiveServer();
-    authToken = await getStoredToken(server?.id);
+    authToken = (await getSession()).token;
   } catch {}
 
   const url = await buildApiUrl(`/api/admin/taskpool/tasks?${qs.toString()}`);

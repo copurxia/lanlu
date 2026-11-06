@@ -1,0 +1,246 @@
+name: Client CI
+run-name: ${{ github.actor }} is checking the React Native client
+
+on:
+  push:
+    paths:
+      - "client/**"
+      - ".gitea/workflows/client.yml"
+  pull_request:
+    paths:
+      - "client/**"
+      - ".gitea/workflows/client.yml"
+  workflow_dispatch:
+  schedule:
+    # Daily 20:30 UTC (~04:30 北京时间) nightly build
+    - cron: "30 20 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Typecheck, tests, lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          set -eux
+          cd client
+          npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: |
+          set -eux
+          cd client
+          npx tsc --noEmit
+
+      - name: Unit tests
+        run: |
+          set -eux
+          cd client
+          npm test -- --runInBand
+
+      # The client still carries a pre-existing lint baseline (unused symbols and
+      # react-hooks/exhaustive-deps). Keep it visible but non-blocking until the
+      # baseline is cleaned up, then remove continue-on-error.
+      - name: Lint (advisory)
+        continue-on-error: true
+        run: |
+          set -eux
+          cd client
+          npm run lint
+
+  android-debug:
+    name: Android debug APK
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          set -eux
+          cd client
+          npm ci --no-audit --no-fund
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-37.0
+            build-tools;37.0.0
+            ndk;27.1.12297006
+            cmake;3.22.1
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('client/android/**/*.gradle*', 'client/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build debug APK
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+          GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
+        run: |
+          set -eux
+          cd client/android
+          chmod +x gradlew
+          # Large RN AARs (~280 MB) regularly exceed Gradle's default read timeout
+          # on slow proxies; give them a few minutes instead of failing the build.
+          ./gradlew assembleDebug --no-daemon --max-workers=2 \
+            -Dorg.gradle.internal.http.socketTimeout=180000 \
+            -Dorg.gradle.internal.http.connectionTimeout=60000
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: client-android-debug
+          path: client/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+  android-nightly:
+    name: Nightly release APK
+    # 定时/手动才发布；普通 push 只跑 quality，避免每次提交都占 release。
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          set -eux
+          cd client
+          npm ci --no-audit --no-fund
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-37.0
+            build-tools;37.0.0
+            ndk;27.1.12297006
+            cmake;3.22.1
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('client/android/**/*.gradle*', 'client/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Build release APK
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+          GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
+        run: |
+          set -eux
+          cd client/android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --max-workers=2 \
+            -Dorg.gradle.internal.http.socketTimeout=180000 \
+            -Dorg.gradle.internal.http.connectionTimeout=60000
+
+      - name: Publish to nightly release
+        env:
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          password: ${{ secrets.TOKEN }}
+        run: |
+          set -eux
+          apk="client/android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$apk"
+          api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}"
+          auth="Authorization: token $password"
+
+          # 复用固定 nightly 标签：存在则复用，不存在则建（指向当前 commit）。
+          release_json=$(curl -sf -H "$auth" "$api/releases/tags/nightly" || true)
+          if [ -z "$release_json" ]; then
+            release_json=$(curl -sf -X POST -H "$auth" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"nightly\",\"name\":\"Nightly\",\"body\":\"Android nightly build (app-release.apk). Install over a previous nightly build; signing key is stable.\",\"draft\":false,\"prerelease\":true}" \
+              "$api/releases")
+          fi
+          release_id=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+
+          # 更新 release 说明里的 commit 信息，并删掉旧资产再传新的（同名牌会冲突）。
+          curl -sf -X PATCH -H "$auth" -H "Content-Type: application/json" \
+            -d "{\"body\":\"Android nightly build for commit ${GITHUB_SHA::7}. Install over a previous nightly build; signing key is stable.\"}" \
+            "$api/releases/$release_id" >/dev/null
+          asset_id=$(printf '%s' "$release_json" | python3 -c '
+            import json,sys
+            data = json.load(sys.stdin)
+            for a in data.get("assets", []):
+                if a["name"] == "lanlu-client-nightly.apk":
+                    print(a["id"])
+                    break
+          ' || true)
+          if [ -n "$asset_id" ]; then
+            curl -sf -X DELETE -H "$auth" "$api/releases/$release_id/assets/$asset_id" >/dev/null
+          fi
+          curl -sf -X POST -H "$auth" \
+            -F "attachment=@$apk" \
+            "$api/releases/$release_id/assets?name=lanlu-client-nightly.apk" >/dev/null
+          echo "Published lanlu-client-nightly.apk to nightly release (commit ${GITHUB_SHA::7})"

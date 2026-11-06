@@ -19,4 +19,9 @@ class MainActivity : ReactActivity() {
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+
+  override fun onResume() {
+    super.onResume()
+    DebugUpdater.check(this)
+  }
 }

@@ -20,6 +20,8 @@ import {
 } from '../storage/servers';
 import {clearStoredToken, getStoredToken, setStoredToken} from '../storage/token';
 import {getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
+import {perfMark, perfSince} from '../perf/perf';
+import {clearSessionCache, primeSession} from './session';
 import {useOfflineProgressQueue} from '../stores/offlineProgressQueue';
 import type {AuthUser} from '../types/api';
 
@@ -48,19 +50,35 @@ type AuthContextValue = {
 
 const USER_CACHE_KEY = 'cached_user';
 
-function loadCachedUser(): AuthUser | null {
+function userCacheKey(serverId?: string | null) {
+  return serverId ? `${USER_CACHE_KEY}:${serverId}` : USER_CACHE_KEY;
+}
+
+function loadCachedUser(serverId?: string | null): AuthUser | null {
   try {
-    const raw = getStoredStringSync(USER_CACHE_KEY);
+    const raw = getStoredStringSync(userCacheKey(serverId));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
-function saveCachedUser(user: AuthUser) {
-  try { setStoredStringSync(USER_CACHE_KEY, JSON.stringify(user)); } catch {}
+function saveCachedUser(user: AuthUser, serverId?: string | null) {
+  try {
+    const serialized = JSON.stringify(user);
+    if (serverId) {
+      setStoredStringSync(userCacheKey(serverId), serialized);
+    }
+    setStoredStringSync(USER_CACHE_KEY, serialized);
+  } catch {}
 }
 
-function clearCachedUser() {
-  try { setStoredStringSync(USER_CACHE_KEY, ''); } catch {}
+function clearCachedUser(serverId?: string | null) {
+  try {
+    if (serverId) {
+      setStoredStringSync(userCacheKey(serverId), '');
+    } else {
+      setStoredStringSync(USER_CACHE_KEY, '');
+    }
+  } catch {}
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -95,6 +113,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
 
   const showServerList = useCallback(async () => {
     await setActiveServerId(null);
+    clearSessionCache();
     setActiveServer(null);
     clearSessionState();
     await reloadServers();
@@ -103,42 +122,59 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
 
   const refreshMe = useCallback(async () => {
     const currentUser = await LanluApi.fetchMe();
-    saveCachedUser(currentUser);
+    saveCachedUser(currentUser, activeServer?.id);
     setUser(currentUser);
     setStatus('authenticated');
-  }, []);
+  }, [activeServer?.id]);
 
   const selectServer = useCallback(
     async (server: LanluServer) => {
       await setActiveServerId(server.id);
-      await touchServer(server.id);
       setActiveServer(server);
-      await reloadServers();
       const storedToken = await getStoredToken(server.id);
       setToken(storedToken);
+      primeSession(server, storedToken);
+      perfMark('auth.server_ready', {hasToken: Boolean(storedToken)});
+      // lastUsedAt / server-list ordering is not part of first paint.
+      touchServer(server.id)
+        .then(reloadServers)
+        .catch(error => console.warn('Failed to update server metadata:', error));
       if (!storedToken) {
         setUser(null);
         setStatus('login');
         return;
       }
+      // Render the cached identity immediately; validate it in the background.
+      const cachedUser = loadCachedUser(server.id);
+      if (cachedUser) {
+        setUser(cachedUser);
+        setStatus('authenticated');
+        perfMark('auth.cached_user');
+      }
+      let probeId: ReturnType<typeof setTimeout> | undefined;
       try {
         const controller = new AbortController();
-        const probeId = setTimeout(() => controller.abort(), 3500);
+        probeId = setTimeout(() => controller.abort(), 3500);
         const currentUser = await LanluApi.fetchMe({timeout: 3500, signal: controller.signal});
         clearTimeout(probeId);
-        saveCachedUser(currentUser);
+        saveCachedUser(currentUser, server.id);
         setUser(currentUser);
         setStatus('authenticated');
+        setIsOffline(false);
+        perfSince('auth.me_ready', 'auth.server_ready');
       } catch (error) {
+        if (probeId) clearTimeout(probeId);
         if (isNetworkError(error)) {
-          const cached = loadCachedUser();
+          const cached = loadCachedUser(server.id);
           setUser(cached);
           setStatus('authenticated');
           setIsOffline(true);
+          perfMark('auth.offline_restore');
           return;
         }
         console.warn('Failed to restore server session:', extractApiError(error));
         await clearStoredToken(server.id);
+        clearSessionCache();
         clearSessionState();
         setStatus('login');
       }
@@ -173,6 +209,8 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       clearStoredToken(serverId).catch(error =>
         console.warn('Failed to clear auth:', error),
       );
+      clearSessionCache();
+      clearCachedUser(serverId);
       clearSessionState();
       setStatus(activeServer ? 'login' : 'serverList');
     });
@@ -182,6 +220,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   useEffect(() => {
     let cancelled = false;
     async function boot() {
+      perfMark('auth.boot.start');
       const [storedServers, storedActiveServer] = await Promise.all([
         getServers(),
         getActiveServer(),
@@ -190,9 +229,19 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         return;
       }
       setServers(storedServers);
+      perfMark('auth.storage_ready', {
+        servers: storedServers.length,
+        hasActiveServer: Boolean(storedActiveServer),
+      });
       if (!storedActiveServer) {
         setStatus('serverList');
         return;
+      }
+      // Migrate the pre-per-server cache once so an upgrade keeps the fast
+      // optimistic restore on its first launch.
+      const legacyUser = loadCachedUser();
+      if (legacyUser && !loadCachedUser(storedActiveServer.id)) {
+        saveCachedUser(legacyUser, storedActiveServer.id);
       }
       await selectServer(storedActiveServer);
     }
@@ -220,6 +269,8 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       await clearStoredToken(serverId);
       await deleteStoredServer(serverId);
       if (activeServer?.id === serverId) {
+        clearSessionCache();
+        clearCachedUser(serverId);
         setActiveServer(null);
         clearSessionState();
         setStatus('serverList');
@@ -247,12 +298,18 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         throw new Error(response.message || 'Login did not return a token.');
       }
       await setStoredToken(nextToken, activeServer.id);
-      await touchServer(activeServer.id);
-      await reloadServers();
+      primeSession(activeServer, nextToken);
+      touchServer(activeServer.id)
+        .then(reloadServers)
+        .catch(error => console.warn('Failed to update server metadata:', error));
       setToken(nextToken);
-      setUser(response.data?.user || null);
+      const nextUser = response.data?.user || null;
+      if (nextUser) {
+        saveCachedUser(nextUser, activeServer.id);
+      }
+      setUser(nextUser);
       setStatus('authenticated');
-      if (!response.data?.user) {
+      if (!nextUser) {
         await refreshMe();
       }
     },
@@ -274,12 +331,18 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       setTotpChallenge(null);
       if (!activeServer) throw new Error('No active server');
       await setStoredToken(nextToken, activeServer.id);
-      await touchServer(activeServer.id);
-      await reloadServers();
+      primeSession(activeServer, nextToken);
+      touchServer(activeServer.id)
+        .then(reloadServers)
+        .catch(error => console.warn('Failed to update server metadata:', error));
       setToken(nextToken);
-      setUser(response.data?.user || null);
+      const nextUser = response.data?.user || null;
+      if (nextUser) {
+        saveCachedUser(nextUser, activeServer.id);
+      }
+      setUser(nextUser);
       setStatus('authenticated');
-      if (!response.data?.user) {
+      if (!nextUser) {
         await refreshMe();
       }
     },
@@ -299,6 +362,8 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       }
     }
     await clearStoredToken(serverId);
+    clearSessionCache();
+    clearCachedUser(serverId);
     clearSessionState();
     setIsOffline(false);
     setStatus(activeServer ? 'login' : 'serverList');
@@ -308,20 +373,25 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
     if (!activeServer) {
       return;
     }
+    let probeId: ReturnType<typeof setTimeout> | undefined;
     try {
       const controller = new AbortController();
-      const probeId = setTimeout(() => controller.abort(), 3500);
+      probeId = setTimeout(() => controller.abort(), 3500);
       const currentUser = await LanluApi.fetchMe({timeout: 3500, signal: controller.signal});
       clearTimeout(probeId);
+      saveCachedUser(currentUser, activeServer.id);
       setUser(currentUser);
       setIsOffline(false);
       await flushProgressIfNeeded();
       setStatus('authenticated');
     } catch (error) {
+      if (probeId) clearTimeout(probeId);
       if (isNetworkError(error)) {
         return;
       }
       await clearStoredToken(activeServer.id);
+      clearSessionCache();
+      clearCachedUser(activeServer.id);
       clearSessionState();
       setStatus('login');
     }

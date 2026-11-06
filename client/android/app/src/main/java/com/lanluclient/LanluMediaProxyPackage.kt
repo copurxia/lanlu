@@ -10,5 +10,5 @@ class LanluMediaProxyPackage : ReactPackage {
       listOf(LanluMediaProxyModule(reactContext))
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
-      emptyList()
+      listOf(LanluLongImageViewManager(), LanluColorFilterViewManager())
 }

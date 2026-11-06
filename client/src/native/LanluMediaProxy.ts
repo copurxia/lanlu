@@ -4,6 +4,8 @@ type LanluMediaProxyModule = {
   createUrl: (uri: string, headers?: Record<string, string>, compress?: boolean) => Promise<string>;
   createPageUrl?: (uri: string, headers: Record<string, string> | undefined, path: string) => Promise<string>;
   setSystemBarsHidden?: (hidden: boolean, edgeToEdge: boolean) => void;
+  setKeepScreenOn?: (enabled: boolean) => void;
+  prefetchImage?: (uri: string, headers?: Record<string, string>) => void;
   shareTextFile?: (extension: string, fileName: string, text: string, title: string) => Promise<string>;
   writeTextFile?: (extension: string, text: string) => Promise<string>;
   uploadFileChunk?: (
@@ -61,6 +63,17 @@ export async function shareLocalTextFile(
 export function setSystemBarsHidden(hidden: boolean, edgeToEdge = true) {
   if (Platform.OS !== 'android' || !nativeProxy?.setSystemBarsHidden) return;
   nativeProxy.setSystemBarsHidden(hidden, edgeToEdge);
+}
+
+export function setKeepScreenOn(enabled: boolean) {
+  if (Platform.OS !== 'android' || !nativeProxy?.setKeepScreenOn) return;
+  nativeProxy.setKeepScreenOn(enabled);
+}
+
+/** Warm the native strip-decoder file cache for a page that is about to be shown. */
+export function prefetchLongImage(uri: string, headers?: Record<string, string>) {
+  if (Platform.OS !== 'android' || !nativeProxy?.prefetchImage || !uri) return;
+  nativeProxy.prefetchImage(uri, headers);
 }
 
 export async function uploadLocalFileChunk(

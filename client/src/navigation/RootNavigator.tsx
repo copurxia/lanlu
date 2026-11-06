@@ -1,11 +1,14 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {NavigationContainer, createNavigationContainerRef, useNavigationState} from '@react-navigation/native';
+import React, {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-  createBottomTabNavigator,
-  type BottomTabBarButtonProps,
-} from '@react-navigation/bottom-tabs';
+  DarkTheme,
+  DefaultTheme,
+  NavigationContainer,
+  createNavigationContainerRef,
+  type Theme,
+} from '@react-navigation/native';
+import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {Animated, PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {PanResponder, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {enableScreens} from 'react-native-screens';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
@@ -14,43 +17,107 @@ import {Heart, Home, Settings, Upload} from 'lucide-react-native';
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
 import {Sidebar} from '../components/Sidebar';
-import {fetchCategories, fetchSmartFilters} from '../api/lanlu';
+import {fetchCategoriesShared, fetchSmartFiltersShared} from '../api/catalog';
 import {useOfflineFeedStore} from '../stores/offlineFeedStore';
-import {AccountSecurityScreen} from '../screens/AccountSecurityScreen';
 import {AddServerScreen} from '../screens/AddServerScreen';
-import {ArchiveDetailScreen} from '../screens/ArchiveDetailScreen';
-import {CacheSettingsScreen} from '../screens/CacheSettingsScreen';
-import {CategorySettingsScreen} from '../screens/CategorySettingsScreen';
-import {CronSettingsScreen} from '../screens/CronSettingsScreen';
-import {DiagnosticsSettingsScreen} from '../screens/DiagnosticsSettingsScreen';
-import {FavoritesScreen} from '../screens/FavoritesScreen';
 import {HomeScreen} from '../screens/HomeScreen';
-import {LanguageSettingsScreen} from '../screens/LanguageSettingsScreen';
 import {LoginScreen} from '../screens/LoginScreen';
-import {PluginSettingsScreen} from '../screens/PluginSettingsScreen';
-import {ReaderScreen} from '../screens/ReaderScreen';
 import {ServerListScreen} from '../screens/ServerListScreen';
-import {SettingsScreen} from '../screens/SettingsScreen';
-import {SmartFilterSettingsScreen} from '../screens/SmartFilterSettingsScreen';
-import {StatsSettingsScreen} from '../screens/StatsSettingsScreen';
-import {SystemSettingsScreen} from '../screens/SystemSettingsScreen';
-import {TagSettingsScreen} from '../screens/TagSettingsScreen';
-import {TankoubonDetailScreen} from '../screens/TankoubonDetailScreen';
-import {TaskSettingsScreen} from '../screens/TaskSettingsScreen';
-import {ThemeSettingsScreen} from '../screens/ThemeSettingsScreen';
-import {UserSettingsScreen} from '../screens/UserSettingsScreen';
 import {useI18n} from '../i18n';
 import {useTheme} from '../theme/ThemeContext';
+import {perfMark} from '../perf/perf';
 import type {MainTabParamList, RootStackParamList} from './types';
-import {UploadScreen} from '../screens/UploadScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const TAB_NAMES = ['Home', 'Favorites', 'Upload', 'Settings'];
 const Tabs = createBottomTabNavigator<MainTabParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
-const contentSlideAnim = new Animated.Value(0);
 
 enableScreens(true);
+
+function lazyScreen(loader: () => Promise<any>, exportName: string) {
+  const Component = lazy(async () => ({default: (await loader())[exportName]}));
+  return function LazyScreenRoute(props: any) {
+    return (
+      <Suspense fallback={<ScreenState loading />}>
+        <Component {...props} />
+      </Suspense>
+    );
+  };
+}
+
+const FavoritesRoute = lazyScreen(() => import('../screens/FavoritesScreen'), 'FavoritesScreen');
+const SettingsRoute = lazyScreen(() => import('../screens/SettingsScreen'), 'SettingsScreen');
+const ThemeSettingsRoute = lazyScreen(() => import('../screens/ThemeSettingsScreen'), 'ThemeSettingsScreen');
+const LanguageSettingsRoute = lazyScreen(() => import('../screens/LanguageSettingsScreen'), 'LanguageSettingsScreen');
+const DiagnosticsSettingsRoute = lazyScreen(() => import('../screens/DiagnosticsSettingsScreen'), 'DiagnosticsSettingsScreen');
+const CacheSettingsRoute = lazyScreen(() => import('../screens/CacheSettingsScreen'), 'CacheSettingsScreen');
+const CategorySettingsRoute = lazyScreen(() => import('../screens/CategorySettingsScreen'), 'CategorySettingsScreen');
+const TagSettingsRoute = lazyScreen(() => import('../screens/TagSettingsScreen'), 'TagSettingsScreen');
+const SmartFilterSettingsRoute = lazyScreen(() => import('../screens/SmartFilterSettingsScreen'), 'SmartFilterSettingsScreen');
+const UserSettingsRoute = lazyScreen(() => import('../screens/UserSettingsScreen'), 'UserSettingsScreen');
+const SystemSettingsRoute = lazyScreen(() => import('../screens/SystemSettingsScreen'), 'SystemSettingsScreen');
+const TaskSettingsRoute = lazyScreen(() => import('../screens/TaskSettingsScreen'), 'TaskSettingsScreen');
+const CronSettingsRoute = lazyScreen(() => import('../screens/CronSettingsScreen'), 'CronSettingsScreen');
+const PluginSettingsRoute = lazyScreen(() => import('../screens/PluginSettingsScreen'), 'PluginSettingsScreen');
+const StatsSettingsRoute = lazyScreen(() => import('../screens/StatsSettingsScreen'), 'StatsSettingsScreen');
+
+// Keep the heavy, non-initial screens out of the startup module graph. Their
+// code (ReaderShell, VLC, file pickers, admin panels) is evaluated on first use.
+const LazyArchiveDetailScreen = lazy(() =>
+  import('../screens/ArchiveDetailScreen').then(m => ({default: m.ArchiveDetailScreen})),
+);
+const LazyTankoubonDetailScreen = lazy(() =>
+  import('../screens/TankoubonDetailScreen').then(m => ({default: m.TankoubonDetailScreen})),
+);
+const LazyReaderScreen = lazy(() =>
+  import('../screens/ReaderScreen').then(m => ({default: m.ReaderScreen})),
+);
+const LazyAccountSecurityScreen = lazy(() =>
+  import('../screens/AccountSecurityScreen').then(m => ({default: m.AccountSecurityScreen})),
+);
+const LazyUploadScreen = lazy(() =>
+  import('../screens/UploadScreen').then(m => ({default: m.UploadScreen})),
+);
+
+function ArchiveDetailRoute(props: any) {
+  return (
+    <Suspense fallback={<ScreenState loading />}>
+      <LazyArchiveDetailScreen {...props} />
+    </Suspense>
+  );
+}
+
+function TankoubonDetailRoute(props: any) {
+  return (
+    <Suspense fallback={<ScreenState loading />}>
+      <LazyTankoubonDetailScreen {...props} />
+    </Suspense>
+  );
+}
+
+function ReaderRoute(props: any) {
+  return (
+    <Suspense fallback={<ScreenState loading />}>
+      <LazyReaderScreen {...props} />
+    </Suspense>
+  );
+}
+
+function AccountSecurityRoute(props: any) {
+  return (
+    <Suspense fallback={<ScreenState loading />}>
+      <LazyAccountSecurityScreen {...props} />
+    </Suspense>
+  );
+}
+
+function UploadRoute(props: any) {
+  return (
+    <Suspense fallback={<ScreenState loading />}>
+      <LazyUploadScreen {...props} />
+    </Suspense>
+  );
+}
 
 function HomeTabIcon({color, size}: {color: string; size: number}) {
   return <Home color={color} size={size} />;
@@ -82,70 +149,26 @@ function BlurTabBarBackground() {
   );
 }
 
-function StaticTabButton({
-  children,
-  style,
-  ...props
-}: BottomTabBarButtonProps) {
-  return (
-    <Pressable {...props} android_ripple={{color: 'transparent'}} style={style}>
-      {children}
-    </Pressable>
-  );
-}
-
 function MainTabs() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const {user} = useAuth();
-  const insets = useSafeAreaInsets();
-  const tabNames = useMemo(
-    () => (user?.isAdmin ? ['Home', 'Favorites', 'Upload', 'Settings'] : ['Home', 'Favorites', 'Settings']),
-    [user?.isAdmin],
-  );
-  const activeTab = useNavigationState(state => {
-    const mainRoute = state.routes.find(r => r.name === 'Main');
-    return (mainRoute?.state as any)?.index ?? 0;
-  });
 
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        tabBar: {
+  return (
+    <Tabs.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: colors.primary,
+        tabBarBackground: BlurTabBarBackground,
+        tabBarHideOnKeyboard: true,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: {fontSize: 10, fontWeight: '600'},
+        tabBarStyle: {
           backgroundColor: 'transparent',
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
-          bottom: 0,
-          flexDirection: 'row',
-          left: 0,
-          position: 'absolute',
-          paddingTop: 8,
-          right: 0,
         },
-        tabItem: {
-          alignItems: 'center',
-          flex: 1,
-          gap: 4,
-          justifyContent: 'center',
-          paddingBottom: 8,
-        },
-        tabLabel: {
-          fontSize: 10,
-          fontWeight: '600',
-        },
-      }),
-    [colors],
-  );
-
-  const handleTabPress = useCallback((index: number) => {
-    if (index === activeTab) return;
-    navigationRef.navigate('Main' as never, {screen: tabNames[index]} as never);
-  }, [activeTab, tabNames]);
-
-  const tabsContent = (
-    <Tabs.Navigator
-      tabBar={() => null}
-      screenOptions={{headerShown: false}}>
+      }}>
       <Tabs.Screen
         name="Home"
         component={HomeScreen}
@@ -157,25 +180,27 @@ function MainTabs() {
       />
       <Tabs.Screen
         name="Favorites"
-        component={FavoritesScreen}
+        component={FavoritesRoute}
         options={{
           title: t('tabs.favorites'),
           tabBarLabel: t('tabs.favorites'),
           tabBarIcon: FavoritesTabIcon,
         }}
       />
-      <Tabs.Screen
-        name="Upload"
-        component={UploadScreen}
-        options={{
-          title: t('tabs.upload'),
-          tabBarLabel: t('tabs.upload'),
-          tabBarIcon: UploadTabIcon,
-        }}
-      />
+      {user?.isAdmin ? (
+        <Tabs.Screen
+          name="Upload"
+          component={UploadRoute}
+          options={{
+            title: t('tabs.upload'),
+            tabBarLabel: t('tabs.upload'),
+            tabBarIcon: UploadTabIcon,
+          }}
+        />
+      ) : null}
       <Tabs.Screen
         name="Settings"
-        component={SettingsScreen}
+        component={SettingsRoute}
         options={{
           title: t('tabs.settings'),
           tabBarLabel: t('tabs.settings'),
@@ -184,42 +209,36 @@ function MainTabs() {
       />
     </Tabs.Navigator>
   );
-
-  return (
-    <View style={{flex: 1}}>
-      <Animated.View style={{flex: 1, transform: [{translateX: contentSlideAnim}]}}>
-        {tabsContent}
-      </Animated.View>
-      <View style={[styles.tabBar, {paddingBottom: insets.bottom}]}>
-        <BlurTabBarBackground />
-        {tabNames.map((name, index) => (
-          <Pressable
-            key={name}
-            onPress={() => handleTabPress(index)}
-            style={styles.tabItem}>
-            {name === 'Home' && <Home color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            {name === 'Favorites' && <Heart color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            {name === 'Upload' && <Upload color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            {name === 'Settings' && <Settings color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            <Text style={[styles.tabLabel, {color: index === activeTab ? colors.primary : colors.textMuted}]}>
-              {name === 'Home' ? t('tabs.home') : name === 'Favorites' ? t('tabs.favorites') : name === 'Upload' ? t('tabs.upload') : t('tabs.settings')}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
 }
 
 export function RootNavigator() {
   const {status, isOffline, reconnect, activeServer, showServerList, signOut} = useAuth();
   const {t} = useI18n();
-  const {colors} = useTheme();
+  const {colors, effectiveScheme} = useTheme();
+  const insets = useSafeAreaInsets();
+  const [activeRouteName, setActiveRouteName] = useState<string | null>(null);
+  const navigationTheme = useMemo<Theme>(() => {
+    const base = effectiveScheme === 'dark' ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        primary: colors.primary,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.text,
+        border: colors.border,
+        notification: colors.danger,
+      },
+    };
+  }, [colors, effectiveScheme]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCategories, setSidebarCategories] = useState<any[]>([]);
   const [sidebarSmartFilters, setSidebarSmartFilters] = useState<any[]>([]);
   const currentRouteNameRef = useRef<string | null>(null);
   const sidebarOpenRef = useRef(false);
+  const navReadyRef = useRef(false);
+  const bootingMarkedRef = useRef(false);
   const getCachedFeed = useOfflineFeedStore(s => s.getCachedFeed);
   const serverId = activeServer?.id || '';
 
@@ -228,101 +247,58 @@ export function RootNavigator() {
   }, [sidebarOpen]);
 
   useEffect(() => {
-    if (isOffline && serverId) {
+    if (status === 'authenticated' && !navReadyRef.current) {
+      navReadyRef.current = true;
+      perfMark('nav.authenticated');
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (!sidebarOpen || status !== 'authenticated') {
+      return;
+    }
+    if (serverId) {
       const cached = getCachedFeed(serverId, 'chips');
       if (cached) {
         setSidebarCategories(cached.categories);
         setSidebarSmartFilters(cached.smartFilters || []);
-        return;
+        if (isOffline) return;
       }
     }
     Promise.all([
-      fetchCategories(),
-      fetchSmartFilters(),
+      fetchCategoriesShared(),
+      fetchSmartFiltersShared(),
     ])
       .then(([cats, filters]) => {
         setSidebarCategories(cats);
         setSidebarSmartFilters(filters);
       })
       .catch(() => {});
-  }, [isOffline, serverId, getCachedFeed]);
+  }, [isOffline, serverId, sidebarOpen, status, getCachedFeed]);
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
   const handleNavStateChange = useCallback(() => {
     const route = navigationRef.getCurrentRoute();
     currentRouteNameRef.current = route?.name ?? null;
+    setActiveRouteName(route?.name ?? null);
   }, []);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
-        const horizontal = Math.abs(gs.dx) > Math.abs(gs.dy) * 2 && Math.abs(gs.dx) > 15;
-        if (sidebarOpenRef.current) return horizontal;
-        const route = currentRouteNameRef.current;
-        if (!TAB_NAMES.includes(route ?? '')) return false;
-        return horizontal;
-      },
-      onPanResponderMove: (_, gs) => {
-        if (sidebarOpenRef.current) {
-          contentSlideAnim.setValue(0);
-          return;
-        }
-        const route = currentRouteNameRef.current;
-        const currentIdx = TAB_NAMES.indexOf(route ?? '');
-        if (route === 'Home' && gs.dx > 0) return;
-        if ((gs.dx > 0 && currentIdx <= 0) || (gs.dx < 0 && currentIdx >= TAB_NAMES.length - 1)) return;
-        contentSlideAnim.setValue(Math.max(-120, Math.min(120, gs.dx)));
+        if (currentRouteNameRef.current !== 'Home') return false;
+        return (
+          Math.abs(gs.dx) > Math.abs(gs.dy) * 2 &&
+          (sidebarOpenRef.current ? Math.abs(gs.dx) > 15 : gs.dx > 15)
+        );
       },
       onPanResponderRelease: (_, gs) => {
         if (sidebarOpenRef.current) {
-          contentSlideAnim.setValue(0);
-          if (gs.dx < -50 || gs.vx < -0.5) {
-            setSidebarOpen(false);
-          }
+          if (gs.dx < -50 || gs.vx < -0.5) setSidebarOpen(false);
           return;
         }
-
-        const route = currentRouteNameRef.current;
-        const currentIndex = TAB_NAMES.indexOf(route ?? '');
-        if (currentIndex === -1) return;
-
-        if (route === 'Home' && gs.dx > 50) {
-          contentSlideAnim.setValue(0);
-          setSidebarOpen(true);
-          return;
-        }
-
-        if (Math.abs(gs.dx) < 60) {
-          Animated.spring(contentSlideAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-          return;
-        }
-
-        const targetIdx = gs.dx > 0 ? currentIndex - 1 : currentIndex + 1;
-        if (targetIdx < 0 || targetIdx >= TAB_NAMES.length) {
-          Animated.spring(contentSlideAnim, {toValue: 0, useNativeDriver: true}).start();
-          return;
-        }
-
-        const targetTab = TAB_NAMES[targetIdx];
-        const direction = gs.dx > 0 ? 1 : -1;
-
-        Animated.timing(contentSlideAnim, {
-          toValue: direction * 500,
-          duration: 180,
-          useNativeDriver: true,
-        }).start(() => {
-          navigationRef.navigate('Main' as never, {screen: targetTab} as never);
-          contentSlideAnim.setValue(-direction * 500);
-          Animated.timing(contentSlideAnim, {
-            toValue: 0,
-            duration: 180,
-            useNativeDriver: true,
-          }).start();
-        });
+        if (gs.dx > 50) setSidebarOpen(true);
       },
     }),
   ).current;
@@ -365,6 +341,10 @@ export function RootNavigator() {
   );
 
   if (status === 'booting') {
+    if (!bootingMarkedRef.current) {
+      bootingMarkedRef.current = true;
+      perfMark('nav.booting_render');
+    }
     return <ScreenState loading title={t('common.loading')} />;
   }
 
@@ -382,7 +362,11 @@ export function RootNavigator() {
           </TouchableOpacity>
         </View>
       ) : null}
-      <NavigationContainer ref={navigationRef} onReady={handleNavStateChange} onStateChange={handleNavStateChange}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navigationTheme}
+        onReady={handleNavStateChange}
+        onStateChange={handleNavStateChange}>
         <Stack.Navigator
           screenOptions={{
             animation: 'slide_from_right',
@@ -397,87 +381,87 @@ export function RootNavigator() {
               />
               <Stack.Screen
                 name="AccountSecurity"
-                component={AccountSecurityScreen}
+                component={AccountSecurityRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="ThemeSettings"
-                component={ThemeSettingsScreen}
+                component={ThemeSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="LanguageSettings"
-                component={LanguageSettingsScreen}
+                component={LanguageSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="DiagnosticsSettings"
-                component={DiagnosticsSettingsScreen}
+                component={DiagnosticsSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="CacheSettings"
-                component={CacheSettingsScreen}
+                component={CacheSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="CategorySettings"
-                component={CategorySettingsScreen}
+                component={CategorySettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="TagSettings"
-                component={TagSettingsScreen}
+                component={TagSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="SmartFilterSettings"
-                component={SmartFilterSettingsScreen}
+                component={SmartFilterSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="UserSettings"
-                component={UserSettingsScreen}
+                component={UserSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="SystemSettings"
-                component={SystemSettingsScreen}
+                component={SystemSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="TaskSettings"
-                component={TaskSettingsScreen}
+                component={TaskSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="CronSettings"
-                component={CronSettingsScreen}
+                component={CronSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="PluginSettings"
-                component={PluginSettingsScreen}
+                component={PluginSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="StatsSettings"
-                component={StatsSettingsScreen}
+                component={StatsSettingsRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="ArchiveDetail"
-                component={ArchiveDetailScreen}
+                component={ArchiveDetailRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="TankoubonDetail"
-                component={TankoubonDetailScreen}
+                component={TankoubonDetailRoute}
                 options={{headerShown: false}}
               />
               <Stack.Screen
                 name="Reader"
-                component={ReaderScreen}
+                component={ReaderRoute}
                 options={{headerShown: false}}
               />
             </>
@@ -503,6 +487,34 @@ export function RootNavigator() {
           )}
         </Stack.Navigator>
       </NavigationContainer>
+      {Platform.OS === 'android' && activeRouteName !== 'Reader' ? (
+        <View
+          pointerEvents="none"
+          style={{
+            backgroundColor: colors.background,
+            height: insets.top,
+            left: 0,
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            zIndex: 999,
+          }}
+        />
+      ) : null}
+      {Platform.OS === 'android' && activeRouteName !== 'Reader' && insets.bottom > 0 ? (
+        <View
+          pointerEvents="none"
+          style={{
+            backgroundColor: colors.background,
+            bottom: 0,
+            height: insets.bottom,
+            left: 0,
+            position: 'absolute',
+            right: 0,
+            zIndex: 999,
+          }}
+        />
+      ) : null}
       {status === 'authenticated' ? (
         <Sidebar
           open={sidebarOpen}
