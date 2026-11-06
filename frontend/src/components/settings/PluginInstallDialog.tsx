@@ -31,6 +31,14 @@ function entryName(entry: PluginCatalogEntry): string {
     .replace(/-wasip1$/, '');
 }
 
+/** release 资产名：优先用清单里的 asset，否则按 <plugin>.wasm 拼（manifest 的 artifact 是 wasm 内部文件名） */
+function releaseAsset(entry: PluginCatalogEntry): string {
+  if (entry.asset) return entry.asset;
+  const base = entry.plugin || '';
+  if (base) return base.toLowerCase().endsWith('.wasm') ? base : `${base}.wasm`;
+  return entry.artifact || '';
+}
+
 export function PluginInstallDialog({
   open,
   onOpenChange,
@@ -100,12 +108,13 @@ export function PluginInstallDialog({
   }, [entries, query]);
 
   const handleCatalogInstall = async (entry: PluginCatalogEntry) => {
-    if (!sourceUrl || !entry.artifact) return;
-    setInstallingArtifact(entry.artifact);
+    const asset = releaseAsset(entry);
+    if (!sourceUrl || !asset) return;
+    setInstallingArtifact(asset);
     setCatalogError('');
     try {
-      await PluginService.installPlugin(`${sourceUrl}/${entry.artifact}`);
-      setInstalledArtifacts((prev) => ({ ...prev, [entry.artifact]: true }));
+      await PluginService.installPlugin(`${sourceUrl}/${asset}`);
+      setInstalledArtifacts((prev) => ({ ...prev, [asset]: true }));
       onInstalled?.();
     } catch (e) {
       setCatalogError(extractApiError(e, t('settings.pluginInstallFailed')));
@@ -277,12 +286,12 @@ export function PluginInstallDialog({
               ) : (
                 <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
                   {filteredEntries.map((entry) => {
-                    const artifact = entry.artifact || '';
-                    const installed = !!installedArtifacts[artifact];
-                    const isInstalling = installingArtifact === artifact;
+                    const asset = releaseAsset(entry);
+                    const installed = !!installedArtifacts[asset];
+                    const isInstalling = installingArtifact === asset;
                     return (
                       <div
-                        key={artifact || entry.plugin}
+                        key={asset || entry.plugin}
                         className="flex items-center gap-3 rounded-md border p-3"
                       >
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">

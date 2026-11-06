@@ -41,6 +41,8 @@ export interface PluginCheckUpdateResult {
 export interface PluginCatalogEntry {
   plugin: string;
   artifact: string;
+  /** release 资产名（如果清单提供）；缺省时用 <plugin>.wasm */
+  asset?: string;
   size_bytes: number;
   sha256?: string;
   version?: string;
