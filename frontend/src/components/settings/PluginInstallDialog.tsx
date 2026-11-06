@@ -53,6 +53,15 @@ function entryKey(entry: PluginCatalogEntry): string {
   return entryNamespace(entry) || releaseAsset(entry).toLowerCase();
 }
 
+/** 合并多源同名插件时优先保留元数据更完整的一条 */
+function catalogRichness(entry: PluginCatalogEntry): number {
+  return (entry.namespace ? 1 : 0)
+    + (entry.name ? 1 : 0)
+    + (entry.description ? 1 : 0)
+    + (entry.icon ? 1 : 0)
+    + ((entry.pre?.length ?? 0) > 0 ? 1 : 0);
+}
+
 export function PluginInstallDialog({
   open,
   onOpenChange,
@@ -102,13 +111,19 @@ export function PluginInstallDialog({
       const failed = catalogSources.filter((s) => !s.ok);
 
       const merged: CatalogEntry[] = [];
-      const seen = new Set<string>();
+      const indexByAsset = new Map<string, number>();
       for (const source of okSources) {
         for (const plugin of source.catalog!.plugins) {
-          const key = entryKey(plugin);
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push({ ...plugin, source_url: source.url });
+          const key = releaseAsset(plugin).toLowerCase();
+          if (!key) continue;
+          const candidate: CatalogEntry = { ...plugin, source_url: source.url };
+          const existingIndex = indexByAsset.get(key);
+          if (existingIndex === undefined) {
+            indexByAsset.set(key, merged.length);
+            merged.push(candidate);
+          } else if (catalogRichness(candidate) > catalogRichness(merged[existingIndex])) {
+            merged[existingIndex] = candidate;
+          }
         }
       }
 
