@@ -199,7 +199,7 @@ public class ArchiveDao {
         let filenameExpr = wrapSearchExpr("${tableAlias}.filename", unaccentFunction)
         let summaryExpr = wrapSearchExpr("${tableAlias}.summary", unaccentFunction)
         let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
-        return "(${titleExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${filenameExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} LIKE ${patternExpr} ESCAPE '\\' OR " +
+        return "(${titleExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${filenameExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} ILIKE ${patternExpr} ESCAPE '\\' OR " +
             buildTagLikeCondition(pattern, params, tableAlias, unaccentFunction)
     }
 
@@ -219,7 +219,7 @@ public class ArchiveDao {
         }
         let tagExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(mt.tag)" } else { "mt.tag" }
         let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
-        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = '${entityType}' AND mo.entity_id = ${entityIdExpr} AND ((position(':' IN mt.tag) > 0 AND ${nameExpr} LIKE ${patternExpr} ESCAPE '\\') OR ${tagExpr} LIKE ${patternExpr} ESCAPE '\\'))"
+        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = '${entityType}' AND mo.entity_id = ${entityIdExpr} AND ((position(':' IN mt.tag) > 0 AND ${nameExpr} ILIKE ${patternExpr} ESCAPE '\\') OR ${tagExpr} ILIKE ${patternExpr} ESCAPE '\\'))"
     }
 
     private static func buildTankoubonTextMatchCondition(
@@ -234,7 +234,7 @@ public class ArchiveDao {
         let summaryExpr = wrapSearchExpr("tankoubon_metadata.description", unaccentFunction)
         let idExpr = wrapSearchExpr("tb.tankoubon_id", unaccentFunction)
         let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
-        return "(${titleExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${idExpr} LIKE ${patternExpr} ESCAPE '\\' OR " +
+        return "(${titleExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${idExpr} ILIKE ${patternExpr} ESCAPE '\\' OR " +
             buildMetadataTagLikeCondition(pattern, params, "tankoubon", "tb.tankoubon_id", unaccentFunction) + ")"
     }
 
