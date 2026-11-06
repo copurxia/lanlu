@@ -15,6 +15,20 @@ import {
 } from '@/lib/services/plugin-service';
 import { Download, Package, RefreshCw, Search, Check, AlertTriangle } from 'lucide-react';
 import { extractApiError } from '@/lib/utils/api-utils';
+import { Badge } from '@/components/ui/badge';
+
+const PLUGIN_TYPE_COLORS: Record<string, string> = {
+  metadata: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  download: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+  login: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+  script: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+  source: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200',
+};
+
+function pluginTypeColor(type?: string): string {
+  const key = (type || '').trim().toLowerCase();
+  return PLUGIN_TYPE_COLORS[key] || 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+}
 
 interface PluginInstallDialogProps {
   open: boolean;
@@ -353,22 +367,23 @@ export function PluginInstallDialog({
     onOpenChange(false);
   };
 
-  const renderIcon = (entry: CatalogEntry) => {
+  const renderIcon = (entry: CatalogEntry, size: 'sm' | 'lg' = 'sm') => {
     const icon = (entry.icon || '').trim();
     const key = entryKey(entry);
     const letter = (entry.name || entryName(entry) || '?').trim().charAt(0).toUpperCase();
+    const box = size === 'lg' ? 'h-12 w-12' : 'h-9 w-9';
     if (icon && !brokenIcons[key]) {
       return (
         <img
           src={icon}
           alt=""
-          className="h-9 w-9 shrink-0 rounded-md border object-cover"
+          className={`${box} shrink-0 rounded-md border object-cover`}
           onError={() => setBrokenIcons((prev) => ({ ...prev, [key]: true }))}
         />
       );
     }
     return (
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-muted-foreground">
+      <div className={`${box} flex shrink-0 items-center justify-center rounded-md bg-muted text-base font-semibold text-muted-foreground`}>
         {letter || <Package className="h-4 w-4" />}
       </div>
     );
@@ -376,22 +391,22 @@ export function PluginInstallDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent size="xl" className="w-[min(92vw,72rem)]">
         <DialogHeader>
-          <DialogTitle className="flex items-center space-x-2">
+          <DialogTitle className="flex items-center space-x-2 text-base sm:text-lg">
             <Download className="w-5 h-5" />
             <span>{t('settings.pluginInstall')}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <DialogBody>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <DialogBody className="flex min-h-[60vh] flex-col">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="store">{t('settings.pluginStore')}</TabsTrigger>
               <TabsTrigger value="custom">{t('settings.pluginCustomInstall')}</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="store" className="mt-4 space-y-3">
+            <TabsContent value="store" className="mt-4 flex flex-1 flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 text-xs text-muted-foreground">
                   {sources.length === 1 ? (
@@ -469,15 +484,16 @@ export function PluginInstallDialog({
               )}
 
               {catalogLoading ? (
-                <div className="flex h-40 items-center justify-center">
-                  <Spinner />
+                <div className="flex h-56 items-center justify-center">
+                  <Spinner size="lg" />
                 </div>
               ) : filteredEntries.length === 0 ? (
-                <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
                   {t('settings.pluginStoreEmpty')}
                 </div>
               ) : (
-                <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
+                <div className="flex-1 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   {filteredEntries.map((entry) => {
                     const key = entryKey(entry);
                     const asset = releaseAsset(entry);
@@ -486,36 +502,46 @@ export function PluginInstallDialog({
                     const isInstalling = installingKey === key;
                     const { plan, missing } = resolvePlan(entry);
                     const pre = (entry.pre || []).filter(Boolean);
-                    const subtitle = [
+                    const meta = [
                       entry.version ? `v${entry.version.replace(/^v/, '')}` : '',
-                      entry.type || '',
                       formatBytes(entry.size_bytes),
                     ].filter(Boolean).join(' · ');
 
                     return (
                       <div
                         key={key || asset}
-                        className="flex items-start gap-3 rounded-md border p-3"
+                        className="flex flex-col rounded-lg border p-4 transition-colors hover:bg-muted/30"
                       >
-                        {renderIcon(entry)}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <div className="truncate text-sm font-medium">
+                        <div className="flex items-start gap-3">
+                          {renderIcon(entry, 'lg')}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold">
                               {entry.name || entryName(entry)}
                             </div>
-                            {subtitle && (
-                              <div className="shrink-0 text-[11px] text-muted-foreground">
-                                {subtitle}
-                              </div>
-                            )}
-                          </div>
-                          {entry.description && (
-                            <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                              {entry.description}
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {entry.type && (
+                                <Badge className={`text-[10px] px-1.5 py-0 ${pluginTypeColor(entry.type)}`}>
+                                  {entry.type}
+                                </Badge>
+                              )}
+                              {meta && (
+                                <span className="text-[11px] text-muted-foreground">{meta}</span>
+                              )}
                             </div>
-                          )}
-                          {pre.length > 0 && (
-                            <div className={`mt-1 text-[11px] ${missing.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                          </div>
+                        </div>
+
+                        {entry.description ? (
+                          <p className="mt-2.5 line-clamp-2 min-h-[2rem] text-xs leading-5 text-muted-foreground">
+                            {entry.description}
+                          </p>
+                        ) : (
+                          <p className="mt-2.5 min-h-[2rem]" />
+                        )}
+
+                        <div className="mt-auto pt-2.5">
+                          {pre.length > 0 ? (
+                            <div className={`mb-2 text-[11px] leading-4 ${missing.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
                               {t('settings.pluginStoreDepends')}: {pre.join(', ')}
                               {missing.length > 0
                                 ? ` · ${t('settings.pluginStoreMissingDep')}: ${missing.join(', ')}`
@@ -524,37 +550,41 @@ export function PluginInstallDialog({
                                 ? ` · ${t('settings.pluginStoreWillInstallDeps')}: ${plan.map((d) => entryName(d)).join(', ')}`
                                 : ''}
                             </div>
-                          )}
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={installed ? 'outline' : 'default'}
-                          disabled={installed || isInstalling || !asset || !entry.source_url}
-                          onClick={() => void handleCatalogInstall(entry)}
-                        >
-                          {installed ? (
-                            <>
-                              <Check className="mr-1 h-3.5 w-3.5" />
-                              {t('settings.pluginStoreInstalled')}
-                            </>
-                          ) : isInstalling ? (
-                            t('settings.pluginInstalling')
                           ) : (
-                            <>
-                              <Download className="mr-1 h-3.5 w-3.5" />
-                              {t('settings.pluginStoreInstall')}
-                            </>
+                            <div className="mb-2" />
                           )}
-                        </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={installed ? 'outline' : 'default'}
+                            className="w-full"
+                            disabled={installed || isInstalling || !asset || !entry.source_url}
+                            onClick={() => void handleCatalogInstall(entry)}
+                          >
+                            {installed ? (
+                              <>
+                                <Check className="mr-1 h-4 w-4" />
+                                {t('settings.pluginStoreInstalled')}
+                              </>
+                            ) : isInstalling ? (
+                              t('settings.pluginInstalling')
+                            ) : (
+                              <>
+                                <Download className="mr-1 h-4 w-4" />
+                                {t('settings.pluginStoreInstall')}
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
+                  </div>
                 </div>
               )}
             </TabsContent>
 
-            <TabsContent value="custom" className="mt-4 space-y-4">
+            <TabsContent value="custom" className="mt-4 mx-auto w-full max-w-lg space-y-4">
               <div className="space-y-2">
                 <Label>{t('settings.pluginUpload')}</Label>
                 <div
