@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { logger } from '@/lib/utils/logger';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -209,6 +210,22 @@ export default function SystemSettingsPage() {
             <p className="text-xs text-muted-foreground">
               {t('settings.system.longHint')}
             </p>
+          </div>
+        );
+
+      case 'text':
+        return (
+          <div className="space-y-2">
+            <Label htmlFor={key}>{localizedDesc}</Label>
+            <Textarea
+              id={key}
+              rows={4}
+              value={value}
+              onChange={(e) =>
+                handleValueChange(setting.category, key, e.target.value)
+              }
+              placeholder={t('settings.system.sourceListPlaceholder')}
+            />
           </div>
         );
 

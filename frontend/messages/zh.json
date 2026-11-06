@@ -981,7 +981,8 @@
       "longHint": "单位：毫秒",
       "pathPlaceholder": "输入目录路径，例如：/path/to/directory",
       "plugins": "插件设置",
-      "pluginsNotice": "插件源地址指向 nightly release 的下载基址，用于在线插件列表与更新检查，例如 https://github.com/copurxia/lanlup/releases/download/nightly。"
+      "pluginsNotice": "插件源地址指向 nightly release 的下载基址，用于在线插件列表与更新检查，例如 https://github.com/copurxia/lanlup/releases/download/nightly。",
+      "sourceListPlaceholder": "每行一个插件源，例如：https://github.com/copurxia/lanlup/releases/download/nightly"
     },
     "auth": "账户安全",
     "authTitle": "账户安全",
@@ -1100,6 +1101,11 @@
     "pluginStoreInstall": "安装",
     "pluginStoreInstalled": "已安装",
     "pluginStoreBuild": "构建",
+    "pluginStoreDepends": "依赖",
+    "pluginStoreMissingDep": "缺少依赖",
+    "pluginStoreWillInstallDeps": "将同时安装",
+    "pluginStoreSourceFilterAll": "全部来源",
+    "pluginStoreFailedSources": "部分插件源加载失败",
     "pluginInstallUrl": "插件URL",
     "pluginInstallUrlPlaceholder": "输入插件的直链地址",
     "pluginInstallType": "插件类型",

@@ -8,8 +8,12 @@ import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { PluginService, type PluginCatalogEntry } from '@/lib/services/plugin-service';
-import { Download, Package, RefreshCw, Search, Check } from 'lucide-react';
+import {
+  PluginService,
+  type PluginCatalogEntry,
+  type PluginCatalogSource,
+} from '@/lib/services/plugin-service';
+import { Download, Package, RefreshCw, Search, Check, AlertTriangle } from 'lucide-react';
 import { extractApiError } from '@/lib/utils/api-utils';
 
 interface PluginInstallDialogProps {
@@ -17,6 +21,8 @@ interface PluginInstallDialogProps {
   onOpenChange: (open: boolean) => void;
   onInstalled?: () => void;
 }
+
+type CatalogEntry = PluginCatalogEntry & { source_url: string };
 
 function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '';
@@ -31,12 +37,20 @@ function entryName(entry: PluginCatalogEntry): string {
     .replace(/-wasip1$/, '');
 }
 
-/** release 资产名：优先用清单里的 asset，否则按 <plugin>.wasm 拼（manifest 的 artifact 是 wasm 内部文件名） */
+/** release 资产名：优先用清单里的 asset，否则按 <plugin>.wasm 拼 */
 function releaseAsset(entry: PluginCatalogEntry): string {
   if (entry.asset) return entry.asset;
   const base = entry.plugin || '';
   if (base) return base.toLowerCase().endsWith('.wasm') ? base : `${base}.wasm`;
   return entry.artifact || '';
+}
+
+function entryNamespace(entry: PluginCatalogEntry): string {
+  return (entry.namespace || entryName(entry)).trim().toLowerCase();
+}
+
+function entryKey(entry: PluginCatalogEntry): string {
+  return entryNamespace(entry) || releaseAsset(entry).toLowerCase();
 }
 
 export function PluginInstallDialog({
@@ -60,12 +74,15 @@ export function PluginInstallDialog({
   // 插件商店
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
-  const [sourceUrl, setSourceUrl] = useState('');
-  const [entries, setEntries] = useState<PluginCatalogEntry[]>([]);
-  const [commit, setCommit] = useState('');
+  const [sources, setSources] = useState<PluginCatalogSource[]>([]);
+  const [failedSources, setFailedSources] = useState<PluginCatalogSource[]>([]);
+  const [entries, setEntries] = useState<CatalogEntry[]>([]);
+  const [sourceFilter, setSourceFilter] = useState('');
   const [query, setQuery] = useState('');
-  const [installingArtifact, setInstallingArtifact] = useState('');
-  const [installedArtifacts, setInstalledArtifacts] = useState<Record<string, boolean>>({});
+  const [installingKey, setInstallingKey] = useState('');
+  const [installedNamespaces, setInstalledNamespaces] = useState<Set<string>>(new Set());
+  const [installedAssets, setInstalledAssets] = useState<Record<string, boolean>>({});
+  const [brokenIcons, setBrokenIcons] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     tRef.current = t;
@@ -75,11 +92,49 @@ export function PluginInstallDialog({
     setCatalogLoading(true);
     setCatalogError('');
     try {
-      const result = await PluginService.getCatalog();
-      setSourceUrl(result.sourceUrl);
-      setEntries(result.catalog.plugins || []);
-      setCommit(result.catalog.commit || result.catalog.version || '');
+      const [catalogSources, installed] = await Promise.all([
+        PluginService.getCatalog(),
+        PluginService.getAllPlugins().catch(() => []),
+      ]);
+      const okSources = catalogSources.filter(
+        (s) => s.ok && s.catalog && Array.isArray(s.catalog.plugins)
+      );
+      const failed = catalogSources.filter((s) => !s.ok);
+
+      const merged: CatalogEntry[] = [];
+      const seen = new Set<string>();
+      for (const source of okSources) {
+        for (const plugin of source.catalog!.plugins) {
+          const key = entryKey(plugin);
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          merged.push({ ...plugin, source_url: source.url });
+        }
+      }
+
+      setSources(okSources);
+      setFailedSources(failed);
+      setEntries(merged);
+      setSourceFilter('');
+      setInstalledNamespaces(
+        new Set(
+          installed
+            .filter((p) => p.installed !== false)
+            .map((p) => (p.namespace || '').trim().toLowerCase())
+            .filter((ns) => ns.length > 0)
+        )
+      );
+      setInstalledAssets({});
+      setBrokenIcons({});
+
+      if (okSources.length === 0 && failed.length > 0) {
+        setCatalogError(
+          failed.map((s) => `${s.url}: ${s.error || 'failed'}`).join('\n')
+        );
+      }
     } catch (e) {
+      setSources([]);
+      setFailedSources([]);
       setEntries([]);
       setCatalogError(extractApiError(e, tRef.current('settings.pluginStoreLoadFailed')));
     } finally {
@@ -94,32 +149,98 @@ export function PluginInstallDialog({
     setFile(null);
     setError('');
     setQuery('');
-    setInstalledArtifacts({});
     void loadCatalog();
   }, [open, loadCatalog]);
 
+  const byNamespace = useMemo(() => {
+    const map = new Map<string, CatalogEntry>();
+    for (const entry of entries) {
+      const ns = entryNamespace(entry);
+      if (ns && !map.has(ns)) map.set(ns, entry);
+    }
+    return map;
+  }, [entries]);
+
+  const resolvePlan = useCallback(
+    (entry: CatalogEntry): { plan: CatalogEntry[]; missing: string[] } => {
+      const plan: CatalogEntry[] = [];
+      const missing: string[] = [];
+      const visited = new Set<string>();
+      const walk = (current: CatalogEntry, depth: number) => {
+        if (depth > 5) return;
+        const selfNs = entryNamespace(current);
+        for (const raw of current.pre || []) {
+          const ns = (raw || '').trim().toLowerCase();
+          if (!ns || ns === selfNs || visited.has(ns)) continue;
+          if (installedNamespaces.has(ns)) continue;
+          const dep = byNamespace.get(ns);
+          if (!dep) {
+            if (!missing.includes(ns)) missing.push(ns);
+            continue;
+          }
+          visited.add(ns);
+          walk(dep, depth + 1);
+          plan.push(dep);
+        }
+      };
+      walk(entry, 0);
+      return { plan, missing };
+    },
+    [byNamespace, installedNamespaces]
+  );
+
   const filteredEntries = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((entry) =>
-      entryName(entry).toLowerCase().includes(q)
-      || (entry.artifact || '').toLowerCase().includes(q)
-    );
-  }, [entries, query]);
+    return entries.filter((entry) => {
+      if (sourceFilter && entry.source_url !== sourceFilter) return false;
+      if (!q) return true;
+      return [entry.name, entry.namespace, entryName(entry), entry.description, entry.artifact]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [entries, query, sourceFilter]);
 
-  const handleCatalogInstall = async (entry: PluginCatalogEntry) => {
+  const markInstalled = (entry: PluginCatalogEntry) => {
+    const ns = entryNamespace(entry);
+    if (ns) {
+      setInstalledNamespaces((prev) => {
+        const next = new Set(prev);
+        next.add(ns);
+        return next;
+      });
+    }
     const asset = releaseAsset(entry);
-    if (!sourceUrl || !asset) return;
-    setInstallingArtifact(asset);
+    if (asset) {
+      setInstalledAssets((prev) => ({ ...prev, [asset]: true }));
+    }
+  };
+
+  const handleCatalogInstall = async (entry: CatalogEntry) => {
+    const asset = releaseAsset(entry);
+    if (!entry.source_url || !asset) return;
+
+    const { plan, missing } = resolvePlan(entry);
+    if (missing.length > 0) {
+      setCatalogError(`${t('settings.pluginStoreMissingDep')}: ${missing.join(', ')}`);
+      return;
+    }
+
+    setInstallingKey(entryKey(entry));
     setCatalogError('');
     try {
-      await PluginService.installPlugin(`${sourceUrl}/${asset}`);
-      setInstalledArtifacts((prev) => ({ ...prev, [asset]: true }));
+      for (const dep of plan) {
+        const depAsset = releaseAsset(dep);
+        if (!dep.source_url || !depAsset) continue;
+        await PluginService.installPlugin(`${dep.source_url}/${depAsset}`);
+        markInstalled(dep);
+      }
+      await PluginService.installPlugin(`${entry.source_url}/${asset}`);
+      markInstalled(entry);
       onInstalled?.();
     } catch (e) {
       setCatalogError(extractApiError(e, t('settings.pluginInstallFailed')));
     } finally {
-      setInstallingArtifact('');
+      setInstallingKey('');
     }
   };
 
@@ -217,6 +338,27 @@ export function PluginInstallDialog({
     onOpenChange(false);
   };
 
+  const renderIcon = (entry: CatalogEntry) => {
+    const icon = (entry.icon || '').trim();
+    const key = entryKey(entry);
+    const letter = (entry.name || entryName(entry) || '?').trim().charAt(0).toUpperCase();
+    if (icon && !brokenIcons[key]) {
+      return (
+        <img
+          src={icon}
+          alt=""
+          className="h-9 w-9 shrink-0 rounded-md border object-cover"
+          onError={() => setBrokenIcons((prev) => ({ ...prev, [key]: true }))}
+        />
+      );
+    }
+    return (
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold text-muted-foreground">
+        {letter || <Package className="h-4 w-4" />}
+      </div>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -237,13 +379,17 @@ export function PluginInstallDialog({
             <TabsContent value="store" className="mt-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 text-xs text-muted-foreground">
-                  <div className="truncate">
-                    {t('settings.pluginStoreSource')}: {sourceUrl || '—'}
-                  </div>
-                  {commit && (
+                  {sources.length === 1 ? (
                     <div className="truncate">
-                      {t('settings.pluginStoreBuild')}: {commit.slice(0, 12)}
+                      {t('settings.pluginStoreSource')}: {sources[0].url}
                     </div>
+                  ) : sources.length > 1 ? (
+                    <div className="truncate">
+                      {t('settings.pluginStoreSource')}: {sources.length}
+                      {failedSources.length > 0 ? ` (+${failedSources.length} failed)` : ''}
+                    </div>
+                  ) : (
+                    <div>{t('settings.pluginStoreSourceHint')}</div>
                   )}
                 </div>
                 <Button
@@ -258,57 +404,118 @@ export function PluginInstallDialog({
                 </Button>
               </div>
 
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder={t('settings.pluginStoreSearch')}
-                  className="pl-9"
-                />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={t('settings.pluginStoreSearch')}
+                    className="pl-9"
+                  />
+                </div>
+                {sources.length > 1 && (
+                  <select
+                    value={sourceFilter}
+                    onChange={(e) => setSourceFilter(e.target.value)}
+                    className="h-9 max-w-[40%] rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    <option value="">{t('settings.pluginStoreSourceFilterAll')}</option>
+                    {sources.map((source) => (
+                      <option key={source.url} value={source.url}>
+                        {source.url.replace(/^https?:\/\//, '').replace(/\/releases\/.*$/, '')}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
+
+              {failedSources.length > 0 && !catalogLoading && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium">{t('settings.pluginStoreFailedSources')}</div>
+                    {failedSources.map((source) => (
+                      <div key={source.url} className="truncate">
+                        {source.url}: {source.error || 'failed'}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {catalogError && !catalogLoading && (
+                <div className="space-y-1 rounded-md border border-dashed p-4 text-sm">
+                  <p className="text-red-600 dark:text-red-400 whitespace-pre-line">{catalogError}</p>
+                  {entries.length === 0 && (
+                    <p className="text-muted-foreground">{t('settings.pluginStoreSourceHint')}</p>
+                  )}
+                </div>
+              )}
 
               {catalogLoading ? (
                 <div className="flex h-40 items-center justify-center">
                   <Spinner />
-                </div>
-              ) : catalogError ? (
-                <div className="space-y-2 rounded-md border border-dashed p-4 text-sm">
-                  <p className="text-red-600 dark:text-red-400">{catalogError}</p>
-                  {entries.length === 0 && (
-                    <p className="text-muted-foreground">{t('settings.pluginStoreSourceHint')}</p>
-                  )}
                 </div>
               ) : filteredEntries.length === 0 ? (
                 <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
                   {t('settings.pluginStoreEmpty')}
                 </div>
               ) : (
-                <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+                <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
                   {filteredEntries.map((entry) => {
+                    const key = entryKey(entry);
                     const asset = releaseAsset(entry);
-                    const installed = !!installedArtifacts[asset];
-                    const isInstalling = installingArtifact === asset;
+                    const ns = entryNamespace(entry);
+                    const installed = !!installedAssets[asset] || (!!ns && installedNamespaces.has(ns));
+                    const isInstalling = installingKey === key;
+                    const { plan, missing } = resolvePlan(entry);
+                    const pre = (entry.pre || []).filter(Boolean);
+                    const subtitle = [
+                      entry.version ? `v${entry.version.replace(/^v/, '')}` : '',
+                      entry.type || '',
+                      formatBytes(entry.size_bytes),
+                    ].filter(Boolean).join(' · ');
+
                     return (
                       <div
-                        key={asset || entry.plugin}
-                        className="flex items-center gap-3 rounded-md border p-3"
+                        key={key || asset}
+                        className="flex items-start gap-3 rounded-md border p-3"
                       >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                        </div>
+                        {renderIcon(entry)}
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium">{entryName(entry)}</div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {formatBytes(entry.size_bytes)}
-                            {entry.sha256 ? ` · ${entry.sha256.slice(0, 8)}` : ''}
+                          <div className="flex items-center gap-2">
+                            <div className="truncate text-sm font-medium">
+                              {entry.name || entryName(entry)}
+                            </div>
+                            {subtitle && (
+                              <div className="shrink-0 text-[11px] text-muted-foreground">
+                                {subtitle}
+                              </div>
+                            )}
                           </div>
+                          {entry.description && (
+                            <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                              {entry.description}
+                            </div>
+                          )}
+                          {pre.length > 0 && (
+                            <div className={`mt-1 text-[11px] ${missing.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                              {t('settings.pluginStoreDepends')}: {pre.join(', ')}
+                              {missing.length > 0
+                                ? ` · ${t('settings.pluginStoreMissingDep')}: ${missing.join(', ')}`
+                                : ''}
+                              {missing.length === 0 && plan.length > 0
+                                ? ` · ${t('settings.pluginStoreWillInstallDeps')}: ${plan.map((d) => entryName(d)).join(', ')}`
+                                : ''}
+                            </div>
+                          )}
                         </div>
                         <Button
                           type="button"
                           size="sm"
                           variant={installed ? 'outline' : 'default'}
-                          disabled={installed || isInstalling || !sourceUrl}
+                          disabled={installed || isInstalling || !asset || !entry.source_url}
                           onClick={() => void handleCatalogInstall(entry)}
                         >
                           {installed ? (

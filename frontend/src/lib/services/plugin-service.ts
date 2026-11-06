@@ -41,11 +41,22 @@ export interface PluginCheckUpdateResult {
 export interface PluginCatalogEntry {
   plugin: string;
   artifact: string;
-  /** release 资产名（如果清单提供）；缺省时用 <plugin>.wasm */
+  /** release 资产名，安装时优先使用 */
   asset?: string;
+  namespace?: string;
+  name?: string;
+  version?: string;
+  type?: string;
+  description?: string;
+  icon?: string;
+  author?: string;
+  tags?: string;
+  /** 前置依赖（登录/脚本插件的 namespace） */
+  pre?: string[];
   size_bytes: number;
   sha256?: string;
-  version?: string;
+  /** 由前端合并时注入：该条目来自哪个插件源 */
+  source_url?: string;
 }
 
 export interface PluginCatalog {
@@ -58,6 +69,13 @@ export interface PluginCatalog {
   plugin_count?: number;
   total_size_bytes?: number;
   plugins: PluginCatalogEntry[];
+}
+
+export interface PluginCatalogSource {
+  url: string;
+  ok: boolean;
+  error?: string;
+  catalog?: PluginCatalog;
 }
 
 export class PluginService {
@@ -91,19 +109,18 @@ export class PluginService {
   }
 
   /**
-   * 获取在线插件列表（后端从插件源拉取 plugins.json）
+   * 获取在线插件列表（后端从所有插件源拉取 plugins.json）
    */
-  static async getCatalog(): Promise<{ sourceUrl: string; catalog: PluginCatalog }> {
+  static async getCatalog(): Promise<PluginCatalogSource[]> {
     const response = await apiClient.get('/api/admin/plugins/catalog');
     const payload = (response.data ?? {}) as {
-      source_url?: string;
-      catalog?: PluginCatalog;
+      sources?: PluginCatalogSource[];
       message?: string;
     };
-    if (!payload.catalog || !Array.isArray(payload.catalog.plugins)) {
+    if (!Array.isArray(payload.sources)) {
       throw new Error(payload.message || 'Invalid plugin catalog response');
     }
-    return { sourceUrl: payload.source_url || '', catalog: payload.catalog };
+    return payload.sources;
   }
 
   static async togglePluginStatus(namespace: string, enabled: boolean): Promise<void> {

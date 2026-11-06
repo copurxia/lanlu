@@ -981,7 +981,8 @@
       "longHint": "Unit: milliseconds",
       "pathPlaceholder": "Enter directory path, e.g.: /path/to/directory",
       "plugins": "Plugin Settings",
-      "pluginsNotice": "The plugin source URL is the nightly release download base used for the online plugin catalog and update checks, e.g. https://github.com/copurxia/lanlup/releases/download/nightly."
+      "pluginsNotice": "The plugin source URL is the nightly release download base used for the online plugin catalog and update checks, e.g. https://github.com/copurxia/lanlup/releases/download/nightly.",
+      "sourceListPlaceholder": "One plugin source per line, e.g. https://github.com/copurxia/lanlup/releases/download/nightly"
     },
     "auth": "Account Security",
     "authTitle": "Account Security",
@@ -1100,6 +1101,11 @@
     "pluginStoreInstall": "Install",
     "pluginStoreInstalled": "Installed",
     "pluginStoreBuild": "Build",
+    "pluginStoreDepends": "Requires",
+    "pluginStoreMissingDep": "Missing dependency",
+    "pluginStoreWillInstallDeps": "Also installs",
+    "pluginStoreSourceFilterAll": "All sources",
+    "pluginStoreFailedSources": "Some sources failed to load",
     "pluginInstallUrl": "Plugin URL",
     "pluginInstallUrlPlaceholder": "Enter the plugin download URL",
     "pluginInstallType": "Plugin Type",

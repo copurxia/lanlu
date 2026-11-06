@@ -57,35 +57,68 @@ public class PluginsController {
         }
     }
 
+    private static func normalizePluginSource(value: String): String {
+        var url = value.trimAscii()
+        while (url.endsWith("/")) {
+            url = url[0..url.size - 1]
+        }
+        return url
+    }
+
+    private static func escapeJsonText(value: String): String {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    }
+
     /**
-     * 获取在线插件列表（读取插件源的 plugins.json）
+     * 获取在线插件列表（读取所有插件源的 plugins.json）
      * GET /api/admin/plugins/catalog
      */
     public static func getCatalog(ctx: Ctx) {
         let logger = getLogger("plugins_controller")
 
-        var sourceUrl = SystemSettingsService.getString("PLUGIN_SOURCE_URL").trimAscii()
-        while (sourceUrl.endsWith("/")) {
-            sourceUrl = sourceUrl[0..sourceUrl.size - 1]
+        let rawSources = SystemSettingsService.getString("PLUGIN_SOURCE_URL").trimAscii()
+        let sources = ArrayList<String>()
+        let seenSources = HashMap<String, Bool>()
+        for (line in rawSources.split("\n")) {
+            for (part in line.split(",")) {
+                let url = normalizePluginSource(part)
+                if (url.size == 0 || seenSources.contains(url)) {
+                    continue
+                }
+                seenSources[url] = true
+                sources.add(url)
+            }
         }
-        if (sourceUrl.size == 0) {
+        if (sources.size == 0) {
             ResponseView.errorJson(ctx, "Plugin source URL is not configured")
             return
         }
-
-        let (ok, catalog, err) = PluginManagerService.fetchPluginCatalog(sourceUrl)
-        if (!ok) {
-            logger.error("拉取在线插件列表失败", [("source", sourceUrl), ("error", err)])
-            ResponseView.errorJson(ctx, "Failed to load plugin catalog: ${err}")
-            return
-        }
-        if (!catalog.contains("\"plugins\"")) {
-            ResponseView.errorJson(ctx, "Invalid plugin catalog from source")
+        if (sources.size > 5) {
+            ResponseView.errorJson(ctx, "Too many plugin sources (max 5)")
             return
         }
 
-        let escapedSource = sourceUrl.replace("\\", "\\\\").replace("\"", "\\\"")
-        ctx.json("{\"source_url\":\"${escapedSource}\",\"catalog\":${catalog}}")
+        var out = "{\"sources\":["
+        var first = true
+        for (source in sources) {
+            let (ok, catalog, err) = PluginManagerService.fetchPluginCatalog(source)
+            if (!first) {
+                out += ","
+            }
+            first = false
+            if (ok && catalog.contains("\"plugins\"")) {
+                out += "{\"url\":\"${escapeJsonText(source)}\",\"ok\":true,\"catalog\":${catalog}}"
+            } else {
+                var message = err
+                if (ok) {
+                    message = "Invalid plugin catalog from source"
+                }
+                logger.warn("拉取插件源失败", ("source", source), ("error", message))
+                out += "{\"url\":\"${escapeJsonText(source)}\",\"ok\":false,\"error\":\"${escapeJsonText(message)}\"}"
+            }
+        }
+        out += "]}"
+        ctx.json(out)
     }
 
     /**

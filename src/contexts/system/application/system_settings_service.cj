@@ -130,7 +130,7 @@ public class SystemSettingsService {
         settings.add(createSetting("ASSET_PATH", "./data/assets", "path", "storage", "资源文件目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
         settings.add(createSetting("PLUGIN_PATH", "./data/plugins", "path", "storage", "插件目录路径"))
-        settings.add(createSetting("PLUGIN_SOURCE_URL", "https://github.com/copurxia/lanlup/releases/download/nightly", "string", "plugins", "插件源地址（在线插件列表的 nightly release 下载基址）"))
+        settings.add(createSetting("PLUGIN_SOURCE_URL", "https://github.com/copurxia/lanlup/releases/download/nightly", "text", "plugins", "插件源地址（每行一个，nightly release 的下载基址）"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))
@@ -210,7 +210,7 @@ public class SystemSettingsService {
         translations["归档文件目录路径"] = "Archive Directory Path"
         translations["资源文件目录路径"] = "Asset Directory Path"
         translations["缓存目录路径"] = "Cache Directory Path"
-        translations["插件源地址（在线插件列表的 nightly release 下载基址）"] = "Plugin Source URL (nightly release download base for the online catalog)"
+        translations["插件源地址（每行一个，nightly release 的下载基址）"] = "Plugin source URLs (one per line, nightly release download base)"
         translations["KV内存占用(MB)"] = "KV Memory Usage (MB)"
         translations["RocksDB Block Cache 大小(MB)"] = "RocksDB Block Cache Size (MB)"
         translations["RocksDB 最大 Write Buffer 数"] = "RocksDB Max Write Buffer Number"

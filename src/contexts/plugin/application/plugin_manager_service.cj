@@ -354,7 +354,7 @@ public class PluginManagerService {
         FileUtils.ensureDirectoryExists(tempDir)
         let tempFile = Path("${tempDir.toString()}/catalog_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}.json")
 
-        let (ok, err, _, _) = downloadUrlToFileWithCurl(url, tempFile, "", maxTimeSec: 20)
+        let (ok, err, _, _) = downloadUrlToFileWithCurl(url, tempFile, "", maxTimeSec: 10)
         if (!ok) {
             return (false, "", err)
         }
