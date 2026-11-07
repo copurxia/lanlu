@@ -15,6 +15,7 @@ export type SearchInputHandle = {
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
   value: string
   onChange: (value: string) => void
+  onSuggestionSelected?: (value: string, suggestion: TagSuggestion) => void
   placeholder?: string
   className?: string
   compact?: boolean
@@ -23,6 +24,7 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
 export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>(({
   value = "",
   onChange,
+  onSuggestionSelected,
   placeholder = "输入搜索关键词或标签",
   className,
   compact = false,
@@ -77,7 +79,11 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
       setInputValue(newValue)
       onChange(newValue)
       autocomplete.clearSuggestions()
-      inputRef.current?.focus()
+      if (onSuggestionSelected) {
+        onSuggestionSelected(newValue, suggestion)
+      } else {
+        inputRef.current?.focus()
+      }
     } finally {
       setTimeout(() => { isProcessingRef.current = false }, 0)
     }

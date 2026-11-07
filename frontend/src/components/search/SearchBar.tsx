@@ -55,12 +55,11 @@ function SearchBarContent(
     []
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const submitSearch = (rawValue?: string) => {
     if (!mounted) return;
-    e.preventDefault();
 
     // 从 SearchInput 获取当前输入值
-    const currentInputValue = searchInputRef.current?.getInputValue?.() || '';
+    const currentInputValue = rawValue ?? (searchInputRef.current?.getInputValue?.() || '');
 
     // 使用当前输入值，如果为空则使用状态中的query
     const searchQuery = currentInputValue.trim() || query.trim();
@@ -79,6 +78,11 @@ function SearchBarContent(
     router.push(queryString ? `/?${queryString}` : '/');
 
     onSubmitted?.();
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitSearch();
   };
 
   return (
