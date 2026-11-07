@@ -1135,15 +1135,21 @@ export function HomeScreen() {
     const words = filter.trim().split(/\s+/).filter(Boolean);
     const nextWords = words.length ? words.slice(0, -1) : [];
     nextWords.push(suggestion.value);
-    setFilter(`${nextWords.join(' ')} `);
-    setSuggestions([]);
+    const nextFilter = nextWords.join(' ');
+    // Keep a trailing space in the input so the user can refine further, but
+    // run the search right away — tapping a suggestion is an explicit intent.
+    setFilter(`${nextFilter} `);
+    runSearch(nextFilter);
   }
 
   function submitSearch() {
+    runSearch(filter.trim());
+  }
+
+  function runSearch(nextFilter: string) {
     clearSelection();
     setSuggestions([]);
     setSuggestionsLoading(false);
-    const nextFilter = filter.trim();
     requestIdRef.current += 1;
     appendDiagnosticLog('home.search.submit', {
       filter: nextFilter,
