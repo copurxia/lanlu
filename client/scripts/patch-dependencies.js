@@ -70,3 +70,38 @@ function patchGradlePluginMirror() {
 }
 
 patchGradlePluginMirror();
+
+/**
+ * The foojay toolchains resolver only auto-downloads JDKs that are missing
+ * locally. On runners where every plugin repository is unreachable, removing
+ * the plugin lets the build proceed with the JDK already installed in the
+ * image instead of failing during settings evaluation.
+ */
+function patchSkipFoojay() {
+  if (process.env.LANLU_GRADLE_SKIP_FOOJAY !== '1') {
+    return;
+  }
+  const relativePath = 'node_modules/@react-native/gradle-plugin/settings.gradle.kts';
+  const file = path.join(root, relativePath);
+  if (!fs.existsSync(file)) {
+    return;
+  }
+  let source = fs.readFileSync(file, 'utf8');
+  if (source.includes('LANLU_GRADLE_SKIP_FOOJAY')) {
+    return;
+  }
+  const anchor =
+    'plugins { id("org.gradle.toolchains.foojay-resolver-convention").version("1.0.0") }';
+  if (!source.includes(anchor)) {
+    return;
+  }
+  source = source.replace(
+    anchor,
+    '// foojay resolver disabled (LANLU_GRADLE_SKIP_FOOJAY=1): the JDK bundled ' +
+      'with the build image satisfies the toolchain, so no auto-download is needed.',
+  );
+  fs.writeFileSync(file, source);
+  console.log(`[patch-dependencies] disabled foojay resolver in ${relativePath}`);
+}
+
+patchSkipFoojay();

@@ -273,15 +273,65 @@ $:
           - main:/root/.gradle:copy-on-write
       env:
         NEXT_TELEMETRY_DISABLED: "1"
-        # CNB runners cannot reach plugins.gradle.org; postinstall patches the
-        # React Native Gradle plugin's settings to resolve plugins via this
-        # mirror instead (see client/scripts/patch-dependencies.js).
-        LANLU_GRADLE_PLUGIN_MIRROR: "https://maven.aliyun.com/repository/gradle-plugin"
+        # Gradle plugin mirror is probed at runtime inside the build stage
+        # (LANLU_GRADLE_PLUGIN_MIRROR / LANLU_GRADLE_SKIP_FOOJAY) because CNB
+        # egress differs per runner; see the self-check at the top of the stage.
       stages:
         - name: Build release APK
           script: |
             bash -lc '
               set -eux
+
+              # --- Egress self-check --------------------------------------
+              # CNB runners may block plugins.gradle.org (the foojay resolver
+              # is published there exclusively) and possibly maven mirrors,
+              # while npm works through the platform registry mirror. Probe
+              # candidate mirrors and export the first reachable one; the
+              # postinstall patch (scripts/patch-dependencies.js) turns it
+              # into a pluginManagement repository for the RN gradle plugin.
+              env | grep -iE "proxy|registry" || true
+              java -version 2>&1 | head -n1
+
+              MARKER=org/gradle/toolchains/foojay-resolver-convention/org.gradle.toolchains.foojay-resolver-convention.gradle.plugin/1.0.0/org.gradle.toolchains.foojay-resolver-convention.gradle.plugin-1.0.0.pom
+              unset LANLU_GRADLE_PLUGIN_MIRROR LANLU_GRADLE_SKIP_FOOJAY
+              for base in \
+                https://maven.aliyun.com/repository/gradle-plugin \
+                https://repo.huaweicloud.com/repository/maven; do
+                if node -e "
+                  const https = require(\"https\");
+                  const req = https.get(process.argv[1], {timeout: 8000}, res => {
+                    console.log(\"probe\", res.statusCode, process.argv[1]);
+                    process.exit(res.statusCode && res.statusCode < 500 ? 0 : 1);
+                  });
+                  req.on(\"error\", e => { console.log(\"probe error:\", e.message); process.exit(1); });
+                  req.on(\"timeout\", () => { req.destroy(); process.exit(1); });
+                " "$base/$MARKER"; then
+                  export LANLU_GRADLE_PLUGIN_MIRROR=$base
+                  echo "using plugin mirror: $base"
+                  break
+                fi
+                echo "unreachable: $base"
+              done
+              if [ -z "${LANLU_GRADLE_PLUGIN_MIRROR:-}" ]; then
+                # No mirror reachable: drop the foojay plugin entirely and run
+                # the toolchain off the JDK bundled in the image.
+                export LANLU_GRADLE_SKIP_FOOJAY=1
+                echo "no plugin mirror reachable; skipping foojay resolver"
+              fi
+
+              # Gradle ignores http_proxy/https_proxy env vars; if the platform
+              # routes egress through one, hand it to the JVM explicitly.
+              proxy=${HTTPS_PROXY:-${https_proxy:-}}
+              if [ -n "$proxy" ]; then
+                hostport=${proxy#*//}
+                hostport=${hostport%%/*}
+                phost=${hostport%%:*}
+                pport=${hostport##*:}
+                [ "$pport" = "$phost" ] && pport=8080
+                GRADLE_OPTS="$GRADLE_OPTS -Dhttps.proxyHost=$phost -Dhttps.proxyPort=$pport -Dhttp.proxyHost=$phost -Dhttp.proxyPort=$pport"
+                export GRADLE_OPTS
+                echo "gradle proxy: $phost:$pport"
+              fi
 
               # Generate debug keystore if missing
               if [ ! -f client/android/app/debug.keystore ]; then
