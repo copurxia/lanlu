@@ -223,3 +223,33 @@ PostgreSQL 原生等价方案：
 - 写路径增加触发器开销（标签批量导入时每行一次单行 upsert），适合读远多于写的场景；
 - 文档表与视图并存：其余 DAO（推荐/统计/智能过滤）仍用视图，可后续逐步迁移；
 - 部署后首次启动会执行回填（13,435 行，秒级）并建索引（GIN 构建约数十秒）。
+
+## 浏览器真实路径探测（2026-11-07，Chromium + CDP Performance API）
+
+以真实用户路径走完全站，收集每页实际发出的 API 与耗时（线上 f494a65）：
+
+| 页面/操作 | 实际 API 瀑布（>100ms） | 结论 |
+| :-- | :-- | :-- |
+| 首页首屏 | discover 841~1017ms、首页聚合搜索 186~239ms、其余 <50ms | 已知两处待部署修复 |
+| 首页搜索框输入"漫画" | **带词分组搜索 1085ms** + discover 911ms + autocomplete 198ms | 与 curl 结论一致（V029 待部署） |
+| 分类 View more | 仅封面图 88~211ms（并行），无慢 API | 健康 |
+| 归档详情 | archive_related 推荐 **827ms**（V029 可间接受益）+ extrafanart 图 140~154ms | 推荐待部署 |
+| 阅读页 | files 35ms、progress 20ms、metadata 7ms、翻译 3ms | **全链路健康** |
+| 在线源 /source?plugin=bzsource | **source_home 1525~1873ms**、source_filters 219~257ms | 新发现（见下） |
+| 收藏页 | search favoriteonly 17ms | 健康 |
+| 未分类页 | discover 927ms | 已知 |
+| 硬刷新 DCL | 18~44ms、首屏渲染 56ms | 前端本身很快 |
+
+### 新发现：`POST /api/admin/source-plugins/bzsource/action/source_home`（1.5~1.9s）
+
+在线源页与首页都会后台预取该插件 action。这是插件 RPC 到外部站点（buscdn 等）
+的网络 IO，不是数据库问题——排查方向应是插件侧超时/缓存，而非 SQL。
+
+### 其余确认
+
+- 58 个 API 的首页瀑布中 50+ 个是封面图（/api/assets/*，1~10ms，流式正常）；
+- /random、/tankoubon、/settings/stats 直达时只发 auth/me（SPA 路由需从首页软导航才加载，
+  属前端行为而非性能问题）；
+- 阅读主链路（用户停留最久的页面）全 API < 40ms，无优化空间；
+- 全站未发现此前未覆盖的慢接口——剩余慢点全部是「V029 + 快速路径待部署」三处
+  （带词搜索、discover、archive_related），与 curl 探测结论闭环一致。
