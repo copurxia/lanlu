@@ -2643,7 +2643,9 @@ function ReaderContent() {
     }
   }, [activeArchiveId, effectivePages, sourceArchiveId, t]);
 
-  if (loading) {
+  // 仅在首载（尚无页面数据）时才整页替换为加载态；已有数据时的重入加载
+  // 保留现有内容，避免可感知的全屏黑屏闪烁
+  if (loading && effectivePages.length === 0) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <Spinner size="lg" />
@@ -2651,7 +2653,7 @@ function ReaderContent() {
     );
   }
 
-  if (error || effectivePages.length === 0) {
+  if (!loading && (error || effectivePages.length === 0)) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center">

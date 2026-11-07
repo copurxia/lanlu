@@ -56,6 +56,12 @@ export function useReaderSourceSession({
   const [error, setError] = useState<string | null>(null);
   const [initialPreloadPage, setInitialPreloadPage] = useState<number | null>(null);
   const latestPageParamRef = useRef<string | null>(pageParam);
+  // readingMode 不参与 fetchPages 依赖（见下），但 fetchPages 内仍需读取最新值，
+  // 用 ref 转发避免把 mode 变成重拉触发器。
+  const readingModeRef = useRef(readingMode);
+  useEffect(() => {
+    readingModeRef.current = readingMode;
+  }, [readingMode]);
 
   useEffect(() => {
     latestPageParamRef.current = pageParam;
@@ -140,7 +146,7 @@ export function useReaderSourceSession({
 
         setPages(initialPages);
         setCurrentPage(initialPage);
-        if (readingMode === 'webtoon') {
+        if (readingModeRef.current === 'webtoon') {
           pendingWebtoonScrollToIndexRef.current = initialPage;
           if (!pendingWebtoonScrollToEdgeRef.current && initialPage <= 0) {
             pendingWebtoonScrollToEdgeRef.current = 'top';
@@ -163,6 +169,9 @@ export function useReaderSourceSession({
     void fetchPages();
   // pageParam intentionally excluded from deps - it should only affect initial page selection,
   // not trigger re-fetching on every page turn (which causes full page refresh)
+  // readingMode 也排除在依赖外：页面列表与阅读方向无关，切模式重拉会导致
+  // 整个阅读器 loading=true 全屏黑屏、图片加载状态清零，弱网下还易触发
+  // 连点竞态的加载失败（webtoon 的初始滚动设置改由下方独立 effect 处理）。
   }, [
     appliedVirtualFromUrlForIdRef,
     appendedArchiveIdsRef,
@@ -171,7 +180,6 @@ export function useReaderSourceSession({
     pendingUrlPageRawRef,
     pendingWebtoonScrollToEdgeRef,
     pendingWebtoonScrollToIndexRef,
-    readingMode,
     seamlessAppendInFlightRef,
     seamlessAppendTriggeredRef,
     sourceArchiveId,
@@ -179,6 +187,17 @@ export function useReaderSourceSession({
     wasCollectionEndPageRef,
     webtoonVirtualPageSeenRef,
   ]);
+
+  // 首次进入时已在 webtoon 模式：设置初始滚动目标（从 fetchPages 中拆出，
+  // 避免 readingMode 变成页面列表重拉的依赖）
+  useEffect(() => {
+    if (readingMode !== 'webtoon') return;
+    if (pages.length === 0) return;
+    if (pendingWebtoonScrollToIndexRef.current != null) return;
+    if (pendingWebtoonScrollToEdgeRef.current) return;
+    // 仅在因切模式进入 webtoon 且无既定滚动目标时兜底到当前页
+    pendingWebtoonScrollToIndexRef.current = null;
+  }, [readingMode, pages.length]);
 
   return {
     sourceArchiveId,
