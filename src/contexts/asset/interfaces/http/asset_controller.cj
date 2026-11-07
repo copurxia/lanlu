@@ -70,6 +70,10 @@ public class AssetController {
                 "application/octet-stream"
             }
             ctx.setHeader("Content-Type", ct)
+            // 不设 Content-Length: stdx 的 h1 流式写入(writer)固定用 chunked
+            // 分帧, 与 CL 头并存会抛 "content-length and transfer-encoding
+            // can not be set together" 导致 500 (h2 下无此限制)。
+            // <img> 整图下载不需要 CL, chunked 流式即正确形态。
             ctx.status(HttpStatusCode.STATUS_OK)
 
             // 统一流式发送：分块读取文件并写入响应流，避免 OOM
