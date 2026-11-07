@@ -13,11 +13,35 @@ private let recoverLogger = getLogger("http_recover")
 private let auditLogger = getLogger("http_audit")
 private let uploadEntryLogger = getLogger("upload_entry")
 
+// 识别连接池借出超时（ConnectionPool: borrow timed out ...）；e.message 判别即可，
+// 避免中间件层 import postgresql_driver（保持中间件与驱动解耦）。
+private func poolBorrowTimeoutMessage(errMsg: String): String {
+    if (errMsg.contains("borrow timed out")) {
+        return errMsg
+    }
+    return ""
+}
+
 public func installObservabilityMiddleware(app: App): Unit {
     app.use(requestIdMiddleware(config: RequestIdConfig()))
     app.use(recoverMiddleware(config: RecoverConfig(
         customHandler: { ctx, e =>
             let requestId = ctx.getLocal("request_id") ?? "-"
+            // 连接池借出超时（postgresql-driver P1001）：过载时快速失败为 503，
+            // 而非无限排队拖慢全站。
+            let poolTimeout = poolBorrowTimeoutMessage(e.message)
+            if (poolTimeout.size > 0) {
+                recoverLogger.warn(
+                    "DB connection pool saturated; request rejected",
+                    ("request_id", requestId),
+                    ("method", ctx.method),
+                    ("path", ctx.path),
+                    ("detail", poolTimeout)
+                )
+                ctx.status(503)
+                ResponseView.errorJson(ctx, "Service busy: database connection pool saturated, retry later", 503)
+                return
+            }
             recoverLogger.error(
                 "Recovered unhandled HTTP exception",
                 ("request_id", requestId),

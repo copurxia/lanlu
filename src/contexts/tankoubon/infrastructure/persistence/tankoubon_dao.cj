@@ -299,9 +299,11 @@ public class TankoubonDao {
     }
 
     /**
-     * 获取所有Tankoubons
+     * 获取所有Tankoubons。
+     * includeArchives=false 时跳过逐合集的 children 查询（调用方应使用
+     * getBatchArchivesInTankoubon 批量补齐，避免 N+1）。
      */
-    public static func getAllTankoubons(): Array<TankoubonData> {
+    public static func getAllTankoubons(includeArchives!: Bool = true): Array<TankoubonData> {
         let sql = """
             SELECT
                 t.id,
@@ -354,9 +356,15 @@ public class TankoubonDao {
                         tankoubon.updated_at = row.getOrNullText(11) ?? ""
                         tankoubon
                     })
-                    for (tankoubon in rows) {
-                        tankoubon.archives = getArchivesInTankoubonWithConnection(db, tankoubon.tankoubon_id)
-                        tankoubons.add(tankoubon)
+                    if (includeArchives) {
+                        for (tankoubon in rows) {
+                            tankoubon.archives = getArchivesInTankoubonWithConnection(db, tankoubon.tankoubon_id)
+                            tankoubons.add(tankoubon)
+                        }
+                    } else {
+                        for (tankoubon in rows) {
+                            tankoubons.add(tankoubon)
+                        }
                     }
                     return tankoubons.toArray()
                 } catch (e: Exception) {

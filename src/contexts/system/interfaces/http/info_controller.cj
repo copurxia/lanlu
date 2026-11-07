@@ -20,8 +20,8 @@ public class InfoController {
      */
     public static func getServerInfo(ctx: Ctx) {
         try {
-            // 获取档案总数
-            let (_, totalArchives) = ArchiveDao.searchArchives("", "", 0, 0, "title", "asc")
+            // 获取档案总数（索引 only-scan；不触发聚合视图物化）
+            let totalArchives = ArchiveDao.countArchivesFast()
 
             // 获取全局总阅读页数
             let totalPagesRead = UserStatsDao.getGlobalTotalPagesRead()

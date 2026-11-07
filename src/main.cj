@@ -25,11 +25,7 @@ main(): Int64 {
         load()
     }
 
-    // 调试：检查环境变量是否正确加载
-    let logLevel = getVariable("LOG_LEVEL") ?? "INFO"
-    println("MAIN: LOG_LEVEL from config = '${logLevel}'")
-
-    // 初始化日志系统（现在环境变量已经加载）
+    // 初始化日志系统（.env 已在上方加载，LOG_LEVEL 由日志系统自行读取）
     initializeLogging()
 
     // 获取应用日志记录器
@@ -40,13 +36,7 @@ main(): Int64 {
     let gitBranch: String = @GitBranch("unknown")
     let appVersion: String = "${version}-${gitBranch}.${gitCommitIdShort}(${cjcVersion})"
 
-    // 测试日志输出
-    logger.debug("=== LOGGING SYSTEM TEST ===")
     logger.info("Starting LANLU server", ("version", appVersion))
-    logger.info("Application starting... step 1: logging initialized")
-    logger.debug("This is a debug message")
-    logger.warn("This is a warning message")
-    logger.debug("Application starting... step 2: logging test complete")
 
     // 引用 DatabaseConfig 以触发其静态初始化器，加载环境变量
     logger.debug("Application starting... step 3: triggering DatabaseConfig static init")

@@ -114,33 +114,80 @@ public class Tankoubon {
  */
 public class TankoubonModel {
     /**
-     * 获取所有单行本
-     */
-    public static func getAllTankoubons(): Array<Tankoubon> {
-        let daoData = TankoubonDao.getAllTankoubons()
-        var tankoubons: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
-
-        for (data in daoData) {
-            let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
-            t.cover_asset_id = data.cover_asset_id
-            t.assets_raw = data.assets_raw
-            tankoubons.add(t)
-        }
-
-        return tankoubons.toArray()
-    }
-
-    /**
-     * 获取所有单行本（带聚合 tags/progress 等），用于列表展示
+     * 获取所有单行本（带聚合 tags/progress 等），用于列表展示。
+     * 批量路径：基础行 + 批量聚合元数据（RocksDB 缓存）+ 批量 children + 批量收藏状态，
+     * 每请求 SQL 条数恒定（≤5 条），替代旧版每合集 4+ 条的 N+1 逐条查询。
      */
     public static func getAllTankoubonsWithUser(userId: Int64): Array<Tankoubon> {
-        let daoData = TankoubonDao.getAllTankoubons()
+        let daoData = TankoubonDao.getAllTankoubons(includeArchives: false)
+        if (daoData.size == 0) {
+            return []
+        }
+
+        var ids = ArrayList<String>()
+        for (data in daoData) {
+            ids.add(data.tankoubon_id)
+        }
+        let idArray = ids.toArray()
+
+        let aggMap = TankoubonDao.getBatchAggregatedMetadata(idArray, userId)
+        let childrenMap = TankoubonDao.getBatchArchivesInTankoubon(idArray)
+        var favoriteMap = HashMap<String, Bool>()
+        if (userId > 0) {
+            favoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, idArray)
+        }
+
         var tankoubons: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
         for (data in daoData) {
             let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
             t.cover_asset_id = data.cover_asset_id
             t.assets_raw = data.assets_raw
-            applyAggregatedMetadata(t, userId)
+            t.release_at = data.release_at
+            t.created_at = data.created_at
+            t.updated_at = data.updated_at
+
+            // 聚合元数据：无子档案的空合集批量 SQL 不产生行（与旧 getAggregatedMetadata 的
+            // JOIN 语义一致），此时保留基础字段，仅补 children 与收藏状态。
+            match (aggMap.get(data.tankoubon_id)) {
+                case Some(agg) =>
+                    if (agg.tags.size > 0) {
+                        t.tags = agg.tags
+                    }
+                    if (agg.cover_asset_id > 0) {
+                        t.cover_asset_id = agg.cover_asset_id
+                    }
+                    t.assets_raw = agg.assets_raw
+                    if (agg.release_at.size > 0) {
+                        t.release_at = agg.release_at
+                    }
+                    if (agg.created_at.size > 0) {
+                        t.created_at = agg.created_at
+                    }
+                    if (agg.updated_at.size > 0) {
+                        t.updated_at = agg.updated_at
+                    }
+                    t.pagecount = agg.pagecount
+                    t.archive_count = agg.archive_count
+                    t.progress = agg.progress
+                    t.last_read_time = agg.last_read_time
+                    t.isnew = agg.isnew
+                case None => ()
+            }
+
+            match (childrenMap.get(data.tankoubon_id)) {
+                case Some(children) =>
+                    if (children.size > 0) {
+                        t.archives = children
+                    }
+                case None => ()
+            }
+
+            if (userId > 0) {
+                match (favoriteMap.get(data.tankoubon_id)) {
+                    case Some(isFav) => t.isfavorite = isFav
+                    case None => ()
+                }
+            }
             tankoubons.add(t)
         }
         return tankoubons.toArray()

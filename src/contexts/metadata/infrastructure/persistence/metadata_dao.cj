@@ -94,6 +94,8 @@ public class MetadataDao {
         }
         if (normalizedType == "archive") {
             let _ = DerivedCacheUtils.bumpArchiveAssetsRawVersion("${reason}:${normalizedId}")
+            // 归档元数据（标题/标签/时间）变化影响搜索结果，一并失效。
+            let _ = DerivedCacheUtils.bumpSearchResultVersion("${reason}:${normalizedId}")
         } else if (normalizedType == "tankoubon") {
             let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("${reason}:${normalizedId}")
         }

@@ -21,6 +21,8 @@ public class ConnectionPool {
     let idleSince = ArrayList<Int64>()
     var total: Int64 = 0
     var closed = false
+    var waiting: Int64 = 0
+    var borrowTimeoutCount: Int64 = 0
 
     public init(cfg: PoolConfig, connect: () -> CPointer<Unit>, disconnect: (CPointer<Unit>) -> Unit) {
         this.cfg = cfg
@@ -49,39 +51,77 @@ public class ConnectionPool {
         synchronized(mtx) { total }
     }
 
-    /** 借一条连接：有空闲直接复用;无空闲且未达上限则新建;已达上限则阻塞等归还。 */
+    /** 当前阻塞在 borrow 等待队列中的数量（饱和监控指标）。 */
+    public func waitingCount(): Int64 {
+        synchronized(mtx) { waiting }
+    }
+
+    /** borrow 超时累计次数（饱和监控指标）。 */
+    public func borrowTimeouts(): Int64 {
+        synchronized(mtx) { borrowTimeoutCount }
+    }
+
+    /** 借一条连接：有空闲直接复用;无空闲且未达上限则新建;已达上限则限时等待归还，超时抛 PGError。 */
     public func borrow(): CPointer<Unit> {
         mtx.lock()
         try {
-            while (true) {
-                if (closed) {
-                    throw PGError("ConnectionPool: pool closed")
-                }
-                reapIdleLocked()
-                if (!idle.isEmpty()) {
-                    let last = idle.size - 1
-                    let c = idle[last]
-                    idle.remove(at: last)
-                    idleSince.remove(at: last)
-                    return c
-                }
-                if (total < cfg.maxSize) {
-                    total += 1
-                    mtx.unlock()
-                    let made = try {
-                        connect()
-                    } catch (e: Exception) {
-                        mtx.lock()
-                        total -= 1
-                        cond.notify()
-                        throw e
+            waiting += 1
+            try {
+                while (true) {
+                    if (closed) {
+                        throw PGError("ConnectionPool: pool closed")
                     }
-                    mtx.lock()
-                    return made
+                    reapIdleLocked()
+                    if (!idle.isEmpty()) {
+                        let last = idle.size - 1
+                        let c = idle[last]
+                        idle.remove(at: last)
+                        idleSince.remove(at: last)
+                        return c
+                    }
+                    if (total < cfg.maxSize) {
+                        total += 1
+                        mtx.unlock()
+                        let made = try {
+                            connect()
+                        } catch (e: Exception) {
+                            mtx.lock()
+                            total -= 1
+                            cond.notify()
+                            throw e
+                        }
+                        mtx.lock()
+                        return made
+                    }
+                    // 饱和：限时等待归还，避免慢查询占池导致全站无界排队。
+                    if (cfg.borrowTimeoutMs > 0) {
+                        let notified = cond.wait(timeout: Duration.millisecond * cfg.borrowTimeoutMs)
+                        if (!notified) {
+                            // 超时醒来后仍持锁；再检查一次空闲（notify 后竞争失败的兜底）。
+                            reapIdleLocked()
+                            if (!idle.isEmpty()) {
+                                let last = idle.size - 1
+                                let c = idle[last]
+                                idle.remove(at: last)
+                                idleSince.remove(at: last)
+                                return c
+                            }
+                            borrowTimeoutCount += 1
+                            // SQLSTATE 用类池超时代码（非 libpq 标准码，前缀 P1 避免与
+                            // PG 官方码冲突），供应用层识别并转 503。
+                            throw PGError(
+                                "ConnectionPool: borrow timed out after ${cfg.borrowTimeoutMs.toString()}ms " +
+                                "(pool saturated: max=${cfg.maxSize.toString()}, waiting=${waiting.toString()})",
+                                sqlstate: "P1001")
+                        }
+                    } else {
+                        cond.wait()
+                    }
                 }
-                cond.wait()
+                throw PGError("ConnectionPool: unreachable")
+            } finally {
+                waiting -= 1
             }
-            throw PGError("ConnectionPool: unreachable")
         } finally {
             mtx.unlock()
         }

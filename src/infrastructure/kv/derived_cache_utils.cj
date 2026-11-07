@@ -19,6 +19,12 @@ public class DerivedCacheUtils {
     private static let archiveAssetsRawNamespace = "archive_assets_raw"
     private static let archiveBasePathPayloadNamespace = "archive_base_path_cache"
     private static let archiveBasePathNamespace = "archive_base_path"
+    private static let tagTranslationsMapPayloadNamespace = "tag_translations_map_cache"
+    private static let tagTranslationsMapNamespace = "tag_translations_map"
+    private static let tagCloudPayloadNamespace = "tag_cloud_cache"
+    private static let tagCloudNamespace = "tag_cloud"
+    private static let searchResultPayloadNamespace = "search_result_cache"
+    private static let searchResultNamespace = "search_result"
 
     public static func normalizeUniqueIds(ids: Array<String>): Array<String> {
         let deduped = ArrayList<String>()
@@ -113,6 +119,45 @@ public class DerivedCacheUtils {
     public static func bumpArchiveBasePathVersion(reason: String): Int64 {
         let _ = reason
         return PersistentCacheService.bumpNamespaceVersion(archiveBasePathNamespace)
+    }
+
+    public static func getTagTranslationsMapPayloadNamespace(): String {
+        return tagTranslationsMapPayloadNamespace
+    }
+
+    public static func getTagTranslationsMapVersion(): Int64 {
+        return PersistentCacheService.getNamespaceVersion(tagTranslationsMapNamespace)
+    }
+
+    public static func bumpTagTranslationsMapVersion(reason: String): Int64 {
+        let _ = reason
+        return PersistentCacheService.bumpNamespaceVersion(tagTranslationsMapNamespace)
+    }
+
+    public static func getTagCloudPayloadNamespace(): String {
+        return tagCloudPayloadNamespace
+    }
+
+    public static func getTagCloudVersion(): Int64 {
+        return PersistentCacheService.getNamespaceVersion(tagCloudNamespace)
+    }
+
+    public static func bumpTagCloudVersion(reason: String): Int64 {
+        let _ = reason
+        return PersistentCacheService.bumpNamespaceVersion(tagCloudNamespace)
+    }
+
+    public static func getSearchResultPayloadNamespace(): String {
+        return searchResultPayloadNamespace
+    }
+
+    public static func getSearchResultVersion(): Int64 {
+        return PersistentCacheService.getNamespaceVersion(searchResultNamespace)
+    }
+
+    public static func bumpSearchResultVersion(reason: String): Int64 {
+        let _ = reason
+        return PersistentCacheService.bumpNamespaceVersion(searchResultNamespace)
     }
 
     private static func buildTankoubonAggregatedUserNamespace(userId: Int64): String {

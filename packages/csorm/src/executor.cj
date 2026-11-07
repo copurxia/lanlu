@@ -140,15 +140,30 @@ public class Database {
     // ===== RAW =====
     /** 执行原始 SQL 查询，物化全部行并映射。占位符风格由调用方按后端方言管理。 */
     public func raw<T>(sql: String, params: Array<Value>, map: (Row) -> T): Array<T> {
-        let rows = conn.queryAll(sql, params)
-        Array<T>(rows.size, { i => map(rows[i]) })
+        let start = MonoTime.now()
+        try {
+            let rows = conn.queryAll(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "raw")
+            Array<T>(rows.size, { i => map(rows[i]) })
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "raw")
+            throw e
+        }
     }
 
     /** 执行原始 SQL 查询，返回首行映射(无结果 None)。 */
     public func rawOne<T>(sql: String, params: Array<Value>, map: (Row) -> T): ?T {
-        match (conn.queryOne(sql, params)) {
-            case Some(r) => Some(map(r))
-            case None => None
+        let start = MonoTime.now()
+        try {
+            let rowOpt = conn.queryOne(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "rawOne")
+            match (rowOpt) {
+                case Some(r) => Some(map(r))
+                case None => None
+            }
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "rawOne")
+            throw e
         }
     }
 
@@ -165,12 +180,27 @@ public class Database {
 
     /** 执行原始写语句(无 RETURNING)，返回受影响行数。 */
     public func execRaw(sql: String, params: Array<Value>): Int64 {
-        conn.exec(sql, params)
+        let start = MonoTime.now()
+        try {
+            let affected = conn.exec(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "execRaw")
+            affected
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "execRaw")
+            throw e
+        }
     }
 
     /** 执行原始无参数语句(DDL/迁移)。 */
     public func execRawSql(sql: String): Unit {
-        conn.execSql(sql)
+        let start = MonoTime.now()
+        try {
+            conn.execSql(sql)
+            DatabaseMetric.record(sql, [], MonoTime.now() - start, false, "execRawSql")
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, [], MonoTime.now() - start, true, "execRawSql")
+            throw e
+        }
     }
 
     // ===== 事务透传 =====

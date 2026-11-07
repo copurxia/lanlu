@@ -10,6 +10,7 @@ import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.infrastructure.middleware.*
+import lanlu.infrastructure.kv.{DerivedCacheUtils, PersistentCacheService}
 import std.convert.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
@@ -494,6 +495,21 @@ public class SearchController {
             }
         }
 
+        // 主路径缓存：同参数请求在 TTL 窗口内直接复用上次响应 JSON。
+        // 不缓存：source 类型（实时读插件）、按分类聚合（结构不同）。
+        let cacheKey = buildSearchResultCacheKey(
+            DerivedCacheUtils.getSearchResultVersion(),
+            filter, category, page, pageSize, sortby, order,
+            newOnly, untaggedOnly, groupByTanks, favoriteOnly,
+            dateFrom, dateTo, userId, tankoubonId, lang
+        )
+        match (readSearchResultCache(cacheKey)) {
+            case Some(cached) =>
+                ResponseView.json(ctx, cached)
+                return
+            case None => ()
+        }
+
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -569,15 +585,53 @@ public class SearchController {
         w.writeName("recordsTotal").writeValue(bundle.totalCount)
         w.endObject()
         w.flush()
-        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+        let responseBody = String.fromUtf8(readToEnd(out))
+        writeSearchResultCache(cacheKey, responseBody)
+        ResponseView.json(ctx, responseBody)
     }
 
-    /**
-     * 获取搜索建议
-     */
-    public static func getSearchSuggestions(ctx: Ctx) {
-        let suggestions = "[\"suggestion1\",\"suggestion2\",\"suggestion3\"]"
-        ResponseView.successJson(ctx, suggestions, "获取搜索建议成功")
+    // ===== 搜索结果缓存（短 TTL + 版本失效）=====
+    // 搜索含对聚合视图的全量 COUNT/物化，是实测最贵的读路径；同参数请求在
+    // TTL 窗口内直接返回缓存 JSON。写路径（归档/元数据/标签/合集变更）通过
+    // bumpSearchResultVersion 失效；用户相关状态（newonly/收藏）键入 userId 隔离。
+    private static let searchResultCacheTtlSeconds: Int64 = 30
+
+    private static func buildSearchResultCacheKey(
+        version: Int64,
+        filter: String,
+        category: String,
+        page: Int32,
+        pageSize: Int32,
+        sortby: String,
+        order: String,
+        newOnly: Bool,
+        untaggedOnly: Bool,
+        groupByTanks: Bool,
+        favoriteOnly: Bool,
+        dateFrom: String,
+        dateTo: String,
+        userId: Int64,
+        tankoubonId: String,
+        lang: String
+    ): String {
+        return "v${version.toString()}:u${userId.toString()}:f[${filter}]:c[${category}]" +
+            ":p${page.toString()}:${pageSize.toString()}:s[${sortby}]:o[${order}]" +
+            ":n${if (newOnly) { "1" } else { "0" }}:t${if (untaggedOnly) { "1" } else { "0" }}" +
+            ":g${if (groupByTanks) { "1" } else { "0" }}:fv${if (favoriteOnly) { "1" } else { "0" }}" +
+            ":df[${dateFrom}]:dt[${dateTo}]:tk[${tankoubonId}]:l[${lang}]"
+    }
+
+    private static func readSearchResultCache(cacheKey: String): Option<String> {
+        return PersistentCacheService.get(DerivedCacheUtils.getSearchResultPayloadNamespace(), cacheKey)
+    }
+
+    private static func writeSearchResultCache(cacheKey: String, body: String): Unit {
+        let _ = PersistentCacheService.set(
+            DerivedCacheUtils.getSearchResultPayloadNamespace(),
+            cacheKey,
+            body,
+            searchResultCacheTtlSeconds
+        )
     }
 
 }

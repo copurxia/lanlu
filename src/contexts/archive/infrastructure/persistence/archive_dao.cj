@@ -131,10 +131,13 @@ public class ArchiveDao {
 
     private static func invalidateTankoubonAggregatedContent(reason: String): Unit {
         let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion(reason)
+        // 聚合内容变化影响搜索结果（标题/标签/合集分组），一并失效搜索结果缓存。
+        let _ = DerivedCacheUtils.bumpSearchResultVersion(reason)
     }
 
     private static func invalidateTankoubonChildren(reason: String): Unit {
         let _ = DerivedCacheUtils.bumpTankoubonChildrenVersion(reason)
+        let _ = DerivedCacheUtils.bumpSearchResultVersion(reason)
     }
 
     private static func invalidateArchiveAssetsRaw(reason: String): Unit {
@@ -652,6 +655,28 @@ public class ArchiveDao {
     /**
      * 搜索归档
      */
+    /**
+     * 归档总数（索引 only-scan）。供 /api/info 等仅需总数的场景使用，
+     * 替代 searchArchives("", ...) —— 后者会触发聚合视图的全量物化与排序。
+     */
+    public static func countArchivesFast(): Int64 {
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    match (db.rawOne<Int64>("SELECT COUNT(*) FROM archives", [], { row => row.getInt64(0) })) {
+                        case Some(c) => return c
+                        case None => return 0
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("统计归档总数失败", ("error", e.message))
+                    return 0
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return 0
+        }
+    }
+
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String): (Array<ArchiveData>, Int64) {
         return searchArchives(filter, category, start, count, sortby, order, false, false, false, "", "", 0)
     }
@@ -949,9 +974,15 @@ public class ArchiveDao {
                     }
 
                     // 构建计数 SQL
+                    // 无任何过滤条件且无搜索词时，视图 archive_metadata_search 的
+                    // "FROM archives LEFT JOIN metadata ... GROUP BY a.id" 每个 archive 恰好
+                    // 聚合为一行，COUNT(*) 与基表计数恒等，改用 SELECT COUNT(*) FROM archives
+                    // 走索引 only-scan，避免对聚合视图全量物化（万级归档下 ~1s → 毫秒级）。
                     if (!hasRelevance) {
                         if (baseWhereClause.size > 0) {
                             countSql += " WHERE " + baseWhereClause
+                        } else {
+                            countSql = "SELECT COUNT(*) FROM archives"
                         }
                     } else {
                         // relevance_score 只在本语句内计算一次
@@ -1325,6 +1356,21 @@ public class ArchiveDao {
                     """
                     if (whereClause.size > 0) {
                         countSql += " WHERE " + whereClause
+                    } else if (relevanceExpr == "1") {
+                        // 无过滤无搜索词：分组数 =「含档案的合集数」+「不属于任何合集的档案数」，
+                        // 与上方 COALESCE 计数严格等价（tankoubons INNER JOIN 保持孤儿引用语义），
+                        // 但全部走基表索引，避免聚合视图全量物化。
+                        countSql = """
+                            SELECT (SELECT COUNT(DISTINCT tba.tankoubon_id)
+                                      FROM tankoubon_archives tba
+                                      JOIN tankoubons tb ON tb.id = tba.tankoubon_id)
+                                 + (SELECT COUNT(*)
+                                      FROM archives a
+                                     WHERE NOT EXISTS (SELECT 1
+                                                         FROM tankoubon_archives tba
+                                                         JOIN tankoubons tb ON tb.id = tba.tankoubon_id
+                                                        WHERE tba.archive_id = a.id))
+                        """
                     }
 
                     getLogger("archive_dao").debug("执行分组计数SQL", ("sql", countSql))

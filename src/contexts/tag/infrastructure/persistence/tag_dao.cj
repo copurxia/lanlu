@@ -861,6 +861,15 @@ public class TagDao {
      * 获取指定语言的所有标签翻译映射
      */
     public static func getTranslationsMap(lang: String): HashMap<String, String> {
+        // 全量翻译映射：tag 表全表加载 + JSON 解析成本高（~1.4MB 响应），
+        // 走 RocksDB 缓存，写失效挂到标签翻译变更处（bumpTagTranslationsMapVersion）。
+        let cacheVersion = DerivedCacheUtils.getTagTranslationsMapVersion()
+        let cacheKey = "v${cacheVersion.toString()}:lang:${lang}"
+        match (readTranslationsMapCache(cacheKey)) {
+            case Some(cached) => return cached
+            case None => ()
+        }
+
         var result: HashMap<String, String> = HashMap<String, String>()
 
         let sql = "SELECT namespace, name, translations FROM tags"
@@ -886,7 +895,31 @@ public class TagDao {
                 }
             case None => ()
         }
+        writeTranslationsMapCache(cacheKey, result)
         return result
+    }
+
+    private static let translationsMapCacheTtlSeconds: Int64 = 10 * 60
+
+    private static func readTranslationsMapCache(cacheKey: String): Option<HashMap<String, String>> {
+        let cacheNamespace = DerivedCacheUtils.getTagTranslationsMapPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                match (TranslationsMapCacheCodec.decode(payload)) {
+                    case Some(cached) => return Some(cached)
+                    case None =>
+                        let _ = PersistentCacheService.delete(cacheNamespace, cacheKey)
+                        getLogger("tag_dao").warn("tag translations map cache decode failed; evicted", ("key", cacheKey))
+                        return None
+                }
+            case None => return None
+        }
+    }
+
+    private static func writeTranslationsMapCache(cacheKey: String, map: HashMap<String, String>): Unit {
+        let cacheNamespace = DerivedCacheUtils.getTagTranslationsMapPayloadNamespace()
+        let _ = PersistentCacheService.set(cacheNamespace, cacheKey,
+            TranslationsMapCacheCodec.encode(map), translationsMapCacheTtlSeconds)
     }
 
     /**
@@ -1297,8 +1330,17 @@ public class TagDao {
         return DerivedCacheUtils.bumpTagTranslationSearchVersion("tag_dao")
     }
 
+    /** 失效全量翻译映射与词云缓存（标签/翻译/归档标签变更时调用）。 */
+    public static func bumpTranslationMapAndCloudCacheVersion(): Unit {
+        DerivedCacheUtils.bumpTagTranslationsMapVersion("tag_dao")
+        DerivedCacheUtils.bumpTagCloudVersion("tag_dao")
+    }
+
     private static func invalidateTranslationSearchCache(): Unit {
         let nextVersion = bumpTranslationSearchCacheVersion()
+        // 翻译写路径同时影响全量翻译映射缓存与词云（翻译显示文案），一并失效。
+        let _ = DerivedCacheUtils.bumpTagTranslationsMapVersion("tag_dao")
+        let _ = DerivedCacheUtils.bumpTagCloudVersion("tag_dao")
         logger.debug("tag translation search cache version bumped", ("version", nextVersion.toString()))
     }
 
@@ -1684,6 +1726,15 @@ public class TagDao {
      * 返回: [(fullName, display, count)]
      */
     public static func getTagCloud(lang: String, limit: Int64): ArrayList<(String, String, Int64)> {
+        // 词云聚合成本高（tags × metadata_tags 全表 JOIN + COUNT DISTINCT），
+        // 走 RocksDB 缓存，写失效挂到标签/归档标签变更处（bumpTagCloudVersion）。
+        let cacheVersion = DerivedCacheUtils.getTagCloudVersion()
+        let cacheKey = "v${cacheVersion.toString()}:lang:${lang}:limit:${limit.toString()}"
+        match (readTagCloudCache(cacheKey)) {
+            case Some(cached) => return cached
+            case None => ()
+        }
+
         var result: ArrayList<(String, String, Int64)> = ArrayList<(String, String, Int64)>()
         let sql = """
             SELECT t.namespace, t.name,
@@ -1714,7 +1765,31 @@ public class TagDao {
                     getLogger("tag_dao").error("获取标签词云失败", ("error", e.message))
                 }
         }
+        writeTagCloudCache(cacheKey, result)
         return result
+    }
+
+    private static let tagCloudCacheTtlSeconds: Int64 = 10 * 60
+
+    private static func readTagCloudCache(cacheKey: String): Option<ArrayList<(String, String, Int64)>> {
+        let cacheNamespace = DerivedCacheUtils.getTagCloudPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                match (TagCloudCacheCodec.decode(payload)) {
+                    case Some(cached) => return Some(cached)
+                    case None =>
+                        let _ = PersistentCacheService.delete(cacheNamespace, cacheKey)
+                        getLogger("tag_dao").warn("tag cloud cache decode failed; evicted", ("key", cacheKey))
+                        return None
+                }
+            case None => return None
+        }
+    }
+
+    private static func writeTagCloudCache(cacheKey: String, items: ArrayList<(String, String, Int64)>): Unit {
+        let cacheNamespace = DerivedCacheUtils.getTagCloudPayloadNamespace()
+        let _ = PersistentCacheService.set(cacheNamespace, cacheKey,
+            TagCloudCacheCodec.encode(items), tagCloudCacheTtlSeconds)
     }
 
     public static func updateIconAssetId(id: Int64, iconAssetId: Int64): Bool {
@@ -1846,6 +1921,108 @@ public class TagDao {
                     getLogger("tag_dao").error("mergeById failed", ("error", e.message))
                     return false
                 }
+        }
+    }
+}
+private class TranslationsMapCacheCodec {
+    public static func encode(map: HashMap<String, String>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        for ((tag, text) in map) {
+            w.writeName(tag).writeValue(text)
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    public static func decode(payload: String): Option<HashMap<String, String>> {
+        let trimmed = payload.trimAscii()
+        if (trimmed.size == 0) {
+            return None
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let reader = JsonReader(buf)
+            if (reader.peek() != Some(BeginObject)) {
+                return None
+            }
+            let map = HashMap<String, String>()
+            reader.startObject()
+            while (reader.peek() != EndObject) {
+                let name = reader.readName()
+                let value = reader.readValue<String>()
+                map[name] = value
+            }
+            reader.endObject()
+            return Some(map)
+        } catch (_: Exception) {
+            return None
+        }
+    }
+}
+
+private class TagCloudCacheCodec {
+    // 条目：{"n": fullName, "d": display, "c": count} 的 JSON 数组
+    public static func encode(items: ArrayList<(String, String, Int64)>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for ((fullName, display, count) in items) {
+            w.startObject()
+            w.writeName("n").writeValue(fullName)
+            w.writeName("d").writeValue(display)
+            w.writeName("c").writeValue(count)
+            w.endObject()
+        }
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    public static func decode(payload: String): Option<ArrayList<(String, String, Int64)>> {
+        let trimmed = payload.trimAscii()
+        if (trimmed.size == 0) {
+            return None
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let reader = JsonReader(buf)
+            if (reader.peek() != Some(BeginArray)) {
+                return None
+            }
+            let items = ArrayList<(String, String, Int64)>()
+            reader.startArray()
+            while (reader.peek() != EndArray) {
+                if (reader.peek() != Some(BeginObject)) {
+                    return None
+                }
+                var fullName = ""
+                var display = ""
+                var count = 0i64
+                reader.startObject()
+                while (reader.peek() != EndObject) {
+                    let name = reader.readName()
+                    if (name == "n") {
+                        fullName = reader.readValue<String>()
+                    } else if (name == "d") {
+                        display = reader.readValue<String>()
+                    } else if (name == "c") {
+                        count = reader.readValue<Int64>()
+                    } else {
+                        reader.skip()
+                    }
+                }
+                reader.endObject()
+                items.add((fullName, display, count))
+            }
+            reader.endArray()
+            return Some(items)
+        } catch (_: Exception) {
+            return None
         }
     }
 }

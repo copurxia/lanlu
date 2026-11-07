@@ -8,18 +8,22 @@ import std.convert.*
  * - maxSize: 池中并存连接上限(借满后再借则阻塞等待归还)。
  * - minSize: 池预热常驻最小空闲连接数。
  * - idleTimeoutMs: 空闲连接回收阈值(毫秒);<=0 不回收。
+ * - borrowTimeoutMs: 借出等待上限(毫秒);<=0 表示无限等待。饱和时超时抛
+ *   PGError(SQLSTATE 走类池超时)，避免慢查询长期占池导致全站无界排队。
  */
 public struct PoolConfig {
     public let maxSize: Int64
     public let minSize: Int64
     public let idleTimeoutMs: Int64
+    public let borrowTimeoutMs: Int64
 
-    public init(maxSize: Int64, minSize: Int64, idleTimeoutMs: Int64) {
+    public init(maxSize: Int64, minSize: Int64, idleTimeoutMs: Int64, borrowTimeoutMs!: Int64 = 5000) {
         let mx = if (maxSize < 1) { 1 } else { maxSize }
         let mn = if (minSize < 0) { 0 } else if (minSize > mx) { mx } else { minSize }
         this.maxSize = mx
         this.minSize = mn
         this.idleTimeoutMs = if (idleTimeoutMs < 0) { 0 } else { idleTimeoutMs }
+        this.borrowTimeoutMs = borrowTimeoutMs
     }
 
     public static func default(): PoolConfig {
@@ -110,6 +114,7 @@ func parseUrlForm(url: String): (String, PoolConfig) {
     var maxSize: Int64 = 10
     var minSize: Int64 = 0
     var idleMs: Int64 = 0
+    var borrowMs: Int64 = 5000
     let kept = ArrayList<String>()
     if (!query.isEmpty()) {
         for (pair in query.split("&")) {
@@ -126,6 +131,8 @@ func parseUrlForm(url: String): (String, PoolConfig) {
                         minSize = parseIntOr(v, minSize)
                     } else if (k == "pool.idleTimeout") {
                         idleMs = parseIntOr(v, idleMs)
+                    } else if (k == "pool.borrowTimeout") {
+                        borrowMs = parseIntOr(v, borrowMs)
                     } else {
                         kept.add(escapeKv(k) + "=" + escapeKv(v))
                     }
@@ -142,7 +149,7 @@ func parseUrlForm(url: String): (String, PoolConfig) {
     if (!password.isEmpty()) { parts.add("password=" + escapeKv(password)) }
     parts.add("dbname=" + escapeKv(dbname))
     for (k in kept) { parts.add(k) }
-    return (joinSpace(parts), PoolConfig(maxSize, minSize, idleMs))
+    return (joinSpace(parts), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs))
 }
 
 // keyword 形式解析：空格分隔的 k=v，剥离 pool.*。
@@ -150,6 +157,7 @@ func parseKeywordForm(s: String): (String, PoolConfig) {
     var maxSize: Int64 = 10
     var minSize: Int64 = 0
     var idleMs: Int64 = 0
+    var borrowMs: Int64 = 5000
     let kept = ArrayList<String>()
     for (part in s.split(" ")) {
         if (part.isEmpty()) {
@@ -165,13 +173,15 @@ func parseKeywordForm(s: String): (String, PoolConfig) {
                     minSize = parseIntOr(v, minSize)
                 } else if (k == "pool.idleTimeout") {
                     idleMs = parseIntOr(v, idleMs)
+                } else if (k == "pool.borrowTimeout") {
+                    borrowMs = parseIntOr(v, borrowMs)
                 } else {
                     kept.add(part)
                 }
             case None => kept.add(part)
         }
     }
-    return (joinSpace(kept), PoolConfig(maxSize, minSize, idleMs))
+    return (joinSpace(kept), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs))
 }
 
 // ----- 工具 -----
