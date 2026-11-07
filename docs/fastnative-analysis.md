@@ -85,3 +85,27 @@
 - `@FastNative` 适合"高频、极短、纯内存"的 C 访问器，本项目符合的主要是 libpq 的取列函数。
 - 它优化的是**单次跨语言调用开销**，而本项目实测瓶颈是**调用次数**（N+1、重复 COUNT、无缓存）和**并发排队**，两者不在一个数量级。
 - 推荐顺序：先做第五节的批量物化/去重判空/复用列索引，再考虑顺手加 `@FastNative`；不要把它当成性能问题的解决方案。
+
+---
+
+## 八、A/B 实测结论（2026-11-07 补充，工具链 cjc 1.1.0 via cjv）
+
+已落地：`packages/postgresql-driver/src/ffi.cj` 的 8 个纯内存访问器加 `@FastNative`
+（`PQresultStatus`/`PQntuples`/`PQnfields`/`PQfname`/`PQftype`/`PQgetvalue`/`PQgetisnull`/`PQcmdTuples`），
+阻塞类声明（`PQexecParams`/`PQconnectdb` 等）保持不标注。
+
+微基准（`fastnative_bench_test.cj`：20000 次小查询 + 2000 次 50 行×8 列查询，
+物化路径 FFI 访问器调用约 240 万次，本地 PG17）：
+
+| 组 | 4 次运行（benchPqAccessors case 总耗时） | 稳定区间 |
+| :-- | :-- | :-- |
+| 基线（无标注） | 2.018 / 2.057 / 2.080 s | ~2.02–2.08s |
+| 加 @FastNative | 2.102 / 2.029 / 2.050 / 1.942 s | ~1.94–2.10s |
+
+**结论：两组区间重叠，差异在运行噪声内（<±5%），不可辨析。** 与第六节预估一致——
+每次调用节省的安全区进出开销（数十 ns 级）被同查询中 PQexecParams 网络往返（百 µs 级）
+与 CString→String 堆分配主导，整体占比 <2%。
+
+处置：标注保留（符合约束、无正确性风险、大结果集场景有理论正收益），
+但 @FastNative 不作为性能优化手段向任何人推荐；本包后续优化优先级仍是
+materialize 去重判空与按结果集批量物化（第五节 1/2 条）。

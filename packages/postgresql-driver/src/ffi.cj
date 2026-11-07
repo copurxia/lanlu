@@ -19,16 +19,26 @@ foreign func PQexecParams(conn: CPointer<Unit>, command: CString, nParams: Int32
     paramLengths: CPointer<Int32>, paramFormats: CPointer<Int32>,
     resultFormat: Int32): CPointer<Unit>
 
-// 结果元信息
+// 结果元信息（纯内存访问器：短耗时、无阻塞、不回调仓颉，符合 @FastNative 约束；
+// 物化循环每格调用 2~3 次，是本包 FFI 调用量最大的路径。
+// 注意：PQexec/PQexecParams/PQconnectdb 等阻塞调用严禁加此标注）
+@FastNative
 foreign func PQresultStatus(res: CPointer<Unit>): Int32
 foreign func PQresultErrorMessage(res: CPointer<Unit>): CString
 foreign func PQresultErrorField(res: CPointer<Unit>, fieldcode: Int32): CString
+@FastNative
 foreign func PQntuples(res: CPointer<Unit>): Int32
+@FastNative
 foreign func PQnfields(res: CPointer<Unit>): Int32
+@FastNative
 foreign func PQfname(res: CPointer<Unit>, col: Int32): CString
+@FastNative
 foreign func PQftype(res: CPointer<Unit>, col: Int32): Int32
+@FastNative
 foreign func PQgetvalue(res: CPointer<Unit>, row: Int32, col: Int32): CString
+@FastNative
 foreign func PQgetisnull(res: CPointer<Unit>, row: Int32, col: Int32): Int32
+@FastNative
 foreign func PQcmdTuples(res: CPointer<Unit>): CString
 foreign func PQclear(res: CPointer<Unit>): Unit
 
