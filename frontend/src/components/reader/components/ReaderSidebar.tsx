@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
+import { ReaderSidebarThumb } from '@/components/reader/components/ReaderSidebarThumb';
 import { useLocalStorage } from '@/hooks/common-hooks';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
@@ -744,14 +745,13 @@ export function ReaderSidebar({
               }}
             />
           ) : showImageThumb ? (
-            <MemoizedImage
+            <ReaderSidebarThumb
               src={thumbSrc}
               alt={displayTitle || t('archive.previewPage').replace('{current}', String(index + 1)).replace('{total}', String(pagesLength))}
+              widthPx={thumbWidth}
               className={SIDEBAR_THUMB_IMAGE_CLASS}
-              decoding="async"
-              loading="lazy"
               draggable={false}
-              onLoad={(e) => handleThumbImageLoad(page, index, e.currentTarget)}
+              onThumbLoaded={(image) => handleThumbImageLoad(page, index, image)}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-muted-foreground/80">
