@@ -144,3 +144,58 @@ func testConninfoParsesBorrowTimeout() {
     let (_, cfg4) = parseConnString("postgres://u:p@h:5432/db?pool.borrowTimeout=0")
     @Assert(cfg4.borrowTimeoutMs, 0)
 }
+
+@Test
+func testBorrowSkipsBrokenIdleConn() {
+    FakeConnRegistry.reset()
+    let validatorCalls = AtomicInt64(0)
+    let firstCheck = AtomicBool(true) // 第一次校验判坏 → 丢弃重建
+    let pool = ConnectionPool(
+        PoolConfig(2, 0, 0, borrowTimeoutMs: 5000),
+        { => FakeConnRegistry.fakeConnect() },
+        { c => FakeConnRegistry.fakeDisconnect(c) },
+        validate: { _ =>
+            let _ = validatorCalls.fetchAdd(1)
+            let v = !firstCheck.load()
+            firstCheck.store(false)
+            return v
+        }
+    )
+    let c1 = pool.borrow()
+    pool.giveBack(c1)
+    let c2 = pool.borrow()
+    @Assert(!c2.isNull(), true)
+    @Assert(pool.size(), 1)
+    @Assert(validatorCalls.load() >= 1)
+    pool.giveBack(c2)
+    pool.closeAll()
+}
+
+@Test
+func testAffectedRowsThreadIsolated() {
+    // lastAffected 改为 ThreadLocal 后：A 线程 exec 的受影响行数
+    // 不应被 B 线程的 exec 覆盖。用 DB_STRING 可用时真实验证，否则跳过。
+    let dbOpt = openOrSkip()
+    match (dbOpt) {
+        case None => return
+        case Some(db) =>
+            let aResult = Array<Int64>(1, { _ => -1 })
+            let bResult = Array<Int64>(1, { _ => -1 })
+            db.exec("CREATE TABLE IF NOT EXISTS _t_affected(x INT)", [])
+            let t1 = spawn {
+                db.exec("DELETE FROM _t_affected", []) // 0 行
+                sleep(50 * Duration.millisecond)        // 等 B 线程写入它的值
+                aResult[0] = db.affectedRows()
+            }
+            let t2 = spawn {
+                db.exec("INSERT INTO _t_affected VALUES (1),(2)", []) // 2 行
+                bResult[0] = db.affectedRows()
+            }
+            let _ = t1.get()
+            let _ = t2.get()
+            @Assert(aResult[0], 0)
+            @Assert(bResult[0], 2)
+            db.exec("DROP TABLE IF EXISTS _t_affected", [])
+            db.close()
+    }
+}

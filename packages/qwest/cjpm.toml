@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.1.0"
+  cjc-version = "1.2.0"
   name = "qwest"
   description = "Reqwest-style HTTP/1.1 client for Cangjie: pooled connections, streaming bodies, native timeouts"
   version = "0.1.0"

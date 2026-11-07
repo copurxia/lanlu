@@ -20,13 +20,16 @@ public class PGDatabase {
     // 当前正在执行的连接(跨线程可见，供 cancel() 从另一线程取消查询)。
     let activeConnMu = Mutex()
     var activeConn: ?CPointer<Unit> = None
-    var lastAffected: Int64 = -1
+    // 受影响行数是"当前线程上一条 exec"的状态，不能跨线程共享；
+    // 原实现为全局 var，高并发下 affectedRows() 会读到其他线程写入的值。
+    let lastAffected = ThreadLocal<Int64>()
 
     public init(connString: String) {
         let (ci, cfg) = parseConnString(connString)
         this.conninfo = ci
         this.pool = ConnectionPool(cfg, { => PGDatabase.openConn(ci) },
-            { c => unsafe { PQfinish(c) } })
+            { c => unsafe { PQfinish(c) } },
+            validate: { c => unsafe { PQstatus(c) == PG_CONNECTION_OK } })
         // 立即借一条验证连通性
         let c = pool.borrow()
         pool.giveBack(c)
@@ -188,7 +191,7 @@ public class PGDatabase {
                     pool.giveBack(c)
                 }
         }
-        lastAffected = aff
+        lastAffected.set(aff)
         return aff
     }
 
@@ -211,7 +214,7 @@ public class PGDatabase {
     }
 
     /** 上一条 exec 影响的行数(非 DML 返回 -1)。 */
-    public func affectedRows(): Int64 { lastAffected }
+    public func affectedRows(): Int64 { lastAffected.get() ?? -1 }
 
     // ===== 事务 =====
 

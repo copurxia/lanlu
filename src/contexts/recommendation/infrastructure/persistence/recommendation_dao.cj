@@ -259,32 +259,36 @@ public class RecommendationDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
+                    // 原实现对聚合视图 archive_metadata_search 做 ORDER BY RANDOM()：
+                    // 全表 13435 行都要 string_agg + to_tsvector 物化后才能排序（实测秒级）。
+                    // 改为两段：先在基表上按相同过滤条件随机抽 limit 个 archive（窄行排序，
+                    // 毫秒级），再只对抽中的行用 LATERAL 聚合 tags / 取封面，语义与随机性不变。
                     var sql = """
-                        SELECT
-                            aws.arcid,
-                            aws.id,
-                            aws.category_id,
-                            aws.title,
-                            aws.filename,
-                            aws.summary,
-                            aws.tags,
-                            aws.pagecount,
-                            aws.cover_asset_id,
-                            COALESCE(aws.created_at::TEXT, ''),
-                            COALESCE(aws.updated_at::TEXT, ''),
-                            COALESCE(aws.release_at::TEXT, ''),
-                            0::INT AS overlap_count
-                        FROM archive_metadata_search aws
-                        WHERE EXISTS (
-                            SELECT 1 FROM categories c
-                            WHERE c.id = aws.category_id AND c.enabled = true
-                        )
+                        WITH picked AS MATERIALIZED (
+                            SELECT
+                                a.id, a.arcid, a.filename, a.category_id, a.pagecount,
+                                COALESCE(mo.title, '') AS title,
+                                COALESCE(mo.description, '') AS summary,
+                                COALESCE(cover.asset_id, 0) AS cover_asset_id,
+                                COALESCE(mo.created_at, CURRENT_TIMESTAMP)::TEXT AS created_at,
+                                COALESCE(mo.updated_at, COALESCE(mo.created_at, CURRENT_TIMESTAMP))::TEXT AS updated_at,
+                                COALESCE(mo.release_at::TEXT, '') AS release_at,
+                                mo.id AS mo_id
+                            FROM archives a
+                            LEFT JOIN metadata_objects mo
+                                   ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+                            LEFT JOIN metadata_assets cover
+                                   ON cover.metadata_id = mo.id AND cover.slot = 'cover'
+                            WHERE EXISTS (
+                                SELECT 1 FROM categories c
+                                WHERE c.id = a.category_id AND c.enabled = true
+                            )
                     """
                     var params = ArrayList<Value>()
                     var idx = 0
                     if (categoryId > 0) {
                         idx += 1
-                        sql += " AND aws.category_id = ${'$'}${idx.toString()}"
+                        sql += " AND a.category_id = ${'$'}${idx.toString()}"
                         params.add(vint(categoryId))
                     }
                     if (userId > 0) {
@@ -294,14 +298,36 @@ public class RecommendationDao {
                                 SELECT 1
                                 FROM user_archive_status uas
                                 WHERE uas.user_id = ${'$'}${idx.toString()}
-                                  AND uas.archive_id = aws.id
+                                  AND uas.archive_id = a.id
                                   AND uas.is_new = false
                              )
                         """
                         params.add(vint(userId))
                     }
                     idx += 1
-                    sql += " ORDER BY RANDOM() LIMIT ${'$'}${idx.toString()}"
+                    sql += """
+                            ORDER BY RANDOM() LIMIT ${'$'}${idx.toString()}
+                        )
+                        SELECT
+                            p.arcid,
+                            p.id,
+                            p.category_id,
+                            p.title,
+                            p.filename,
+                            p.summary,
+                            COALESCE(tagmap.tags, '') AS tags,
+                            p.pagecount,
+                            p.cover_asset_id,
+                            p.created_at,
+                            p.updated_at,
+                            p.release_at,
+                            0::INT AS overlap_count
+                        FROM picked p
+                        LEFT JOIN LATERAL (
+                            SELECT string_agg(mt.tag, ',' ORDER BY mt.tag) AS tags
+                            FROM metadata_tags mt WHERE mt.metadata_id = p.mo_id
+                        ) tagmap ON true
+                    """
                     params.add(vint(Int64(limit)))
                     let rows = db.raw<RecommendationArchiveCandidateRow>(sql, params.toArray(), { row => mapArchiveCandidateRow(row) })
                     for (r in rows) {

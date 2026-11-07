@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.1.0"
+  cjc-version = "1.2.0"
   name = "rawdir_ffi"
   description = "POSIX raw-byte directory listing, GB18030 fallback decoding, byte-safe rename"
   version = "0.1.0"

@@ -1007,7 +1007,75 @@ public class ArchiveDao {
                     // 然后查询分页数据
                     var sql = ""
                     var orderJoinPrefix: ArrayList<String> = ArrayList<String>()
-                    if (!hasRelevance) {
+                    // 无过滤快速路径：视图的代价主要是全部 13435 行都要 string_agg(mt.tag)
+                    // 与 3 次 to_tsvector。无 WHERE 时每个 archive 恰为一行，可以先在基表上
+                    // 排序分页（LIMIT ${count}），再只对这页的 20 行用 LATERAL 聚合 tags。
+                    // 基表约束保证等价：metadata_objects UNIQUE(entity_type,entity_id)、
+                    // metadata_assets PK(metadata_id,slot)、metadata_tags PK(metadata_id,tag)。
+                    // 只对最常见的排序启用，其余分支保持原视图查询不变。
+                    var fastPageSortKey = ""
+                    if (!hasRelevance && baseWhereClause.size == 0 && start >= 0
+                        && sortby != "lastread" && sortby != "lastreadtime" && sortby != "tank_order"
+                        && sortby != "relevance") {
+                        fastPageSortKey = if (sortby == "RANDOM()") {
+                            "RANDOM()"
+                        } else if (sortby == "title") {
+                            "COALESCE(mo.title, '')"
+                        } else if (sortby == "date_added" || sortby == "created_at") {
+                            "COALESCE(mo.created_at, CURRENT_TIMESTAMP)"
+                        } else if (sortby == "updated_at") {
+                            "COALESCE(mo.updated_at, COALESCE(mo.created_at, CURRENT_TIMESTAMP))"
+                        } else if (sortby == "release_at") {
+                            "mo.release_at"
+                        } else if (sortby == "pagecount") {
+                            "a.pagecount"
+                        } else if (sortby == "size") {
+                            "a.file_size"
+                        } else if (sortby == "id") {
+                            "a.id"
+                        } else {
+                            // 未知 sortby 走原路径（原实现默认按 title）
+                            ""
+                        }
+                    }
+                    let useFastPage = fastPageSortKey.size > 0
+
+                    if (useFastPage) {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        sql = """
+                            WITH page AS MATERIALIZED (
+                                SELECT a.id, a.arcid, a.filename,
+                                       COALESCE(mo.title, '') AS title,
+                                       COALESCE(mo.description, '') AS summary,
+                                       COALESCE(cover_asset.thumbhash, COALESCE(a.thumbhash, '')) AS thumbhash,
+                                       COALESCE(cover.asset_id, 0) AS cover_asset_id,
+                                       COALESCE(mo.created_at, CURRENT_TIMESTAMP)::TEXT AS created_at,
+                                       COALESCE(mo.updated_at, COALESCE(mo.created_at, CURRENT_TIMESTAMP))::TEXT AS updated_at,
+                                       mo.release_at::TEXT AS release_at,
+                                       a.relative_path, a.file_size, a.pagecount, a.archive_type,
+                                       a.category_id, mo.id AS mo_id,
+                                       (${fastPageSortKey}) AS sort_key
+                                FROM archives a
+                                LEFT JOIN metadata_objects mo
+                                       ON mo.entity_type = 'archive' AND mo.entity_id = a.arcid
+                                LEFT JOIN metadata_assets cover
+                                       ON cover.metadata_id = mo.id AND cover.slot = 'cover'
+                                LEFT JOIN assets cover_asset ON cover_asset.id = cover.asset_id
+                                ORDER BY (${fastPageSortKey}) ${dir}
+                                LIMIT ${count} OFFSET ${start}
+                            )
+                            SELECT p.id, p.arcid, p.filename, p.title, p.summary, p.thumbhash,
+                                   p.cover_asset_id, p.created_at, p.updated_at, p.release_at,
+                                   p.relative_path, p.file_size, p.pagecount, p.archive_type,
+                                   COALESCE(tagmap.tags, '') AS tags, p.category_id
+                            FROM page p
+                            LEFT JOIN LATERAL (
+                                SELECT string_agg(mt.tag, ',' ORDER BY mt.tag) AS tags
+                                FROM metadata_tags mt WHERE mt.metadata_id = p.mo_id
+                            ) tagmap ON true
+                            ORDER BY p.sort_key ${dir}
+                        """
+                    } else if (!hasRelevance) {
                         // 无 relevance：保持原查询形态
                         sql = "SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, archive_metadata_search.category_id FROM archive_metadata_search"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
@@ -1036,8 +1104,10 @@ public class ArchiveDao {
                         sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, tags, category_id FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
                     }
 
-                    // 处理排序参数
-                    if (sortby == "RANDOM()") {
+                    // 处理排序参数（快速路径的 CTE 已完成排序分页）
+                    if (useFastPage) {
+                        ()
+                    } else if (sortby == "RANDOM()") {
                         // 对于随机排序，使用 RANDOM() 函数
                         // 为了确保每次查询都有不同的随机结果，使用 ORDER BY RANDOM() DESC
                         // 这样可以避免某些数据库版本中 RANDOM() 的缓存问题
@@ -1084,8 +1154,8 @@ public class ArchiveDao {
                         sql += " ORDER BY title ${orderDirection}"
                     }
 
-                    // start=-1 时不添加 LIMIT/OFFSET，返回全部数据
-                    if (start >= 0) {
+                    // start=-1 时不添加 LIMIT/OFFSET，返回全部数据（快速路径已自带分页）
+                    if (start >= 0 && !useFastPage) {
                         sql += " LIMIT ${count} OFFSET ${start}"
                     }
 

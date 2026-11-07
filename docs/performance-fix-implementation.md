@@ -74,3 +74,49 @@ for i in 1 2; do curl -sk -o /dev/null -w "%{time_total}s\n" -H "Authorization: 
 curl -sk -o /dev/null -w "%{time_total}s\n" -H "Authorization: Bearer $TOKEN" "https://nas.copur.xyz:3005/api/search"
 curl -sk -o /dev/null -w "%{time_total}s\n" https://nas.copur.xyz:3005/api/info
 ```
+
+---
+
+# 第二轮修复（2026-11-07，cjc 1.2.0）
+
+## 回归修复
+
+- **随机排序被结果缓存破坏**：P0-3 的 30s 缓存键未排除 `sortby=RANDOM()`，
+  30s TTL 内「换一批」返回相同列表。修复：`isSearchResultCacheable()` 排除
+  随机与聚合分支（`search_cache_policy_test.cj` 3 项测试锁定）。
+  实测线上复现：连续 3 次返回相同 arcid → 修复后每次不同。
+
+## 首查性能（缓存 miss 路径）
+
+- **搜索无过滤取数快速路径**：无 WHERE 时不再物化整个聚合视图，先在基表排序
+  分页取 LIMIT 行，再 LATERAL 补 tags（仅 title/created_at/updated_at/release_at/
+  pagecount/size/id/RANDOM 排序启用）。SQL 层逐行逐列差集双向为 0（含 desc 深分页）。
+- **discover 随机候选**：`recommendation_dao` 弃用对视图的 `ORDER BY RANDOM()`
+  （13435 行全物化），改为基表窄行随机抽样 + LATERAL 补详情，字段级差集双向 0。
+  线上 1.26~1.40s → 本地实测 0.10~0.12s。
+- **search?sortby=RANDOM()** 走同一快速路径（RANDOM 作 sort_key），~6ms。
+
+## P1 剩余
+
+- **借出校验**：`ConnectionPool` 增加 `validate` 闭包（PGDatabase 传
+  `PQstatus==CONNECTION_OK`），陈旧连接借出即丢弃重建，不再等 5 分钟 idleTimeout。
+- **lastAffected 线程隔离**：全局 var → `ThreadLocal<Int64>`，真实验证跨线程
+  exec 后各自 affectedRows 互不串扰。
+- **gzip 兜底**：客户端不接受 br 时启用 ignite `compressMiddleware`（gzip/deflate，
+  包裹判断防二次压缩）。实测 translations 167KB → gzip 2.4KB / br 0.9KB，
+  `gzip, br` 协商仍优先 br。
+
+## 工具链升级 cjc 1.1.0 → 1.2.0
+
+- 全部 17 个 `cjpm.toml` `cjc-version = "1.2.0"`；GitHub CI 锁定 `version: "1.2.0"`
+  （原 `latest` 漂移风险）。
+- 修复升级暴露的依赖声明错误：`cjpminfo` 上游只有 master 分支无同名 tag，
+  `tag="master"` → `branch="master"`（1.1.0 宽松处理掩盖）。
+- 1.2.0 unittest 链接需显式 `-lstdc++`（wasmedge/vips 的 C++ 符号），已加 link-option。
+
+## 第二轮测试结果
+
+- 主包 8 + postgresql-driver 69（+2：借出校验、affectedRows 隔离）+ rocksdb_ffi 10 全绿
+- 端到端（300 合集种子，cjc 1.2.0 二进制）：tankoubons 49ms / search 首查 11ms /
+  RANDOM 6ms / discover 119ms / translations 9ms / 全部 200 无错误，
+  gzip 协商、随机采样多样性均验证通过

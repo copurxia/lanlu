@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.1.0"
+  cjc-version = "1.2.0"
   name = "lanlu"
   description = "nothing here"
   version = "1.0.0"
@@ -9,7 +9,7 @@
   override-compile-option = ""
   # vips_ffi uses libvips for general-purpose decode/resize/crop/encode.
   # postgresql_driver links libpq (-lpq) for PG FFI.
-  link-option = "-larchive -lavif -lvips -lrocksdb -largon2 -lbrotlienc -lbrotlicommon -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s -lpq"
+  link-option = "-larchive -lavif -lvips -lrocksdb -largon2 -lbrotlienc -lbrotlicommon -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s -lstdc++ -lpq"
 
 [dependencies]
   ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "stdx"}
@@ -18,7 +18,7 @@
   csorm_macros = { path = "packages/csorm/macros" }
   cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
   ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
-  cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", tag = "master" }
+  cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", branch = "master" }
   cjcron = { path = "packages/cjcron" }
   epub = { path = "packages/epub" }
   archive_ffi = { path = "packages/archive_ffi" }

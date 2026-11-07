@@ -19,7 +19,7 @@ jobs:
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
-          version: latest
+          version: "1.2.0"
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH

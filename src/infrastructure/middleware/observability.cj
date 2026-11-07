@@ -59,6 +59,17 @@ public func installObservabilityMiddleware(app: App): Unit {
         config: BrotliConfig(minBytes: 2048),
         shouldSkip: { path => shouldSkipCompression(path) }
     ))
+    // gzip/deflate 兜底：仅当客户端不接受 br 时启用，避免对已被 brotli 编码的
+    // 响应二次压缩（两个中间件都会读 ctx.responseBody，互不感知对方的编码结果）。
+    let gzipFallback = compressMiddleware(config: CompressConfig(minBytes: 2048))
+    app.use({ ctx =>
+        let ae = (ctx.header("accept-encoding") ?? "").trimAscii().toAsciiLower()
+        if (ae.contains("br")) {
+            ctx.next()
+            return
+        }
+        gzipFallback(ctx)
+    })
 }
 
 public func audited(action: String, handler: Handler, riskLevel!: Int64 = 4): Handler {

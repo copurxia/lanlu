@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.1.0"
+  cjc-version = "1.2.0"
   name = "postgresql_driver"
   description = "Pure-Cangjie PostgreSQL driver via libpq FFI — implements csorm backend interfaces"
   version = "0.1.0"

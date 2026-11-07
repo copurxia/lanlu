@@ -496,18 +496,22 @@ public class SearchController {
         }
 
         // 主路径缓存：同参数请求在 TTL 窗口内直接复用上次响应 JSON。
-        // 不缓存：source 类型（实时读插件）、按分类聚合（结构不同）。
+        // 不缓存：source 类型（实时读插件）、按分类聚合（结构不同）、
+        // 随机排序（sortby=="RANDOM()" 要求每次重新采样，客户端「换一批」依赖此语义）。
+        let cacheable = isSearchResultCacheable(sortby, aggregateBy)
         let cacheKey = buildSearchResultCacheKey(
             DerivedCacheUtils.getSearchResultVersion(),
             filter, category, page, pageSize, sortby, order,
             newOnly, untaggedOnly, groupByTanks, favoriteOnly,
             dateFrom, dateTo, userId, tankoubonId, lang
         )
-        match (readSearchResultCache(cacheKey)) {
-            case Some(cached) =>
-                ResponseView.json(ctx, cached)
-                return
-            case None => ()
+        if (cacheable) {
+            match (readSearchResultCache(cacheKey)) {
+                case Some(cached) =>
+                    ResponseView.json(ctx, cached)
+                    return
+                case None => ()
+            }
         }
 
         let out = ByteBuffer()
@@ -586,7 +590,9 @@ public class SearchController {
         w.endObject()
         w.flush()
         let responseBody = String.fromUtf8(readToEnd(out))
-        writeSearchResultCache(cacheKey, responseBody)
+        if (cacheable) {
+            writeSearchResultCache(cacheKey, responseBody)
+        }
         ResponseView.json(ctx, responseBody)
     }
 
@@ -595,6 +601,11 @@ public class SearchController {
     // TTL 窗口内直接返回缓存 JSON。写路径（归档/元数据/标签/合集变更）通过
     // bumpSearchResultVersion 失效；用户相关状态（newonly/收藏）键入 userId 隔离。
     private static let searchResultCacheTtlSeconds: Int64 = 30
+
+    /** 判定某次搜索是否允许结果缓存。随机排序必须每次重新采样（客户端「换一批」）。 */
+    public static func isSearchResultCacheable(sortby: String, aggregateBy: String): Bool {
+        return aggregateBy != "category" && sortby.trimAscii() != "RANDOM()"
+    }
 
     private static func buildSearchResultCacheKey(
         version: Int64,

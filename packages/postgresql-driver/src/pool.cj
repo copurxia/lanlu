@@ -14,6 +14,10 @@ import std.time.*
 public class ConnectionPool {
     let connect: () -> CPointer<Unit>
     let disconnect: (CPointer<Unit>) -> Unit
+    // 借出校验（如 libpq 的 PQstatus == CONNECTION_OK）。返回 false 的连接
+    // 会被断开并从池中移除，再借时新建；避免 PG 重启/网络抖动后把陈旧连接
+    // 交给业务（原实现会直接抛 SQL 失败，直到 idleTimeout 回收才恢复）。
+    let validate: (CPointer<Unit>) -> Bool
     let cfg: PoolConfig
     let mtx = Mutex()
     let cond: Condition
@@ -24,10 +28,12 @@ public class ConnectionPool {
     var waiting: Int64 = 0
     var borrowTimeoutCount: Int64 = 0
 
-    public init(cfg: PoolConfig, connect: () -> CPointer<Unit>, disconnect: (CPointer<Unit>) -> Unit) {
+    public init(cfg: PoolConfig, connect: () -> CPointer<Unit>, disconnect: (CPointer<Unit>) -> Unit,
+        validate!: (CPointer<Unit>) -> Bool = { _ => true }) {
         this.cfg = cfg
         this.connect = connect
         this.disconnect = disconnect
+        this.validate = validate
         this.cond = synchronized(mtx) {
             mtx.condition()
         }
@@ -77,6 +83,16 @@ public class ConnectionPool {
                         let c = idle[last]
                         idle.remove(at: last)
                         idleSince.remove(at: last)
+                        if (!validate(c)) {
+                            // 陈旧连接：池已关闭则直接销毁，否则在锁外断开并调整计数，
+                            // 继续循环重借（未达上限时会新建）。
+                            total -= 1
+                            mtx.unlock()
+                            disconnect(c)
+                            mtx.lock()
+                            cond.notify()
+                            continue
+                        }
                         return c
                     }
                     if (total < cfg.maxSize) {
@@ -104,6 +120,14 @@ public class ConnectionPool {
                                 let c = idle[last]
                                 idle.remove(at: last)
                                 idleSince.remove(at: last)
+                                if (!validate(c)) {
+                                    total -= 1
+                                    mtx.unlock()
+                                    disconnect(c)
+                                    mtx.lock()
+                                    cond.notify()
+                                    continue
+                                }
                                 return c
                             }
                             borrowTimeoutCount += 1
