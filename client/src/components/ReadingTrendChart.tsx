@@ -1,6 +1,6 @@
 import React, {useCallback, useMemo, useState} from 'react';
 import {LayoutChangeEvent, StyleSheet, Text, View} from 'react-native';
-import Svg, {Circle, Line, Polyline, Text as SvgText} from 'react-native-svg';
+import Svg, {Rect, Text as SvgText} from 'react-native-svg';
 import {TrendingUp} from 'lucide-react-native';
 import {useTheme} from '../theme/ThemeContext';
 import {useI18n} from '../i18n';
@@ -11,8 +11,8 @@ type DataPoint = {
   count: number;
 };
 
-const CHART_HEIGHT = 200;
-const PADDING = {top: 20, right: 20, bottom: 30, left: 40};
+const CHART_HEIGHT = 170;
+const PADDING = {top: 14, right: 8, bottom: 22, left: 34};
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -32,26 +32,31 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
   const chartWidth = Math.max(0, containerWidth - PADDING.left - PADDING.right);
   const chartHeight = CHART_HEIGHT - PADDING.top - PADDING.bottom;
 
-  const {points, yMax, xLabels, yLabels} = useMemo(() => {
-    if (data.length === 0) {
-      return {points: '', yMax: 5, xLabels: [] as {x: number; label: string}[], yLabels: [] as {y: number; label: string}[]};
+  const {bars, yLabels, xLabels} = useMemo(() => {
+    if (data.length === 0 || containerWidth <= 0) {
+      return {
+        bars: [] as {x: number; y: number; w: number; h: number; active: boolean}[],
+        yLabels: [] as {y: number; label: string}[],
+        xLabels: [] as {x: number; label: string}[],
+      };
     }
     const maxVal = Math.max(...data.map(d => d.count), 5);
-    const xScale = chartWidth / Math.max(data.length - 1, 1);
-    const yScale = chartHeight / maxVal;
+    // One slot per day, bars take 68% of the slot so gaps stay even.
+    const slot = chartWidth / data.length;
+    const barWidth = Math.max(2, Math.min(slot * 0.68, 18));
 
-    const pts = data.map((d, i) => {
-      const x = PADDING.left + i * xScale;
-      const y = PADDING.top + chartHeight - d.count * yScale;
-      return `${x},${y}`;
-    }).join(' ');
+    const barsOut = data.map((d, i) => {
+      const h = maxVal > 0 ? (d.count / maxVal) * chartHeight : 0;
+      return {
+        x: PADDING.left + i * slot + (slot - barWidth) / 2,
+        y: PADDING.top + chartHeight - h,
+        w: barWidth,
+        h: Math.max(d.count > 0 ? 2 : 0, h),
+        active: d.count > 0,
+      };
+    });
 
-    const xLbls = data.map((d, i) => ({
-      x: PADDING.left + i * xScale,
-      label: formatDate(d.date),
-    }));
-
-    const steps = 4;
+    const steps = 3;
     const yLbls = Array.from({length: steps + 1}, (_, i) => {
       const val = Math.round((maxVal / steps) * i);
       return {
@@ -60,22 +65,31 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
       };
     });
 
-    return {points: pts, yMax: maxVal, xLabels: xLbls, yLabels: yLbls};
-  }, [data, chartWidth, chartHeight]);
+    // Label roughly every 6th day so 30 days render ~5 marks without overlap.
+    const labelStride = Math.max(1, Math.ceil(data.length / 5));
+    const xLbls = data
+      .map((d, i) => ({x: PADDING.left + i * slot + slot / 2, label: formatDate(d.date), i}))
+      .filter(entry => entry.i % labelStride === 0)
+      .map(({x, label}) => ({x, label}));
+
+    return {bars: barsOut, yLabels: yLbls, xLabels: xLbls};
+  }, [data, chartWidth, chartHeight, containerWidth]);
 
   const summary = useMemo(() => {
     if (data.length === 0) return null;
     let maxCount = 0;
     let maxDate = '';
     let daysWithReads = 0;
+    let total = 0;
     for (const d of data) {
       if (d.count > maxCount) {
         maxCount = d.count;
         maxDate = d.date;
       }
       if (d.count > 0) daysWithReads++;
+      total += d.count;
     }
-    return {maxDate: formatDate(maxDate), maxCount, daysWithReads};
+    return {maxDate: formatDate(maxDate), maxCount, daysWithReads, total};
   }, [data]);
 
   if (loading) {
@@ -86,11 +100,11 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
     <View style={styles.container}>
       <View style={styles.titleRow}>
         <TrendingUp color={colors.text} size={18} />
-        <Text style={styles.title}>{t('dashboard.readingTrend' as any)}</Text>
+        <Text style={styles.title}>{t('dashboard.readingTrend')}</Text>
       </View>
       {data.length === 0 ? (
         <View style={[styles.emptyContainer, {height: CHART_HEIGHT}]}>
-          <Text style={styles.emptyText}>{t('dashboard.noTrendData' as any)}</Text>
+          <Text style={styles.emptyText}>{t('dashboard.noTrendData')}</Text>
         </View>
       ) : (
         <View onLayout={onLayout}>
@@ -98,14 +112,15 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
             <Svg width={containerWidth} height={CHART_HEIGHT}>
               {yLabels.map((yl, i) => (
                 <React.Fragment key={`y-${i}`}>
-                  <Line
-                    x1={PADDING.left}
-                    y1={yl.y}
-                    x2={containerWidth - PADDING.right}
-                    y2={yl.y}
-                    stroke={colors.border}
-                    strokeWidth={1}
-                  />
+                  {i > 0 ? (
+                    <Rect
+                      x={PADDING.left}
+                      y={yl.y}
+                      width={chartWidth}
+                      height={1}
+                      fill={colors.border}
+                    />
+                  ) : null}
                   <SvgText
                     x={PADDING.left - 6}
                     y={yl.y + 4}
@@ -115,6 +130,17 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
                     {yl.label}
                   </SvgText>
                 </React.Fragment>
+              ))}
+              {bars.map((bar, i) => (
+                <Rect
+                  key={`bar-${i}`}
+                  x={bar.x}
+                  y={bar.y}
+                  width={bar.w}
+                  height={bar.h}
+                  rx={2}
+                  fill={bar.active ? colors.primary : colors.border}
+                />
               ))}
               {xLabels.map((xl, i) => (
                 <SvgText
@@ -127,29 +153,6 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
                   {xl.label}
                 </SvgText>
               ))}
-              <Polyline
-                points={points}
-                fill="none"
-                stroke={colors.primary}
-                strokeWidth={2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {data.map((d, i) => {
-                const xScale = chartWidth / Math.max(data.length - 1, 1);
-                const yScale = chartHeight / yMax;
-                const cx = PADDING.left + i * xScale;
-                const cy = PADDING.top + chartHeight - d.count * yScale;
-                return (
-                  <Circle
-                    key={`dot-${i}`}
-                    cx={cx}
-                    cy={cy}
-                    r={3}
-                    fill={colors.primary}
-                  />
-                );
-              })}
             </Svg>
           )}
         </View>
@@ -157,16 +160,16 @@ export function ReadingTrendChart({data, loading}: {data: DataPoint[]; loading: 
       {summary && (
         <View style={styles.summary}>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>{t('dashboard.mostActiveDay' as any)}</Text>
+            <Text style={styles.summaryLabel}>{t('dashboard.readCount')}</Text>
+            <Text style={styles.summaryValue}>{summary.total}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>{t('dashboard.mostActiveDay')}</Text>
             <Text style={styles.summaryValue}>{summary.maxDate}</Text>
           </View>
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>{t('dashboard.daysWithReads' as any)}</Text>
+            <Text style={styles.summaryLabel}>{t('dashboard.daysWithReads')}</Text>
             <Text style={styles.summaryValue}>{summary.daysWithReads}</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>{t('dashboard.readCount' as any)}</Text>
-            <Text style={styles.summaryValue}>{summary.maxCount}</Text>
           </View>
         </View>
       )}

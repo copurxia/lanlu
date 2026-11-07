@@ -618,7 +618,12 @@ class LanluLongImageView(context: Context) : View(context) {
   }
 
   private fun emitEvent(type: String, buildPayload: (WritableMap.() -> Unit)? = null) {
-    val reactContext = context as? ReactContext ?: return
+    // ThemedReactContext inherits ReactContext.emitDeviceEvent(), which resolves
+    // RCTDeviceEventEmitter through getJSModule and is unreliable under
+    // bridgeless. BridgelessReactContext overrides it with a direct JS call.
+    val themed = context as? ThemedReactContext
+    val target: ReactContext =
+      themed?.reactApplicationContext ?: (context as? ReactContext ?: return)
     val event = Arguments.createMap()
     event.putString("handle", handle)
     event.putString("type", type)
@@ -628,7 +633,7 @@ class LanluLongImageView(context: Context) : View(context) {
       event.putMap("payload", payload)
     }
     try {
-      reactContext.emitDeviceEvent(EVENT_NAME, event)
+      target.emitDeviceEvent(EVENT_NAME, event)
     } catch (_: Throwable) {
       // The React instance can be gone while a download finishes during exit.
     }

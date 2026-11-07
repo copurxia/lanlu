@@ -49,6 +49,12 @@ class MainApplication : Application(), ReactApplication {
       val featureFlags = object : ReactNativeFeatureFlagsDefaults() {
         override fun enableBridgelessArchitecture(): Boolean = true
         override fun useNativeViewConfigsInBridgelessMode(): Boolean = true
+        // LanluMediaProxyModule is a legacy ReactContextBaseJavaModule registered
+        // through a classic ReactPackage. Without interop the bridgeless delegate
+        // never calls createNativeModules(), so NativeModules.LanluMediaProxy is
+        // undefined and the proxy, system bars, wide-page splitter and prefetch
+        // are all silently unavailable.
+        override fun useTurboModuleInterop(): Boolean = true
       }
       try {
         val method = DefaultNewArchitectureEntryPoint::class.java.getDeclaredMethod(

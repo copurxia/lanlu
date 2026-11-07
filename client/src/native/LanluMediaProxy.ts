@@ -19,6 +19,13 @@ type LanluMediaProxyModule = {
 
 const nativeProxy = NativeModules.LanluMediaProxy as LanluMediaProxyModule | undefined;
 
+/** The view manager and this module are registered by the same package; if the
+ *  module is invisible to JS (e.g. a stale APK under bridgeless), the native
+ *  long-image view cannot deliver events either. */
+export function isLanluMediaProxyAvailable(): boolean {
+  return Platform.OS === 'android' && Boolean(nativeProxy?.createUrl);
+}
+
 export async function createProxiedMediaUrl(
   uri: string,
   headers?: Record<string, string>,

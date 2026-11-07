@@ -264,7 +264,9 @@ export function ArchiveCard({
         card: {
           backgroundColor: 'transparent',
           borderRadius: radius.md,
-          marginBottom: spacing.md,
+          // The bottom margin belongs to the surrounding list (feed gap), not to
+          // horizontal row cards, or each row gains an extra strip of blank space.
+          marginBottom: variant === 'row' || variant === 'related' ? 0 : spacing.sm,
           overflow: 'hidden',
         },
         cardSelectionMode: {
@@ -358,7 +360,10 @@ export function ArchiveCard({
         body: {
           gap: 4,
           flex: 1,
-          minHeight: 72,
+          // Height follows content: title (max 2 lines) + one meta line. A fixed
+          // minimum left a wide blank band under one-line titles and made grid
+          // rows feel twice as far apart as they are.
+          minHeight: variant === 'row' || variant === 'related' ? 52 : 0,
           padding: spacing.sm,
         },
         bodyList: {
@@ -471,7 +476,7 @@ export function ArchiveCard({
           backgroundColor: colors.primary,
         },
       }),
-    [colors],
+    [colors, variant],
   );
 
   return (

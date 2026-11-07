@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -11,7 +12,7 @@ import {extractApiError, isNetworkError, setUnauthorizedHandler, setOfflineHandl
 import * as LanluApi from '../api/lanlu';
 import {
   deleteServer as deleteStoredServer,
-  getActiveServer,
+  getActiveServerId,
   getServers,
   LanluServer,
   setActiveServerId,
@@ -61,6 +62,23 @@ function loadCachedUser(serverId?: string | null): AuthUser | null {
   } catch { return null; }
 }
 
+/** Keychain has no synchronous API, so tokens are mirrored into MMKV on every
+ *  write and the boot path reads the mirror synchronously. The Keychain value
+ *  stays the source of truth for writes/clears. */
+function loadStoredTokenSync(serverId?: string | null): string | null {
+  try {
+    return getStoredStringSync(`auth_token_mirror:${serverId || 'legacy'}`) || null;
+  } catch {
+    return null;
+  }
+}
+
+function mirrorToken(token: string | null, serverId?: string | null) {
+  try {
+    setStoredStringSync(`auth_token_mirror:${serverId || 'legacy'}`, token || '');
+  } catch {}
+}
+
 function saveCachedUser(user: AuthUser, serverId?: string | null) {
   try {
     const serialized = JSON.stringify(user);
@@ -84,13 +102,38 @@ function clearCachedUser(serverId?: string | null) {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({children}: {children: React.ReactNode}) {
-  const [status, setStatus] = useState<AuthStatus>('booting');
-  const [servers, setServers] = useState<LanluServer[]>([]);
-  const [activeServer, setActiveServer] = useState<LanluServer | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<AuthUser | null>(null);
+  // Restore persisted state synchronously: every read below is backed by MMKV,
+  // so the first paint can be the real screen (home / server list / login)
+  // instead of a two-stage boot spinner.
+  const [initial] = useState(() => {
+    perfMark('auth.boot.start');
+    const servers = getServers();
+    const activeId = getActiveServerId();
+    const activeServer = activeId
+      ? servers.find(server => server.id === activeId) || null
+      : null;
+    if (!activeServer) {
+      return {
+        servers,
+        activeServer: null,
+        token: null,
+        user: null,
+        status: 'serverList' as AuthStatus,
+      };
+    }
+    const token = loadStoredTokenSync(activeServer.id);
+    const user = token ? loadCachedUser(activeServer.id) : null;
+    const status: AuthStatus = !token ? 'login' : user ? 'authenticated' : 'booting';
+    return {servers, activeServer, token, user, status};
+  });
+  const [status, setStatus] = useState<AuthStatus>(initial.status);
+  const [servers, setServers] = useState<LanluServer[]>(initial.servers);
+  const [activeServer, setActiveServer] = useState<LanluServer | null>(initial.activeServer);
+  const [token, setToken] = useState<string | null>(initial.token);
+  const [user, setUser] = useState<AuthUser | null>(initial.user);
   const [isOffline, setIsOffline] = useState(false);
   const [totpChallenge, setTotpChallenge] = useState<{challengeId: string} | null>(null);
+  const bootPrimed = useRef(false);
   const flushQueue = useOfflineProgressQueue(s => s.flushQueue);
 
   const flushProgressIfNeeded = useCallback(async () => {
@@ -132,6 +175,9 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       await setActiveServerId(server.id);
       setActiveServer(server);
       const storedToken = await getStoredToken(server.id);
+      // Keep the MMKV mirror in step so the next cold boot can restore the
+      // session synchronously (Keychain itself has no sync read).
+      mirrorToken(storedToken, server.id);
       setToken(storedToken);
       primeSession(server, storedToken);
       perfMark('auth.server_ready', {hasToken: Boolean(storedToken)});
@@ -174,6 +220,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         }
         console.warn('Failed to restore server session:', extractApiError(error));
         await clearStoredToken(server.id);
+        mirrorToken(null, server.id);
         clearSessionCache();
         clearSessionState();
         setStatus('login');
@@ -209,6 +256,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       clearStoredToken(serverId).catch(error =>
         console.warn('Failed to clear auth:', error),
       );
+      mirrorToken(null, serverId);
       clearSessionCache();
       clearCachedUser(serverId);
       clearSessionState();
@@ -218,42 +266,25 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   }, [activeServer, clearSessionState]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function boot() {
-      perfMark('auth.boot.start');
-      const [storedServers, storedActiveServer] = await Promise.all([
-        getServers(),
-        getActiveServer(),
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setServers(storedServers);
-      perfMark('auth.storage_ready', {
-        servers: storedServers.length,
-        hasActiveServer: Boolean(storedActiveServer),
-      });
-      if (!storedActiveServer) {
-        setStatus('serverList');
-        return;
-      }
-      // Migrate the pre-per-server cache once so an upgrade keeps the fast
-      // optimistic restore on its first launch.
-      const legacyUser = loadCachedUser();
-      if (legacyUser && !loadCachedUser(storedActiveServer.id)) {
-        saveCachedUser(legacyUser, storedActiveServer.id);
-      }
-      await selectServer(storedActiveServer);
+    if (bootPrimed.current) return;
+    bootPrimed.current = true;
+    perfMark('auth.boot.sync_done', {status: initial.status});
+    // Nothing to validate: the synchronous restore already resolved the screen.
+    if (initial.status !== 'booting' || !initial.activeServer) {
+      return;
     }
-
-    boot().catch(error => {
-      console.warn('Failed to boot auth state:', error);
-      setStatus('serverList');
+    // Token exists but no cached identity: probe the server, then commit.
+    let cancelled = false;
+    selectServer(initial.activeServer).catch(error => {
+      if (!cancelled) {
+        console.warn('Failed to restore server session:', extractApiError(error));
+        setStatus('login');
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [selectServer]);
+  }, [initial.activeServer, initial.status, selectServer]);
 
   const saveServer = useCallback(
     async (params: {id?: string; name: string; baseUrl: string}) => {
@@ -267,6 +298,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   const deleteServer = useCallback(
     async (serverId: string) => {
       await clearStoredToken(serverId);
+      mirrorToken(null, serverId);
       await deleteStoredServer(serverId);
       if (activeServer?.id === serverId) {
         clearSessionCache();
@@ -298,6 +330,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         throw new Error(response.message || 'Login did not return a token.');
       }
       await setStoredToken(nextToken, activeServer.id);
+      mirrorToken(nextToken, activeServer.id);
       primeSession(activeServer, nextToken);
       touchServer(activeServer.id)
         .then(reloadServers)
@@ -331,6 +364,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       setTotpChallenge(null);
       if (!activeServer) throw new Error('No active server');
       await setStoredToken(nextToken, activeServer.id);
+      mirrorToken(nextToken, activeServer.id);
       primeSession(activeServer, nextToken);
       touchServer(activeServer.id)
         .then(reloadServers)
@@ -362,6 +396,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       }
     }
     await clearStoredToken(serverId);
+    mirrorToken(null, serverId);
     clearSessionCache();
     clearCachedUser(serverId);
     clearSessionState();
@@ -390,6 +425,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         return;
       }
       await clearStoredToken(activeServer.id);
+      mirrorToken(null, activeServer.id);
       clearSessionCache();
       clearCachedUser(activeServer.id);
       clearSessionState();

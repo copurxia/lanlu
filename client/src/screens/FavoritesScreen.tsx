@@ -12,7 +12,7 @@ import {
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BookOpen, Heart} from 'lucide-react-native';
+import {BookOpen, Heart, Search, X} from 'lucide-react-native';
 
 import {extractApiError, isNetworkError} from '../api/client';
 import {
@@ -92,6 +92,7 @@ export function FavoritesScreen() {
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
   const [historyItems, setHistoryItems] = useState<MediaItem[]>([]);
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -337,32 +338,41 @@ export function FavoritesScreen() {
           flex: 1,
         },
         header: {
-          gap: spacing.md,
-          padding: spacing.lg,
-        },
-        tabs: {
-          backgroundColor: colors.surfaceMuted,
-          borderRadius: 8,
-          flexDirection: 'row',
-          padding: 3,
-        },
-        tab: {
           alignItems: 'center',
-          borderRadius: 7,
+          flexDirection: 'row',
+          gap: spacing.sm,
+          paddingHorizontal: spacing.lg,
+          paddingTop: spacing.md,
+          paddingBottom: spacing.sm,
+        },
+        headerSpacer: {
           flex: 1,
+        },
+        // Same visual language as the home toolbar: 42dp bordered surface
+        // buttons on one row, active state tinted with the primary colour.
+        headerSquareButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
           flexDirection: 'row',
           gap: 6,
+          height: 42,
           justifyContent: 'center',
-          paddingVertical: 9,
+          minWidth: 42,
+          paddingHorizontal: 10,
         },
-        tabActive: {
-          backgroundColor: colors.surface,
+        headerSquareButtonActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
         },
-        tabText: {
-          color: colors.textMuted,
+        headerButtonText: {
+          color: colors.text,
+          fontSize: 12,
           fontWeight: '800',
         },
-        tabTextActive: {
+        headerButtonTextActive: {
           color: colors.primary,
         },
         searchInput: {
@@ -371,6 +381,7 @@ export function FavoritesScreen() {
           borderRadius: 8,
           borderWidth: StyleSheet.hairlineWidth,
           color: colors.text,
+          flex: 1,
           fontSize: 15,
           includeFontPadding: false,
           minHeight: 42,
@@ -394,12 +405,12 @@ export function FavoritesScreen() {
           alignItems: 'center',
           flexDirection: 'row',
           justifyContent: 'space-between',
-          marginBottom: spacing.md,
-          marginTop: spacing.md,
+          marginBottom: spacing.sm,
+          marginTop: spacing.xs,
         },
         sectionTitle: {
           color: colors.text,
-          fontSize: 18,
+          fontSize: 16,
           fontWeight: '800',
         },
         sectionCount: {
@@ -434,34 +445,65 @@ export function FavoritesScreen() {
           paddingRight: insets.right,
         },
       ]}>
+      {/* One compact bar: icon tabs on the left, search expands in place of the
+          tabs so the header never grows past a single row. */}
       <View style={styles.header}>
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            onPress={() => setTab('favorites')}
-            style={[styles.tab, tab === 'favorites' && styles.tabActive]}>
-            <Heart color={tab === 'favorites' ? colors.primary : colors.textMuted} size={16} />
-            <Text style={[styles.tabText, tab === 'favorites' && styles.tabTextActive]}>
-              {t('favorites.favorites')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setTab('history')}
-            style={[styles.tab, tab === 'history' && styles.tabActive]}>
-            <BookOpen color={tab === 'history' ? colors.primary : colors.textMuted} size={16} />
-            <Text style={[styles.tabText, tab === 'history' && styles.tabTextActive]}>
-              {t('favorites.history')}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <TextInput
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={setQuery}
-          placeholder={t('favorites.searchPlaceholder')}
-          placeholderTextColor={colors.textMuted}
-          style={styles.searchInput}
-          value={query}
-        />
+        {searchOpen || query.trim() ? (
+          <>
+            <TextInput
+              autoFocus={searchOpen}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={setQuery}
+              placeholder={t('favorites.searchPlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="search"
+              style={styles.searchInput}
+              value={query}
+            />
+            <TouchableOpacity
+              accessibilityLabel={t('common.close')}
+              accessibilityRole="button"
+              onPress={() => {
+                setQuery('');
+                setSearchOpen(false);
+              }}
+              style={styles.headerSquareButton}>
+              <X color={colors.text} size={18} />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity
+              accessibilityLabel={t('favorites.favorites')}
+              accessibilityRole="button"
+              onPress={() => setTab('favorites')}
+              style={[styles.headerSquareButton, tab === 'favorites' && styles.headerSquareButtonActive]}>
+              <Heart color={tab === 'favorites' ? colors.primary : colors.text} size={17} />
+              <Text style={[styles.headerButtonText, tab === 'favorites' && styles.headerButtonTextActive]}>
+                {t('favorites.favorites')}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={t('favorites.history')}
+              accessibilityRole="button"
+              onPress={() => setTab('history')}
+              style={[styles.headerSquareButton, tab === 'history' && styles.headerSquareButtonActive]}>
+              <BookOpen color={tab === 'history' ? colors.primary : colors.text} size={17} />
+              <Text style={[styles.headerButtonText, tab === 'history' && styles.headerButtonTextActive]}>
+                {t('favorites.history')}
+              </Text>
+            </TouchableOpacity>
+            <View style={styles.headerSpacer} />
+            <TouchableOpacity
+              accessibilityLabel={t('common.search')}
+              accessibilityRole="button"
+              onPress={() => setSearchOpen(true)}
+              style={styles.headerSquareButton}>
+              <Search color={colors.text} size={18} />
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}

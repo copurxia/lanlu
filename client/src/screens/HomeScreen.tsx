@@ -1,4 +1,13 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   Alert,
   FlatList,
@@ -9,6 +18,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useFocusEffect, useNavigation} from '@react-navigation/native';
@@ -17,6 +28,7 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Drawer} from '../components/Drawer';
+import {CrossFadeView} from '../components/CrossFadeView';
 import {FluentSwitch} from '../components/fluent';
 import {
   CalendarDays,
@@ -65,6 +77,7 @@ import {ScreenState} from '../components/ScreenState';
 import {BatchActionBar, type BatchAction} from '../components/BatchActionBar';
 import {BatchEditDialog, type BatchEditPayload} from '../components/BatchEditDialog';
 import {useI18n} from '../i18n';
+import {reportDebug} from '../debug/errorBridge';
 import {appendDiagnosticLog} from '../storage/diagnostics';
 import {perfMark, perfNow, perfSince} from '../perf/perf';
 import {useScrollPerf} from '../perf/useScrollPerf';
@@ -98,6 +111,8 @@ type HomeRow = {
   icon?: string;
   category?: Category;
   items: MediaItem[];
+  /** True while this row's content is still being fetched; renders a skeleton. */
+  placeholder?: boolean;
 };
 type DatePickerTarget = 'from' | 'to';
 type HomeViewSurface = 'archive-feed' | 'home-category-rows';
@@ -456,7 +471,11 @@ export function HomeScreen() {
           setError(extractApiError(err));
         }
       } finally {
-        if (requestId !== requestIdRef.current) return;
+        if (requestId !== requestIdRef.current) {
+          // A newer load owns the UI state now; still release the pull spinner.
+          setRefreshing(false);
+          return;
+        }
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
@@ -481,20 +500,30 @@ export function HomeScreen() {
     ],
   );
 
-  const loadRows = useCallback(async () => {
+  const loadRows = useCallback(async (mode: 'replace' | 'refresh' = 'replace') => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    // 'replace' (startup / view switch): cached rows stay on screen and fresh
+    // data only fills the gaps, so nothing the user is already looking at gets
+    // swapped out. 'refresh' (pull-to-refresh / focus refresh): fetch everything
+    // and swap visibly — the user asked for new content.
+    const fillOnly = mode === 'replace';
 
     let hadCache = false;
+    let cachedRows: Record<string, MediaItem[]> | null = null;
     if (serverId) {
       const cached = getCachedFeed(serverId, 'home');
       if (cached && (cached.items.length || cached.categories.length)) {
+        // Categories and per-category rows come from cache so the page fills
+        // immediately, but randomItems deliberately do NOT: showing yesterday's
+        // random picks and then swapping them for fresh ones reads as a glitch.
+        // The discover row renders a skeleton until the fresh list arrives.
         setCategories(cached.categories);
         setCategoryRows(cached.categoryRows);
-        setRandomItems(cached.randomItems);
         setError('');
         setLoading(false);
         hadCache = true;
+        cachedRows = cached.categoryRows;
         perfMark('home.rows.cache', {
           categories: cached.categories.length,
           rows: Object.keys(cached.categoryRows).length,
@@ -507,10 +536,20 @@ export function HomeScreen() {
 
     setLoading(!hadCache);
     setError('');
+    reportDebug('home.rows.start', {archiveId: serverId, hadCache});
+    // The discover endpoint scans a heavy search view server-side and can take
+    // far longer than a single request timeout when several calls race. A hard
+    // guard keeps the screen from spinning forever on a slow backend.
+    const rowsDeadline = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('rows load timeout')), 15000),
+    );
     try {
-      const [cats, discover] = await Promise.all([
-        fetchCategoriesShared(),
-        fetchDiscover(ROW_SIZE).catch(() => []),
+      const [cats, discover] = await Promise.race([
+        Promise.all([
+          fetchCategoriesShared(),
+          fetchDiscover(ROW_SIZE).catch(() => []),
+        ]),
+        rowsDeadline,
       ]);
       if (requestId !== requestIdRef.current) return;
       const enabled = cats.filter(category => category.enabled !== false);
@@ -521,6 +560,10 @@ export function HomeScreen() {
       setLoading(false);
       perfMark('home.discover.ready', {categories: enabled.length, discover: discover.length});
       perfSince('home.discover.ms', 'home.mount');
+      reportDebug('home.rows.discover_ready', {
+        categories: enabled.length,
+        discover: discover.length,
+      });
 
       if (enabled.length) {
         const rows: Record<string, MediaItem[]> = {};
@@ -555,13 +598,26 @@ export function HomeScreen() {
           }
         }
 
+        // In fillOnly mode, cached rows stay untouched: fresh data only fills
+        // rows the cache left empty, so nothing on screen visibly swaps.
+        const merged: Record<string, MediaItem[]> = {};
+        for (const [key, value] of Object.entries(fillOnly && cachedRows ? cachedRows : rows)) {
+          merged[key] = [...value];
+        }
+        for (const [key, value] of Object.entries(rows)) {
+          const existing = merged[key];
+          if (!fillOnly || !existing || !existing.length) {
+            merged[key] = value;
+          }
+        }
+
         // Show aggregate rows immediately; fallbacks fill in row by row.
-        setCategoryRows({...rows});
+        setCategoryRows(merged);
         perfMark('home.aggregate.ready', {categories: enabled.length});
 
         const missing = enabled.filter(category => {
-          const idItems = rows[String(category.id)] || [];
-          const catidItems = rows[category.catid] || [];
+          const idItems = merged[String(category.id)] || [];
+          const catidItems = merged[category.catid] || [];
           return idItems.length === 0 && catidItems.length === 0;
         });
         if (missing.length) {
@@ -585,7 +641,9 @@ export function HomeScreen() {
                 if (requestId !== requestIdRef.current) return;
                 rows[String(category.id)] = result.data;
                 rows[category.catid] = result.data;
-                setCategoryRows({...rows});
+                merged[String(category.id)] = result.data;
+                merged[category.catid] = result.data;
+                setCategoryRows({...merged});
               } catch {
                 // Missing category stays empty; other rows remain usable.
               }
@@ -606,6 +664,10 @@ export function HomeScreen() {
         setCategoryRows({});
       }
     } catch (err) {
+      reportDebug('home.rows.error', {
+        message: extractApiError(err),
+        hadCache,
+      });
       if (requestId !== requestIdRef.current) return;
       if (hadCache) {
         // Keep the cached rows visible; the refresh can retry later.
@@ -624,7 +686,13 @@ export function HomeScreen() {
         setError(extractApiError(err));
       }
     } finally {
-      if (requestId !== requestIdRef.current) return;
+      if (requestId !== requestIdRef.current) {
+        // A newer load owns the UI state now. Clearing `refreshing` is still
+        // safe: if no newer load ran (e.g. the surface switched away), the pull
+        // spinner would otherwise hang forever.
+        setRefreshing(false);
+        return;
+      }
       setLoading(false);
       setRefreshing(false);
     }
@@ -632,7 +700,7 @@ export function HomeScreen() {
 
   const load = useCallback(
     async (nextPage = 1, mode: 'replace' | 'append' | 'refresh' = 'replace') => {
-      if (showRows) await loadRows();
+      if (showRows) await loadRows(mode === 'refresh' ? 'refresh' : 'replace');
       else await loadFeed(nextPage, mode);
     },
     [loadFeed, loadRows, showRows],
@@ -715,7 +783,7 @@ export function HomeScreen() {
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    load(1, 'replace').catch(err => console.warn('Failed to refresh home:', err));
+    load(1, 'refresh').catch(err => console.warn('Failed to refresh home:', err));
   }, [load]);
 
   // ─── Batch action handlers ────────────────────────────────────────────────
@@ -1282,12 +1350,21 @@ export function HomeScreen() {
     if (viewMode === 'channel') return 'channel';
     return 'grid';
   }, [viewMode]);
-  const listLayoutKey = itemVariant === 'grid' ? 'columns:2' : 'columns:1';
+  // Remount the list when the layout actually changes (column count or card
+  // variant) so cells never render a stale variant mid-swap.
+  const listLayoutKey = `feed:${itemVariant}`;
 
   const homeRows = useMemo<HomeRow[]>(() => {
     const rows: HomeRow[] = [];
-    if (randomItems.length) {
-      rows.push({key: 'discover', title: t('home.random'), items: randomItems});
+    // Every row exists while loading so the layout does not jump when data
+    // arrives; renderRow shows a skeleton for rows without content yet.
+    if (randomItems.length || loading) {
+      rows.push({
+        key: 'discover',
+        title: t('home.random'),
+        items: randomItems,
+        placeholder: loading && !randomItems.length,
+      });
     }
     for (const category of categories) {
       const itemsForCategory =
@@ -1300,10 +1377,33 @@ export function HomeScreen() {
         icon: category.icon,
         category,
         items: itemsForCategory,
+        placeholder: loading && !itemsForCategory.length,
       });
     }
+    // Categories themselves are still loading: keep a couple of anonymous
+    // skeleton rows so the page height is roughly stable from the first frame.
+    if (loading && !categories.length) {
+      rows.push({key: 'skeleton:0', title: '', items: [], placeholder: true});
+      rows.push({key: 'skeleton:1', title: '', items: [], placeholder: true});
+    }
     return rows;
-  }, [categories, categoryRows, randomItems, t]);
+  }, [categories, categoryRows, loading, randomItems, t]);
+
+  // Debug probe: lets the LAN log show whether the rows UI actually has data
+  // when the user reports a stuck "loading recommendations" screen.
+  const rowsRenderProbe = useRef('');
+  useEffect(() => {
+    if (!showRows) return;
+    const probe = `${loading}:${randomItems.length}:${homeRows.length}`;
+    if (rowsRenderProbe.current === probe) return;
+    rowsRenderProbe.current = probe;
+    reportDebug('home.rows.render', {
+      loading,
+      randomItems: randomItems.length,
+      rows: homeRows.length,
+      rowItems: homeRows.reduce((sum, row) => sum + row.items.length, 0),
+    });
+  }, [homeRows, loading, randomItems.length, showRows]);
 
   const styles = useMemo(
     () =>
@@ -1469,14 +1569,14 @@ export function HomeScreen() {
           paddingBottom: spacing.lg + 56,
         },
         rowSection: {
-          marginBottom: spacing.md,
+          marginBottom: spacing.sm,
         },
         rowHeader: {
           alignItems: 'center',
           flexDirection: 'row',
           gap: spacing.sm,
           paddingHorizontal: spacing.lg,
-          marginBottom: spacing.sm,
+          marginBottom: spacing.xs,
         },
         sectionIcon: {
           fontSize: 18,
@@ -1491,7 +1591,7 @@ export function HomeScreen() {
           alignItems: 'center',
           flexDirection: 'row',
           gap: 2,
-          minHeight: 32,
+          minHeight: 24,
           paddingLeft: spacing.sm,
         },
         viewMoreText: {
@@ -1508,6 +1608,14 @@ export function HomeScreen() {
           flexDirection: 'row',
           gap: spacing.md,
           paddingHorizontal: spacing.lg,
+        },
+        skeletonBase: {
+          backgroundColor: colors.surfaceMuted,
+        },
+        skeletonHeaderLine: {
+          borderRadius: 999,
+          flex: 1,
+          height: 16,
         },
         skeletonCard: {
           width: 136,
@@ -1665,9 +1773,9 @@ export function HomeScreen() {
     [colors],
   );
 
-  if (loading && !refreshing && !items.length && !showRows && !submittedFilter) {
-    return <ScreenState loading title={t('home.loading')} />;
-  }
+  // No full-screen early return for the loading state: replacing the whole tree
+  // on a view-mode switch would bypass the cross-fade and blink. The FlatList's
+  // ListEmptyComponent and the rows skeleton already render loading in place.
 
   if (error && !items.length && !showRows) {
     return (
@@ -1681,20 +1789,28 @@ export function HomeScreen() {
   }
 
   const renderRow = (row: HomeRow) => {
+    const showSkeleton = row.placeholder === true;
     return (
       <View key={row.key} style={styles.rowSection}>
         <View style={styles.rowHeader}>
-          {row.icon ? <Text style={styles.sectionIcon}>{row.icon}</Text> : null}
-          <Text numberOfLines={1} style={styles.sectionTitle}>{row.title}</Text>
-          {row.category ? (
-            <TouchableOpacity
-              accessibilityRole="button"
-              onPress={() => openCategory(row.category as Category)}
-              style={styles.viewMoreButton}>
-              <Text style={styles.viewMoreText}>{t('common.more')}</Text>
-              <ChevronRight color={colors.textMuted} size={16} />
-            </TouchableOpacity>
-          ) : null}
+          {showSkeleton ? (
+            // Anonymous placeholder rows have no title yet: show a title bar.
+            <SkeletonBlock style={styles.skeletonHeaderLine} />
+          ) : (
+            <>
+              {row.icon ? <Text style={styles.sectionIcon}>{row.icon}</Text> : null}
+              <Text numberOfLines={1} style={styles.sectionTitle}>{row.title}</Text>
+              {row.category ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  onPress={() => openCategory(row.category as Category)}
+                  style={styles.viewMoreButton}>
+                  <Text style={styles.viewMoreText}>{t('common.more')}</Text>
+                  <ChevronRight color={colors.textMuted} size={16} />
+                </TouchableOpacity>
+              ) : null}
+            </>
+          )}
         </View>
         {row.items.length ? (
         <FlatList
@@ -1722,13 +1838,13 @@ export function HomeScreen() {
           showsHorizontalScrollIndicator={false}
           windowSize={3}
         />
-        ) : loading ? (
+        ) : showSkeleton ? (
           <View style={styles.rowSkeleton}>
             {Array.from({length: 4}).map((_, index) => (
               <View key={index} style={styles.skeletonCard}>
-                <View style={styles.skeletonCover} />
-                <View style={styles.skeletonLine} />
-                <View style={[styles.skeletonLine, styles.skeletonLineShort]} />
+                <SkeletonBlock style={styles.skeletonCover} />
+                <SkeletonBlock style={styles.skeletonLine} />
+                <SkeletonBlock style={[styles.skeletonLine, styles.skeletonLineShort]} />
               </View>
             ))}
           </View>
@@ -1840,14 +1956,12 @@ export function HomeScreen() {
 
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
 
+      <CrossFadeView identity={showRows ? 'rows' : 'feed'}>
       {showRows ? (
         <ScrollView
           {...rowsScrollPerf}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           contentContainerStyle={styles.rowsContent}>
-          {loading && !randomItems.length ? (
-            <ScreenState loading title={t('home.loadingRecommendations')} />
-          ) : null}
           {homeRows.map(renderRow)}
           {!loading && homeRows.length === 0 ? (
             <ScreenState title={t('home.noCategories')} message={t('home.useAnotherView')} />
@@ -1912,6 +2026,7 @@ export function HomeScreen() {
           }
         />
       )}
+      </CrossFadeView>
 
       {selectionMode ? (
         <BatchActionBar
@@ -2110,3 +2225,26 @@ function FilterSwitch({
     </View>
   );
 }
+
+/** One grey block of a loading placeholder, pulsing softly. */
+function SkeletonBlock({style}: {style?: StyleProp<ViewStyle>}) {
+  const opacity = useSharedValue(0.45);
+  useEffect(() => {
+    opacity.value = withRepeat(
+      withSequence(
+        withTiming(0.9, {duration: 700, easing: Easing.inOut(Easing.quad)}),
+        withTiming(0.45, {duration: 700, easing: Easing.inOut(Easing.quad)}),
+      ),
+      -1,
+    );
+    return () => cancelAnimation(opacity);
+  }, [opacity]);
+  const animatedStyle = useAnimatedStyle(() => ({opacity: opacity.value}));
+  return <Animated.View style={[skeletonStyles.base, style, animatedStyle]} />;
+}
+
+const skeletonStyles = StyleSheet.create({
+  base: {
+    backgroundColor: 'rgba(128,128,128,0.24)',
+  },
+});

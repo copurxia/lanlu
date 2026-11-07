@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {BarChart3, BookOpen, ChevronRight, Clock, Database, FileText, Filter, FolderOpen, Heart, Languages, ListTodo, LogOut, Moon, Package, Repeat, Server, Shield, Sun, Tag, Trash2, TrendingUp, User, Users} from 'lucide-react-native';
+import {BarChart3, Clock, Database, FileText, Filter, FolderOpen, Languages, ListTodo, LogOut, Moon, Package, Repeat, Server, Shield, Sun, Tag, Trash2, User, Users} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -8,10 +8,10 @@ import Animated, {runOnJS, useAnimatedStyle, useSharedValue, withTiming} from 'r
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {useAuth} from '../auth/AuthContext';
 import {ModalBackdrop, ScreenRoot, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {FluentCard, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import type {RootStackParamList} from '../navigation/types';
-import {buildAuthorizedAssetImageSource, isNetworkError} from '../api/client';
+import {buildAuthorizedAssetImageSource} from '../api/client';
 import {fetchUserStats, fetchReadingTrend, type UserStats, type ReadingTrendItem} from '../api/lanlu';
 import {DashboardStats} from '../components/DashboardStats';
 import {ReadingTrendChart} from '../components/ReadingTrendChart';
@@ -34,25 +34,27 @@ function SettingsGroup({title, items}: {title?: string; items: SettingsItem[]}) 
   return (
     <FluentCard style={styles.section}>
       {title ? <Text style={styles.groupTitle}>{title}</Text> : null}
-      <View style={styles.actionList}>
-        {items.map((item, index) => (
+      <View style={styles.tileGrid}>
+        {items.map(item => (
           <TouchableOpacity
-            key={index}
+            key={item.label}
             activeOpacity={0.78}
             accessibilityLabel={item.label}
             accessibilityRole="button"
             onPress={item.onPress}
-            style={[
-              styles.actionRow,
-              index === items.length - 1 && styles.actionRowLast,
-            ]}>
-            <View style={styles.iconWrap}>{item.icon}</View>
+            style={styles.tile}>
+            <View
+              style={[
+                styles.tileIconWrap,
+                item.danger && styles.tileIconWrapDanger,
+              ]}>
+              {item.icon}
+            </View>
             <Text
-              style={[styles.actionLabel, item.danger && styles.actionLabelDanger]}
+              style={[styles.tileLabel, item.danger && styles.actionLabelDanger]}
               numberOfLines={1}>
               {item.label}
             </Text>
-            <ChevronRight color={item.danger ? colors.danger : colors.textMuted} size={18} />
           </TouchableOpacity>
         ))}
       </View>
@@ -66,7 +68,7 @@ export function SettingsScreen() {
   const serverId = activeServer?.id || '';
   const cacheDashboard = useOfflineSettingsStore(s => s.cacheDashboard);
   const getCachedDashboard = useOfflineSettingsStore(s => s.getCachedDashboard);
-  const {colors, themePreference, setThemePreference} = useTheme();
+  const {colors, themePreference} = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const [diagnosticLog, setDiagnosticLog] = useState('');
@@ -123,7 +125,7 @@ export function SettingsScreen() {
           }
           setDashboardLoading(false);
         }
-      } catch (err) {
+      } catch {
         if (!cancelled && serverId) {
           const cached = getCachedDashboard(serverId);
           if (cached) {
@@ -156,13 +158,6 @@ export function SettingsScreen() {
     : themePreference === 'light'
     ? <Sun color={colors.textMuted} size={20} />
     : <Languages color={colors.textMuted} size={20} />;
-
-  async function openDiagnostics() {
-    const log = await getDiagnosticLog();
-    setDiagnosticLog(log || t('settings.diagnosticsEmpty'));
-    setDiagnosticsOpen(true);
-    diagnosticsProgress.value = withTiming(1, {duration: 160});
-  }
 
   function closeDiagnostics() {
     diagnosticsProgress.value = withTiming(0, {duration: 130}, finished => {
@@ -435,36 +430,39 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    actionList: {
-      borderColor: colors.border,
-      borderRadius: 8,
-      borderWidth: StyleSheet.hairlineWidth,
-      overflow: 'hidden',
-    },
-    actionRow: {
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderBottomColor: colors.border,
-      borderBottomWidth: StyleSheet.hairlineWidth,
+    tileGrid: {
       flexDirection: 'row',
-      gap: spacing.md,
-      minHeight: 48,
-      paddingHorizontal: spacing.md,
+      flexWrap: 'wrap',
     },
-    actionRowLast: {borderBottomWidth: 0},
-    actionLabel: {
+    // Exactly 4 equal columns; labels wrap under a centered icon so every row
+    // lines up regardless of how long the localized labels are.
+    tile: {
+      alignItems: 'center',
+      gap: spacing.xs,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: spacing.sm,
+      width: '25%',
+    },
+    tileIconWrap: {
+      alignItems: 'center',
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      height: 52,
+      justifyContent: 'center',
+      width: 52,
+    },
+    tileIconWrapDanger: {
+      backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
+    },
+    tileLabel: {
       color: colors.text,
-      flex: 1,
-      fontSize: 15,
-      fontWeight: '800',
+      fontSize: 12,
+      fontWeight: '700',
+      textAlign: 'center',
     },
     actionLabelDanger: {color: colors.danger},
-    iconWrap: {
-      alignItems: 'center',
-      height: 36,
-      justifyContent: 'center',
-      width: 28,
-    },
     iconAction: {
       alignItems: 'center',
       backgroundColor: colors.surfaceMuted,

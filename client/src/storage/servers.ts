@@ -1,4 +1,8 @@
-import {getStoredString, removeStoredValue, setStoredString} from './mmkv';
+import {
+  getStoredStringSync,
+  removeStoredValue,
+  setStoredString,
+} from './mmkv';
 
 export type LanluServer = {
   id: string;
@@ -26,8 +30,10 @@ function normalizeServer(server: LanluServer): LanluServer {
   };
 }
 
-export async function getServers(): Promise<LanluServer[]> {
-  const raw = await getStoredString(SERVERS_KEY);
+/** Synchronous read: MMKV backs this store, so the auth boot path can resolve
+ *  the active server without a round trip and the first frame shows the real
+ *  screen instead of a spinner. */
+function parseServers(raw: string | null): LanluServer[] {
   if (!raw) {
     return [];
   }
@@ -39,6 +45,10 @@ export async function getServers(): Promise<LanluServer[]> {
   } catch {
     return [];
   }
+}
+
+export function getServers(): LanluServer[] {
+  return parseServers(getStoredStringSync(SERVERS_KEY));
 }
 
 export async function saveServers(servers: LanluServer[]): Promise<void> {
@@ -75,9 +85,8 @@ export async function deleteServer(serverId: string): Promise<void> {
   }
 }
 
-export async function getActiveServerId(): Promise<string | null> {
-  const value = await getStoredString(ACTIVE_SERVER_ID_KEY);
-  return value || null;
+export function getActiveServerId(): string | null {
+  return getStoredStringSync(ACTIVE_SERVER_ID_KEY) || null;
 }
 
 export async function setActiveServerId(serverId: string | null): Promise<void> {

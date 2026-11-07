@@ -102,6 +102,11 @@ import {OptionSelectSheet, type SelectOption} from './reader/OptionSelectSheet';
 import {ZoomableFrame} from './reader/ZoomableFrame';
 import {readerItemIndexForPage, webtoonIndexForPage} from './reader/readerIndex';
 import {resolveTapAction} from './reader/tapZones';
+import {ReaderLoadingState, ReaderPageLoading} from './reader/ReaderLoading';
+import {
+  resetReaderPageLoadStates,
+  setReaderPageLoadState,
+} from './reader/pageLoadState';
 import {ScreenState} from '../components/ScreenState';
 import {
   loadArchiveReadingMode,
@@ -116,12 +121,14 @@ import {
   createLocalSubtitleFile,
   createProxiedMediaUrl,
   createProxiedPageUrl,
+  isLanluMediaProxyAvailable,
   prefetchLongImage,
   setKeepScreenOn,
   setSystemBarsHidden,
 } from '../native/LanluMediaProxy';
 import {LanluLongImage, isLanluLongImageAvailable} from '../native/LanluLongImage';
 import {setSystemBarTheme} from '../native/SystemBars';
+import {reportDebug} from '../debug/errorBridge';
 import {ColorFilteredView} from '../native/ColorFilteredView';
 import {
   getWidePageImages,
@@ -966,6 +973,9 @@ export function ReaderScreen({route, navigation}: Props) {
   const [loadedPages, setLoadedPages] = useState<Record<number, boolean>>({});
   const [imageLoadProgressByPage, setImageLoadProgressByPage] = useState<Record<number, number>>({});
   const [imageReloadNonceByPage, setImageReloadNonceByPage] = useState<Record<number, number>>({});
+  const [nativeLongImageSilentPages, setNativeLongImageSilentPages] = useState<Record<number, true>>({});
+  const nativeLongImageSeenPages = useRef<Record<number, true>>({});
+  const webtoonHeightDebugKeys = useRef<Map<number, number>>(new Map());
   const [htmlContents, setHtmlContents] = useState<Record<number, string>>({});
   const [htmlHeights, setHtmlHeights] = useState<Record<number, number>>({});
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
@@ -1050,6 +1060,8 @@ export function ReaderScreen({route, navigation}: Props) {
     },
     [pages.length],
   );
+  const queueWebtoonHydrationRef = useRef(queueWebtoonHydration);
+  queueWebtoonHydrationRef.current = queueWebtoonHydration;
 
   const topBarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: chromeProgress.value,
@@ -1097,18 +1109,29 @@ export function ReaderScreen({route, navigation}: Props) {
       const path = basePage.resolvedPath || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(pageArchiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
-      const proxiedPageUri =
-        effectiveType === 'html' && path && authorized.uri
-          ? await createProxiedPageUrl(authorized.uri, path, authorized.headers)
-          : undefined;
-      // Plain HTTP pages are fetched directly with their Authorization header.
-      // The local proxy is only needed for HTTPS (self-signed trust) and media.
-      const directHttpImage =
-        effectiveType === 'image' && /^http:\/\//i.test(authorized.uri);
-      const proxiedImageUri =
-        effectiveType === 'image' && !directHttpImage && authorized.uri
-          ? await createProxiedMediaUrl(authorized.uri, authorized.headers)
-          : undefined;
+      const proxiedPageUri = await (async () => {
+        if (effectiveType !== 'html' || !path || !authorized.uri) return undefined;
+        try {
+          return await createProxiedPageUrl(authorized.uri, path, authorized.headers);
+        } catch {
+          return undefined;
+        }
+      })();
+      // The local proxy is an optimization; if it fails, fall back to the direct
+      // backend URL with auth headers so the page still renders.
+      const proxiedImageUri = await (async () => {
+        if (effectiveType !== 'image' || !authorized.uri) return undefined;
+        try {
+          return await createProxiedMediaUrl(authorized.uri, authorized.headers);
+        } catch (err) {
+          reportDebug('reader.proxy.error', {
+            archiveId: pageArchiveId,
+            page: basePage.pageNumber,
+            message: extractApiError(err),
+          });
+          return undefined;
+        }
+      })();
       const displayMetadata = source?.metadata || page.metadata;
       const dedicatedThumbPath =
         displayMetadata?.thumb?.trim() || assetPath(displayMetadata?.thumb_asset_id) || '';
@@ -1118,9 +1141,7 @@ export function ReaderScreen({route, navigation}: Props) {
         effectiveType === 'image' && imageUri
           ? {
               uri: imageUri,
-              ...(((directHttpImage || !proxiedImageUri) && authorized.headers)
-                ? {headers: authorized.headers}
-                : {}),
+              ...(!proxiedImageUri && authorized.headers ? {headers: authorized.headers} : {}),
               cache: FastImage.cacheControl.immutable,
               priority,
             }
@@ -1147,23 +1168,13 @@ export function ReaderScreen({route, navigation}: Props) {
         }
       }
       if (effectiveType === 'image') {
-        const debugKey = `${pageArchiveId}:${basePage.pageNumber}`;
-        if (!imageSourceDebugKeys.current.has(debugKey)) {
-          imageSourceDebugKeys.current.add(debugKey);
-          appendDiagnosticLog('reader.imageSource.hydrate', {
-            archiveId: pageArchiveId,
-            page: basePage.pageNumber,
-            sourceIndex,
-            path,
-            url,
-            authorizedUri: authorized.uri,
-            imageSourceUri: imageSource?.uri || '',
-            imageSourceHeaders: Boolean(imageSource?.headers),
-            thumbnailPath,
-            thumbnailUri: thumbnailSource?.uri || '',
-            thumbnailHeaders: Boolean(thumbnailSource?.headers),
-          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
-        }
+        reportDebug('reader.page.hydrated', {
+          archiveId: pageArchiveId,
+          page: basePage.pageNumber,
+          uri: imageUri,
+          proxied: Boolean(proxiedImageUri),
+          headers: Boolean(imageSource?.headers),
+        });
       }
       return {
         ...basePage,
@@ -1200,6 +1211,7 @@ export function ReaderScreen({route, navigation}: Props) {
       hydratingPageKeys.current.add(key);
 
       if (page.effectiveType === 'image') {
+        setReaderPageLoadState(page.pageNumber, {phase: 'loading', progress: 0, error: undefined});
         setLoadedPages(current => {
           if (!current[page.pageNumber]) return current;
           const next = {...current};
@@ -1280,10 +1292,12 @@ export function ReaderScreen({route, navigation}: Props) {
     setFailedPages({});
     setLoadedPages({});
     setImageLoadProgressByPage({});
+    resetReaderPageLoadStates();
     setImageReloadNonceByPage({});
     setHtmlContents({});
     setHtmlHeights({});
     setWebtoonHeights({});
+    webtoonHeightDebugKeys.current.clear();
     setImageSizeByPage({});
     setWebtoonHydrationTargets({});
     let targetArchiveId = archiveId;
@@ -1324,22 +1338,53 @@ export function ReaderScreen({route, navigation}: Props) {
     }
 
     try {
-      const [storedSettings, files] = await Promise.all([
-        loadReaderSettings(),
-        fetchArchiveFiles(targetArchiveId),
-      ]);
+      reportDebug('reader.load.start', {archiveId: targetArchiveId});
+      // The backend rescans the archive for /files, which can take a long time on
+      // large LAN archives. Fall back to cached pages instead of blocking forever.
+      const filesPromise = fetchArchiveFiles(targetArchiveId);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('files fetch timeout')), 20000),
+      );
+      let files: PageInfo[];
+      try {
+        const [, fetched] = await Promise.all([
+          loadReaderSettings(),
+          Promise.race([filesPromise, timeoutPromise]),
+        ]);
+        files = fetched;
+      } catch (err) {
+        const cached = serverId ? getCachedArchive(serverId, targetArchiveId) : null;
+        if (cached && cached.pages.length) {
+          files = cached.pages;
+          reportDebug('reader.pages.cache_fallback', {archiveId: targetArchiveId, count: files.length});
+        } else {
+          throw err;
+        }
+      }
       const archiveMode = loadArchiveReadingMode(targetArchiveId);
+      const storedSettings = await loadReaderSettings();
       globalReaderSettings.current = storedSettings;
       setSettings(archiveMode ? {...storedSettings, readingMode: archiveMode} : storedSettings);
       settingsHydratedRef.current = true;
       const readerPages = files.map((page, index) => createReaderPage(page, index, targetArchiveId));
       setPages(readerPages);
+      reportDebug('reader.pages.loaded', {
+        archiveId: targetArchiveId,
+        count: readerPages.length,
+        firstUri: readerPages[0]?.uri || '',
+        readingMode: storedSettings.readingMode,
+        virtualization: 'anchor+v2',
+      });
       const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
       setCurrentPage(startIndex + 1);
       if (serverId) {
         cacheArchive(serverId, targetArchiveId, {pages: files});
       }
     } catch (err) {
+      reportDebug('reader.load.error', {
+        archiveId: targetArchiveId,
+        message: extractApiError(err),
+      });
       if (serverId && isNetworkError(err)) {
         const cached = getCachedArchive(serverId, targetArchiveId);
         if (cached && cached.pages.length) {
@@ -1350,6 +1395,12 @@ export function ReaderScreen({route, navigation}: Props) {
           setSettings(archiveMode ? {...offlineSettings, readingMode: archiveMode} : offlineSettings);
           settingsHydratedRef.current = true;
           setPages(readerPages);
+          reportDebug('reader.pages.loaded', {
+            archiveId: targetArchiveId,
+            count: readerPages.length,
+            readingMode: offlineSettings.readingMode,
+            offline: true,
+          });
           const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
           setCurrentPage(startIndex + 1);
           setError('');
@@ -1481,6 +1532,10 @@ export function ReaderScreen({route, navigation}: Props) {
     return () => setKeepScreenOn(false);
   }, [settings.keepScreenOn]);
 
+  useEffect(() => {
+    reportDebug('reader.open', {archiveId, readingMode: settings.readingMode});
+  }, [archiveId, settings.readingMode]);
+
   const resolveProgressTarget = useCallback(
     (page: number) => {
       if (!pages.length) return null;
@@ -1550,6 +1605,7 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     setWebtoonHeights({});
+    webtoonHeightDebugKeys.current.clear();
     setImageSizeByPage({});
   }, [width]);
 
@@ -1785,13 +1841,28 @@ export function ReaderScreen({route, navigation}: Props) {
     setZoomResetToken(current => current + 1);
   }, [archiveId, initialPage, settings.readingMode]);
 
+  const recordWebtoonHeight = useCallback((pageNum: number, measured: number) => {
+    if (!Number.isFinite(measured) || measured <= 0) return;
+    setWebtoonHeights(prev => {
+      const existing = prev[pageNum];
+      if (existing !== undefined && Math.abs(existing - measured) < 4) return prev;
+      return {...prev, [pageNum]: measured};
+    });
+  }, []);
+
   const getEstimatedWebtoonItemHeight = useCallback(
     (item: ReaderWebtoonItem) => {
       const pageNum = 'kind' in item && item.kind === 'collection-end' ? pages.length + 1 : item.pageNumber;
-      const measured = webtoonHeights[pageNum];
-      if (typeof measured === 'number' && measured > 0) return measured;
-      if ('kind' in item && item.kind === 'collection-end') return height;
+      if ('kind' in item && item.kind === 'collection-end') {
+        const measuredEnd = webtoonHeights[pageNum];
+        if (typeof measuredEnd === 'number' && measuredEnd > 0) return measuredEnd;
+        return height;
+      }
       const page = item as ReaderPage;
+      // Image height comes from the aspect ratio, never from an onLayout
+      // measurement: a native view that has not sized itself yet reports a
+      // collapsed height, which would then shrink getItemLayout and leave a
+      // large black gap below the top sliver of the image.
       if (page.effectiveType === 'html') return (htmlHeights[page.pageNumber] || height) + webtoonGap;
       if (page.effectiveType === 'video') {
         return Math.min(height, Math.max(1, webtoonContentWidth * (9 / 16))) + webtoonGap;
@@ -2144,7 +2215,27 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [activeExternalVlcSubtitleAttachment, activeLane, archiveId, localSubtitleUriByAssetId, subtitleTextsByAssetId]);
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
+  const webtoonViewabilityConfig = useMemo(
+    () => ({itemVisiblePercentThreshold: 1, minimumViewTime: 80}),
+    [],
+  );
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  // Hydrate by what is actually on screen, not by an estimated offset. Tall
+  // pages make the offset guess unreliable and leave a black, never-requested
+  // page in view; this mirrors Mihon's findLastVisibleItemPosition tracking.
+  const onWebtoonViewableItemsChanged = useRef(
+    ({viewableItems}: {viewableItems: {item?: ReaderWebtoonItem}[]}) => {
+      if (!viewableItems.length) return;
+      const pageNumbers = viewableItems
+        .map(entry => entry.item)
+        .filter((item): item is ReaderPage => Boolean(item && !('kind' in item)))
+        .map(item => item.pageNumber);
+      if (!pageNumbers.length) return;
+      const center = pageNumbers[Math.floor((pageNumbers.length - 1) / 2)];
+      queueWebtoonHydrationRef.current?.(center, 3);
+    },
+  );
 
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ListViewToken[]}) => {
@@ -2537,11 +2628,12 @@ export function ReaderScreen({route, navigation}: Props) {
   }, []);
 
   const markWidePageLoaded = useCallback((pageNumber: number) => {
+    reportDebug('reader.image.loaded', {archiveId, page: pageNumber, widePage: true});
     setLoadedPages(current => (current[pageNumber] ? current : {...current, [pageNumber]: true}));
     setImageLoadProgressByPage(current =>
       current[pageNumber] === 100 ? current : {...current, [pageNumber]: 100},
     );
-  }, []);
+  }, [archiveId]);
 
   const failWidePage = useCallback((pageNumber: number, message?: string) => {
     setFailedPages(current => ({
@@ -2861,10 +2953,12 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     if (!pages.length) return;
+    const currentLoaded = loadedPages[currentPage] === true;
     if (settings.readingMode === 'webtoon') {
-      // Warm the strip decoder's file cache a few pages ahead so scrolling does
-      // not wait for a full page download at the moment it becomes visible.
+      // Warm the strip decoder's file cache only after the current page is
+      // visible; otherwise prefetch competes with the page the user waits on.
       for (let offset = 0; offset <= 3; offset += 1) {
+        if (offset > 0 && !currentLoaded) break;
         const page = pages[currentPage - 1 + offset];
         if (!page || page.effectiveType !== 'image' || !page.imageSource?.uri) continue;
         const uri = page.imageSource.uri;
@@ -2874,6 +2968,7 @@ export function ReaderScreen({route, navigation}: Props) {
       }
       return;
     }
+    if (!currentLoaded) return;
     const sources: FastImageSource[] = [];
     for (let offset = 1; offset <= 2; offset += 1) {
       const page = pages[currentPage - 1 + offset];
@@ -2886,7 +2981,26 @@ export function ReaderScreen({route, navigation}: Props) {
     if (sources.length) {
       FastImage.preload(sources);
     }
-  }, [currentPage, pages, settings.readingMode]);
+  }, [currentPage, loadedPages, pages, settings.readingMode]);
+
+  useEffect(() => {
+    if (!pages.length || loadedPages[currentPage] === true) return;
+    const current = pages[currentPage - 1];
+    if (!current || current.effectiveType !== 'image' || !current.imageSource?.uri) return;
+    if (nativeLongImageSeenPages.current[currentPage]) return;
+    if (nativeLongImageSilentPages[currentPage]) return;
+    const timer = setTimeout(() => {
+      setNativeLongImageSilentPages(prev =>
+        prev[currentPage] ? prev : {...prev, [currentPage]: true},
+      );
+      reportDebug('reader.image.native_fallback', {
+        archiveId,
+        page: currentPage,
+        uri: current.imageSource?.uri || '',
+      });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [archiveId, currentPage, loadedPages, nativeLongImageSilentPages, pages]);
 
   useEffect(() => {
     nearbyMediaPages.forEach(ensureMediaProxy);
@@ -3002,7 +3116,14 @@ export function ReaderScreen({route, navigation}: Props) {
     widePageResults,
   }), [currentPage, failedPages, htmlContents, htmlHeights, loadedPages, widePageResults]);
 
-  if (loading) return <ScreenState loading title={t('reader.loading')} />;
+  if (loading) {
+    return (
+      <ReaderLoadingState
+        title={t('reader.loading')}
+        detail={t('reader.loadingDetail')}
+      />
+    );
+  }
 
   if (error) {
     return (
@@ -3999,13 +4120,6 @@ export function ReaderScreen({route, navigation}: Props) {
                       const nextHeight = Math.ceil(payload.height || 0);
                       const oldHeight = current[page.pageNumber] || 0;
                       if (Math.abs(oldHeight - nextHeight) < 2) return current;
-                      const delta = nextHeight - oldHeight;
-                      if (delta !== 0 && page.pageNumber < currentPage) {
-                        const scrollTarget = webtoonScrollOffset.current + delta;
-                        setTimeout(() => {
-                          webtoonRef.current?.scrollToOffset({animated: false, offset: Math.max(0, scrollTarget)});
-                        }, 0);
-                      }
                       return {...current, [page.pageNumber]: nextHeight};
                     });
                   }
@@ -4035,6 +4149,13 @@ export function ReaderScreen({route, navigation}: Props) {
             : {aspectRatio: 0.72},
         ]
       : styles.pageImage;
+    // A custom native View is not guaranteed to honour aspectRatio under the
+    // bridgeless ViewManager interop, so give it an explicit height that matches
+    // getItemLayout's estimate instead of letting it collapse to a sliver.
+    const nativeImageHeight = webtoonImageSize?.width && webtoonImageSize.height
+      ? pageWidth * (webtoonImageSize.height / webtoonImageSize.width)
+      : pageWidth / 0.72;
+    const nativeImageStyle = [styles.webtoonImage, {height: nativeImageHeight}];
     const imageReloadKey = imageReloadNonceByPage[page.pageNumber] || 0;
     const nativeImageUri = page.imageSource?.uri ?? '';
     const colorFilterActive =
@@ -4047,34 +4168,25 @@ export function ReaderScreen({route, navigation}: Props) {
       brightness: settings.brightness,
     };
     // Long webtoon pages go through the native strip decoder so a single
-    // 1000x20000 bitmap never reaches Glide/GPU as one texture.
+    // 1000x20000 bitmap never reaches Glide/GPU as one texture. A stale native
+    // side can accept the view config but never emit events, which would leave
+    // the page black forever, so fall back to FastImage after a silent window.
+    const nativeLongImageSilent = nativeLongImageSilentPages[page.pageNumber] === true;
     const useNativeLongImage =
       isLanluLongImageAvailable &&
+      isLanluMediaProxyAvailable() &&
       Platform.OS === 'android' &&
       webtoon &&
       page.effectiveType === 'image' &&
-      nativeImageUri.length > 0;
+      nativeImageUri.length > 0 &&
+      !nativeLongImageSilent;
 
     const applyLoadedImageSize = (imageWidth: number, imageHeight: number) => {
       if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) {
         return;
       }
-      const previousSize = imageSizeByPage[page.pageNumber];
-      const previousHeight =
-        previousSize?.width && previousSize.height
-          ? pageWidth * (previousSize.height / previousSize.width)
-          : pageWidth / 0.72;
-      const nextHeight = pageWidth * (imageHeight / imageWidth);
-      if (
-        webtoon &&
-        page.pageNumber < currentPage &&
-        Math.abs(nextHeight - previousHeight) >= 2
-      ) {
-        const scrollTarget = webtoonScrollOffset.current + nextHeight - previousHeight;
-        setTimeout(() => {
-          webtoonRef.current?.scrollToOffset({animated: false, offset: Math.max(0, scrollTarget)});
-        }, 0);
-      }
+      // Height changes are absorbed by maintainVisibleContentPosition on the
+      // list. Manually scrolling here fights that anchor and produces jumps.
       setImageSizeByPage(prev => {
         const existing = prev[page.pageNumber];
         if (existing && existing.width === imageWidth && existing.height === imageHeight) return prev;
@@ -4083,6 +4195,7 @@ export function ReaderScreen({route, navigation}: Props) {
     };
 
     const resetImageLoadState = () => {
+      setReaderPageLoadState(page.pageNumber, {phase: 'loading', progress: 0, error: undefined});
       setLoadedPages(current => {
         if (!current[page.pageNumber]) return current;
         const next = {...current};
@@ -4106,16 +4219,24 @@ export function ReaderScreen({route, navigation}: Props) {
     const updateImageProgress = (loaded: number, total: number) => {
       if (!Number.isFinite(loaded) || !Number.isFinite(total) || total <= 0) return;
       const nextValue = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
-      setImageLoadProgressByPage(current =>
-        current[page.pageNumber] === nextValue ? current : {...current, [page.pageNumber]: nextValue},
-      );
+      // Progress lives in an external store so a 200ms tick does not re-render
+      // every virtualized cell; only this page's placeholder subscribes to it.
+      setReaderPageLoadState(page.pageNumber, {phase: 'downloading', progress: nextValue});
     };
 
     const failImage = (message?: string) => {
+      const resolved =
+        typeof message === 'string' && message.trim() ? message : 'Image failed to load.';
+      setReaderPageLoadState(page.pageNumber, {phase: 'error', error: resolved});
+      reportDebug('reader.image.error', {
+        archiveId,
+        page: page.pageNumber,
+        uri: page.imageSource?.uri || '',
+        message: message || '',
+      });
       setFailedPages(current => ({
         ...current,
-        [page.pageNumber]:
-          typeof message === 'string' && message.trim() ? message : 'Image failed to load.',
+        [page.pageNumber]: resolved,
       }));
       setImageLoadProgressByPage(current => {
         if (!current[page.pageNumber]) return current;
@@ -4126,8 +4247,20 @@ export function ReaderScreen({route, navigation}: Props) {
     };
 
     const markImageLoaded = () => {
+      setReaderPageLoadState(page.pageNumber, {phase: 'ready', progress: 100, error: undefined});
+      reportDebug('reader.image.loaded', {
+        archiveId,
+        page: page.pageNumber,
+        uri: page.imageSource?.uri || '',
+      });
       setLoadedPages(current => ({...current, [page.pageNumber]: true}));
       setImageLoadProgressByPage(current => ({...current, [page.pageNumber]: 100}));
+    };
+    const pageLoadingLabels = {
+      queued: t('reader.pageQueued'),
+      loading: t('reader.loadingPage', {page: page.pageNumber}),
+      downloading: t('reader.pageDownloading'),
+      error: t('reader.pageFailed'),
     };
     const fastImageElement = (
       <FastImage
@@ -4158,7 +4291,7 @@ export function ReaderScreen({route, navigation}: Props) {
       />
     );
     if (page.effectiveType === 'image') {
-      const debugKey = `${page.sourceArchiveId || archiveId}:${page.pageNumber}:render`;
+      const debugKey = `${page.sourceArchiveId || archiveId}:${page.pageNumber}:render:${Boolean(page.imageSource)}`;
       if (!imageSourceDebugKeys.current.has(debugKey)) {
         imageSourceDebugKeys.current.add(debugKey);
         appendDiagnosticLog('reader.imageSource.render', {
@@ -4170,6 +4303,14 @@ export function ReaderScreen({route, navigation}: Props) {
           thumbnailHasHeaders: Boolean(page.thumbnailSource?.headers),
           currentPage,
         }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+        reportDebug('reader.image.render', {
+          archiveId: page.sourceArchiveId || archiveId,
+          page: page.pageNumber,
+          hasSource: Boolean(page.imageSource),
+          uri: page.imageSource?.uri || '',
+          webtoon,
+          currentPage,
+        });
       }
     }
     return (
@@ -4188,12 +4329,12 @@ export function ReaderScreen({route, navigation}: Props) {
                 style={StyleSheet.absoluteFill}
               />
             ) : null}
-            {!loadedPages[page.pageNumber] && !commonError && page.pageNumber === currentPage ? (
+            {!loadedPages[page.pageNumber] && !commonError ? (
               <View style={styles.loadingOverlay}>
-                <CircularProgress
-                  value={imageLoadProgressByPage[page.pageNumber] ?? 0}
-                  color={colors.white}
-                  showLabel={true}
+                <ReaderPageLoading
+                  labels={pageLoadingLabels}
+                  minHeight={0}
+                  pageNumber={page.pageNumber}
                 />
               </View>
             ) : null}
@@ -4206,12 +4347,29 @@ export function ReaderScreen({route, navigation}: Props) {
                 headers={page.imageSource.headers}
                 invertColors={settings.invertColors}
                 key={`${page.pageNumber}:${imageReloadKey}:native`}
-                onError={message => failImage(message)}
-                onLoad={markImageLoaded}
-                onLoadStart={resetImageLoadState}
-                onProgress={updateImageProgress}
-                onSize={applyLoadedImageSize}
-                style={styles.webtoonImage}
+                onError={message => {
+                  if (!nativeLongImageSeenPages.current[page.pageNumber]) {
+                    nativeLongImageSeenPages.current[page.pageNumber] = true;
+                  }
+                  failImage(message);
+                }}
+                onLoad={() => {
+                  nativeLongImageSeenPages.current[page.pageNumber] = true;
+                  markImageLoaded();
+                }}
+                onLoadStart={() => {
+                  nativeLongImageSeenPages.current[page.pageNumber] = true;
+                  resetImageLoadState();
+                }}
+                onProgress={(loaded, total) => {
+                  nativeLongImageSeenPages.current[page.pageNumber] = true;
+                  updateImageProgress(loaded, total);
+                }}
+                onSize={(width, height) => {
+                  nativeLongImageSeenPages.current[page.pageNumber] = true;
+                  applyLoadedImageSize(width, height);
+                }}
+                style={nativeImageStyle}
                 uri={nativeImageUri}
               />
             ) : colorFilterActive ? (
@@ -4232,13 +4390,11 @@ export function ReaderScreen({route, navigation}: Props) {
           </>
         ) : (
           !page.uri && !commonError ? (
-            <View style={styles.loadingOverlay}>
-              <CircularProgress
-                value={imageLoadProgressByPage[page.pageNumber] ?? 0}
-                color={colors.white}
-                showLabel={true}
-              />
-            </View>
+            <ReaderPageLoading
+              labels={pageLoadingLabels}
+              minHeight={webtoon ? nativeImageHeight : height * 0.9}
+              pageNumber={page.pageNumber}
+            />
           ) : (
             <ErrorOverlay
               actionLabel={t('common.retry')}
@@ -4445,10 +4601,7 @@ export function ReaderScreen({route, navigation}: Props) {
       const colPageNum = pages.length + 1;
       return (
         <View
-          onLayout={e => {
-            const h = e.nativeEvent.layout.height;
-            setWebtoonHeights(prev => (prev[colPageNum] === h ? prev : {...prev, [colPageNum]: h}));
-          }}
+          onLayout={e => recordWebtoonHeight(colPageNum, e.nativeEvent.layout.height)}
           style={[
             styles.webtoonItem,
             {minHeight: height, paddingBottom: webtoonGap, paddingHorizontal: webtoonPadding},
@@ -4468,11 +4621,26 @@ export function ReaderScreen({route, navigation}: Props) {
     const pageIdx = page.pageNumber - 1;
     const currentIdx = Math.max(0, Math.min(currentPage - 1, pages.length - 1));
     const mediaActiveStable = Math.abs(pageIdx - currentIdx) <= 1;
+    const estimatedHeight = getEstimatedWebtoonItemHeight(item);
     return (
       <View
         onLayout={e => {
-          const h = e.nativeEvent.layout.height;
-          setWebtoonHeights(prev => (prev[page.pageNumber] === h ? prev : {...prev, [page.pageNumber]: h}));
+          const measured = e.nativeEvent.layout.height;
+          // Image page height is derived from the aspect ratio for getItemLayout;
+          // writing onLayout results back to state only causes re-render churn.
+          const previous = webtoonHeightDebugKeys.current.get(page.pageNumber);
+          if (previous === undefined || Math.abs(previous - measured) > 8) {
+            webtoonHeightDebugKeys.current.set(page.pageNumber, measured);
+            reportDebug('webtoon.item.layout', {
+              archiveId,
+              page: page.pageNumber,
+              measured,
+              estimated: estimatedHeight,
+              delta: Math.round(measured - estimatedHeight),
+              collapsed: measured < estimatedHeight * 0.6,
+              nativeViewAvailable: isLanluLongImageAvailable && isLanluMediaProxyAvailable(),
+            });
+          }
         }}
         style={[
           styles.webtoonItem,
@@ -4519,8 +4687,8 @@ export function ReaderScreen({route, navigation}: Props) {
                 index,
               };
             }}
-            initialNumToRender={4}
-            maxToRenderPerBatch={6}
+            initialNumToRender={3}
+            maxToRenderPerBatch={4}
             onScrollToIndexFailed={info => {
               setTimeout(() => {
                 webtoonRef.current?.scrollToIndex({
@@ -4543,14 +4711,18 @@ export function ReaderScreen({route, navigation}: Props) {
               queueWebtoonHydration(nextPage, 3);
               setCurrentPage(Math.max(1, Math.min(nextPage, readerProgressTotal)));
             }}
+            onViewableItemsChanged={onWebtoonViewableItemsChanged.current}
             ref={webtoonRef}
+            removeClippedSubviews={false}
             renderItem={renderWebtoonItem}
             scrollEnabled={!webtoonZoomed}
             scrollEventThrottle={100}
             showsVerticalScrollIndicator={false}
             style={styles.webtoonList}
             contentContainerStyle={styles.webtoonContent}
-            windowSize={5}
+            updateCellsBatchingPeriod={50}
+            viewabilityConfig={webtoonViewabilityConfig}
+            windowSize={9}
           />
         </ZoomableFrame>
       ) : (
@@ -4625,7 +4797,12 @@ export function ReaderScreen({route, navigation}: Props) {
                 size={20}
               />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconButton}>
+            <TouchableOpacity
+              onPress={() => {
+                reportDebug('reader.settings.open', {archiveId});
+                setSettingsOpen(true);
+              }}
+              style={styles.iconButton}>
               <SettingsIcon color={colors.white} size={21} />
             </TouchableOpacity>
           </View>
@@ -5418,6 +5595,11 @@ function ReaderSettingsModal({
 }) {
   const {colors} = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  useEffect(() => {
+    if (open) {
+      reportDebug('reader.settings.rendered', {readingMode: settings.readingMode});
+    }
+  }, [open, settings.readingMode]);
   const {height: windowHeight} = useWindowDimensions();
   const scrollMaxHeight = Math.max(260, Math.min(620, Math.round(windowHeight * 0.62)));
   const paged = settings.readingMode !== 'webtoon';
