@@ -2061,7 +2061,7 @@ export function HomeScreen() {
           }}
           ListEmptyComponent={
             loading ? (
-              <ScreenState loading title={t('home.loading')} />
+              <ScreenState loading title={t('common.loading')} />
             ) : (
               <ScreenState title={t('home.noArchives')} message={t('home.tryAnotherSearch')} />
             )
