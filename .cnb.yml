@@ -273,6 +273,10 @@ $:
           - main:/root/.gradle:copy-on-write
       env:
         NEXT_TELEMETRY_DISABLED: "1"
+        # CNB runners cannot reach plugins.gradle.org; postinstall patches the
+        # React Native Gradle plugin's settings to resolve plugins via this
+        # mirror instead (see client/scripts/patch-dependencies.js).
+        LANLU_GRADLE_PLUGIN_MIRROR: "https://maven.aliyun.com/repository/gradle-plugin"
       stages:
         - name: Build release APK
           script: |

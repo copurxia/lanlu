@@ -35,3 +35,38 @@ patchFile('node_modules/react-native-vlc-media-player/android/build.gradle', [
     "getDefaultProguardFile('proguard-android-optimize.txt')",
   ],
 ]);
+
+/**
+ * Some CI runners (e.g. CNB in mainland China) cannot reach
+ * plugins.gradle.org, which breaks the included React Native Gradle plugin
+ * build: it resolves org.gradle.toolchains.foojay-resolver-convention from the
+ * Gradle Plugin Portal only. When LANLU_GRADLE_PLUGIN_MIRROR is set, prepend
+ * that mirror so plugin resolution succeeds; other environments (GitHub/Gitea
+ * runners, dev machines) are left untouched because the variable is unset.
+ */
+function patchGradlePluginMirror() {
+  const mirror = process.env.LANLU_GRADLE_PLUGIN_MIRROR;
+  if (!mirror) {
+    return;
+  }
+  const relativePath = 'node_modules/@react-native/gradle-plugin/settings.gradle.kts';
+  const file = path.join(root, relativePath);
+  if (!fs.existsSync(file)) {
+    return;
+  }
+  let source = fs.readFileSync(file, 'utf8');
+  if (source.includes(mirror)) {
+    return;
+  }
+  const anchor = '    gradlePluginPortal()';
+  if (!source.includes(anchor)) {
+    // Upstream changed the block layout; leave it alone and let the build fail
+    // loudly rather than patch blind.
+    return;
+  }
+  source = source.replace(anchor, `    maven { url = uri("${mirror}") }\n${anchor}`);
+  fs.writeFileSync(file, source);
+  console.log(`[patch-dependencies] added Gradle plugin mirror to ${relativePath}`);
+}
+
+patchGradlePluginMirror();
