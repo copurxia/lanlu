@@ -236,6 +236,7 @@ export function HomeScreen() {
   const [datePickerTarget, setDatePickerTarget] = useState<DatePickerTarget | null>(null);
   const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const suppressAutocompleteRef = useRef(false);
   const [activeSmartFilterId, setActiveSmartFilterId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -1097,6 +1098,14 @@ export function HomeScreen() {
   );
 
   useEffect(() => {
+    if (suppressAutocompleteRef.current) {
+      // Selection just submitted a search; do not reopen the dropdown for the
+      // completed word.
+      suppressAutocompleteRef.current = false;
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
     const words = filter.trim().split(/\s+/).filter(Boolean);
     const lastWord = words[words.length - 1] || '';
     if (!lastWord) {
@@ -1138,6 +1147,9 @@ export function HomeScreen() {
     const nextFilter = nextWords.join(' ');
     // Keep a trailing space in the input so the user can refine further, but
     // run the search right away — tapping a suggestion is an explicit intent.
+    // The filter change would re-trigger autocomplete for the completed word;
+    // suppress that once so the dropdown does not pop over the results.
+    suppressAutocompleteRef.current = true;
     setFilter(`${nextFilter} `);
     runSearch(nextFilter);
   }
@@ -1797,9 +1809,13 @@ export function HomeScreen() {
     [colors],
   );
 
-  // No full-screen early return for the loading state: replacing the whole tree
-  // on a view-mode switch would bypass the cross-fade and blink. The FlatList's
-  // ListEmptyComponent and the rows skeleton already render loading in place.
+  // No full-screen early return for view-mode switches (it would bypass the
+  // cross-fade and blink). A submitted search is different: the user explicitly
+  // asked for new results, so show an unambiguous full-screen loading instead
+  // of leaving stale content on screen while the query runs.
+  if (!showRows && loading && !refreshing && !items.length && submittedFilter) {
+    return <ScreenState loading title={t('common.searching')} />;
+  }
 
   if (error && !items.length && !showRows) {
     return (
