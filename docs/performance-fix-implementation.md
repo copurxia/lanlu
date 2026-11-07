@@ -161,3 +161,65 @@ curl -sk -o /dev/null -w "%{time_total}s\n" https://nas.copur.xyz:3005/api/info
   维持 30s 结果缓存兜底。
 - discover 0.77~0.83s（原 1.26~1.40s，有改善但未到本地 0.12s 水平），
   同样疑似构建缓存问题。
+
+---
+
+# 带词搜索索引化（V029，2026-11-07）
+
+## 问题定位
+
+带 filter 的冷查询线上 3.6~4.8s。根因不是 ILIKE 本身，而是：
+1. `archive_metadata_search` 是带 `GROUP BY` + `string_agg` 的视图，PostgreSQL 无法把
+   WHERE 下推到基表，任何 ILIKE 都退化为「13k 行全量聚合 + 过滤」；
+2. 现有 trigram 索引只覆盖 `archives.filename`，`title`/`summary`/`tags` 完全没有；
+3. 模糊标签匹配走 `metadata_tags EXISTS`，该分支不可索引，会让整个 OR 条件退化。
+
+## 行业做法对照
+
+| 项目 | 方案 |
+| :-- | :-- |
+| LANraragi 0.8.8（本项目的上游原型） | 重写为 Redis 搜索索引，启动建索引、写时增量更新，官方称最快场景 10 倍 |
+| Komga | Lucene（Hibernate Search）全文索引 + SQLite 负责条件过滤/排序 |
+| Pluteus 等 | 内存/磁盘预建索引，不用 `LIKE %x%` 扫库 |
+
+共同点：**预建倒排/索引结构，不在聚合视图上做 `ILIKE '%x%'` 全扫描**。
+
+## 实现（V029_SearchDocIndex）
+
+PostgreSQL 原生等价方案：
+- 新表 `archive_search_docs`：每 archive 一行，字段与搜索视图对齐
+  （id/arcid/filename/title/summary/tags/封面/时间/页数/大小/`search_tsv`）；
+- 五个触发器（`archives` / `metadata_objects` / `metadata_tags` / `metadata_assets` / `assets.thumbhash`）
+  在写路径增量刷新对应行，`lanlu_refresh_search_doc()` 单行 upsert；
+- 迁移内自带 `lanlu_immutable_unaccent`（版本迁移先于扩展迁移执行）与回填；
+- GIN trigram 索引（表达式与查询完全一致：`lanlu_immutable_unaccent(COALESCE(col,''))`）
+  覆盖 title/filename/summary/tags + `metadata_tags.tag`；GIN(tsvector) 供相关度排序；
+  另加 title/arcid/category/created/updated/release/pagecount/file_size btree 索引；
+- `archive_dao` 的搜索查询改为查文档表；模糊 tag 匹配改用文档表聚合 `tags` 列
+  （trigram 可索引），精确标签（`$`）仍走 `metadata_tags` btree 等值。
+
+## 实测（本地 13,335 归档，索引冷查询）
+
+| 查询 | 旧视图方案 | 文档表方案 |
+| :-- | --: | --: |
+| `filter=漫画标题编号001`（100 命中） | ~1.1s（线上 3.6s） | **30ms** |
+| `filter=file_12`（1111 命中） | ~1.1s | **74ms** |
+| `filter=作者:测试作者$`（精确标签，13334 命中） | ~1.1s | **15ms** |
+| `filter=测试作者`（模糊标签，13335 全命中） | ~1.1s | 264ms（全命中时仍需排序/计分） |
+| `filter=不存在的词` | ~1.1s | **12ms** |
+
+执行计划从 `Seq Scan + GroupAggregate` 变为 `BitmapOr（4 个 GIN trigram 索引）`。
+
+## 正确性验证
+
+- 视图 vs 文档表：5 个检索词逐 id 差集双向为 0；
+- 触发器链路逐项验证：改标题 / 加删标签 / 改文件名 / 设封面并改 thumbhash / 删档案，
+  文档行均实时同步（`search_doc_test.cj` 两项测试锁定）；
+- 分组搜索、相关度排序、`newonly`/`untaggedonly`、精确标签路径均实测通过；
+- 全量测试：主包 10 + postgresql-driver 69 + rocksdb_ffi 10，全绿。
+
+## 代价与注意
+
+- 写路径增加触发器开销（标签批量导入时每行一次单行 upsert），适合读远多于写的场景；
+- 文档表与视图并存：其余 DAO（推荐/统计/智能过滤）仍用视图，可后续逐步迁移；
+- 部署后首次启动会执行回填（13,435 行，秒级）并建索引（GIN 构建约数十秒）。

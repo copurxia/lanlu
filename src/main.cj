@@ -79,6 +79,7 @@ main(): Int64 {
     MigrationRegistry.register(V026_AddSourceIdRegexToPlugins())
     MigrationRegistry.register(V027_DropUserTankoubonFavorites())
     MigrationRegistry.register(V028_UserTokensTimestamptz())
+    MigrationRegistry.register(V029_SearchDocIndex())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
 

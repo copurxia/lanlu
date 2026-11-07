@@ -293,7 +293,7 @@ public class ArchiveDao {
         let categoryValues = parseCategoryFilterValues(category)
         if (categoryValues.size > 0) {
             if (categoryValues.size == 1) {
-                whereConditions.add("archive_metadata_search.category_id = ?")
+                whereConditions.add("archive_search_docs.category_id = ?")
                 filterParams.add(categoryValues[0])
                 return
             }
@@ -306,12 +306,12 @@ public class ArchiveDao {
                 placeholders += "?"
                 filterParams.add(categoryValues[i])
             }
-            whereConditions.add("archive_metadata_search.category_id IN (${placeholders})")
+            whereConditions.add("archive_search_docs.category_id IN (${placeholders})")
             return
         }
 
         // 当没有指定分类时，只搜索启用的分类
-        whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archive_metadata_search.category_id AND c.enabled = true)")
+        whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archive_search_docs.category_id AND c.enabled = true)")
     }
 
     /**
@@ -424,10 +424,18 @@ public class ArchiveDao {
 
     /**
      * 构建 tags 模糊匹配条件（结构化查询）。
-     * 同时匹配 name 与 namespace:name 两种形式。
+     *
+     * 命中搜索文档表的聚合 tags 列（GIN trigram 可索引），而不是对 metadata_tags
+     * 做 EXISTS：后者不可索引，会让整个 OR 条件退化为全表扫描（实测 13k 行 ~1s）。
+     * 语义等价性：聚合 tags 为 "ns:name,ns:name,..."，对 name 或 ns:name 的子串
+     * 匹配结果与原 "分别匹配 mt.tag 与去掉命名空间的 name" 一致（仅多出跨逗号
+     * 边界的极端情况，可忽略）。精确标签匹配（`$`）仍走 metadata_tags 等值查询。
      */
     private static func buildTagLikeCondition(pattern: String, params: ArrayList<String>, tableAlias: String, unaccentFunction: String): String {
-        return buildMetadataTagLikeCondition(pattern, params, "archive", "${tableAlias}.arcid", unaccentFunction)
+        params.add(pattern)
+        let tagsExpr = wrapSearchExpr("${tableAlias}.tags", unaccentFunction)
+        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+        return "${tagsExpr} ILIKE ${patternExpr} ESCAPE '\\'"
     }
 
     private static func ensureArchiveMetadataRoot(archiveId: String): Bool {
@@ -497,7 +505,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id FROM archive_metadata_search ORDER BY id"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id FROM archive_search_docs ORDER BY id"
                     return db.raw<ArchiveData>(sql, Array<Value>(), { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -533,7 +541,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id FROM archive_metadata_search WHERE arcid = $1"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id FROM archive_search_docs WHERE arcid = $1"
                     let result = db.rawOne<ArchiveData>(sql, [vtext(id)], { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -597,7 +605,7 @@ public class ArchiveDao {
                         placeholders += "${'$'}${(i + 1).toString()}"
                         params.add(vtext(deduped[i]))
                     }
-                    let sql = "SELECT arcid, id, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id, tags FROM archive_metadata_search WHERE arcid IN (${placeholders})"
+                    let sql = "SELECT arcid, id, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id, tags FROM archive_search_docs WHERE arcid IN (${placeholders})"
                     let rows = db.raw<ArchiveData>(sql, params.toArray(), { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -787,7 +795,7 @@ public class ArchiveDao {
                     let resolvedDateField = normalizeSearchTimeField(sortby)
 
                     // 首先获取总记录数
-                    var countSql = "SELECT COUNT(*) FROM archive_metadata_search"
+                    var countSql = "SELECT COUNT(*) FROM archive_search_docs"
                     var whereConditions: ArrayList<String> = ArrayList<String>()
 
                     // 解析搜索过滤器
@@ -815,18 +823,18 @@ public class ArchiveDao {
                                     termValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, termValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(termValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             // 查询翻译匹配的标签，添加 OR 条件
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, termValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -858,18 +866,18 @@ public class ArchiveDao {
                                     phraseValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, phraseValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(phraseValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             // 查询翻译匹配的标签
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, phraseValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -891,18 +899,18 @@ public class ArchiveDao {
                                     excludeValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, excludeValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(excludeValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             // 查询翻译匹配的标签
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, excludeValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -915,7 +923,7 @@ public class ArchiveDao {
                     if (newOnly && userId > 0) {
                         // 排除用户已读的归档（is_new = false 的记录）
                         // 使用子查询：排除在 user_archive_status 表中 is_new = false 的归档
-                        whereConditions.add("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
+                        whereConditions.add("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_search_docs.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
                     }
 
                     // 按 lastread 排序时，移除从未阅读的记录
@@ -924,18 +932,18 @@ public class ArchiveDao {
                     // 注意：未登录用户会被重定向到登录页，所以这里只处理已登录用户
                     if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
                         // 只显示用户已读的档案（在 user_archive_status 表中有记录且 is_new = false）
-                        whereConditions.add("EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_search_docs.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
                     }
 
                     // 添加无标签过滤条件
                     if (untaggedOnly) {
-                        whereConditions.add("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = archive_metadata_search.arcid)")
+                        whereConditions.add("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = archive_search_docs.arcid)")
                     }
 
                     // favoriteOnly 过滤 - 只显示用户收藏的档案
                     // 当 favoriteOnly=true 且 userId > 0 时，只返回用户收藏的归档
                     if (favoriteOnly && userId > 0) {
-                        whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uf.user_id = @@UID@@)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archive_search_docs.arcid AND uf.user_id = @@UID@@)")
                     }
 
                     // 分类过滤
@@ -943,7 +951,7 @@ public class ArchiveDao {
 
                     // tankoubon_id 过滤 - 只返回某个合集中的归档
                     if (tankoubonId.size > 0) {
-                        whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archive_metadata_search.id)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archive_search_docs.id)")
                         filterParams.add(tankoubonId)
                     }
 
@@ -974,7 +982,7 @@ public class ArchiveDao {
                     }
 
                     // 构建计数 SQL
-                    // 无任何过滤条件且无搜索词时，视图 archive_metadata_search 的
+                    // 无任何过滤条件且无搜索词时，搜索文档表 archive_search_docs 的
                     // "FROM archives LEFT JOIN metadata ... GROUP BY a.id" 每个 archive 恰好
                     // 聚合为一行，COUNT(*) 与基表计数恒等，改用 SELECT COUNT(*) FROM archives
                     // 走索引 only-scan，避免对聚合视图全量物化（万级归档下 ~1s → 毫秒级）。
@@ -986,7 +994,7 @@ public class ArchiveDao {
                         }
                     } else {
                         // relevance_score 只在本语句内计算一次
-                        countSql = "WITH base AS (SELECT (" + relevanceExpr + ") AS relevance_score FROM archive_metadata_search"
+                        countSql = "WITH base AS (SELECT (" + relevanceExpr + ") AS relevance_score FROM archive_search_docs"
                         if (baseWhereClause.size > 0) {
                             countSql += " WHERE " + baseWhereClause
                         }
@@ -1077,10 +1085,10 @@ public class ArchiveDao {
                         """
                     } else if (!hasRelevance) {
                         // 无 relevance：保持原查询形态
-                        sql = "SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, archive_metadata_search.category_id FROM archive_metadata_search"
+                        sql = "SELECT archive_search_docs.id, archive_search_docs.arcid, archive_search_docs.filename, archive_search_docs.title, archive_search_docs.summary, archive_search_docs.thumbhash, archive_search_docs.cover_asset_id, archive_search_docs.created_at, archive_search_docs.updated_at, archive_search_docs.release_at, archive_search_docs.relative_path, archive_search_docs.file_size, archive_search_docs.pagecount, archive_search_docs.archive_type, archive_search_docs.tags, archive_search_docs.category_id FROM archive_search_docs"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
                             sql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
-                            sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_metadata_search.id"
+                            sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_search_docs.id"
                             orderJoinPrefix.add(tankoubonId)
                         }
                         if (baseWhereClause.size > 0) {
@@ -1088,14 +1096,14 @@ public class ArchiveDao {
                         }
                     } else {
                         // 有 relevance：在 base CTE 里计算 relevance_score，并在外层应用阈值过滤
-                        sql = "WITH base AS (SELECT archive_metadata_search.id, archive_metadata_search.arcid, archive_metadata_search.filename, archive_metadata_search.title, archive_metadata_search.summary, archive_metadata_search.thumbhash, archive_metadata_search.cover_asset_id, archive_metadata_search.created_at, archive_metadata_search.updated_at, archive_metadata_search.release_at, archive_metadata_search.relative_path, archive_metadata_search.file_size, archive_metadata_search.pagecount, archive_metadata_search.archive_type, archive_metadata_search.tags, archive_metadata_search.category_id, (" + relevanceExpr + ") AS relevance_score"
+                        sql = "WITH base AS (SELECT archive_search_docs.id, archive_search_docs.arcid, archive_search_docs.filename, archive_search_docs.title, archive_search_docs.summary, archive_search_docs.thumbhash, archive_search_docs.cover_asset_id, archive_search_docs.created_at, archive_search_docs.updated_at, archive_search_docs.release_at, archive_search_docs.relative_path, archive_search_docs.file_size, archive_search_docs.pagecount, archive_search_docs.archive_type, archive_search_docs.tags, archive_search_docs.category_id, (" + relevanceExpr + ") AS relevance_score"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
                             sql += ", ta_order.sort_order AS tank_sort_order"
                         }
-                        sql += " FROM archive_metadata_search"
+                        sql += " FROM archive_search_docs"
                         if (sortby == "tank_order" && tankoubonId.size > 0) {
                             sql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
-                            sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_metadata_search.id"
+                            sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_search_docs.id"
                             orderJoinPrefix.add(tankoubonId)
                         }
                         if (baseWhereClause.size > 0) {
@@ -1270,17 +1278,17 @@ public class ArchiveDao {
                                     termValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, termValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(termValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, termValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1309,17 +1317,17 @@ public class ArchiveDao {
                                     phraseValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, phraseValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(phraseValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, phraseValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1340,17 +1348,17 @@ public class ArchiveDao {
                                     excludeValue,
                                     getPreloadedTranslatedTags(translatedTagsLookup, excludeValue),
                                     filterParams,
-                                    "archive_metadata_search"
+                                    "archive_search_docs"
                                 ))
                                 continue
                             }
 
                             let pattern = SearchFilter.toLikePattern(excludeValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, excludeValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_search_docs", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1361,39 +1369,39 @@ public class ArchiveDao {
 
                     // newOnly 过滤 - 使用用户级别的已读状态
                     if (newOnly && userId > 0) {
-                        whereConditions.add("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
+                        whereConditions.add("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_search_docs.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
                     }
 
                     // 按 lastread 排序时，移除从未阅读的记录
                     if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
-                        whereConditions.add("EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archive_search_docs.arcid AND uas.user_id = @@UID@@ AND uas.is_new = false)")
                     }
 
                     if (untaggedOnly) {
-                        whereConditions.add("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = archive_metadata_search.arcid)")
+                        whereConditions.add("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = archive_search_docs.arcid)")
                     }
 
                     if (favoriteOnly && userId > 0) {
-                        whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uf.user_id = @@UID@@)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archive_search_docs.arcid AND uf.user_id = @@UID@@)")
                     }
 
                     appendCategoryFilter(whereConditions, filterParams, category)
 
                     if (tankoubonId.size > 0) {
-                        whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archive_metadata_search.id)")
+                        whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archive_search_docs.id)")
                         filterParams.add(tankoubonId)
                     }
 
                     if (dateFrom.size > 0) {
-                        whereConditions.add("archive_metadata_search.${resolvedDateField} >= ?")
+                        whereConditions.add("archive_search_docs.${resolvedDateField} >= ?")
                         filterParams.add(dateFrom)
                     }
                     if (dateTo.size > 0) {
-                        whereConditions.add("archive_metadata_search.${resolvedDateField} <= ?")
+                        whereConditions.add("archive_search_docs.${resolvedDateField} <= ?")
                         filterParams.add(dateTo + " 23:59:59")
                     }
 
-                    let archiveRelevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.", unaccentFunction)
+                    let archiveRelevanceExpr = buildRelevanceExpr(filter, "archive_search_docs.", unaccentFunction)
                     let tankRelevanceExpr = buildTankoubonRelevanceExpr(filter, unaccentFunction)
                     let relevanceExpr = if (archiveRelevanceExpr == "1") {
                         "1"
@@ -1416,9 +1424,9 @@ public class ArchiveDao {
 
                     // Count distinct groups (tankoubon_id or arcid).
                     var countSql = """
-                        SELECT COUNT(DISTINCT COALESCE(tb.tankoubon_id, archive_metadata_search.arcid))
-                        FROM archive_metadata_search
-                        LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_metadata_search.id
+                        SELECT COUNT(DISTINCT COALESCE(tb.tankoubon_id, archive_search_docs.arcid))
+                        FROM archive_search_docs
+                        LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_search_docs.id
                         LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
                         LEFT JOIN metadata_objects tankoubon_metadata
                                ON tankoubon_metadata.entity_type = 'tankoubon'
@@ -1509,31 +1517,31 @@ public class ArchiveDao {
                     var dataSql = """
                         WITH base AS (
                             SELECT
-                                archive_metadata_search.id,
-                                archive_metadata_search.arcid,
-                                archive_metadata_search.filename,
-                                archive_metadata_search.title,
-                                archive_metadata_search.summary,
-                                archive_metadata_search.thumbhash,
-                                archive_metadata_search.cover_asset_id,
-                                archive_metadata_search.created_at,
-                                archive_metadata_search.updated_at,
-                                archive_metadata_search.release_at,
-                                archive_metadata_search.relative_path,
-                                archive_metadata_search.file_size,
-                                archive_metadata_search.pagecount,
-                                archive_metadata_search.archive_type,
-                                archive_metadata_search.tags,
+                                archive_search_docs.id,
+                                archive_search_docs.arcid,
+                                archive_search_docs.filename,
+                                archive_search_docs.title,
+                                archive_search_docs.summary,
+                                archive_search_docs.thumbhash,
+                                archive_search_docs.cover_asset_id,
+                                archive_search_docs.created_at,
+                                archive_search_docs.updated_at,
+                                archive_search_docs.release_at,
+                                archive_search_docs.relative_path,
+                                archive_search_docs.file_size,
+                                archive_search_docs.pagecount,
+                                archive_search_docs.archive_type,
+                                archive_search_docs.tags,
                                 CASE WHEN tb.tankoubon_id IS NOT NULL AND tb.tankoubon_id != '' THEN 'tankoubon' ELSE 'archive' END AS group_item_type,
-                                COALESCE(tb.tankoubon_id, archive_metadata_search.arcid) AS group_item_id,
+                                COALESCE(tb.tankoubon_id, archive_search_docs.arcid) AS group_item_id,
                                 COALESCE((${relevanceExpr}), 0) AS relevance_score
                     """
                     if (sortby == "tank_order" && tankoubonId.size > 0) {
                         dataSql += ", ta_order.sort_order AS tank_sort_order"
                     }
                     dataSql += """
-                            FROM archive_metadata_search
-                            LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_metadata_search.id
+                            FROM archive_search_docs
+                            LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_search_docs.id
                             LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
                             LEFT JOIN metadata_objects tankoubon_metadata
                                    ON tankoubon_metadata.entity_type = 'tankoubon'
@@ -1541,7 +1549,7 @@ public class ArchiveDao {
                     """
                     if (sortby == "tank_order" && tankoubonId.size > 0) {
                         dataSql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
-                        dataSql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_metadata_search.id"
+                        dataSql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archive_search_docs.id"
                     }
                     if (whereClause.size > 0) {
                         dataSql += " WHERE " + whereClause
@@ -1904,7 +1912,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_metadata_search WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_search_docs WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id"
                     return db.raw<ArchiveData>(sql, Array<Value>(), { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -1958,7 +1966,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_metadata_search WHERE relative_path = $1"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_search_docs WHERE relative_path = $1"
                     return db.rawOne<ArchiveData>(sql, [vtext(filePath)], { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -1996,7 +2004,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_metadata_search WHERE category_id = $1 AND relative_path = $2 AND filename = $3"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_search_docs WHERE category_id = $1 AND relative_path = $2 AND filename = $3"
                     return db.rawOne<ArchiveData>(sql, [vint(categoryId), vtext(relativePath), vtext(filename)], { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -2031,7 +2039,7 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_metadata_search WHERE relative_path = $1 AND filename = $2"
+                    let sql = "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, category_id FROM archive_search_docs WHERE relative_path = $1 AND filename = $2"
                     return db.rawOne<ArchiveData>(sql, [vtext(relativePath), vtext(filename)], { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -2391,8 +2399,8 @@ public class ArchiveDao {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    // 使用 archive_metadata_search 视图获取包含标签的数据
-                    let sql = "SELECT arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, tags FROM archive_metadata_search WHERE arcid = $1"
+                    // 使用 archive_search_docs 文档表获取包含标签的数据
+                    let sql = "SELECT arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, tags FROM archive_search_docs WHERE arcid = $1"
                     let result = db.rawOne<ArchiveData>(sql, [vtext(id)], { row =>
                         let archive = ArchiveData()
                         archive.id = row.getOrNullText(0) ?? ""
@@ -2687,7 +2695,7 @@ public class ArchiveDao {
         offset!: Int64 = 0
     ): (String, Array<Value>) {
         // 用 SelectQuery + Expr 构建查询
-        let q = selectQuery("archive_metadata_search")
+        let q = selectQuery("archive_search_docs")
             .select(["arcid", "filename", "title", "summary", "thumbhash", "cover_asset_id",
                      "created_at", "updated_at", "release_at", "relative_path", "file_size",
                      "pagecount", "category_id", "tags"])
