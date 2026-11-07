@@ -53,7 +53,7 @@ jobs:
       - name: Unzip Cangjie
         run: |
           wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
-          tar -xzvf c.tar.gz
+          tar --no-same-owner --no-same-permissions --touch -xzvf c.tar.gz
           wget -O s.zip "${{ vars.STDX_URL }}"
           unzip s.zip -d stdx
       - name: Checkout WasmEdge source (public)

@@ -9,8 +9,13 @@ ENV XMAKE_ROOT=y
 
 SHELL ["/bin/bash", "-lc"]
 
+# CNB build hosts run a 5.4 kernel without openat2(); Ubuntu 26.04's tar
+# (CVE-2025-45582 fix) does not fall back and fails every extraction with
+# ENOSYS. Pin the release-pocket tar that predates the openat2 change.
+# See https://cnb.cool/cnb/feedback/-/issues/4546
 RUN set -eux; \
   apt-get update; \
+  apt-get install -y --no-install-recommends --allow-downgrades tar=1.35+dfsg-4; \
   apt-get install -y --no-install-recommends \
     ca-certificates curl git wget unzip zip xz-utils \
     build-essential clang ninja-build cmake binutils \
@@ -29,7 +34,9 @@ RUN set -eux; \
     *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
   esac; \
   curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
-  tar -xJf "node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -C /usr/local --strip-components=1; \
+  tar -xJf "node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
+    --strip-components=1 --no-same-owner --no-same-permissions --touch \
+    -C /usr/local; \
   rm -f "node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
   node -v; \
   npm -v

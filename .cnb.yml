@@ -65,7 +65,7 @@ $:
               # Cangjie SDK
               if [ ! -d "./cangjie" ]; then
                 wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
-                tar -xzf build-script-cache/cangjie.tar.gz
+                tar --no-same-owner --no-same-permissions --touch -xzf build-script-cache/cangjie.tar.gz
               fi
 
               # stdx
