@@ -66,7 +66,8 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
 
     try {
       const currentValue = inputValue.replace(/[+\s\t]+$/g, '')
-      const formattedValue = suggestion.value
+      // `$` 后缀 = 后端搜索语法的精确标签匹配（走 metadata_tags 等值查询）
+      const formattedValue = `${suggestion.value}$`
       const words = currentValue.trim().split(/\s+/).filter(w => w.trim())
 
       if (words.length > 0) {

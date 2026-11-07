@@ -951,6 +951,13 @@ function HomePageContent() {
                 </div>
               </div>
 
+              {loading && archives.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground">
+                  <Spinner size="sm" />
+                  <span>{t('common.loading')}</span>
+                </div>
+              )}
+
               {archives.length > 0 ? (
                 <>
                   <div className={centeredFeedClassName || undefined}>

@@ -94,8 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const handleUnauthorized = () => {
       clearAuthState();
-      // 重定向到登录页，保留当前路径用于登录后跳转
-      const currentPath = window.location.pathname;
+      // 重定向到登录页，保留当前路径和查询参数用于登录后跳转
+      const currentPath = window.location.pathname + window.location.search;
       const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
       window.location.href = `/login${redirectParam}`;
     };

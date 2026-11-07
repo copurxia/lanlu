@@ -94,6 +94,7 @@ function SearchBarContent(
             placeholder={t('search.placeholder')}
             value={query}
             onChange={setQuery}
+            onSuggestionSelected={(newValue) => submitSearch(newValue)}
             compact={compact}
             className="w-full"
           />
