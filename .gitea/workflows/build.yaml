@@ -3,6 +3,9 @@ run-name: ${{ github.actor }} is trying to auto compile with Actions 🚀
 on: [push]
 jobs:
   build:
+    # The runner label set is instance-managed, so this stays on ubuntu-latest.
+    # The package job smoke test fails before pushing if the runner distro and
+    # the runtime image sonames (notably librocksdb) do not match.
     runs-on: ubuntu-latest
     env:
       # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
@@ -170,6 +173,19 @@ jobs:
           registry: ${{ steps.image_meta.outputs.registry }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.TOKEN }}
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: lanlu:smoke
+          cache-from: type=registry,ref=${{ steps.image_meta.outputs.image }}-cache
+          cache-to: type=registry,ref=${{ steps.image_meta.outputs.image }}-cache,mode=max
+
+      - name: Smoke test image
+        run: bash ./scripts/docker-smoke-test.sh lanlu:smoke
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -177,6 +193,7 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: ${{ steps.image_meta.outputs.image }}
+          cache-from: type=registry,ref=${{ steps.image_meta.outputs.image }}-cache
 
   mcp:
     runs-on: ubuntu-latest

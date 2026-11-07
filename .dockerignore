@@ -1,0 +1,7 @@
+# The image only needs the prebuilt runtime bundle. Keep the build context at
+# ~95MB instead of shipping the whole workspace (client build artifacts alone
+# are ~11GB locally).
+*
+!app
+!Dockerfile
+!.ide

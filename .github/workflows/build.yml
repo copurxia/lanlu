@@ -5,7 +5,9 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # The runtime image is Ubuntu 26.04; build the binary on the same distro so
+    # dynamically linked sonames (notably librocksdb) match at runtime.
+    runs-on: ubuntu-26.04
     env:
       # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
       XMAKE_ROOT: "y"
@@ -167,6 +169,19 @@ jobs:
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: lanlu:smoke
+          cache-from: type=gha,scope=lanlu
+          cache-to: type=gha,mode=max,scope=lanlu
+
+      - name: Smoke test image
+        run: bash ./scripts/docker-smoke-test.sh lanlu:smoke
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -176,6 +191,7 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.image_tag.outputs.tag }}
+          cache-from: type=gha,scope=lanlu
 
   mcp:
     runs-on: ubuntu-latest

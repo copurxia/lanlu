@@ -12,6 +12,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    init: true
     restart: unless-stopped
     networks:
       - lanlu-network
@@ -33,10 +34,6 @@ services:
     restart: unless-stopped
     networks:
       - lanlu-network
-
-volumes:
-  postgres-data:
-    driver: local
 
 networks:
   lanlu-network:

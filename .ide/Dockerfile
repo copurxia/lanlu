@@ -1,4 +1,6 @@
-FROM ubuntu:26.04
+# Keep the builder on the same snapshot as the runtime image so the sonames the
+# binary links against (notably librocksdb) match at runtime.
+FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai

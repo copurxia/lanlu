@@ -209,7 +209,21 @@ $:
           script: |
             bash -lc '
               set -eux
-              docker build -t "$IMAGE_TAG" .
+              export DOCKER_BUILDKIT=1
+              # Reuse the previous image as an inline cache source so an
+              # app-only change does not reinstall the 700MB apt layer.
+              docker pull "$IMAGE_TAG" || true
+              docker build \
+                --build-arg BUILDKIT_INLINE_CACHE=1 \
+                --cache-from "$IMAGE_TAG" \
+                -t "$IMAGE_TAG" .
+            '
+
+        - name: Smoke test runtime image
+          script: |
+            bash -lc '
+              set -eux
+              bash ./scripts/docker-smoke-test.sh "$IMAGE_TAG"
             '
 
         - name: Docker push (CNB Docker registry)
