@@ -134,3 +134,30 @@ curl -sk -o /dev/null -w "%{time_total}s\n" https://nas.copur.xyz:3005/api/info
 
 10 并发混合读 60 请求 0 错误。遗留：首次 miss 的取数 SQL 与 RANDOM 全表扫描
 已在 76be7b3 修复，待下次部署验证。
+
+## 线上复测记录二（2026-11-07，版本 f494a65 / cjc 1.2.0 部署后）
+
+**已确认生效的修复：**
+
+| 项 | 实测 |
+| :-- | :-- |
+| tankoubons | 0.39s 冷 / 0.26~0.27s 热（2319 合集，字段完整） |
+| search 结果缓存 | 冷 1.13s → 命中 0.047~0.059s；filter=test 冷 3.58s → 命中 0.047s |
+| /api/info | 0.052s |
+| translations | 冷 0.61s → 热 0.124s |
+| RANDOM 采样多样性 | 三次结果互不相同（缓存排除回归已修复） |
+| gzip 兜底 | **生效**：translations 1,470KB → gzip 597KB / deflate 597KB / br 523KB，协商正确 |
+| 并发健康 | 轻接口 10 并发 100 请求 0 错误，p95 82ms；SSE ttfb 0.18s |
+
+**未达预期（待排查）：**
+
+- 冷查询 `/api/search`（任意排序、含 sortby=id/pagecount、newonly 开关、pageSize=1）
+  恒定 ~1.1s，与上一版 (5a745f6) 无差异——**快速路径在 CI 构建的二进制中疑似未生效**。
+  证据：本地同代码 13,335 行归档下同查询 44~150ms；线上 5 个并行冷请求各自 ~1.3s、
+  墙钟 1.37s（非池串行化）；强制老路径（newonly=true）与 fast path 无耗时差异。
+  怀疑 CNB 构建（cjpm 大量 cjpm.toml/lock 变更 + 增量缓存）未重编对应包。
+  验证方法：CI 清空 target 重跑一次构建，部署后再测 page=1&sortby=id（预期 <100ms）。
+- 带 filter 冷查询 3.6~4.8s：已知遗留（带词走 ILIKE 全扫描，不在快速路径范围），
+  维持 30s 结果缓存兜底。
+- discover 0.77~0.83s（原 1.26~1.40s，有改善但未到本地 0.12s 水平），
+  同样疑似构建缓存问题。
