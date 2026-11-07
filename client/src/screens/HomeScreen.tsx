@@ -1141,6 +1141,8 @@ export function HomeScreen() {
 
   function submitSearch() {
     clearSelection();
+    setSuggestions([]);
+    setSuggestionsLoading(false);
     const nextFilter = filter.trim();
     requestIdRef.current += 1;
     appendDiagnosticLog('home.search.submit', {
@@ -1525,13 +1527,24 @@ export function HomeScreen() {
           color: colors.primary,
         },
         suggestionsPanel: {
+          // Floating dropdown anchored right under the 42dp toolbar row
+          // (12 top padding + 42 content + 8 bottom padding): overlays the
+          // chips row instead of pushing the whole page down while typing.
+          position: 'absolute',
+          top: 62,
+          left: spacing.lg,
+          right: spacing.lg,
           backgroundColor: colors.surface,
           borderColor: colors.border,
           borderRadius: 8,
           borderWidth: StyleSheet.hairlineWidth,
-          marginHorizontal: spacing.lg,
-          marginBottom: spacing.sm,
           overflow: 'hidden',
+          zIndex: 20,
+          elevation: 6,
+          shadowColor: '#000',
+          shadowOffset: {width: 0, height: 4},
+          shadowOpacity: 0.18,
+          shadowRadius: 8,
         },
         suggestionsTitle: {
           color: colors.textMuted,
@@ -1543,20 +1556,25 @@ export function HomeScreen() {
           textTransform: 'uppercase',
         },
         suggestionRow: {
+          alignItems: 'center',
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
-          gap: 2,
+          flexDirection: 'row',
+          gap: spacing.sm,
           paddingHorizontal: spacing.md,
           paddingVertical: spacing.sm,
         },
         suggestionLabel: {
           color: colors.text,
+          flexShrink: 1,
           fontSize: 14,
           fontWeight: '800',
         },
         suggestionValue: {
           color: colors.textMuted,
+          flex: 1,
           fontSize: 12,
+          textAlign: 'right',
         },
         inlineError: {
           color: colors.danger,
@@ -1857,6 +1875,10 @@ export function HomeScreen() {
 
   return (
     <View style={[styles.screen, {paddingTop: isOffline ? spacing.md : insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
+      {/* Anchor for the autocomplete dropdown: absolute positioning inside this
+          wrapper keeps the chips row and list from being pushed down while
+          typing. */}
+      <View>
       <View style={styles.toolbar}>
         <TextInput
           autoCapitalize="none"
@@ -1908,6 +1930,7 @@ export function HomeScreen() {
           ))}
         </View>
       ) : null}
+      </View>
 
       <ScrollView
         contentContainerStyle={styles.sortRowContent}
