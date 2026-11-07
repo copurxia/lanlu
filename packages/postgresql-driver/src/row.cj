@@ -41,18 +41,16 @@ public class PgRowData {
     let oids: Array<Int32>
     let values: Array<String>   // 原始文本(列非空时)
     let nulls: Array<Bool>      // 是否为 NULL
-    let nameIndex: HashMap<String, Int64>
+    // 列名索引：惰性构建。批量结果集（数千行）绝大多数行从不按名取列，
+    // 构造期逐行建 HashMap 是 13k 行查询的主要仓颉侧开销之一。
+    var nameIndex: HashMap<String, Int64> = HashMap<String, Int64>()
+    var nameIndexBuilt = false
 
     public init(names: Array<String>, oids: Array<Int32>, values: Array<String>, nulls: Array<Bool>) {
         this.names = names
         this.oids = oids
         this.values = values
         this.nulls = nulls
-        let m = HashMap<String, Int64>()
-        for (i in 0..names.size) {
-            m[names[i]] = Int64(i)
-        }
-        this.nameIndex = m
     }
 
     /** 便捷构造：names + values(oids 默认为 0，nulls 默认为 false)。 */
@@ -61,11 +59,6 @@ public class PgRowData {
         this.oids = Array<Int32>(names.size, { _ => 0 })
         this.values = values
         this.nulls = Array<Bool>(values.size, { _ => false })
-        let m = HashMap<String, Int64>()
-        for (i in 0..names.size) {
-            m[names[i]] = Int64(i)
-        }
-        this.nameIndex = m
     }
 
     public func columnCount(): Int64 { Int64(names.size) }
@@ -85,6 +78,14 @@ public class PgRowData {
 
     // ----- 列名 -> 索引 -----
     func idx(col: String): Int64 {
+        if (!nameIndexBuilt) {
+            let m = HashMap<String, Int64>()
+            for (i in 0..names.size) {
+                m[names[i]] = Int64(i)
+            }
+            nameIndex = m
+            nameIndexBuilt = true
+        }
         match (nameIndex.get(col)) {
             case Some(i) => i
             case None => throw PGError("column not found: " + col)

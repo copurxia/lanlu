@@ -253,3 +253,29 @@ PostgreSQL 原生等价方案：
 - 阅读主链路（用户停留最久的页面）全 API < 40ms，无优化空间；
 - 全站未发现此前未覆盖的慢接口——剩余慢点全部是「V029 + 快速路径待部署」三处
   （带词搜索、discover、archive_related），与 curl 探测结论闭环一致。
+
+## 自研 ORM 优化（2026-11-07 追加）
+
+### 定量诊断（新增 materialize_bench_test.cj）
+
+13,335 行 × 16 列单查询端到端：psql 侧执行仅 ~2ms，仓颉侧 `query()` 实测 350~500ms——
+差距全部在 ORM/驱动的物化层：21 万 cell 的 FFI 取值 + CString→String 堆分配 +
+**每行构造一个列名 HashMap**。这就是此前分析里指出的「自研 ORM 剩余优化空间」的定量证实。
+
+### 两项修改（packages/postgresql-driver）
+
+1. `materialize`：每 cell 只调一次 `PQgetisnull`（原 vals/nulls 各判一次）——FFI 调用量 -1/3；
+2. `PgRowData`：列名 HashMap 从构造期改为**首次按名取列时惰性构建**——批量结果集
+   （csorm raw 的 map 回调全按索引取列）绝大多数行根本不按名取列，白建了哈希表。
+
+### 实测
+
+| 指标 | 优化前 | 优化后 |
+| :-- | --: | --: |
+| 13k 行 × 16 列 query() | 350~500ms | **200~236ms（约 -42%）** |
+| tankoubons（2319 合集全量，端到端） | 150~290ms | **143~192ms**（SQL 侧 ~110ms 为底线） |
+| search 深分页 page=600 | 37ms | 37ms（页小，本就不敏感） |
+
+测试 70(driver)+主包全绿。
+进一步空间（未做）：C 侧一次性物化整个 PGresult（跨语言仅 2 次调用）、
+CString→String 批量转换——预计还能再砍一半，留作后续。

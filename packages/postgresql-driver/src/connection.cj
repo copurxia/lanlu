@@ -123,8 +123,9 @@ public class PGDatabase {
         let oids = Array<Int32>(ncols, { j => res.fieldType(j) })
         let rows = ArrayList<PgRowData>()
         for (i in 0..nrows) {
-            let vals = Array<String>(ncols, { j => if (res.isNull(i, j)) { "" } else { res.getValue(i, j) } })
+            // 每个 cell 只调一次 PQgetisnull（原来 vals/nulls 各判一次，FFI 调用量 -1/3）
             let nulls = Array<Bool>(ncols, { j => res.isNull(i, j) })
+            let vals = Array<String>(ncols, { j => if (nulls[j]) { "" } else { res.getValue(i, j) } })
             rows.add(PgRowData(names, oids, vals, nulls))
         }
         return rows.toArray()
