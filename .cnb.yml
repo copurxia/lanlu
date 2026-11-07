@@ -288,9 +288,18 @@ $:
               fi
 
               cd client
-              npm ci
+              npm ci --no-audit --no-fund
               cd android
-              ./gradlew assembleRelease
+              chmod +x gradlew
+              # Advance versionCode per build (yymmddnn, CNB offset +4) so
+              # artifacts install over their predecessors; avoid clashing with
+              # the Gitea (+1) / GitHub (+3) nightlies built from the same day.
+              code="$(( $(date -u +%y%m%d) * 100 + 4 ))"
+              echo "$code" > version-code.txt
+              echo "cnb versionCode=$code"
+              ./gradlew assembleRelease --no-daemon --max-workers=2 \
+                -Dorg.gradle.internal.http.socketTimeout=180000 \
+                -Dorg.gradle.internal.http.connectionTimeout=60000
               ls -lh app/build/outputs/apk/release/
             '
 
