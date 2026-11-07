@@ -120,3 +120,17 @@ curl -sk -o /dev/null -w "%{time_total}s\n" https://nas.copur.xyz:3005/api/info
 - 端到端（300 合集种子，cjc 1.2.0 二进制）：tankoubons 49ms / search 首查 11ms /
   RANDOM 6ms / discover 119ms / translations 9ms / 全部 200 无错误，
   gzip 协商、随机采样多样性均验证通过
+
+## 线上复测记录（2026-11-07，版本 5a745f6 部署后）
+
+| 接口 | 修复前 | 部署 5a745f6 后（冷/热） |
+| :-- | --: | --: |
+| /api/tankoubons | 6.13s | 0.60s / 0.27s |
+| /api/search（无词） | 1.43s | 1.13s / 0.061s |
+| /api/search?filter=test | 4.76~8.2s | 4.76s / 0.048s |
+| /api/info | 0.58s | 0.062s |
+| /api/tags/translations | 0.56s | 0.198s / 0.124s |
+| /api/tags/cloud | 0.67s | 0.055s |
+
+10 并发混合读 60 请求 0 错误。遗留：首次 miss 的取数 SQL 与 RANDOM 全表扫描
+已在 76be7b3 修复，待下次部署验证。
