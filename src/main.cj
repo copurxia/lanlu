@@ -206,8 +206,8 @@ main(): Int64 {
         logger.info("SSL/TLS enabled from system settings",
             ("cert_file", sslCertFile),
             ("key_file", sslKeyFile),
-            ("http2", "off"),
-            ("alpn", "http/1.1"))
+            ("http2", "on"),
+            ("alpn", "h2,http/1.1"))
     } else {
         logger.info("SSL/TLS disabled in system settings")
     }
@@ -222,17 +222,31 @@ main(): Int64 {
         enablePrintSwaggerUrl: false,
         enableBannerSignature: false,
         enableTlsPrecheck: true,
+        // h2 流控下客户端慢读（弱网拉大图）会让 writer.write 阻塞在流控窗口上，
+        // 默认 30s 写超时是整个响应的墙钟预算，到点强杀流 —— 浏览器表现为大图
+        // "加载一半 + 协议错误"（已实测复现：50KB/s 拉 5MB 在 30s 处被截断）。
+        // 放宽到 10 分钟：10 分钟内 80KB/s 也能传完 ~47MB，覆盖弱网大文件场景。
+        // 这是 HTTP/2 能保持开启的前提，勿回调紧。
+        writeTimeout: Duration.second * 600,
         // 关闭 ignite 网络变更监控：其内部 getPreferredLocalIP 的 UdpSocket.close 未放在 finally 中，
         // 在容器网络异常时会每 2 秒周期性泄漏一个 UDP socket fd（ignite fd 审计 #4）
         enableNetworkChangeNotice: false,
         tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
         tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
-        // 仅协商 http/1.1，关闭 HTTP/2，保留 HTTPS
-        alpnProtocols: ["http/1.1"],
+        // 协商 HTTP/2（writeTimeout 已放宽，弱网大文件截断的根因已消除，
+        // 实测弱网 Chrome/curl 拉 50MB asset 均完整）
+        alpnProtocols: ["h2", "http/1.1"],
         ))
 
     installObservabilityMiddleware(app)
     installFrontendFallbackMiddleware(app)
+
+    // 覆盖 ignite 默认 404 handler：默认实现用 sendString 输出 "Cannot GET /"，
+    // 会先把 content-type: text/plain 写入响应。frontendFallbackMiddleware 随后
+    // 服务静态 HTML 时再追加 text/html，两个值拼成
+    // "text/plain; charset=utf-8,text/html; charset=utf-8"。
+    // 空 handler 保持 404 状态码交给 fallback 中间件接管，不再污染响应头。
+    app.notFound({ _ => })
 
     // 注册所有路由
     logger.debug("Application starting... step 15: registering routes")
@@ -240,7 +254,7 @@ main(): Int64 {
     logger.info("Application starting... step 16: routes registered")
 
     if (sslEnabled) {
-        logger.info("Starting HTTPS server", ("http2", "off"), ("alpn", "http/1.1"), ("host", host), ("port", portStr))
+        logger.info("Starting HTTPS server", ("http2", "on"), ("alpn", "h2,http/1.1"), ("host", host), ("port", portStr))
     } else {
         logger.info("Starting HTTP server", ("host", host), ("port", portStr))
     }

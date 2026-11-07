@@ -53,31 +53,27 @@ function interpolateMessage(template: string, params?: TranslationParams): strin
   return result;
 }
 
+// 惰性读取初始语言：首帧即为最终值，避免 mount 后切换语言导致依赖 language 的
+// 请求（搜索/推荐等）按错误语言发起再重发一轮。
+// 静态导出的预渲染阶段没有 window，回退 'zh' 与旧 SSR 行为一致。
+function resolveInitialLanguage(): Language {
+  if (typeof window === 'undefined') {
+    return 'zh';
+  }
+  const savedLanguage = window.localStorage.getItem('language');
+  if (savedLanguage === 'zh' || savedLanguage === 'en') {
+    return savedLanguage;
+  }
+  return window.navigator.language.toLowerCase().startsWith('en') ? 'en' : 'zh';
+}
+
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>('zh');
+  const [language, setLanguage] = useState<Language>(resolveInitialLanguage);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
-
-    const savedLanguage = localStorage.getItem('language') as Language;
-    if (savedLanguage === 'zh' || savedLanguage === 'en') {
-      setLanguage((current) => (current === savedLanguage ? current : savedLanguage));
-      return;
-    }
-
-    const browserLanguage = navigator.language.toLowerCase();
-    if (browserLanguage.startsWith('en')) {
-      setLanguage('en');
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
     localStorage.setItem('language', language);
     document.documentElement.lang = language;
     window.dispatchEvent(new CustomEvent('languagechange', { detail: language }));

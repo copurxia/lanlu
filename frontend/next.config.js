@@ -7,8 +7,9 @@ const nextConfig = {
   },
 
   experimental: {
-    // 内联关键 CSS，减少渲染阻塞
-    inlineCss: true,
+    // inlineCss 在静态导出下会把同一份 CSS 重复内联进 head 与 RSC payload
+    // （实测 HTML 中出现 3 份、约 430KB 文本），改回外链 CSS 走 immutable 缓存。
+    inlineCss: false,
     optimizePackageImports: [
       'lucide-react',
       '@radix-ui/react-icons',
