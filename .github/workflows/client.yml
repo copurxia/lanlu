@@ -69,82 +69,10 @@ jobs:
           cd client
           npm run lint
 
-  android-debug:
-    name: Android debug APK
-    # 普通 push/PR 也打包 debug APK（仅 artifact，不发布 release；发布仍由
-    # 下方 android-nightly 的 schedule/dispatch 负责）。
-    runs-on: ubuntu-latest
-    needs: quality
-    timeout-minutes: 60
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
-      - name: Install dependencies
-        run: |
-          set -eux
-          cd client
-          npm ci --no-audit --no-fund
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: >-
-            platform-tools
-            platforms;android-37.0
-            build-tools;37.0.0
-            ndk;27.1.12297006
-            cmake;3.22.1
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('client/android/**/*.gradle*', 'client/android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
-      - name: Build debug APK
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: "2"
-          GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
-        run: |
-          set -eux
-          cd client/android
-          chmod +x gradlew
-          # Large RN AARs (~280 MB) regularly exceed Gradle's default read timeout
-          # on slow proxies; give them a few minutes instead of failing the build.
-          ./gradlew assembleDebug --no-daemon --max-workers=2 \
-            -Dorg.gradle.internal.http.socketTimeout=180000 \
-            -Dorg.gradle.internal.http.connectionTimeout=60000
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: client-android-debug
-          path: client/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-
   android-release:
-    name: Nightly release APK
-    # Schedule / manual dispatch only: plain pushes run quality alone so every
-    # commit does not burn a release build (same policy as the Gitea pipeline).
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    name: Android release APK
+    # 普通 push/PR 也构建并上传 artifact；只有发布到 nightly release 的步骤
+    # 保留 schedule/dispatch 门控。
     runs-on: ubuntu-latest
     needs: quality
     timeout-minutes: 90
@@ -227,6 +155,8 @@ jobs:
              /tmp/lanlu-client-nightly.apk
 
       - name: Publish to nightly release
+        # 仅定时/手动发布；push 构建止步于 artifact。
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly

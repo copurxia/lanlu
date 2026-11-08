@@ -70,86 +70,13 @@ jobs:
           cd client
           npm run lint
 
-  android-debug:
-    name: Android debug APK
-    # 普通 push/PR 也打包：产出 debug APK artifact（不发布 release，那是
-    # android-nightly 专属，仍只在 schedule/dispatch 时跑）。
+  android-release:
+    name: Android release APK
+    # 普通 push/PR 也构建 release APK 并上传 artifact；只有 nightly 发布
+    # （android-nightly）保持 schedule/dispatch 门控。
     runs-on: ubuntu-latest
     needs: quality
     timeout-minutes: 60
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
-      - name: Install dependencies
-        run: |
-          set -eux
-          cd client
-          npm ci --no-audit --no-fund
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: >-
-            platform-tools
-            platforms;android-37.0
-            build-tools;37.0.0
-            ndk;27.1.12297006
-            cmake;3.22.1
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('client/android/**/*.gradle*', 'client/android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            gradle-${{ runner.os }}-
-
-      - name: Build debug APK
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: "2"
-          GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
-        run: |
-          set -eux
-          cd client/android
-          chmod +x gradlew
-          # Large RN AARs (~280 MB) regularly exceed Gradle's default read timeout
-          # on slow proxies; give them a few minutes instead of failing the build.
-          ./gradlew assembleDebug --no-daemon --max-workers=2 \
-            -Dorg.gradle.internal.http.socketTimeout=180000 \
-            -Dorg.gradle.internal.http.connectionTimeout=60000
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v3
-        with:
-          name: client-android-debug
-          path: client/android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 14
-
-  android-nightly:
-    name: Nightly release APK
-    # 定时/手动才发布；普通 push 只跑 quality，避免每次提交都占 release。
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    needs: quality
-    timeout-minutes: 60
-    permissions:
-      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -201,11 +128,24 @@ jobs:
           set -eux
           cd client/android
           chmod +x gradlew
+          # 与 nightly 相同的 versionCode 递进策略（yymmddnn），保证可覆盖安装。
+          code="$(( $(date -u +%y%m%d) * 100 + 3 ))"
+          echo "$code" > version-code.txt
+          echo "push release versionCode=$code"
           ./gradlew assembleRelease --no-daemon --max-workers=2 \
             -Dorg.gradle.internal.http.socketTimeout=180000 \
             -Dorg.gradle.internal.http.connectionTimeout=60000
 
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: client-android-release
+          path: client/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+
       - name: Publish to nightly release
+        # 仅定时/手动发布；push/PR 构建止步于 artifact，不占 nightly 资产。
+        if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           SERVER_URL: ${{ github.server_url }}
           REPOSITORY: ${{ github.repository }}
@@ -217,7 +157,6 @@ jobs:
           api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}"
           auth="Authorization: token $password"
 
-          # 复用固定 nightly 标签：存在则复用，不存在则建（指向当前 commit）。
           release_json=$(curl -sf -H "$auth" "$api/releases/tags/nightly" || true)
           if [ -z "$release_json" ]; then
             release_json=$(curl -sf -X POST -H "$auth" -H "Content-Type: application/json" \
@@ -226,7 +165,6 @@ jobs:
           fi
           release_id=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
-          # 更新 release 说明里的 commit 信息，并删掉旧资产再传新的（同名牌会冲突）。
           curl -sf -X PATCH -H "$auth" -H "Content-Type: application/json" \
             -d "{\"body\":\"Android nightly build for commit ${GITHUB_SHA::7}. Install over a previous nightly build; signing key is stable.\"}" \
             "$api/releases/$release_id" >/dev/null
