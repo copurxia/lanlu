@@ -6,6 +6,7 @@ import std.time.*
 import csorm.Value
 import csorm.DbBackend
 import csorm.Dialect
+import csorm.IsolationLevel
 import csorm.DriverConn
 import csorm.DbError
 import csorm.PlaceholderStyle
@@ -99,6 +100,11 @@ public class PgDialect <: Dialect {
     }
 
     public func supportReturning(): Bool { true }
+
+    public func renderDistinctOn(cols: Array<String>): String {
+        let q = Array<String>(cols.size, { i => doQuoteIdent(cols[i]) })
+        "DISTINCT ON (" + joinComma(q) + ")"
+    }
 }
 
 // 内部引号工具(与 csorm 的 doQuoteIdent/doQuoteTable 逻辑一致，避免循环依赖)
@@ -301,6 +307,9 @@ public class PgConn <: DriverConn {
     // ===== 事务 =====
 
     public func begin(): Unit { wrapRun("begin", { => pg.begin() }) }
+    public func begin(level: IsolationLevel): Unit {
+        wrapRun("begin", { => pg.begin(level) })
+    }
     public func commit(): Unit { wrapRun("commit", { => pg.commit() }) }
     public func rollback(): Unit { wrapRun("rollback", { => pg.rollback() }) }
     public func inTransaction(): Bool { pg.inTransaction() }
@@ -316,4 +325,7 @@ public class PgConn <: DriverConn {
     public func cancel(): Bool { pg.cancel() }
     public func close(): Unit { pg.close() }
     public func poolSize(): Int64 { pg.poolSize() }
+    public func poolIdleCount(): Int64 { pg.pool.idleCount() }
+    public func poolWaitingCount(): Int64 { pg.pool.waitingCount() }
+    public func poolBorrowTimeouts(): Int64 { pg.pool.borrowTimeouts() }
 }

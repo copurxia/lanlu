@@ -16,14 +16,25 @@ public struct PoolConfig {
     public let minSize: Int64
     public let idleTimeoutMs: Int64
     public let borrowTimeoutMs: Int64
+    // prepared statement LRU 容量（每连接）；<=0 关闭语句缓存（恒 PQexecParams）。
+    public let stmtCacheSize: Int64
+    // 二进制结果协议模式（auto=白名单自适应，always=强制，never=恒文本）。
+    public let binaryResult: BinaryResultMode
+    // statement_timeout（毫秒，会话级）：>0 时连接建立后执行 SET statement_timeout；0 不设置（默认，完全向后兼容）。
+    public let statementTimeoutMs: Int64
 
-    public init(maxSize: Int64, minSize: Int64, idleTimeoutMs: Int64, borrowTimeoutMs!: Int64 = 5000) {
+    public init(maxSize: Int64, minSize: Int64, idleTimeoutMs: Int64, borrowTimeoutMs!: Int64 = 5000,
+        stmtCacheSize!: Int64 = 32, binaryResult!: BinaryResultMode = BinaryResultMode.Auto,
+        statementTimeoutMs!: Int64 = 0) {
         let mx = if (maxSize < 1) { 1 } else { maxSize }
         let mn = if (minSize < 0) { 0 } else if (minSize > mx) { mx } else { minSize }
         this.maxSize = mx
         this.minSize = mn
         this.idleTimeoutMs = if (idleTimeoutMs < 0) { 0 } else { idleTimeoutMs }
         this.borrowTimeoutMs = borrowTimeoutMs
+        this.stmtCacheSize = stmtCacheSize
+        this.binaryResult = binaryResult
+        this.statementTimeoutMs = if (statementTimeoutMs < 0) { 0 } else { statementTimeoutMs }
     }
 
     public static func default(): PoolConfig {
@@ -37,7 +48,7 @@ public struct PoolConfig {
  *   1. URL 形式：postgres://user:pass@host:port/db?sslmode=disable&pool.max=20
  *      （postgresql:// 同义；非标准端口/缺省端口/缺省 dbname 均兼容）
  *   2. libpq keyword 形式：host=h port=p user=u password=p dbname=d sslmode=disable pool.max=20
- * pool.max / pool.min / pool.idleTimeout 三个键从连接串中剥离用于建池，其余原样交给 libpq。
+ * pool.max / pool.min / pool.idleTimeout 等键从连接串中剥离用于建池，其余原样交给 libpq。
  */
 public func parseConnString(input: String): (String, PoolConfig) {
     let s = input.trimAscii()
@@ -115,6 +126,9 @@ func parseUrlForm(url: String): (String, PoolConfig) {
     var minSize: Int64 = 0
     var idleMs: Int64 = 0
     var borrowMs: Int64 = 5000
+    var stmtCache: Int64 = 32
+    var binMode: BinaryResultMode = BinaryResultMode.Auto
+    var stmtTimeoutMs: Int64 = 0
     let kept = ArrayList<String>()
     if (!query.isEmpty()) {
         for (pair in query.split("&")) {
@@ -133,6 +147,12 @@ func parseUrlForm(url: String): (String, PoolConfig) {
                         idleMs = parseIntOr(v, idleMs)
                     } else if (k == "pool.borrowTimeout") {
                         borrowMs = parseIntOr(v, borrowMs)
+                    } else if (k == "pool.stmtCache") {
+                        stmtCache = parseIntOr(v, stmtCache)
+                    } else if (k == "pool.binaryResult") {
+                        binMode = parseBinaryResultMode(v)
+                    } else if (k == "pool.statementTimeout") {
+                        stmtTimeoutMs = parseIntOr(v, stmtTimeoutMs)
                     } else {
                         kept.add(escapeKv(k) + "=" + escapeKv(v))
                     }
@@ -149,7 +169,8 @@ func parseUrlForm(url: String): (String, PoolConfig) {
     if (!password.isEmpty()) { parts.add("password=" + escapeKv(password)) }
     parts.add("dbname=" + escapeKv(dbname))
     for (k in kept) { parts.add(k) }
-    return (joinSpace(parts), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs))
+    return (joinSpace(parts), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs,
+        stmtCacheSize: stmtCache, binaryResult: binMode, statementTimeoutMs: stmtTimeoutMs))
 }
 
 // keyword 形式解析：空格分隔的 k=v，剥离 pool.*。
@@ -158,6 +179,9 @@ func parseKeywordForm(s: String): (String, PoolConfig) {
     var minSize: Int64 = 0
     var idleMs: Int64 = 0
     var borrowMs: Int64 = 5000
+    var stmtCache: Int64 = 32
+    var binMode: BinaryResultMode = BinaryResultMode.Auto
+    var stmtTimeoutMs: Int64 = 0
     let kept = ArrayList<String>()
     for (part in s.split(" ")) {
         if (part.isEmpty()) {
@@ -175,13 +199,20 @@ func parseKeywordForm(s: String): (String, PoolConfig) {
                     idleMs = parseIntOr(v, idleMs)
                 } else if (k == "pool.borrowTimeout") {
                     borrowMs = parseIntOr(v, borrowMs)
+                } else if (k == "pool.stmtCache") {
+                    stmtCache = parseIntOr(v, stmtCache)
+                } else if (k == "pool.binaryResult") {
+                    binMode = parseBinaryResultMode(v)
+                } else if (k == "pool.statementTimeout") {
+                    stmtTimeoutMs = parseIntOr(v, stmtTimeoutMs)
                 } else {
                     kept.add(part)
                 }
             case None => kept.add(part)
         }
     }
-    return (joinSpace(kept), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs))
+    return (joinSpace(kept), PoolConfig(maxSize, minSize, idleMs, borrowTimeoutMs: borrowMs,
+        stmtCacheSize: stmtCache, binaryResult: binMode, statementTimeoutMs: stmtTimeoutMs))
 }
 
 // ----- 工具 -----

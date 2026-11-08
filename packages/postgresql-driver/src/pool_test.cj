@@ -182,13 +182,16 @@ func testAffectedRowsThreadIsolated() {
             let aResult = Array<Int64>(1, { _ => -1 })
             let bResult = Array<Int64>(1, { _ => -1 })
             db.exec("CREATE TABLE IF NOT EXISTS _t_affected(x INT)", [])
+            // 竞态修复：A 的 DELETE 与 B 的 INSERT 共享表会互相影响 affectedRows
+            // （B 先插则 A 的 DELETE 影响 2 行）——B 先插入独立表 _t_affected_b。
+            db.exec("CREATE TABLE IF NOT EXISTS _t_affected_b(x INT)", [])
             let t1 = spawn {
                 db.exec("DELETE FROM _t_affected", []) // 0 行
                 sleep(50 * Duration.millisecond)        // 等 B 线程写入它的值
                 aResult[0] = db.affectedRows()
             }
             let t2 = spawn {
-                db.exec("INSERT INTO _t_affected VALUES (1),(2)", []) // 2 行
+                db.exec("INSERT INTO _t_affected_b VALUES (1),(2)", []) // 2 行
                 bResult[0] = db.affectedRows()
             }
             let _ = t1.get()
@@ -196,6 +199,7 @@ func testAffectedRowsThreadIsolated() {
             @Assert(aResult[0], 0)
             @Assert(bResult[0], 2)
             db.exec("DROP TABLE IF EXISTS _t_affected", [])
+            db.exec("DROP TABLE IF EXISTS _t_affected_b", [])
             db.close()
     }
 }

@@ -37,6 +37,11 @@ public class PGResult {
     public func isCommandOk(): Bool { status() == PGRES_COMMAND_OK }
     public func isTuplesOk(): Bool { status() == PGRES_TUPLES_OK }
 
+    /** 结果级 SQLSTATE（错误诊断用；成功结果返回空串）。 */
+    public func sqlstate(): String {
+        readField(PG_DIAG_SQLSTATE)
+    }
+
     /** 行数(PQntuples)。 */
     public func rowCount(): Int64 {
         Int64(unsafe { PQntuples(res) })
@@ -65,6 +70,11 @@ public class PGResult {
     /** 指定单元格的原始文本值(text 协议)。调用方须先确认非 NULL。 */
     public func getValue(row: Int64, col: Int64): String {
         unsafe { PQgetvalue(res, Int32(row), Int32(col)) }.toString()
+    }
+
+    /** 该结果是否为二进制格式（resultFormat=1）。 */
+    public func isBinary(): Bool {
+        unsafe { PQbinaryTuples(res) } == 1
     }
 
     /** 受影响行数(PQcmdTuples 文本→Int64)；非 DML 返回 -1。 */

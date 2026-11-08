@@ -19,6 +19,15 @@ foreign func PQexecParams(conn: CPointer<Unit>, command: CString, nParams: Int32
     paramLengths: CPointer<Int32>, paramFormats: CPointer<Int32>,
     resultFormat: Int32): CPointer<Unit>
 
+// ===== prepared statement（阻塞调用，严禁 @FastNative）=====
+// PQprepare：命名语句（连接内唯一），nParams<=0 时参数类型由首次执行推断。
+foreign func PQprepare(conn: CPointer<Unit>, stmtName: CString, query: CString, nParams: Int32,
+    paramTypes: CPointer<UInt32>): CPointer<Unit>
+// PQexecPrepared：按语句名执行（paramTypes 传 NULL 使用 prepare 时的类型）。
+foreign func PQexecPrepared(conn: CPointer<Unit>, stmtName: CString, nParams: Int32,
+    paramValues: CPointer<CString>, paramLengths: CPointer<Int32>,
+    paramFormats: CPointer<Int32>, resultFormat: Int32): CPointer<Unit>
+
 // 结果元信息（纯内存访问器：短耗时、无阻塞、不回调仓颉，符合 @FastNative 约束；
 // 物化循环每格调用 2~3 次，是本包 FFI 调用量最大的路径。
 // 注意：PQexec/PQexecParams/PQconnectdb 等阻塞调用严禁加此标注）
@@ -40,6 +49,9 @@ foreign func PQgetvalue(res: CPointer<Unit>, row: Int32, col: Int32): CString
 foreign func PQgetisnull(res: CPointer<Unit>, row: Int32, col: Int32): Int32
 @FastNative
 foreign func PQcmdTuples(res: CPointer<Unit>): CString
+// 结果是否为二进制格式（resultFormat=1 时为 1）。
+@FastNative
+foreign func PQbinaryTuples(res: CPointer<Unit>): Int32
 foreign func PQclear(res: CPointer<Unit>): Unit
 
 // 查询取消(线程安全：PGcancel 独立于 PGconn，可跨线程调用)

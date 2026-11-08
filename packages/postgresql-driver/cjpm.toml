@@ -10,11 +10,17 @@
 [dependencies]
   csorm = { path = "../csorm" }
 
+[ffi.c]
+lanlu_pg_bridge = { path = "./native" }
+
 [test-dependencies]
   csorm_macros = { path = "../csorm/macros" }
 
 [target.x86_64-unknown-linux-gnu]
-  link-option = "-lpq"
+  link-option = "-lpq -L ./native -llanlu_pg_bridge"
 
 [target.aarch64-apple-darwin]
-  link-option = "-lpq -L/opt/homebrew/lib"
+  link-option = "-lpq -L/opt/homebrew/lib -L ./native -llanlu_pg_bridge"
+
+[target.x86_64-w64-mingw32]
+  link-option = "-lpq -L ./native -llanlu_pg_bridge"
