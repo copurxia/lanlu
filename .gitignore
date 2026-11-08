@@ -27,5 +27,7 @@ packages/cangjie-gui
 cte_smoke.txt
 
 # C bridge build artifacts
-native/*.o
-native/lib*.a
+packages/postgresql-driver/native/*.o
+packages/postgresql-driver/native/lib*.a
+**/native/*.o
+**/native/lib*.a
