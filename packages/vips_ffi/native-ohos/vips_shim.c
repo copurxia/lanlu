@@ -68,13 +68,18 @@ void* vips_image_new_from_memory_copy(void* data, size_t size, int w, int h, int
 int vips_image_get_width(void* im){ return im?((VIMG*)im)->w:0; }
 int vips_image_get_height(void* im){ return im?((VIMG*)im)->h:0; }
 int vips_image_get_bands(void* im){ return im?((VIMG*)im)->b:0; }
-int vips_autorot(void* in, void** out, ...){ if(out)*out=in; return 0; }
-int vips_colourspace(void* in, void** out, int space, ...){ (void)space; if(out)*out=in; return 0; }
-int vips_cast_uchar(void* in, void** out, ...){ if(out)*out=in; return 0; }
-int vips_bandjoin_const1(void* in, void** out, double c, ...){ (void)c; if(out)*out=in; return 0; }
-int vips_bandjoin(void** in, void** out, int n, ...){ (void)n; if(out&&in)*out=in[0]; return 0; }
-int vips_gaussblur(void* in, void** out, double s, ...){ (void)s; if(out)*out=in; return 0; }
-int vips_extract_band(void* in, void** out, int band, ...){ (void)band; if(out)*out=in; return 0; }
+/* Real libvips operations each produce a NEW image. Aliasing the input caused
+ * double-free: decodeFileToRgba unrefs in/rot/srgb/u8/norm separately in its
+ * finally block -> heap corruption -> SIGTRAP in the Cangjie runtime. Always
+ * return an independent copy. */
+static void* dup_img(void* in){ if(!in)return 0; VIMG*s=(VIMG*)in; VIMG*m=mk(s->w,s->h); if(!m)return 0; memcpy(m->px,s->px,(size_t)s->w*s->h*4); m->b=s->b; return m; }
+int vips_autorot(void* in, void** out, ...){ if(out)*out=dup_img(in); return in?0:-1; }
+int vips_colourspace(void* in, void** out, int space, ...){ (void)space; if(out)*out=dup_img(in); return in?0:-1; }
+int vips_cast_uchar(void* in, void** out, ...){ if(out)*out=dup_img(in); return in?0:-1; }
+int vips_bandjoin_const1(void* in, void** out, double c, ...){ VIMG*m=(VIMG*)dup_img(in); if(m){ if(m->b==3){ for(int i=0;i<m->w*m->h;i++) m->px[i*4+3]=255; m->b=4; } (void)c; } if(out)*out=m; return in?0:-1; }
+int vips_bandjoin(void** in, void** out, int n, ...){ (void)n; if(out)*out=(in&&in[0])?dup_img(in[0]):0; return (in&&in[0])?0:-1; }
+int vips_gaussblur(void* in, void** out, double s, ...){ (void)s; if(out)*out=dup_img(in); return in?0:-1; }
+int vips_extract_band(void* in, void** out, int band, ...){ (void)band; if(out)*out=dup_img(in); return in?0:-1; }
 int vips_text(void** out, const char* t, ...){ (void)t; if(out)*out=0; return -1; }
 int vips_resize(void* in, void** out, double scale, ...){ if(!in){ if(out)*out=0; return -1; } VIMG*s=in; int w=(int)(s->w*scale+0.5),h=(int)(s->h*scale+0.5); if(w<1)w=1; if(h<1)h=1; VIMG*m=mk(w,h); for(int y=0;y<h;y++){ int sy=y*s->h/h; for(int x=0;x<w;x++){ int sx=x*s->w/w; unsigned char*sp=s->px+((size_t)sy*s->w+sx)*4; unsigned char*dp=m->px+((size_t)y*w+x)*4; dp[0]=sp[0];dp[1]=sp[1];dp[2]=sp[2];dp[3]=sp[3]; } } if(out)*out=m; return 0; }
 int vips_extract_area(void* in, void** out, int left,int top,int width,int height, ...){ if(!in){ if(out)*out=0; return -1;} VIMG*s=in; if(left<0)left=0; if(top<0)top=0; if(left+width>s->w)width=s->w-left; if(top+height>s->h)height=s->h-top; if(width<1||height<1){ if(out)*out=0; return -1;} VIMG*m=mk(width,height); for(int y=0;y<height;y++){ const unsigned char*sp=s->px+((size_t)(top+y)*s->w+left)*4; unsigned char*dp=m->px+(size_t)y*width*4; memcpy(dp,sp,(size_t)width*4);} if(out)*out=m; return 0; }
