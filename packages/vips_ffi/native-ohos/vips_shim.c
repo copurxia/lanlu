@@ -4,8 +4,8 @@
 #include <dlfcn.h>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-typedef struct { int w,h,b; unsigned char* px; } VIMG;
-static VIMG* mk(int w,int h){ VIMG*m=malloc(sizeof(VIMG)); m->w=w;m->h=h;m->b=4; m->px=malloc((size_t)w*h*4); memset(m->px,0,(size_t)w*h*4); return m; }
+typedef struct { int w,h,b,refs; unsigned char* px; } VIMG;
+static VIMG* mk(int w,int h){ VIMG*m=malloc(sizeof(VIMG)); m->w=w;m->h=h;m->b=4;m->refs=1; m->px=malloc((size_t)w*h*4); memset(m->px,0,(size_t)w*h*4); return m; }
 /* ---- OHOS ImageSource fallback (for WebP etc), via dlopen ---- */
 typedef struct { void* isrc; void* ipm; } OHH;
 static OHH g_oh={0,0};
@@ -68,22 +68,31 @@ void* vips_image_new_from_memory_copy(void* data, size_t size, int w, int h, int
 int vips_image_get_width(void* im){ return im?((VIMG*)im)->w:0; }
 int vips_image_get_height(void* im){ return im?((VIMG*)im)->h:0; }
 int vips_image_get_bands(void* im){ return im?((VIMG*)im)->b:0; }
-/* Real libvips operations each produce a NEW image. Aliasing the input caused
- * double-free: decodeFileToRgba unrefs in/rot/srgb/u8/norm separately in its
- * finally block -> heap corruption -> SIGTRAP in the Cangjie runtime. Always
- * return an independent copy. */
+/* libvips images are reference counted: each operation takes its own reference,
+ * so the caller may unref every handle independently (decodeFileToRgba does exactly
+ * that in its finally block). Aliasing without a reference caused a double free;
+ * copying unconditionally would spike memory on full-size page decodes. */
+static VIMG* ref_img(void* in){ VIMG* s=(VIMG*)in; if(s) s->refs++; return s; }
 static void* dup_img(void* in){ if(!in)return 0; VIMG*s=(VIMG*)in; VIMG*m=mk(s->w,s->h); if(!m)return 0; memcpy(m->px,s->px,(size_t)s->w*s->h*4); m->b=s->b; return m; }
-int vips_autorot(void* in, void** out, ...){ if(out)*out=dup_img(in); return in?0:-1; }
-int vips_colourspace(void* in, void** out, int space, ...){ (void)space; if(out)*out=dup_img(in); return in?0:-1; }
-int vips_cast_uchar(void* in, void** out, ...){ if(out)*out=dup_img(in); return in?0:-1; }
-int vips_bandjoin_const1(void* in, void** out, double c, ...){ VIMG*m=(VIMG*)dup_img(in); if(m){ if(m->b==3){ for(int i=0;i<m->w*m->h;i++) m->px[i*4+3]=255; m->b=4; } (void)c; } if(out)*out=m; return in?0:-1; }
-int vips_bandjoin(void** in, void** out, int n, ...){ (void)n; if(out)*out=(in&&in[0])?dup_img(in[0]):0; return (in&&in[0])?0:-1; }
-int vips_gaussblur(void* in, void** out, double s, ...){ (void)s; if(out)*out=dup_img(in); return in?0:-1; }
-int vips_extract_band(void* in, void** out, int band, ...){ (void)band; if(out)*out=dup_img(in); return in?0:-1; }
+/* 3x3 box blur approximating vips_gaussblur (backdrop 用途) */
+static void box_blur(VIMG* m){ int w=m->w,h=m->h; unsigned char* src=malloc((size_t)w*h*4); if(!src)return; memcpy(src,m->px,(size_t)w*h*4);
+  for(int y=0;y<h;y++){ for(int x=0;x<w;x++){ int r=0,g=0,b=0,a=0,n=0;
+    for(int dy=-1;dy<=1;dy++){ int yy=y+dy; if(yy<0||yy>=h)continue; for(int dx=-1;dx<=1;dx++){ int xx=x+dx; if(xx<0||xx>=w)continue;
+      unsigned char* p=src+((size_t)yy*w+xx)*4; r+=p[0];g+=p[1];b+=p[2];a+=p[3];n++; } }
+    unsigned char* d=m->px+((size_t)y*w+x)*4; d[0]=r/n; d[1]=g/n; d[2]=b/n; d[3]=a/n; } }
+  free(src); }
+int vips_autorot(void* in, void** out, ...){ if(!in){ if(out)*out=0; return -1; } if(out)*out=ref_img(in); return 0; }
+int vips_colourspace(void* in, void** out, int space, ...){ (void)space; if(!in){ if(out)*out=0; return -1; } if(out)*out=ref_img(in); return 0; }
+int vips_cast_uchar(void* in, void** out, ...){ if(!in){ if(out)*out=0; return -1; } if(out)*out=ref_img(in); return 0; }
+int vips_bandjoin_const1(void* in, void** out, double c, ...){ VIMG*m=(VIMG*)dup_img(in); if(m&&m->b==3){ for(int i=0;i<m->w*m->h;i++) m->px[i*4+3]=(unsigned char)(int)c; m->b=4; } if(out)*out=m; return in?0:-1; }
+int vips_bandjoin(void** in, void** out, int n, ...){ (void)n; if(!in||!in[0]){ if(out)*out=0; return -1; } if(out)*out=dup_img(in[0]); return 0; }
+int vips_gaussblur(void* in, void** out, double s, ...){ (void)s; if(!in){ if(out)*out=0; return -1; }
+  VIMG* src=(VIMG*)in; if(src->refs<=1){ box_blur(src); if(out)*out=ref_img(src); } else { VIMG* m=(VIMG*)dup_img(in); if(m) box_blur(m); if(out)*out=m; } return 0; }
+int vips_extract_band(void* in, void** out, int band, ...){ (void)band; if(!in){ if(out)*out=0; return -1; } if(out)*out=ref_img(in); return 0; }
 int vips_text(void** out, const char* t, ...){ (void)t; if(out)*out=0; return -1; }
 int vips_resize(void* in, void** out, double scale, ...){ if(!in){ if(out)*out=0; return -1; } VIMG*s=in; int w=(int)(s->w*scale+0.5),h=(int)(s->h*scale+0.5); if(w<1)w=1; if(h<1)h=1; VIMG*m=mk(w,h); for(int y=0;y<h;y++){ int sy=y*s->h/h; for(int x=0;x<w;x++){ int sx=x*s->w/w; unsigned char*sp=s->px+((size_t)sy*s->w+sx)*4; unsigned char*dp=m->px+((size_t)y*w+x)*4; dp[0]=sp[0];dp[1]=sp[1];dp[2]=sp[2];dp[3]=sp[3]; } } if(out)*out=m; return 0; }
 int vips_extract_area(void* in, void** out, int left,int top,int width,int height, ...){ if(!in){ if(out)*out=0; return -1;} VIMG*s=in; if(left<0)left=0; if(top<0)top=0; if(left+width>s->w)width=s->w-left; if(top+height>s->h)height=s->h-top; if(width<1||height<1){ if(out)*out=0; return -1;} VIMG*m=mk(width,height); for(int y=0;y<height;y++){ const unsigned char*sp=s->px+((size_t)(top+y)*s->w+left)*4; unsigned char*dp=m->px+(size_t)y*width*4; memcpy(dp,sp,(size_t)width*4);} if(out)*out=m; return 0; }
 int vips_image_write_to_file(void* im, const char* fn, ...){ (void)im;(void)fn; return -1; }
 void* vips_image_write_to_memory(void* im, size_t* size){ if(!im){ if(size)*size=0; return 0;} VIMG*m=im; size_t n=(size_t)m->w*m->h*4; void*p=malloc(n); memcpy(p,m->px,n); if(size)*size=n; return p; }
-void g_object_unref(void* o){ if(!o)return; VIMG*m=o; free(m->px); free(m); }
+void g_object_unref(void* o){ if(!o)return; VIMG*m=o; if(--m->refs>0) return; free(m->px); free(m); }
 void g_free(void* p){ free(p); }
