@@ -30,8 +30,18 @@ public func cj_app_main(): Int64 {
     if (SEED_KV.size > 0) {
         try {
             let kvDir = base + "/.config/lanlu-client-next/kv"
-            Directory.create(Path(kvDir), recursive: true)
-            File.writeTo(Path(kvDir + "/lanlu_kv.bin"), SEED_KV)
+            let kvFile = kvDir + "/lanlu_kv.bin"
+            // 仅首次写入：已有 KV（迁移/真实使用产生）绝不覆盖。
+            var seeded = true
+            try {
+                let _ = File.readFrom(Path(kvFile))
+            } catch (_) {
+                seeded = false
+            }
+            if (!seeded) {
+                Directory.create(Path(kvDir), recursive: true)
+                File.writeTo(Path(kvFile), SEED_KV)
+            }
         } catch (_) {}
     }
     // 移植自检（图片/网络/字幕 probe），仅在显式开启时执行
