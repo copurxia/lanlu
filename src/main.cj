@@ -153,12 +153,20 @@ main(): Int64 {
 
     let effectiveWasmRuntime = "wasmedge"
 
-    let (wamrReady, wamrError) = WasmHostBridge.warmup()
-    if (wamrReady) {
-        logger.info("WASM runtime warmup ready", ("runtime", effectiveWasmRuntime))
+    // WASM warmup：WASM_RUNTIME=off 跳过（无插件场景/受限沙箱——WasmEdge 在缺
+    // 特定内核特性的容器里初始化会无限阻塞，Dockerfile 定义的环境不受影响）。
+    let wasmRuntime = getVariable("WASM_RUNTIME") ?? ""
+    let wasmRuntimeOff = wasmRuntime == "off"
+    if (wasmRuntimeOff) {
+        logger.info("WASM runtime warmup skipped (WASM_RUNTIME=off)")
     } else {
-        logger.error("WASM runtime warmup failed", ("runtime", effectiveWasmRuntime), ("error", wamrError))
-        return 1
+        let (wamrReady, wamrError) = WasmHostBridge.warmup()
+        if (wamrReady) {
+            logger.info("WASM runtime warmup ready", ("runtime", effectiveWasmRuntime))
+        } else {
+            logger.error("WASM runtime warmup failed", ("runtime", effectiveWasmRuntime), ("error", wamrError))
+            return 1
+        }
     }
 
     // 启动 TaskPool（从tasks表领取pending任务执行）
