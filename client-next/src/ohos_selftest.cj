@@ -167,4 +167,7 @@ func ohosMediaSelftest(base: String): Unit {
     } catch (ex8: Exception) {
         File.writeTo(Path(base + "/wvtest.txt"), ("EXC " + ex8.message).toArray())
     }
+catch (ex9: Exception) {
+        File.writeTo(Path(base + "/inject.txt"), ("EXC " + ex9.message).toArray())
+    }
 }
