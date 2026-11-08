@@ -57,4 +57,3 @@ npm test -- --runInBand
 
 Android native build requires a local JDK with `JAVA_HOME` configured.
 
-<!-- ci-probe: push APK 触发验证 2026-11-08 -->
