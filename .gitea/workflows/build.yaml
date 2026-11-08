@@ -24,6 +24,9 @@ jobs:
           --health-retries 10
     env:
       DB_STRING: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable&pool.max=5
+      # psql(libpq) CLI 不认驱动特有的 pool.* 查询参数（invalid URI query parameter），
+      # psql 仅用于建扩展/建表/种子；去掉 pool.* 指向同一数据库即可。
+      PG_DSN: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -55,7 +58,7 @@ jobs:
         # 大结果集基准（13,335 行）在 CI 环境抖动大，种子保持同规模以复现测试断言。
         run: |
           set -eux
-          PSQL="psql $DB_STRING -v ON_ERROR_STOP=1"
+          PSQL="psql $PG_DSN -v ON_ERROR_STOP=1"
           $PSQL -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
           $PSQL -c 'CREATE EXTENSION IF NOT EXISTS unaccent'
           $PSQL -c "CREATE TABLE IF NOT EXISTS bench_rows(id bigserial primary key, title text, filename text, summary text, tags text, extra text, n1 int, n2 bigint, f1 float8, b1 bool, t1 timestamptz, by1 bytea, j1 jsonb)"
@@ -163,6 +166,15 @@ jobs:
             -o packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
           ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
             packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          # postgresql-driver 的 lanlu_pg_bridge 同理（C bridge，用 cc 而非 g++，
+          # 需要 libpq 头文件）。缺它时 cjpm update 报 "can not find the library
+          # 'lanlu_pg_bridge'"。
+          cc -O2 -fPIC \
+            -c packages/postgresql-driver/native/lanlu_pg_bridge.c \
+            -o packages/postgresql-driver/native/lanlu_pg_bridge.o \
+            -I/usr/include/postgresql
+          ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
+            packages/postgresql-driver/native/lanlu_pg_bridge.o
           cjpm update
           for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
             grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
