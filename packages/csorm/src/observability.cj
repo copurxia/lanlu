@@ -334,6 +334,7 @@ public class MockDatabase <: DriverConn {
     public func execSql(sql: String): Unit { logCall(sql) }
 
     public func begin(): Unit { logCall("BEGIN") }
+    public func begin(level: IsolationLevel): Unit { logCall("BEGIN" + isolationClause(level)) }
     public func commit(): Unit { logCall("COMMIT") }
     public func rollback(): Unit { logCall("ROLLBACK") }
     public func inTransaction(): Bool { false }

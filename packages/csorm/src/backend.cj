@@ -77,6 +77,32 @@ public interface Dialect {
     func renderOnConflictDoNothing(target: Array<String>): String
     func renderOnConflictDoUpdate(target: Array<String>, setExprs: Array<(String, String)>): String
     func supportReturning(): Bool
+
+    /** DISTINCT ON (cols)：PG 专属；不支持的方言抛 CsormError（SelectQuery.distinctOn 调用）。 */
+    func renderDistinctOn(cols: Array<String>): String
+}
+
+// ===== 事务隔离级别 =====
+
+/**
+ * 事务隔离级别（对标 std.database.sql TransactionIsoLevel，裁剪到 PG 支持的子集）。
+ * Default 保持裸 BEGIN（连接默认，通常 READ COMMITTED）。
+ */
+public enum IsolationLevel {
+    | Default
+    | ReadCommitted
+    | RepeatableRead
+    | Serializable
+}
+
+/** IsolationLevel → BEGIN 子句文本（Default 为空）。 */
+public func isolationClause(level: IsolationLevel): String {
+    match (level) {
+        case Default => ""
+        case ReadCommitted => " ISOLATION LEVEL READ COMMITTED"
+        case RepeatableRead => " ISOLATION LEVEL REPEATABLE READ"
+        case Serializable => " ISOLATION LEVEL SERIALIZABLE"
+    }
 }
 
 // ===== Row =====
@@ -181,6 +207,8 @@ public interface DriverConn {
     func execSql(sql: String): Unit
 
     func begin(): Unit
+    /** 带隔离级别的 BEGIN（Default 等价 begin()）。 */
+    func begin(level: IsolationLevel): Unit
     func commit(): Unit
     func rollback(): Unit
     func inTransaction(): Bool
@@ -192,6 +220,12 @@ public interface DriverConn {
     func cancel(): Bool
     func close(): Unit
     func poolSize(): Int64
+    /** 池空闲连接数（监控指标；无池实现返回 0）。 */
+    func poolIdleCount(): Int64 { 0 }
+    /** 当前阻塞在 borrow 的等待者数（饱和监控）。 */
+    func poolWaitingCount(): Int64 { 0 }
+    /** borrow 超时累计次数（过载监控）。 */
+    func poolBorrowTimeouts(): Int64 { 0 }
 }
 
 // ===== PgCompatDialect =====
@@ -239,6 +273,11 @@ public class PgCompatDialect <: Dialect {
     }
 
     public func supportReturning(): Bool { true }
+
+    public func renderDistinctOn(cols: Array<String>): String {
+        let q = Array<String>(cols.size, { i => doQuoteIdent(cols[i]) })
+        "DISTINCT ON (" + joinComma(q) + ")"
+    }
 }
 
 /** 默认 PG 兼容方言实例(供 build() 无参版本使用)。 */

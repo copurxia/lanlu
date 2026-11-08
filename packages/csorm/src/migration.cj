@@ -73,6 +73,20 @@ public class SchemaManager {
         db.execRawSql(schema.dropEnumType(typeName))
     }
 
+    /** CREATE [UNIQUE] INDEX ...（参数同 createIndexSql，见 schema.cj）。 */
+    public func createIndex(name: String, table: String, cols: Array<String>,
+        method!: String = IndexMethod.Btree, predicate!: ?String = None,
+        include!: Array<String> = Array<String>(), unique!: Bool = false,
+        ifNotExists!: Bool = false): Unit {
+        db.execRawSql(createIndexSql(name, table, cols, method: method, predicate: predicate,
+            include: include, unique: unique, ifNotExists: ifNotExists))
+    }
+
+    /** DROP INDEX IF EXISTS。 */
+    public func dropIndex(name: String): Unit {
+        db.execRawSql("DROP INDEX IF EXISTS " + quoteIdent(name))
+    }
+
     /** 执行 SchemaBuilder 批次(按顺序执行全部 SQL)。 */
     public func execBatch(sqls: Array<String>): Unit {
         for (sql in sqls) {
@@ -164,6 +178,11 @@ public class Migrator {
     /**
      * 应用全部待执行的迁移。
      * 返回已应用的版本列表。
+     *
+     * 并发防护：每个迁移的事务以 pg_advisory_xact_lock(hashtext(锁键)) 开头——
+     * 多实例同时启动迁移时，同一锁键只有一个事务能拿到锁，其余阻塞等待；
+     * 锁随事务提交/回滚自动释放（xact 级），无泄漏。锁键含 migrations 表名，
+     * 不同迁移表的应用互不阻塞。
      */
     public func up(migrations: Array<CsormMigration>): Array<String> {
         ensureMigrationsTable()
@@ -177,6 +196,7 @@ public class Migrator {
                 let mgr = SchemaManager(db)
                 db.transaction({
                     =>
+                    acquireMigrationLock()
                     m.up(mgr)
                     recordApplied(m.version())
                 })
@@ -184,6 +204,28 @@ public class Migrator {
             }
         }
         newlyApplied.toArray()
+    }
+
+    /**
+     * 会话级迁移锁（非事务路径用）：pg_advisory_lock 阻塞至拿到；调用方必须
+     * 在 finally 中 releaseMigrationLock() 释放。事务路径用 acquireMigrationLock()
+     * （xact 级，自动释放）更安全。
+     */
+    public func acquireSessionLock(): Unit {
+        db.raw<Row>("SELECT pg_advisory_lock(hashtext($1)) AS ok",
+            [vtext("lanlu_migration:" + migrationsTable)], { r => r })
+    }
+
+    /** 释放会话级迁移锁。 */
+    public func releaseSessionLock(): Unit {
+        db.raw<Row>("SELECT pg_advisory_unlock(hashtext($1)) AS ok",
+            [vtext("lanlu_migration:" + migrationsTable)], { r => r })
+    }
+
+    /** 事务级迁移锁：在【当前事务内】执行，提交/回滚自动释放。 */
+    func acquireMigrationLock(): Unit {
+        db.raw<Row>("SELECT pg_advisory_xact_lock(hashtext($1)) AS ok",
+            [vtext("lanlu_migration:" + migrationsTable)], { r => r })
     }
 
     /**
@@ -210,6 +252,7 @@ public class Migrator {
                     let mgr = SchemaManager(db)
                     db.transaction({
                         =>
+                        acquireMigrationLock()
                         m.down(mgr)
                         removeApplied(v)
                     })

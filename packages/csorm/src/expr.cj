@@ -192,6 +192,42 @@ public class Expr {
     public func asAlias(alias: String): Expr {
         if (alias.isEmpty()) { this } else { Expr(sql + " AS " + quoteIdent(alias), params) }
     }
+
+    /**
+     * 窗口函数修饰符（对标 sea_query WindowStatement 的 OVER 子句）：
+     * expr.over(partitionBy!, orderBy!, frame!) → expr OVER (PARTITION BY ... ORDER BY ... frame)
+     * 典型用法：exprCount().over(partitionBy: ["user_id"], orderBy: [("created_at", Order.Desc)])
+     *          exprSum(expr("amount")).over(partitionBy: ["uid"], frame: "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW")
+     * - partitionBy/orderBy 中的列名经 quoteIdent 引号防注入；orderBy 携带方向。
+     * - frame 为完整 frame 子句文本（如 "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"），
+     *   仓颉侧不解析——调用方保证语法正确（PG 窗口 frame 语法稳定，白名单收益低）。
+     * - 返回新 Expr（不可变语义）；本 Expr 的参数原样继承（OVER 不引入新占位符）。
+     */
+    public func over(partitionBy!: Array<String> = Array<String>(),
+        orderBy!: Array<(String, Order)> = Array<(String, Order)>(),
+        frame!: String = ""): Expr {
+        var inner = ArrayList<String>()
+        if (partitionBy.size > 0) {
+            let quoted = Array<String>(partitionBy.size, { i => quoteIdent(partitionBy[i]) })
+            inner.add("PARTITION BY " + joinComma(quoted))
+        }
+        if (orderBy.size > 0) {
+            let parts = ArrayList<String>()
+            for ((col, o) in orderBy) {
+                parts.add(quoteIdent(col) + " " + orderKeyword(o))
+            }
+            inner.add("ORDER BY " + joinComma(parts.toArray()))
+        }
+        if (!frame.isEmpty()) {
+            inner.add(frame)
+        }
+        if (inner.size == 0) {
+            // 空 OVER：OVER () 合法（全表窗口），保持输出
+            return Expr(sql + " OVER ()", params)
+        }
+        // OVER 内部各子句用空格连接（逗号仅在 PARTITION BY/ORDER BY 各自的列清单内）
+        Expr(sql + " OVER (" + joinSql(inner.toArray()) + ")", params)
+    }
 }
 
 // ===== 构造函数 =====

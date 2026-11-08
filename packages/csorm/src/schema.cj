@@ -275,6 +275,65 @@ public class Schema {
     }
 }
 
+// ===== 索引 DDL =====
+
+/** PG 索引方法常量（method 参数标识符校验用）。 */
+public class IndexMethod {
+    public static const Btree: String = "btree"
+    public static const Hash: String = "hash"
+    public static const Gist: String = "gist"
+    public static const Gin: String = "gin"
+    public static const Spgist: String = "spgist"
+    public static const Brin: String = "brin"
+
+    /** method 是否为 PG 合法索引方法（createIndex 标识符校验）。 */
+    public static func isValid(m: String): Bool {
+        m == Btree || m == Hash || m == Gist || m == Gin || m == Spgist || m == Brin
+    }
+}
+
+/**
+ * 渲染 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON tbl USING method (cols)
+ *   [INCLUDE (incCols)] [WHERE predicate]。
+ * - method 必须是 IndexMethod.isValid 认可的标识符（防注入）；否则抛 CsormError。
+ * - name/cols 经 quoteIdent；where/include 为原始片段（调用方保证语法）。
+ */
+public func createIndexSql(name: String, table: String, cols: Array<String>,
+    method!: String = IndexMethod.Btree, predicate!: ?String = None,
+    include!: Array<String> = Array<String>(), unique!: Bool = false,
+    ifNotExists!: Bool = false, schema!: ?String = None): String {
+    // 标识符校验：method 只能是白名单常量
+    if (!IndexMethod.isValid(method)) {
+        throw CsormError("createIndex: invalid index method '" + method + "' (use IndexMethod constants)")
+    }
+    if (cols.size == 0) {
+        throw CsormError("createIndex: at least one column required")
+    }
+    let dialect = defaultDialect
+    var s = "CREATE "
+    if (unique) {
+        s += "UNIQUE "
+    }
+    s += "INDEX "
+    if (ifNotExists) {
+        s += "IF NOT EXISTS "
+    }
+    s += dialect.quoteIdent(name)
+    s += " ON " + dialect.quoteTable(schema, table)
+    s += " USING " + method
+    let q = Array<String>(cols.size, { i => dialect.quoteIdent(cols[i]) })
+    s += " (" + joinComma(q) + ")"
+    if (include.size > 0) {
+        let qi = Array<String>(include.size, { i => dialect.quoteIdent(include[i]) })
+        s += " INCLUDE (" + joinComma(qi) + ")"
+    }
+    match (predicate) {
+        case Some(pred) => s += " WHERE " + pred
+        case None => ()
+    }
+    s
+}
+
 /**
  * SchemaBuilder：链式构造 DDL 批次，build() 返回 SQL 字符串数组(按顺序执行)。
  */
@@ -313,6 +372,19 @@ public class SchemaBuilder {
     /** 追加原始 SQL。 */
     public func rawSql(sql: String): SchemaBuilder {
         stmts.add(sql)
+        this
+    }
+
+    /**
+     * CREATE [UNIQUE] INDEX ... 链式入口（参数同 createIndexSql）：
+     * method 做标识符合法性校验（IndexMethod 常量）；where/include/unique/ifNotExists 可选。
+     */
+    public func createIndex(name: String, table: String, cols: Array<String>,
+        method!: String = IndexMethod.Btree, predicate!: ?String = None,
+        include!: Array<String> = Array<String>(), unique!: Bool = false,
+        ifNotExists!: Bool = false, schema!: ?String = None): SchemaBuilder {
+        stmts.add(createIndexSql(name, table, cols, method: method, predicate: predicate,
+            include: include, unique: unique, ifNotExists: ifNotExists, schema: schema))
         this
     }
 

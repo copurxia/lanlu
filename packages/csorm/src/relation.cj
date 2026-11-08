@@ -271,6 +271,39 @@ public func loadMany<T, P>(db: Database, rel: RelationDef,
     })
 }
 
+/**
+ * withMany（对标 SeaORM LoaderTrait::with_many）：组合器形态的一对多批量装配。
+ * 与 loadMany（返回平行数组）不同，withMany 直接把关联分组【装回父对象】：
+ * mapper(parent, relatedList) 产出最终对象，返回与 parents 顺序对齐的结果数组。
+ * N+1 安全：仍是单条 IN 查询。
+ *
+ * 用法：let enriched = withMany(db, rel, parents, { p => vint(p.id) },
+ *     { r => toModel(r) }, { (p, children) => ParentWithChildren(p, children) })
+ */
+public func withMany<T, R, P>(db: Database, rel: RelationDef,
+    parents: Array<P>, parentPkOf: (P) -> Value, mapRelated: (Row) -> R,
+    assemble: (P, Array<R>) -> T): Array<T> {
+    let groups = loadMany<R, P>(db, rel, parents, parentPkOf, mapRelated)
+    Array<T>(parents.size, { i => assemble(parents[i], groups[i]) })
+}
+
+/**
+ * withOne（对标 SeaORM LoaderTrait::with_one）：一对一组合装配（关联至多 1 条，None 传空数组
+ * 由 assemble 决定语义；需要 Option 语义时 assemble 内检查 children.size）。
+ */
+public func withOne<T, R, P>(db: Database, rel: RelationDef,
+    parents: Array<P>, parentPkOf: (P) -> Value, mapRelated: (Row) -> R,
+    assemble: (P, Array<R>) -> T): Array<T> {
+    let groups = loadOne<R, P>(db, rel, parents, parentPkOf, mapRelated)
+    Array<T>(parents.size, { i =>
+        let single = match (groups[i]) {
+            case Some(r) => Array<R>(1, { _ => r })
+            case None => Array<R>()
+        }
+        assemble(parents[i], single)
+    })
+}
+
 /** 从 Value 取 Int64(VInt → 内部值；VText → parse；VNull → 0；其余尽力转)。 */
 func int64OfValue(v: Value): Int64 {
     match (v) {
@@ -305,15 +338,15 @@ public func loadManyToMany<T>(db: Database,
     joinLeftCol: String,
     joinRightCol: String,
     toEntity: Entity,
-    mapRelated: (Row) -> T): Array<Array<T>> {
+    mapRelated: (Row) -> T,
+    useJoin!: Bool = true): Array<Array<T>> {
     if (parentPks.size == 0) {
         return Array<Array<T>>(0, { _ => Array<T>() })
     }
-    // 单条 SQL：SELECT jt.leftCol, to.* FROM joinTable jt
-    //         INNER JOIN toTable ON toTable.pk = jt.rightCol
-    //         WHERE jt.leftCol IN (parentPks)
-    // 简化：直接用两步查询(中间表 + 目标表)，避免复杂 JOIN 列别名。
-    // 步骤1：查中间表，得到 (leftCol, rightCol) 配对
+    if (useJoin) {
+        return loadManyToManyJoin<T>(db, parentPks, joinTable, joinLeftCol, joinRightCol, toEntity, mapRelated)
+    }
+    // ===== 旧路径（两步查询）：保留为行为开关 useJoin=false =====
     let jq = SelectQuery()
     jq.from(joinTable)
     jq.select([joinLeftCol, joinRightCol])
@@ -367,6 +400,64 @@ public func loadManyToMany<T>(db: Database,
                     }
                 }
                 out.toArray()
+            case None => Array<T>()
+        }
+    })
+}
+
+/**
+ * 多对多单 JOIN 加载：一条 SQL 完成（中间表 JOIN 目标表），N+1 与往返次数双优化。
+ * SELECT jt.leftCol, to.* FROM joinTable jt
+ *   INNER JOIN toTable ON toTable.pk = jt.rightCol
+ *   WHERE jt.leftCol IN (parentPks)
+ * toEntity 列用别名 "to.col AS col" 避免与 leftCol 冲突（fromRow 按原名读）。
+ */
+public func loadManyToManyJoin<T>(db: Database,
+    parentPks: Array<Value>,
+    joinTable: String,
+    joinLeftCol: String,
+    joinRightCol: String,
+    toEntity: Entity,
+    mapRelated: (Row) -> T): Array<Array<T>> {
+    let toTable = toEntity.table()
+    let toPk = toEntity.pkColumns()[0]
+    let q = SelectQuery()
+    match (toEntity.schema()) {
+        case Some(s) => q.from(s, table: toTable)
+        case None => q.from(toTable)
+    }
+    // 关联键列（用于回配父对象）
+    q.addRawColumn(joinTable + "." + joinLeftCol, alias: joinLeftCol)
+    // 目标表全部列（别名还原为原名）
+    for (c in toEntity.columns()) {
+        q.addRawColumn(toTable + "." + c, alias: c)
+    }
+    q.join(JoinKind.Inner, joinTable,
+        joinTable + "." + joinRightCol + " = " + toTable + "." + toPk)
+    // leftCol 是 表.列 复合名，不能走 quoteIdent（会整体引号化）——手写 ? 占位符
+    // （rawCond 不支持数组展开；parentPks 个数动态）
+    var phs = ""
+    for (i in 0..parentPks.size) {
+        phs += if (i == 0) { "?" } else { ", ?" }
+    }
+    q.filter(rawCond(joinTable + "." + joinLeftCol + " IN (" + phs + ")", parentPks))
+    let rows = db.all<Row>(q, { r => r })
+    // 按 leftVal 分组（保持行序）
+    let groups = HashMap<Int64, ArrayList<T>>()
+    for (r in rows) {
+        let leftVal = r.getInt64(joinLeftCol)
+        match (groups.get(leftVal)) {
+            case Some(arr) => arr.add(mapRelated(r))
+            case None =>
+                let arr = ArrayList<T>()
+                arr.add(mapRelated(r))
+                groups[leftVal] = arr
+        }
+    }
+    Array<Array<T>>(parentPks.size, { i =>
+        let key = int64OfValue(parentPks[i])
+        match (groups.get(key)) {
+            case Some(arr) => arr.toArray()
             case None => Array<T>()
         }
     })

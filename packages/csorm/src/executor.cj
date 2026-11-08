@@ -29,29 +29,58 @@ public class Database {
     public func close(): Unit { conn.close() }
     public func poolSize(): Int64 { conn.poolSize() }
 
+    /** 池监控指标：(open, idle, waiting, borrowTimeouts)。供运维/日志导出。 */
+    public func poolStats(): (Int64, Int64, Int64, Int64) {
+        (conn.poolSize(), conn.poolIdleCount(), conn.poolWaitingCount(), conn.poolBorrowTimeouts())
+    }
+
     // ===== SELECT =====
     /** 执行 SelectQuery，物化全部行，按 map 映射为 T 数组。 */
     public func all<T>(q: SelectQuery, map: (Row) -> T): Array<T> {
         let (sql, params) = q.build(dialect)
-        let rows = conn.queryAll(sql, params)
-        Array<T>(rows.size, { i => map(rows[i]) })
+        let start = MonoTime.now()
+        try {
+            let rows = conn.queryAll(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "select all")
+            Array<T>(rows.size, { i => map(rows[i]) })
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "select all")
+            throw e
+        }
     }
 
     /** 执行 SelectQuery，返回首行映射结果(无结果 None)。 */
     public func one<T>(q: SelectQuery, map: (Row) -> T): ?T {
         let (sql, params) = q.build(dialect)
-        match (conn.queryOne(sql, params)) {
-            case Some(r) => Some(map(r))
-            case None => None
+        let start = MonoTime.now()
+        try {
+            let rowOpt = conn.queryOne(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "select one")
+            match (rowOpt) {
+                case Some(r) => Some(map(r))
+                case None => None
+            }
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "select one")
+            throw e
         }
     }
 
     /** 游标流式读取 SelectQuery，分批回调。 */
     public func stream<T>(q: SelectQuery, chunkSize: Int64, map: (Row) -> T, cb: (Array<T>) -> Unit): Unit {
         let (sql, params) = q.build(dialect)
-        conn.streamQuery(sql, params, chunkSize, { rows =>
-            cb(Array<T>(rows.size, { i => map(rows[i]) }))
-        })
+        let start = MonoTime.now()
+        var failed = false
+        try {
+            conn.streamQuery(sql, params, chunkSize, { rows =>
+                cb(Array<T>(rows.size, { i => map(rows[i]) }))
+            })
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        } finally {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, failed, "select stream")
+        }
     }
 
     // ===== INSERT =====
@@ -61,18 +90,26 @@ public class Database {
      */
     public func exec(q: InsertQuery): InsertResult {
         let (sql, params) = q.build(dialect)
-        if (q.returningCols.size > 0 && dialect.supportReturning()) {
-            let rows = conn.queryAll(sql, params)
-            // 受影响行数 = RETURNING 行数(写语句带 RETURNING 时 PG 不返回 cmdTuples)
-            let aff = Int64(rows.size)
-            var lastId: ?Int64 = None
-            if (q.returningCols.size == 1 && rows.size > 0) {
-                lastId = Some(rows[0].getOrNullInt64(0) ?? 0)
+        let start = MonoTime.now()
+        try {
+            let result = if (q.returningCols.size > 0 && dialect.supportReturning()) {
+                let rows = conn.queryAll(sql, params)
+                // 受影响行数 = RETURNING 行数(写语句带 RETURNING 时 PG 不返回 cmdTuples)
+                let aff = Int64(rows.size)
+                var lastId: ?Int64 = None
+                if (q.returningCols.size == 1 && rows.size > 0) {
+                    lastId = Some(rows[0].getOrNullInt64(0) ?? 0)
+                }
+                InsertResult(aff, lastId, rows)
+            } else {
+                let aff = conn.exec(sql, params)
+                InsertResult(aff, None, Array<Row>())
             }
-            InsertResult(aff, lastId, rows)
-        } else {
-            let aff = conn.exec(sql, params)
-            InsertResult(aff, None, Array<Row>())
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "insert")
+            result
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "insert")
+            throw e
         }
     }
 
@@ -85,19 +122,34 @@ public class Database {
         if (!dialect.supportReturning()) {
             throw CsormError("InsertQuery.execReturning: backend does not support RETURNING")
         }
-        let rows = conn.queryAll(sql, params)
-        Array<T>(rows.size, { i => map(rows[i]) })
+        let start = MonoTime.now()
+        try {
+            let rows = conn.queryAll(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "insert returning")
+            Array<T>(rows.size, { i => map(rows[i]) })
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "insert returning")
+            throw e
+        }
     }
 
     // ===== UPDATE =====
     public func exec(q: UpdateQuery): UpdateResult {
         let (sql, params) = q.build(dialect)
-        if (q.returningCols.size > 0 && dialect.supportReturning()) {
-            let rows = conn.queryAll(sql, params)
-            UpdateResult(Int64(rows.size), rows)
-        } else {
-            let aff = conn.exec(sql, params)
-            UpdateResult(aff, Array<Row>())
+        let start = MonoTime.now()
+        try {
+            let result = if (q.returningCols.size > 0 && dialect.supportReturning()) {
+                let rows = conn.queryAll(sql, params)
+                UpdateResult(Int64(rows.size), rows)
+            } else {
+                let aff = conn.exec(sql, params)
+                UpdateResult(aff, Array<Row>())
+            }
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "update")
+            result
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "update")
+            throw e
         }
     }
 
@@ -109,19 +161,34 @@ public class Database {
         if (!dialect.supportReturning()) {
             throw CsormError("UpdateQuery.execReturning: backend does not support RETURNING")
         }
-        let rows = conn.queryAll(sql, params)
-        Array<T>(rows.size, { i => map(rows[i]) })
+        let start = MonoTime.now()
+        try {
+            let rows = conn.queryAll(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "update returning")
+            Array<T>(rows.size, { i => map(rows[i]) })
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "update returning")
+            throw e
+        }
     }
 
     // ===== DELETE =====
     public func exec(q: DeleteQuery): DeleteResult {
         let (sql, params) = q.build(dialect)
-        if (q.returningCols.size > 0 && dialect.supportReturning()) {
-            let rows = conn.queryAll(sql, params)
-            DeleteResult(Int64(rows.size), rows)
-        } else {
-            let aff = conn.exec(sql, params)
-            DeleteResult(aff, Array<Row>())
+        let start = MonoTime.now()
+        try {
+            let result = if (q.returningCols.size > 0 && dialect.supportReturning()) {
+                let rows = conn.queryAll(sql, params)
+                DeleteResult(Int64(rows.size), rows)
+            } else {
+                let aff = conn.exec(sql, params)
+                DeleteResult(aff, Array<Row>())
+            }
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "delete")
+            result
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "delete")
+            throw e
         }
     }
 
@@ -133,8 +200,15 @@ public class Database {
         if (!dialect.supportReturning()) {
             throw CsormError("DeleteQuery.execReturning: backend does not support RETURNING")
         }
-        let rows = conn.queryAll(sql, params)
-        Array<T>(rows.size, { i => map(rows[i]) })
+        let start = MonoTime.now()
+        try {
+            let rows = conn.queryAll(sql, params)
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, false, "delete returning")
+            Array<T>(rows.size, { i => map(rows[i]) })
+        } catch (e: Exception) {
+            DatabaseMetric.record(sql, params, MonoTime.now() - start, true, "delete returning")
+            throw e
+        }
     }
 
     // ===== RAW =====
@@ -204,7 +278,10 @@ public class Database {
     }
 
     // ===== 事务透传 =====
-    public func begin(): Unit { conn.begin() }
+    /** 带隔离级别的 BEGIN（Default 等价裸 BEGIN）。 */
+    public func begin(level!: IsolationLevel = IsolationLevel.Default): Unit {
+        conn.begin(level)
+    }
     public func commit(): Unit { conn.commit() }
     public func rollback(): Unit { conn.rollback() }
     public func inTransaction(): Bool { conn.inTransaction() }

@@ -21,6 +21,77 @@ public func orderKeyword(o: Order): String {
     }
 }
 
+// ===== CTE 定义 =====
+/**
+ * WITH 子句的单个 CTE（对标 sea_query WithClause/WithQuery）。
+ * subQuery 为结构化 SelectQuery；build() 时先渲染 sub，占位符经 rewriteDollarSeq
+ * 结构性续编到主查询编号链（禁止沿用 rawPrefixFragment 手写 $n 模式）。
+ * columnList 非空时输出 name(col1,col2,...)（RECURSIVE 常用）。
+ */
+public struct CTEDef {
+    public let name: String
+    public let recursive: Bool
+    public let subQuery: SelectQuery
+    public let columnList: Array<String>
+
+    public init(name: String, subQuery: SelectQuery, recursive!: Bool = false,
+        columnList!: Array<String> = Array<String>()) {
+        this.name = name
+        this.subQuery = subQuery
+        this.recursive = recursive
+        this.columnList = columnList
+    }
+}
+
+/**
+ * LATERAL JOIN 定义：JOIN kind LATERAL (subQuery) AS alias [ON cond]。
+ * on 为空 → CROSS JOIN LATERAL（无 ON 子句）。sub 占位符在 build 时结构性续编。
+ */
+public struct LateralJoin {
+    public let kind: JoinKind
+    public let subQuery: SelectQuery
+    public let alias: String
+    public let onSql: String   // 空 = CROSS JOIN LATERAL
+
+    public init(kind: JoinKind, subQuery: SelectQuery, alias: String, onSql!: String = "") {
+        this.kind = kind
+        this.subQuery = subQuery
+        this.alias = alias
+        this.onSql = onSql
+    }
+}
+
+/**
+ * 把 SQL 中按出现顺序的 $1..$k 局部占位符重写为 $(offset+1)..$(offset+k)
+ * （CTE/派生表从子查询续编主查询占位符链）。返回 (新SQL, 局部占位符个数)。
+ */
+public func rewriteDollarSeq(sql: String, offset: Int64): (String, Int64) {
+    let bytes = sql.toArray()
+    let out = ArrayList<UInt8>()
+    var seq: Int64 = 0
+    var i = 0
+    while (i < bytes.size) {
+        let b = bytes[i]
+        if (b == 36u8 && i + 1 < bytes.size) { // '$'
+            var j = i + 1
+            let numStart = j
+            while (j < bytes.size && bytes[j] >= 48u8 && bytes[j] <= 57u8) {
+                j += 1
+            }
+            if (j > numStart) {
+                seq += 1
+                let newNum = "$" + (offset + seq).toString()
+                for (c in newNum.toArray()) { out.add(c) }
+                i = j
+                continue
+            }
+        }
+        out.add(b)
+        i += 1
+    }
+    (String.fromUtf8(out.toArray()), seq)
+}
+
 // ===== JoinType =====
 public enum JoinKind {
     | Inner
@@ -49,6 +120,38 @@ public enum OnConflict {
     | DoUpdate(Array<String>, Array<(String, String)>)  // (targetCols, [(setCol, setExpr)])
 }
 
+/**
+ * EXCLUDED.col 引用（upsert setExprs 用）：返回 "excluded"."col" 原始片段。
+ * 用法：insert.onConflictDoUpdate(["id"], [("updated_at", "CURRENT_TIMESTAMP"), ("count", "excluded".\"count\")])
+ * 或直接与其他字符串表达式拼接。
+ */
+public func Excluded(col: String): String {
+    defaultDialect.quoteIdent("excluded") + "." + defaultDialect.quoteIdent(col)
+}
+
+// ===== LockBehavior =====
+/**
+ * 行锁行为（对标 sea_query SelectForUpdate）。
+ * - Wait:        FOR UPDATE（等待锁，默认）
+ * - SkipLocked:  FOR UPDATE SKIP LOCKED（跳过已锁行，任务队列领取场景）
+ * - NoWait:      FOR UPDATE NOWAIT（抢不到锁立即报错）
+ * 渲染位置：LIMIT/OFFSET 之后（PG 语法硬约束）。
+ */
+public enum LockBehavior {
+    | Wait
+    | SkipLocked
+    | NoWait
+}
+
+/** LockBehavior → SQL 片段（不含 FOR UPDATE 前缀）。 */
+public func lockBehaviorSuffix(b: LockBehavior): String {
+    match (b) {
+        case Wait => ""
+        case SkipLocked => " SKIP LOCKED"
+        case NoWait => " NOWAIT"
+    }
+}
+
 // ===== SelectQuery =====
 /**
  * SELECT 构建。columns 留空表示 SELECT *。
@@ -65,6 +168,8 @@ public class SelectQuery {
     // 类型化 Expr 列：(Expr, alias)；build 时在 rawCols 之后渲染。
     var exprCols: ArrayList<(Expr, String)> = ArrayList<(Expr, String)>()
     var distinctFlag: Bool = false
+    // DISTINCT ON (cols)：PG 专属；与 distinctFlag 互斥；cols 必须是最左 ORDER BY 前缀
+    var distinctOnCols: Array<String> = Array<String>()
     var joins: ArrayList<(JoinKind, String, String)> = ArrayList<(JoinKind, String, String)>()   // (kind, table, onSql)
     var joinParams: ArrayList<Value> = ArrayList<Value>()
     // JOIN ON 子句的参数(按 join 顺序累积；build 时在 WHERE 之前续编号压入)。
@@ -86,6 +191,10 @@ public class SelectQuery {
     var fromSubParams: ArrayList<Value> = ArrayList<Value>()
     // UNION / UNION ALL 尾随查询（暂存原始 SQL + 参数，build 时拼在末尾）。
     var unions: ArrayList<(String, Array<Value>, Bool)> = ArrayList<(String, Array<Value>, Bool)>()  // (sql, params, all)
+    // CTE（WITH 子句）：结构化 SelectQuery 传入，build 时占位符结构性自动续编。
+    var ctes: ArrayList<CTEDef> = ArrayList<CTEDef>()
+    // LATERAL JOIN：JOIN [CROSS] LATERAL (sub) AS alias [ON ...]；sub 为结构化 SelectQuery。
+    var lateralJoins: ArrayList<LateralJoin> = ArrayList<LateralJoin>()
 
     public init() {}
 
@@ -158,6 +267,15 @@ public class SelectQuery {
     }
     public func distinct(): SelectQuery { distinctFlag = true; this }
 
+    /**
+     * DISTINCT ON (cols)（PG 专属）：与 distinct() 互斥；cols 必须是最左 ORDER BY 前缀
+     * （PG 硬约束：SELECT DISTINCT ON 表达式必须匹配初始 ORDER BY 表达式），build() 时校验。
+     */
+    public func distinctOn(cols: Array<String>): SelectQuery {
+        distinctOnCols = cols
+        this
+    }
+
     public func join(kind: JoinKind, table: String, on: String): SelectQuery {
         joins.add((kind, table, on))
         this
@@ -172,6 +290,18 @@ public class SelectQuery {
     public func leftJoin(table: String, on: String): SelectQuery { join(JoinKind.Left, table, on) }
     public func leftJoinWithParams(table: String, on: String, params: Array<Value>): SelectQuery {
         joinWithParams(JoinKind.Left, table, on, params)
+    }
+
+    /**
+     * LATERAL JOIN（PG 专属）：joinLateral(kind, subSelect, alias, on)。
+     * - subSelect 为结构化 SelectQuery，占位符 build 时结构性续编（同 CTE 机制）。
+     * - on 为空 → CROSS JOIN LATERAL（无 ON）；非空 → {kind} JOIN LATERAL (...) AS alias ON {on}。
+     * - LATERAL 可引用左侧表的列（相关子查询），ON 条件常用于右表行过滤。
+     */
+    public func joinLateral(kind: JoinKind, subSelect: SelectQuery, alias: String,
+        on!: String = ""): SelectQuery {
+        lateralJoins.add(LateralJoin(kind, subSelect, alias, onSql: on))
+        this
     }
 
     public func filter(c: Cond): SelectQuery { whereCond = Some(c); this }
@@ -207,8 +337,18 @@ public class SelectQuery {
 
     public func limit(n: Int64): SelectQuery { limitVal = Some(n); this }
     public func offset(n: Int64): SelectQuery { offsetVal = Some(n); this }
-    public func forUpdate(): SelectQuery { lockClause = "FOR UPDATE"; this }
-    public func forShare(): SelectQuery { lockClause = "FOR SHARE"; this }
+
+    /** FOR UPDATE：Wait → FOR UPDATE；SkipLocked → FOR UPDATE SKIP LOCKED；NoWait → FOR UPDATE NOWAIT。
+     * 渲染位置在 LIMIT/OFFSET 之后（build() 内 LOCK 段，符合 PG 子句顺序）。 */
+    public func forUpdate(behavior!: LockBehavior = LockBehavior.Wait): SelectQuery {
+        lockClause = "FOR UPDATE" + lockBehaviorSuffix(behavior)
+        this
+    }
+    /** FOR SHARE + 锁行为（同 forUpdate）。 */
+    public func forShare(behavior!: LockBehavior = LockBehavior.Wait): SelectQuery {
+        lockClause = "FOR SHARE" + lockBehaviorSuffix(behavior)
+        this
+    }
 
     /** 追加 UNION / UNION ALL 查询(原始 SQL + 参数)。 */
     public func union(sql: String, params: Array<Value>): SelectQuery {
@@ -227,6 +367,21 @@ public class SelectQuery {
         this
     }
 
+    /**
+     * 结构化 CTE（对标 sea_query WithQuery）：with("t", subSelect) → WITH "t" AS (sub) 前缀。
+     * - subQuery 是 SelectQuery 对象；其占位符（$1..$k 局部编号）在 build() 时经
+     *   rewriteDollarSeq 结构性续编到主查询编号链，调用方无需手写续接 $n。
+     * - 多个 with() 聚合输出单个 WITH 子句；RECURSIVE 是列表级标志：任一 recursive
+     *   即输出 WITH RECURSIVE（PG 语法要求，非逐 CTE 标志）。
+     * - columnList 非空时输出 name("c1","c2")（递归 CTE 常用，列名经 quoteIdent 防注入）。
+     * - 与旧 rawPrefixFragment 兼容：CTE 在前（WITH 必须最前），rawPrefix 紧随其后。
+     */
+    public func withCte(name: String, subQuery: SelectQuery, recursive!: Bool = false,
+        columnList!: Array<String> = Array<String>()): SelectQuery {
+        ctes.add(CTEDef(name, subQuery, recursive: recursive, columnList: columnList))
+        this
+    }
+
     /** 构建为 SQL + 参数(占位符跨片段连续编号，风格由 Dialect 决定)。 */
     public func build(dialect: Dialect): (String, Array<Value>) {
         let allParams = ArrayList<Value>()
@@ -234,9 +389,48 @@ public class SelectQuery {
 
         var sql = ""
         // 前置原始片段(CTE 等)的参数先编号
+        // ===== CTE（WITH 子句，必须在最前）=====
+        if (ctes.size > 0) {
+            var withSql = ""
+            // RECURSIVE 是列表级标志：任一 CTE 标记 recursive 即输出单个 WITH RECURSIVE
+            var anyRecursive = false
+            for (cte in ctes) {
+                if (cte.recursive) { anyRecursive = true }
+            }
+            withSql += if (anyRecursive) { "WITH RECURSIVE " } else { "WITH " }
+            var first = true
+            for (cte in ctes) {
+                if (!first) { withSql += ", " }
+                first = false
+                // 列名（可选）
+                withSql += dialect.quoteIdent(cte.name)
+                if (cte.columnList.size > 0) {
+                    let q = Array<String>(cte.columnList.size, { i => dialect.quoteIdent(cte.columnList[i]) })
+                    withSql += "(" + joinComma(q) + ")"
+                }
+                withSql += " AS ("
+                // subQuery 占位符结构性续编：sub 局部 $1..$k 重写为 $(offset+1)..$(offset+k)，
+                // 参数按序压入 allParams 并推进 ph（ph.current 即 offset）。
+                let (subSql, subParams) = cte.subQuery.build(dialect)
+                let offset = ph.current()
+                let (rewritten, _) = rewriteDollarSeq(subSql, offset)
+                for (p in subParams) {
+                    allParams.add(p)
+                    ph.next()
+                }
+                withSql += rewritten
+                withSql += ")"
+            }
+            sql = withSql + " "
+        }
         if (!rawPrefix.isEmpty()) {
-            sql = rawPrefix + " "
-            // 原始片段中的占位符假设已是 $1..$k 形式由用户写好，这里只把参数压入并推进编号
+            // rawPrefix 中的占位符假设已是续接编号（调用方手写）；CTE 已占用 $1..$k 时
+            // rawPrefix 编号由调用方衔接（兼容保留，新代码建议用 with()）。
+            if (!sql.isEmpty()) {
+                sql += rawPrefix + " "
+            } else {
+                sql = rawPrefix + " "
+            }
             for (_ in rawPrefixParams) { ph.next() }
             for (p in rawPrefixParams) { allParams.add(p) }
         }
@@ -247,7 +441,26 @@ public class SelectQuery {
         // 实际 SQL 文本中派生表占位符由调用方写为续接编号。
         // SELECT
         var sel = "SELECT "
-        if (distinctFlag) { sel += "DISTINCT " }
+        if (distinctOnCols.size > 0) {
+            // PG 硬约束 1：与普通 distinct() 互斥
+            if (distinctFlag) {
+                throw CsormError("SelectQuery.build: distinct() and distinctOn() are mutually exclusive")
+            }
+            // PG 硬约束 2：distinctOn 的列必须是最左 ORDER BY 前缀
+            if (orderBys.size < distinctOnCols.size) {
+                throw CsormError("SelectQuery.build: DISTINCT ON columns must be a prefix of ORDER BY (ORDER BY has fewer columns)")
+            }
+            for (i in 0..distinctOnCols.size) {
+                let (expr, _, _, isRaw) = orderBys[i]
+                // orderBys[0] 存原始列名（isRaw=false 时 build 时才引号），直接与 distinctOnCols 比对原始名
+                if (expr != distinctOnCols[i]) {
+                    throw CsormError("SelectQuery.build: DISTINCT ON columns must be a leftmost prefix of ORDER BY; mismatch at index " + i.toString() + ": DISTINCT ON '" + distinctOnCols[i] + "' vs ORDER BY '" + expr + "'")
+                }
+            }
+            sel += dialect.renderDistinctOn(distinctOnCols) + " "
+        } else if (distinctFlag) {
+            sel += "DISTINCT "
+        }
         let selParts = ArrayList<String>()
         if (cols.size == 0 && rawCols.size == 0 && exprCols.size == 0) {
             selParts.add("*")
@@ -287,6 +500,22 @@ public class SelectQuery {
         // JOIN(ON 子句参数压入并续编号)
         for ((k, t, on) in joins) {
             sel += " " + joinKeyword(k) + " " + dialect.quoteIdent(t) + " ON " + on
+        }
+        // LATERAL JOIN（sub 占位符结构性续编，参数在 ON/WHERE 之前压入）
+        for (lj in lateralJoins) {
+            let (subSql, subParams) = lj.subQuery.build(dialect)
+            let offset = ph.current()
+            let (rewritten, _) = rewriteDollarSeq(subSql, offset)
+            for (p in subParams) {
+                allParams.add(p)
+                ph.next()
+            }
+            if (lj.onSql.isEmpty()) {
+                sel += " CROSS JOIN LATERAL (" + rewritten + ") AS " + dialect.quoteIdent(lj.alias)
+            } else {
+                sel += " " + joinKeyword(lj.kind) + " LATERAL (" + rewritten + ") AS " +
+                    dialect.quoteIdent(lj.alias) + " ON " + lj.onSql
+            }
         }
         // joinOnParams 按 join 顺序累积；假设 ON 子句中的占位符已由调用方按续接编号写好
         for (p in joinOnParams) {
@@ -429,6 +658,16 @@ public class InsertQuery {
     }
     /** upsert：setExprs 中可用 EXCLUDED.col 引用插入值；expr 可含 $n 占位符(续编号)。 */
     public func onConflictDoUpdate(target: Array<String>, setExprs: Array<(String, String)>): InsertQuery {
+        conflict = Some(OnConflict.DoUpdate(target, setExprs))
+        this
+    }
+
+    /**
+     * upsert 语法糖：SET "col" = "excluded"."col"（col 列表逐个自赋值为冲突候选行的对应值）。
+     * 基于 onConflictDoUpdate；需要混合自定义表达式时用 Excluded(col) 拼进 setExprs。
+     */
+    public func onConflictDoUpdateExcluded(target: Array<String>, cols: Array<String>): InsertQuery {
+        let setExprs = Array<(String, String)>(cols.size, { i => (cols[i], Excluded(cols[i])) })
         conflict = Some(OnConflict.DoUpdate(target, setExprs))
         this
     }
