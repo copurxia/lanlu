@@ -269,7 +269,34 @@
   - **查询计划**：视图全量 Seq Scan 43ms vs 文档表 ILIKE 19ms vs tsquery GIN 0.07ms vs trigram ILIKE 9.3ms（Bitmap Index Scan）；keyset 深分页 0.1ms vs OFFSET 13.5ms（Index Scan Backward vs 全表 Seq Scan）；
   - **写路径语义**：ON CONFLICT 两次同键 upsert → 单行 progress=77（幂等）；SKIP LOCKED 四个模拟 worker 并发领取任务 id=3/4/5/6 无重复；多行 VALUES 一次 1,000 行 impressions 成功。
 
-结论：本仓 ORM/驱动/业务 SQL 与 PostgreSQL 18 完全兼容，无版本专属 API 依赖；PG18 可作为线上升级候选（依赖项仅 pg_trgm/unaccent 两扩展，均已在源码 contrib 中随版编译验证）。
+### 6.7.2 线上部署 A/B（2026-11-08，nas.copur.xyz:3005，13,435 归档）
+
+部署版本：`608b7b5`（含本轮全部改动）。基线：同实例部署 `5d89654`（本轮改动前，
+已含上轮 N+1/缓存/V029 修复）当日实测。生产网络 RTT ≈1ms，基线各端点因上轮
+优化已处于 20~35ms 区间。
+
+| 端点（3 次均值区间） | 基线 5d89654 | 部署 608b7b5 | 变化 |
+| :-- | :-- | :-- | :-- |
+| /api/info | 20~33ms | 29~37ms | 持平（±噪声） |
+| /api/search | 18~29ms | 25~29ms | 持平 |
+| /api/tankoubons?limit=1 | 21~27ms | 27~30ms | 持平 |
+| /api/tags/cloud | 17~29ms | 27~36ms | 持平 |
+| /api/categories | 34ms | 25~34ms | 持平 |
+| /api/user/stats | 34ms | 30~34ms | 持平 |
+| /api/search?page=670 | — | 28~32ms | 深分页无劣化（keyset 保障） |
+| /api/search 50 连发 p50/p90/max | — | 28/32/37ms | 无长尾 |
+
+结论（诚实版）：**热缓存读端点在基线已优化到 20~35ms 的前提下，本轮改动未带来
+可测的端到端差异（差异被 RTT/序列化/框架开销淹没）**。这与预期一致——本轮收益
+集中在：① 冷缓存场景（推荐/统计/收藏/智能过滤不再触发旧视图全量物化，
+本地实测 28×/6× 的收益只在缓存失效后首查兑现）；② 协议层（stmt 缓存省
+parse/plan，远程 RTT 1ms 下单次省 0.1~0.5ms，QPS 放大后可见）；③ 写路径
+批量化与并发安全（upsert/SKIP LOCKED，正确性收益大于计时收益）；④
+13,335 行级大结果集物化 3×（列表类接口行数少，不触发）。
+
+部署过程修复两处 CI/迁移问题：CNB 流水线 pg bridge 预生成缺失（cjpm update
+失败）、V030 typeSql 误用 ? 占位符（驱动为 DollarNumber，raw 路径无重写）。
+两处均已修复并经真实启动路径验证 V030 五列 TEXT→JSONB 成功。
 
 #### 6.7.1 性能提升汇总（PG18 + 13,335 行虚拟数据实测，2026-11-08）
 
