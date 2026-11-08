@@ -19,6 +19,10 @@ static FILE* vlc_log(void){ static FILE* f=0; if(!f){ const char* p=getenv("LANL
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+#include <libswresample/swresample.h>
+#include <ohaudio/native_audiostreambuilder.h>
+#include <ohaudio/native_audiorenderer.h>
+#include <ohaudio/native_audiostream_base.h>
 
 typedef void* InstancePtr;
 typedef void* MediaPtr;
@@ -57,8 +61,19 @@ typedef struct {
 
     int out_w, out_h;
     int format_done;         // setup callback invoked
+
+    // audio
+    OH_AudioRenderer* renderer;
+    pthread_t athread;
+    int athread_started;
+    atomic_int muted;
+    volatile int astop;
+    pthread_mutex_t amu;
+    pthread_cond_t  acv;
+    unsigned char* ring; size_t rcap, rhead, rtail, rsize;
 } VlcPlayer;
 
+static void audio_stop(VlcPlayer* p);
 static long now_ms(void) {
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
@@ -97,6 +112,7 @@ void libvlc_media_player_release(PlayerPtr pp) {
     VlcPlayer* p = (VlcPlayer*)pp;
     if (!p) return;
     atomic_store(&p->stop_req, 1);
+    audio_stop(p);
     if (p->sws) sws_freeContext(p->sws);
     if (p->codec) avcodec_free_context(&p->codec);
     if (p->fmt) avformat_close_input(&p->fmt);
@@ -205,6 +221,110 @@ static void pump(VlcPlayer* p) {
     (void)elapsed;
 }
 
+
+// ---------------- audio (OH_AudioRenderer + ffmpeg, pure-C thread) -------------
+static void ring_write(VlcPlayer* p, const unsigned char* d, size_t n) {
+    pthread_mutex_lock(&p->amu);
+    for (size_t i = 0; i < n; i++) {
+        if (p->rsize >= p->rcap) { // full: drop oldest
+            p->rtail = (p->rtail + 1) % p->rcap; p->rsize--;
+        }
+        p->ring[p->rhead] = d[i];
+        p->rhead = (p->rhead + 1) % p->rcap; p->rsize++;
+    }
+    pthread_cond_signal(&p->acv);
+    pthread_mutex_unlock(&p->amu);
+}
+static void audio_write_cb(OH_AudioRenderer* r, void* user, void* data, int32_t size) {
+    (void)r; VlcPlayer* p = (VlcPlayer*)user;
+    unsigned char* out = (unsigned char*)data;
+    int32_t got = 0;
+    if (p && !atomic_load(&p->muted)) {
+        pthread_mutex_lock(&p->amu);
+        while (got < size && p->rsize > 0) {
+            out[got++] = p->ring[p->rtail];
+            p->rtail = (p->rtail + 1) % p->rcap; p->rsize--;
+        }
+        pthread_mutex_unlock(&p->amu);
+    }
+    for (; got < size; got++) out[got] = 0;
+}
+static void* audio_loop(void* arg) {
+    VlcPlayer* p = (VlcPlayer*)arg;
+    AVFormatContext* af = NULL; AVCodecContext* ac = NULL;
+    struct SwrContext* swr = NULL; AVPacket* pkt = av_packet_alloc(); AVFrame* fr = av_frame_alloc();
+    if (avformat_open_input(&af, p->path, NULL, NULL) == 0 && avformat_find_stream_info(af, NULL) >= 0) {
+        int ai = av_find_best_stream(af, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+        const AVCodec* dec = ai >= 0 ? avcodec_find_decoder(af->streams[ai]->codecpar->codec_id) : NULL;
+        if (dec) {
+            ac = avcodec_alloc_context3(dec);
+            avcodec_parameters_to_context(ac, af->streams[ai]->codecpar);
+            if (avcodec_open2(ac, dec, NULL) == 0) {
+                AVChannelLayout out_ch; av_channel_layout_default(&out_ch, 2);
+                AVChannelLayout in_ch; av_channel_layout_copy(&in_ch, &ac->ch_layout);
+                swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000, &in_ch, ac->sample_fmt, ac->sample_rate, 0, NULL);
+                swr_init(swr);
+                while (!p->astop) {
+                    if (av_read_frame(af, pkt) < 0) break;
+                    if (pkt->stream_index != ai) { av_packet_unref(pkt); continue; }
+                    if (avcodec_send_packet(ac, pkt) == 0) {
+                        while (avcodec_receive_frame(ac, fr) == 0) {
+                            uint8_t* obuf = NULL; int outn = swr_convert(swr, &obuf, fr->nb_samples,
+                                (const uint8_t**)fr->data, fr->nb_samples);
+                            if (outn > 0) {
+                                size_t bytes = (size_t)outn * 2 * 2;  // 2ch s16
+                                // backpressure: wait while ring nearly full
+                                for (;;) {
+                                    pthread_mutex_lock(&p->amu);
+                                    int full = (p->rsize + bytes) > p->rcap;
+                                    pthread_mutex_unlock(&p->amu);
+                                    if (!full || p->astop) break;
+                                    usleep(10000);
+                                }
+                                ring_write(p, obuf, bytes);
+                            }
+                            av_frame_unref(fr);
+                        }
+                    }
+                    av_packet_unref(pkt);
+                }
+            }
+        }
+    }
+    if (swr) swr_free(&swr);
+    if (ac) avcodec_free_context(&ac);
+    if (af) avformat_close_input(&af);
+    if (pkt) av_packet_free(&pkt);
+    if (fr) av_frame_free(&fr);
+    return 0;
+}
+static void audio_start(VlcPlayer* p) {
+    if (p->athread_started) return;
+    p->rcap = 1024 * 1024; p->ring = malloc(p->rcap); p->rhead = p->rtail = p->rsize = 0;
+    p->astop = 0; atomic_store(&p->muted, 0);
+    pthread_mutex_init(&p->amu, NULL); pthread_cond_init(&p->acv, NULL);
+    OH_AudioStreamBuilder* b = NULL;
+    if (OH_AudioStreamBuilder_Create(&b, AUDIOSTREAM_TYPE_RENDERER) == AUDIOSTREAM_SUCCESS && b) {
+        OH_AudioStreamBuilder_SetSamplingRate(b, 48000);
+        OH_AudioStreamBuilder_SetChannelCount(b, 2);
+        OH_AudioStreamBuilder_SetSampleFormat(b, AUDIOSTREAM_SAMPLE_S16LE);
+        OH_AudioStreamBuilder_SetEncodingType(b, AUDIOSTREAM_ENCODING_TYPE_RAW);
+        OH_AudioStreamBuilder_SetRendererInfo(b, AUDIOSTREAM_USAGE_MUSIC);
+        OH_AudioStreamBuilder_SetRendererWriteDataCallback(b, audio_write_cb, p);
+        OH_AudioStreamBuilder_GenerateRenderer(b, &p->renderer);
+        OH_AudioStreamBuilder_Destroy(b);
+    }
+    if (p->renderer) OH_AudioRenderer_Start(p->renderer);
+    if (pthread_create(&p->athread, NULL, audio_loop, p) == 0) p->athread_started = 1;
+    VLOG("audio started renderer=%p", (void*)p->renderer);
+}
+static void audio_stop(VlcPlayer* p) {
+    p->astop = 1;
+    if (p->athread_started) { pthread_join(p->athread, NULL); p->athread_started = 0; }
+    if (p->renderer) { int64_t fw = 0; OH_AudioRenderer_GetFramesWritten(p->renderer, &fw); VLOG("audio frames_written=%lld", (long long)fw); OH_AudioRenderer_Stop(p->renderer); OH_AudioRenderer_Release(p->renderer); p->renderer = NULL; }
+    if (p->ring) { free(p->ring); p->ring = NULL; }
+}
+
 int32_t libvlc_media_player_play(PlayerPtr pp) {
     VlcPlayer* p = (VlcPlayer*)pp;
     if (!p) return -1;
@@ -212,15 +332,16 @@ int32_t libvlc_media_player_play(PlayerPtr pp) {
     atomic_store(&p->running, 1);
     atomic_store(&p->paused, 0);
     p->last_tick_ms = 0;
+    audio_start(p);
     return 0;
 }
 void libvlc_media_player_set_pause(PlayerPtr pp, int paused) { VlcPlayer* p=(VlcPlayer*)pp; if(p) atomic_store(&p->paused, paused?1:0); }
-void libvlc_media_player_stop(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(p){ atomic_store(&p->running,0); } }
+void libvlc_media_player_stop(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(p){ atomic_store(&p->running,0); audio_stop(p); } }
 int32_t libvlc_media_player_set_time(PlayerPtr pp, int64_t ms) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return -1; atomic_store(&p->seek_ms,(int)ms); return 0; }
 int64_t libvlc_media_player_get_time(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return 0; if(atomic_load(&p->running)) pump(p); return atomic_load(&p->position_ms); }
 int64_t libvlc_media_player_get_length(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; return p? atomic_load(&p->duration_ms):0; }
-int32_t libvlc_audio_set_mute(PlayerPtr pp, int m) { (void)pp; (void)m; return 0; }
-int32_t libvlc_audio_set_volume(PlayerPtr pp, int v) { (void)pp; (void)v; return 0; }
+int32_t libvlc_audio_set_mute(PlayerPtr pp, int m) { VlcPlayer* p=(VlcPlayer*)pp; if(p) atomic_store(&p->muted, m?1:0); return 0; }
+int32_t libvlc_audio_set_volume(PlayerPtr pp, int v) { VlcPlayer* p=(VlcPlayer*)pp; if(p&&p->renderer) OH_AudioRenderer_SetVolume(p->renderer, (float)v/100.0f); return 0; }
 int32_t libvlc_video_get_spu(PlayerPtr pp) { (void)pp; return -1; }
 void* libvlc_video_get_spu_description(PlayerPtr pp) { (void)pp; return 0; }
 int32_t libvlc_video_set_spu(PlayerPtr pp, int id) { (void)pp; (void)id; return -1; }

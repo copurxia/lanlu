@@ -99,7 +99,7 @@ func ohosMediaSelftest(base: String): Unit {
         File.writeTo(Path(base + "/test.mp4"), TEST_MP4)
         let vmsg = try {
             let player = VlcPlayer()
-            player.open(base + "/test.mp4", muted: true)
+            player.open(base + "/test.mp4", muted: false)
             var frames = 0
             var lastW: Int32 = 0
             var lastH: Int32 = 0
