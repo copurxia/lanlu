@@ -54,6 +54,7 @@ typedef struct {
     atomic_int paused;
     atomic_int stop_req;
     atomic_int seek_ms;      // -1 = none
+    atomic_int audio_seek_ms; // audio thread has its own AVFormatContext; -1 = none
     atomic_long position_ms;
     atomic_long duration_ms;
     long last_tick_ms;       // pacing clock
@@ -102,6 +103,7 @@ PlayerPtr libvlc_media_player_new_from_media(MediaPtr mp) {
     if (!p) return 0;
     p->stream = -1;
     atomic_store(&p->seek_ms, -1);
+    atomic_store(&p->audio_seek_ms, -1);
     atomic_store(&p->duration_ms, 0);
     snprintf(p->path, sizeof p->path, "%s", m->path);
     p->pkt = av_packet_alloc();
@@ -265,6 +267,16 @@ static void* audio_loop(void* arg) {
                 swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000, &in_ch, ac->sample_fmt, ac->sample_rate, 0, NULL);
                 swr_init(swr);
                 while (!p->astop) {
+                    // 跟随视频 seek：音频有自己的 demuxer/decoder，必须自行 seek，
+                    // 否则 seek 后画面跳转而声音停在原位置。
+                    int ask = atomic_exchange(&p->audio_seek_ms, -1);
+                    if (ask >= 0) {
+                        avformat_seek_file(af, ai, INT64_MIN, (int64_t)ask * 1000, INT64_MAX, 0);
+                        avcodec_flush_buffers(ac);
+                        // 丢弃已排队旧音频，避免 seek 后先听到旧片段
+                        pthread_mutex_lock(&p->amu); p->rsize = 0; p->rhead = p->rtail = 0; pthread_mutex_unlock(&p->amu);
+                        VLOG("audio seek to %d ms", ask);
+                    }
                     if (av_read_frame(af, pkt) < 0) break;
                     if (pkt->stream_index != ai) { av_packet_unref(pkt); continue; }
                     if (avcodec_send_packet(ac, pkt) == 0) {
@@ -337,7 +349,7 @@ int32_t libvlc_media_player_play(PlayerPtr pp) {
 }
 void libvlc_media_player_set_pause(PlayerPtr pp, int paused) { VlcPlayer* p=(VlcPlayer*)pp; if(p) atomic_store(&p->paused, paused?1:0); }
 void libvlc_media_player_stop(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(p){ atomic_store(&p->running,0); audio_stop(p); } }
-int32_t libvlc_media_player_set_time(PlayerPtr pp, int64_t ms) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return -1; atomic_store(&p->seek_ms,(int)ms); return 0; }
+int32_t libvlc_media_player_set_time(PlayerPtr pp, int64_t ms) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return -1; atomic_store(&p->seek_ms,(int)ms); atomic_store(&p->audio_seek_ms,(int)ms); return 0; }
 int64_t libvlc_media_player_get_time(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return 0; if(atomic_load(&p->running)) pump(p); return atomic_load(&p->position_ms); }
 int64_t libvlc_media_player_get_length(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; return p? atomic_load(&p->duration_ms):0; }
 int32_t libvlc_audio_set_mute(PlayerPtr pp, int m) { VlcPlayer* p=(VlcPlayer*)pp; if(p) atomic_store(&p->muted, m?1:0); return 0; }
