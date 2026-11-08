@@ -116,6 +116,15 @@ $:
               ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
                 packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
 
+              # postgresql-driver 的 lanlu_pg_bridge 同理（C bridge，用 cc 非 g++，
+              # 需要 libpq 头文件）。
+              cc -O2 -fPIC \
+                -c packages/postgresql-driver/native/lanlu_pg_bridge.c \
+                -o packages/postgresql-driver/native/lanlu_pg_bridge.o \
+                -I/usr/include/postgresql
+              ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
+                packages/postgresql-driver/native/lanlu_pg_bridge.o
+
               cjpm update
               # cjpm may execute git-dependency build scripts with GIT_* set.
               # Patch wasmedge_ffi native build script to clear git env before nested git/cmake steps.
