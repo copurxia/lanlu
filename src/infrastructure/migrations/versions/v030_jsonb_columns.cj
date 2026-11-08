@@ -54,8 +54,8 @@ public class V030_JsonbColumns <: Migration {
         let typeSql = """
             SELECT data_type FROM information_schema.columns
             WHERE table_schema = current_schema()
-              AND table_name = ?
-              AND column_name = ?
+              AND table_name = $1
+              AND column_name = $2
         """
         let dataType = db.rawOne<String>(typeSql, [vtext(table), vtext(column)], { r => r.getOrNullText(0) ?? "" })
         if (dataType == Some("jsonb") || dataType == Some("json")) {
