@@ -9,6 +9,7 @@ import qwest.*
 import libavformat_ffi.*
 import libass_ffi.*
 import libvlc_ffi.{VlcPlayer}
+import webview.{WebviewSession, HtmlFrame, warmup as wvWarmup}
 import lanlu_client_next.ui.EMBEDDED_LOGO_PNG
 
 private func decodeMsg(p: String): String {
@@ -120,16 +121,50 @@ func ohosMediaSelftest(base: String): Unit {
                 }
                 sleep(Duration.millisecond * 30)
             }
+            player.seek(6.0)
+            var seekTime = 0.0
+            let ts = MonoTime.now()
+            while (MonoTime.now() - ts < Duration.second * 2) {
+                let _ = player.timeSec()
+                seekTime = player.timeSec()
+                if (seekTime > 5.5) { break }
+                sleep(Duration.millisecond * 30)
+            }
             let dur = player.durationSec()
             let t = player.timeSec()
             player.stop()
             player.close()
-            "frames=${frames} last=${lastW}x${lastH} dur=${dur}s time=${t}s"
+            "frames=${frames} last=${lastW}x${lastH} dur=${dur}s time=${t}s seekTo=${seekTime}s"
         } catch (ex5: Exception) {
             "EXC ${ex5.message}"
         }
         File.writeTo(Path(base + "/vlctest.txt"), vmsg.toArray())
     } catch (ex6: Exception) {
         File.writeTo(Path(base + "/vlctest.txt"), ("EXC " + ex6.message).toArray())
+    }
+    try {
+        let wmsg = try {
+            wvWarmup()
+            let w = WebviewSession(800, 600, 1.0)
+            w.loadHtml("<html><body><h1>Hello Blitz</h1><p>lanlu html reader</p></body></html>".toArray(), "about:blank")
+            var fr: ?HtmlFrame = None
+            let ts = MonoTime.now()
+            while (MonoTime.now() - ts < Duration.second * 3) {
+                fr = w.takeFrame()
+                match (fr) { case Some(_) => break; case None => () }
+                sleep(Duration.millisecond * 30)
+            }
+            let s = match (fr) {
+                case Some(f) => "ok w=${f.width} h=${f.height} rgba=${f.rgba.size}"
+                case None => "no frame"
+            }
+            w.close()
+            s
+        } catch (ex7: Exception) {
+            "EXC ${ex7.message}"
+        }
+        File.writeTo(Path(base + "/wvtest.txt"), wmsg.toArray())
+    } catch (ex8: Exception) {
+        File.writeTo(Path(base + "/wvtest.txt"), ("EXC " + ex8.message).toArray())
     }
 }

@@ -21,6 +21,13 @@ export TMPDIR=/workspace/tmp; mkdir -p "$TMPDIR"
 "$CN/../packages/libvlc_ffi/native-ohos/build-ohos.sh" "$RES/ohos-stubs/libvlc.so"
 "$CN/../packages/fontkit_ffi/native-ohos/build-ohos.sh" "$CN/../packages/fontkit_ffi/native/target/release/libfontkit_native.so"
 
+# 1.5) webview(Blitz) 交叉静态库（需 rust;已构建则就位）
+WV="$CN/../packages/webview/native"
+if [ -f "$WV/target/aarch64-unknown-linux-ohos/release/libwebview_native.a" ]; then
+  cp -f "$WV/target/aarch64-unknown-linux-ohos/release/libwebview_native.a" "$WV/target/release/libwebview_native.a"
+  echo "webview .a staged"
+fi
+
 # 2) 构建目录：复制 src + 载入 OHOS cjpm 配置（临时产物，可随时删）
 # .hvigor 由 hvigor 守护进程持有（FUSE 句柄），整体删除会失败：只清生成物
 find "$BUILD" -mindepth 1 -maxdepth 1 ! -name '.hvigor' -exec rm -rf {} + 2>/dev/null || true

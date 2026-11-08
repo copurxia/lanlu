@@ -14,3 +14,6 @@ webview_native = { path = "./native/target/release" }
 # Blitz 字体源依赖 fontconfig/freetype，Rust 静态库解包需要 libgcc_s。
 [target.x86_64-unknown-linux-gnu]
 link-option = "-lfontconfig -lfreetype -ldl -lpthread -lgcc_s"
+
+[target.aarch64-linux-ohos]
+link-option = "-L /workspace/lanlu/.research-ohos/ohos-stubs -lfontconfig -lfreetype -lexpat -lz -ldl -lpthread -lm -L/workspace/lanlu/.research-ohos/tools/clt-7.0/command-line-tools/sdk/default/openharmony/native/llvm/lib/aarch64-linux-ohos -lunwind"

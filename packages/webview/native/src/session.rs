@@ -73,7 +73,7 @@ impl PendingQueue {
         self.0.lock().expect("pending queue poisoned").len()
     }
 
-    pub fn url_ptr(&self, index: usize) -> *const i8 {
+    pub fn url_ptr(&self, index: usize) -> *const std::os::raw::c_char {
         let queue = self.0.lock().expect("pending queue poisoned");
         queue
             .get(index)
@@ -299,7 +299,7 @@ impl WvSession {
         self.net.len()
     }
 
-    pub fn pending_url_ptr(&self, index: usize) -> *const i8 {
+    pub fn pending_url_ptr(&self, index: usize) -> *const std::os::raw::c_char {
         self.net.url_ptr(index)
     }
 
