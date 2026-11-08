@@ -86,7 +86,7 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
     }
 }
 
-main(): Int64 {
+public func runApp(): Int64 {
     // 启动计时基准（LANLU_PERF 评估用）：各 [boot] 行尾部为距进程入口的累计毫秒。
     let bootT0 = MonoTime.now()
     // 临时启动诊断（定位 Windows 启动即崩的访问违规，查到后可删）：
@@ -224,6 +224,9 @@ main(): Int64 {
             borderless: true,
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
+            } else if (exists(Path("/system/fonts/HarmonyOS_Sans_SC.ttf"))) {
+                // OHOS 等无 fontconfig 平台：系统存在该字体则直接用（Linux 上文件不存在自然回退 None）
+                Some("/system/fonts/HarmonyOS_Sans_SC.ttf")
             } else {
                 None
             }), theme: lanluThemeFor(settings.theme))
@@ -234,7 +237,7 @@ main(): Int64 {
     model.worker.onResult = { => app.requestWake() }
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
-    app.setMinimumSize(960, 640)
+    try { app.setMinimumSize(960, 640) } catch (_: Exception) {}  // OHOS: SDL_SetWindowMinimumSize 不支持
     // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
     // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
     // Wayland 无窗口图标协议（图标靠上方 app_id 匹配 .desktop），SDL 会返回
@@ -305,4 +308,9 @@ main(): Int64 {
     model.close()
     closeSettingsStore()
     return 0
+}
+
+// 标准入口：Linux/Windows 直接跑 runApp；OHOS 由 @C cj_app_main（src/ohos_entry.cj）调 runApp。
+main(): Int64 {
+    return runApp()
 }
