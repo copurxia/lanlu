@@ -4,6 +4,88 @@ run-name: ${{ github.actor }} is trying to auto compile with Actions 🚀
 on: [push]
 
 jobs:
+  orm-test:
+    # ORM 三包（csorm / csorm_macros / postgresql-driver）cjpm test。
+    # 依赖真实 PostgreSQL：service 容器 + pg_trgm/unaccent 扩展 + bench_rows 种子。
+    # 独立于主 build job（无需 vips/rocksdb 等重依赖），失败快速可见。
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pgtest
+          POSTGRES_DB: lanlutest
+          # trust 认证（本地 CI 测试库，无敏感数据）；如需密码改这里与 DB_STRING 两处
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pgtest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_STRING: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable&pool.max=5
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Cangjie
+        uses: Zxilly/setup-cangjie@v3
+        with:
+          channel: sts
+          version: "1.2.0"
+          components: stdx
+
+      - name: Export CANGJIE_STDX_PATH
+        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
+
+      - name: Install libpq headers
+        run: |
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends libpq-dev
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends libpq-dev
+          fi
+
+      - name: Prepare test database
+        # 扩展 + bench_rows 种子（CTE/LATERAL/DISTINCT ON smoke 与物化基准依赖）。
+        # 大结果集基准（13,335 行）在 CI 环境抖动大，种子保持同规模以复现测试断言。
+        run: |
+          set -eux
+          PSQL="psql $DB_STRING -v ON_ERROR_STOP=1"
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS unaccent'
+          $PSQL -c "CREATE TABLE IF NOT EXISTS bench_rows(id bigserial primary key, title text, filename text, summary text, tags text, extra text, n1 int, n2 bigint, f1 float8, b1 bool, t1 timestamptz, by1 bytea, j1 jsonb)"
+          $PSQL -c "INSERT INTO bench_rows(title, filename, summary, tags, extra, n1, n2, f1, b1, t1, by1, j1) SELECT '漫画标题编号'||i, 'file_'||i||'.zip', 'summary text '||i, 'tag_a,tag_b,tag_'||(i%50), 'x', i%100, i*7, i*0.5, i%2=0, now() - (i||' hours')::interval, ('\\x'||md5(i::text))::bytea, jsonb_build_object('k', i) FROM generate_series(1,13335) s(i) ON CONFLICT DO NOTHING"
+
+      - name: Pre-generate C bridge static lib
+        # postgresql-driver 的 [ffi.c] 在 cjpm update 阶段校验 liblanlu_pg_bridge.a 存在
+        # （产物被 gitignore，fresh checkout 不存在）；与 rocksdb bridge 同款预生成。
+        run: |
+          set -eux
+          cc -O2 -fPIC -c packages/postgresql-driver/native/lanlu_pg_bridge.c \
+            -o packages/postgresql-driver/native/lanlu_pg_bridge.o \
+            -I/usr/include/postgresql
+          ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
+            packages/postgresql-driver/native/lanlu_pg_bridge.o
+
+      - name: Run csorm tests
+        run: |
+          set -eux
+          cd packages/csorm
+          cjpm test
+
+      - name: Run postgresql-driver tests
+        run: |
+          set -eux
+          cd packages/postgresql-driver
+          cjpm test
+
   build:
     # The runtime image is Ubuntu 26.04; build the binary on the same distro so
     # dynamically linked sonames (notably librocksdb) match at runtime.
