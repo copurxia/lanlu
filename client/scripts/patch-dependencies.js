@@ -36,6 +36,28 @@ patchFile('node_modules/react-native-vlc-media-player/android/build.gradle', [
   ],
 ]);
 
+// react-native-vlc-media-player@1.0.98: onHostPause calls MediaPlayer.pause()
+// after the native VLC object has been released (page teardown / host-destroy
+// ordering), crashing the activity with
+// IllegalStateException "can't get VLCObject instance". Pause failures here are
+// best-effort: swallow and continue.
+patchFile(
+  'node_modules/react-native-vlc-media-player/android/src/main/java/com/yuanzhou/vlc/vlcplayer/ReactVlcPlayerView.java',
+  [
+    [
+      `            isHostPaused = true;
+            mMediaPlayer.pause();`,
+      `            isHostPaused = true;
+            try {
+                mMediaPlayer.pause();
+            } catch (IllegalStateException e) {
+                // released concurrently (e.g. page teardown before host pause);
+                // pausing a released player must never crash the activity.
+            }`,
+    ],
+  ],
+);
+
 /**
  * Some CI runners (e.g. CNB in mainland China) cannot reach
  * plugins.gradle.org, which breaks the included React Native Gradle plugin
