@@ -72,7 +72,8 @@ jobs:
 
   android-debug:
     name: Android debug APK
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    # 普通 push/PR 也打包：产出 debug APK artifact（不发布 release，那是
+    # android-nightly 专属，仍只在 schedule/dispatch 时跑）。
     runs-on: ubuntu-latest
     needs: quality
     timeout-minutes: 60
