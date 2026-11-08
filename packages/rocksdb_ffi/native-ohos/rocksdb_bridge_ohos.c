@@ -2,10 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 /* in-memory + file-persisted KV with 2-byte column-family id prefix */
 typedef struct { unsigned char* k; unsigned kl; unsigned char* v; unsigned vl; } KV;
 static KV* g_kv=NULL; static int g_n=0,g_cap=0; static char g_path[1024];
-static void save(void){ if(!g_path[0])return; FILE*f=fopen(g_path,"wb"); if(!f)return; fwrite(&g_n,4,1,f); for(int i=0;i<g_n;i++){ fwrite(&g_kv[i].kl,4,1,f); fwrite(g_kv[i].k,1,g_kv[i].kl,f); fwrite(&g_kv[i].vl,4,1,f); fwrite(g_kv[i].v,1,g_kv[i].vl,f);} fclose(f);} 
+/* 目录不存在时 fopen 会静默失败（KV 数据丢失）；先补建父目录。 */
+static void mkdirs(const char* path){ char tmp[1024]; snprintf(tmp,sizeof tmp,"%s",path); for(char* q=tmp+1;*q;q++){ if(*q=='/'){ *q=0; mkdir(tmp,0777); *q='/'; } } }
+static void save(void){ if(!g_path[0])return; mkdirs(g_path); FILE*f=fopen(g_path,"wb"); if(!f)return; fwrite(&g_n,4,1,f); for(int i=0;i<g_n;i++){ fwrite(&g_kv[i].kl,4,1,f); fwrite(g_kv[i].k,1,g_kv[i].kl,f); fwrite(&g_kv[i].vl,4,1,f); fwrite(g_kv[i].v,1,g_kv[i].vl,f);} fclose(f);} 
 static void load(void){ g_n=0; FILE*f=fopen(g_path,"rb"); if(!f)return; int n=0; if(fread(&n,4,1,f)!=1){fclose(f);return;} for(int i=0;i<n;i++){ unsigned kl,vl; if(fread(&kl,4,1,f)!=1)break; unsigned char*k=malloc(kl?kl:1); if(fread(k,1,kl,f)!=kl){free(k);break;} if(fread(&vl,4,1,f)!=1){free(k);break;} unsigned char*v=malloc(vl?vl:1); if(fread(v,1,vl,f)!=vl){free(k);free(v);break;} if(g_n>=g_cap){g_cap=g_cap?g_cap*2:16; g_kv=realloc(g_kv,g_cap*sizeof(KV));} g_kv[g_n].k=k;g_kv[g_n].kl=kl;g_kv[g_n].v=v;g_kv[g_n].vl=vl;g_n++; } fclose(f);} 
 static unsigned fnv(const char*s){ unsigned h=2166136261u; for(;*s;s++){h^=(unsigned char)*s;h*=16777619u;} unsigned id=h&0x7fffu; return id?id:1u; }
 static void* mkhandle(unsigned id){ return (void*)(uintptr_t)(0x100000u + id); }
