@@ -54,6 +54,11 @@ if [ -f "$HERE/assets/test360.mp4" ]; then
   python3 "$HERE/gen_video_cj.py" "$HERE/assets/test360.mp4" "$BUILD/src/ohos_selftest_video.cj"
 fi
 
+# 2.6) 可选调试种子 KV（CN_OHOS_SEED_FILE=lanlu_kv.bin → src/ohos_seed.cj）
+if [ -n "${CN_OHOS_SEED_FILE:-}" ] && [ -f "${CN_OHOS_SEED_FILE}" ]; then
+  python3 "$HERE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$BUILD/src/ohos_seed.cj"
+fi
+
 # 3) 交叉编译引擎（dynamic, @C cj_app_main）
 export CANGJIE_HOME=$OH
 export LD_LIBRARY_PATH=$BASE/runtime/lib/linux_x86_64_cjnative:$OH/lib/linux_x86_64_cjnative

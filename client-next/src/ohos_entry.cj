@@ -4,7 +4,7 @@ package lanlu_client_next
 // 仅做平台环境准备，然后复用与应用入口完全相同的 runApp()——
 // 本文件在 Linux/Windows 构建中同样参与编译（@C 导出未被调用，无副作用）。
 import std.env.{getVariable, setVariable}
-import std.fs.{File, Path}
+import std.fs.{Directory, File, Path}
 import lanlu_client_next.ui.EMBEDDED_LOGO_PNG
 
 @C
@@ -26,6 +26,14 @@ public func cj_app_main(): Int64 {
     } catch (_) {}
     setVariable("LANLU_VLC_LOG", "/data/storage/el2/base/files/vlclog.txt")
     setVariable("LLASS_LOG_FILE", "/data/storage/el2/base/files/asslog.txt")
+    // 调试种子：把预置 KV（联调用 mock 会话）落到应用存储，仅 CN_OHOS_SEED_FILE 构建时非空。
+    if (SEED_KV.size > 0) {
+        try {
+            let kvDir = base + "/.config/lanlu-client-next/kv"
+            Directory.create(Path(kvDir), recursive: true)
+            File.writeTo(Path(kvDir + "/lanlu_kv.bin"), SEED_KV)
+        } catch (_) {}
+    }
     // 移植自检（图片/网络/字幕 probe），仅在显式开启时执行
     if ((getVariable("OHOS_SELFTEST") ?? "0") == "1") {
         ohosSelftest(base)
