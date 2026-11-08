@@ -6,12 +6,15 @@ typedef struct { int n; char** labels; char** paths; } FL;
 static char* dup(const char*s){ size_t n=strlen(s)+1; char*p=malloc(n); memcpy(p,s,n); return p; }
 static char* strip_ext(const char*name){ char*p=dup(name); char*dot=strrchr(p,'.'); if(dot)*dot=0; return p; }
 static int hasfont(const char*n){ const char*e=strrchr(n,'.'); if(!e)return 0; return !strcmp(e,".ttf")||!strcmp(e,".ttc")||!strcmp(e,".otf"); }
+/* 字体目录可经 LANLU_FONT_DIR 覆盖（测试/自定义字体目录）；默认系统字体目录。 */
+static const char* font_dir(void){ const char* e=getenv("LANLU_FONT_DIR"); return (e&&*e)?e:"/system/fonts"; }
 void* lanlu_font_list_create(void){
-  DIR*d=opendir("/system/fonts"); if(!d) return 0;
+  const char* dir=font_dir();
+  DIR*d=opendir(dir); if(!d) return 0;
   FL*f=calloc(1,sizeof(FL)); int cap=128; f->labels=malloc(sizeof(char*)*cap); f->paths=malloc(sizeof(char*)*cap);
   struct dirent*e; while((e=readdir(d))){ if(e->d_name[0]=='.')continue; if(!hasfont(e->d_name))continue;
     if(f->n>=cap){cap*=2; f->labels=realloc(f->labels,sizeof(char*)*cap); f->paths=realloc(f->paths,sizeof(char*)*cap);}
-    char full[512]; snprintf(full,sizeof full,"/system/fonts/%s",e->d_name);
+    char full[1024]; int written=snprintf(full,sizeof full,"%s/%s",dir,e->d_name); if(written<0||(size_t)written>=sizeof full) continue;
     f->paths[f->n]=dup(full); f->labels[f->n]=strip_ext(e->d_name); f->n++; }
   closedir(d); return f;
 }
