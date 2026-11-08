@@ -5,7 +5,20 @@ type GlobalErrorUtils = {
   setGlobalHandler: (handler: (error: unknown, isFatal?: boolean) => void) => void;
 };
 
-const ENDPOINT = 'http://192.168.0.111:8084/log';
+// Debug 日志接收端跟随调试包加载主机（Metro host），端口固定 8084。
+// 旧实现硬编码 192.168.0.111，换机器/换网络后手机必然连不上。
+let cachedEndpoint: string | null = null;
+export function debugEndpoint(): string {
+  if (cachedEndpoint) return cachedEndpoint;
+  try {
+    const scriptURL = (NativeModules.SourceCode?.getConstants?.().scriptURL ??
+      NativeModules.PlatformConstants?.getConstants?.().ServerHost ??
+      '') as string;
+    const m = /^https?:\/\/([^/:]+)/.exec(scriptURL);
+    if (m?.[1]) cachedEndpoint = `http://${m[1]}:8084/log`;
+  } catch {}
+  return cachedEndpoint ?? 'http://192.168.0.131:8084/log';
+}
 let installed = false;
 
 /** Report which native capabilities are actually reachable from JS.
@@ -49,7 +62,7 @@ function reportNativeCapabilities(): void {
 export function reportDebug(message: string, data: Record<string, unknown> = {}): void {
   if (!__DEV__) return;
   try {
-    fetch(ENDPOINT, {
+    fetch(debugEndpoint(), {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({message, at: new Date().toISOString(), ...data}),
@@ -81,7 +94,7 @@ export function installErrorBridge(): void {
         message: String(value?.message ?? error),
         stack: String(value?.stack ?? ''),
       };
-      fetch(ENDPOINT, {
+      fetch(debugEndpoint(), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),

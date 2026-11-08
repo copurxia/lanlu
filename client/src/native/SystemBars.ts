@@ -1,5 +1,7 @@
 import {NativeModules, Platform} from 'react-native';
 
+import {debugEndpoint} from '../debug/errorBridge';
+
 type SystemBarsModule = {
   setSystemBarTheme?: (backgroundColor: string, lightIcons: boolean) => void;
 };
@@ -15,7 +17,7 @@ export function setSystemBarTheme(backgroundColor: string, lightIcons: boolean) 
     const key = `${backgroundColor}:${lightIcons}:${hasMethod}`;
     if (key !== lastReport) {
       lastReport = key;
-      fetch('http://192.168.0.111:8084/log', {
+      fetch(debugEndpoint(), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
