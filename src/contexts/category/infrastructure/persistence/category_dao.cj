@@ -243,11 +243,11 @@ public class CategoryDao {
             vtext(data.icon),
             vint(Int64(data.sortOrder)),
             vbool(data.enabled),
-            vtext(data.plugins)
+            vjson(data.plugins)
         ]
         let sql = """
             INSERT INTO categories (catid, name, scan_path, description, icon, sort_order, enabled, plugins)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
             RETURNING id, created_at, updated_at
         """
         match (DatabaseConfig.getDatabase()) {
@@ -286,13 +286,13 @@ public class CategoryDao {
             vtext(data.icon),
             vint(Int64(data.sortOrder)),
             vbool(data.enabled),
-            vtext(data.plugins),
+            vjson(data.plugins),
             vtext(catid)
         ]
         let sql = """
             UPDATE categories
             SET name = $1, scan_path = $2, description = $3, icon = $4,
-                sort_order = $5, enabled = $6, plugins = $7, updated_at = CURRENT_TIMESTAMP
+                sort_order = $5, enabled = $6, plugins = $7::jsonb, updated_at = CURRENT_TIMESTAMP
             WHERE catid = $8
         """
         match (DatabaseConfig.getDatabase()) {

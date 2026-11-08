@@ -123,7 +123,32 @@ public class TankoubonModel {
         if (daoData.size == 0) {
             return []
         }
+        return assembleTankoubonList(daoData, userId)
+    }
 
+    /**
+     * keyset（游标）分页获取合集列表（带聚合元数据）。
+     * 游标基于 tankoubons.id（BIGSERIAL 确定序），返回 (列表, 总数, 下一页游标 id)。
+     * 游标为 0 表示无下一页。基础行/聚合/children/收藏全部走批量路径，SQL 条数恒定。
+     */
+    public static func getTankoubonsKeysetWithUser(userId: Int64, limit: Int32, cursorId: Int64, ascending: Bool): (Array<Tankoubon>, Int64, Int64) {
+        let cappedLimit = if (limit <= 0) { 20i32 } else if (limit > 500) { 500i32 } else { limit }
+        let daoData = TankoubonDao.getTankoubonsKeysetPage(cappedLimit, ascending, cursorId)
+        let total = TankoubonDao.countTankoubons()
+        if (daoData.size == 0) {
+            return ([], total, 0)
+        }
+        let tankoubons = assembleTankoubonList(daoData, userId)
+        // 满页才产出下一页游标
+        var nextCursorId: Int64 = 0
+        if (daoData.size == Int64(cappedLimit)) {
+            nextCursorId = daoData[daoData.size - 1].id
+        }
+        return (tankoubons, total, nextCursorId)
+    }
+
+    /** 批量装配：基础行 + 批量聚合元数据（RocksDB 缓存）+ 批量 children + 批量收藏状态。 */
+    private static func assembleTankoubonList(daoData: Array<TankoubonData>, userId: Int64): Array<Tankoubon> {
         var ids = ArrayList<String>()
         for (data in daoData) {
             ids.add(data.tankoubon_id)

@@ -104,7 +104,7 @@ public class TaskDao {
             vint(Int64(data.progress)),
             vtext(data.message),
             vtext(data.pluginNamespace),
-            vtext(data.parameters),
+            vjson(data.parameters),
             vtext(data.result),
             vint(Int64(data.priority)),
             if (data.groupId.size > 0) { vtext(data.groupId) } else { vnull() },
@@ -118,7 +118,7 @@ public class TaskDao {
         ]
         let sql = """
             INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id
         """
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
@@ -165,14 +165,14 @@ public class TaskDao {
             vtext(status),
             vint(Int64(progress)),
             vtext(message),
-            vtext(parameters),
+            vjson(parameters),
             vint(Int64(priority)),
             vtext(triggerSource),
             vtext(phase)
         ]
         let sql = """
             INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
-            VALUES ($1, $2, $3, $4, $5, '', $6, '', $7, NULL, NULL, $8, NULL, NULL, $9, NULL, NULL) RETURNING id
+            VALUES ($1, $2, $3, $4, $5, '', $6::jsonb, '', $7, NULL, NULL, $8, NULL, NULL, $9, NULL, NULL) RETURNING id
         """
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
@@ -484,7 +484,7 @@ public class TaskDao {
             vint(Int64(data.progress)),
             vtext(data.message),
             vtext(data.pluginNamespace),
-            vtext(data.parameters),
+            vjson(data.parameters),
             vtext(data.result),
             vint(Int64(data.priority)),
             if (data.groupId.size > 0) { vtext(data.groupId) } else { vnull() },
@@ -500,7 +500,7 @@ public class TaskDao {
         let sql = """
             UPDATE tasks SET
                 name = $1, task_type = $2, status = $3, progress = $4, message = $5,
-                plugin_namespace = $6, parameters = $7, result = $8, priority = $9, group_id = $10,
+                plugin_namespace = $6, parameters = $7::jsonb, result = $8, priority = $9, group_id = $10,
                 timeout_at = $11, trigger_source = $12, started_at = $13, completed_at = $14,
                 phase = $15, waiting_reason = $16, active_key = $17
             WHERE id = $18
@@ -676,8 +676,8 @@ public class TaskDao {
      */
     public static func updateTaskParameters(id: Int64, parameters: String): Bool {
         let logger = getLogger("task_dao")
-        let sql = "UPDATE tasks SET parameters = $1 WHERE id = $2"
-        let params: Array<Value> = [vtext(parameters), vint(id)]
+        let sql = "UPDATE tasks SET parameters = $1::jsonb WHERE id = $2"
+        let params: Array<Value> = [vjson(parameters), vint(id)]
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
@@ -983,6 +983,10 @@ public class TaskDao {
      */
     public static func claimNextPendingTask(): Option<TaskData> {
         let logger = getLogger("task_dao")
+        // 原子领取：UPDATE 子查询 + FOR UPDATE SKIP LOCKED，多 worker 并发不争同一行。
+        // 说明：csorm 的 forUpdate(LockBehavior.SkipLocked) 只作用于 SelectQuery 顶层渲染
+        // （LIMIT/OFFSET 之后），无法表达"UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)"
+        // 的数据修改型子查询锁，故此处保留原生 SQL（与 DSL 渲染产物逐字一致）。
         let sql = """
             UPDATE tasks
             SET status = 'running',
@@ -994,6 +998,7 @@ public class TaskDao {
                 WHERE status = 'pending'
                 ORDER BY priority ASC, created_at ASC, id ASC
                 LIMIT 1
+                FOR UPDATE SKIP LOCKED
             )
             AND status = 'pending'
             RETURNING id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
@@ -1106,7 +1111,7 @@ public class TaskDao {
             vint(Int64(data.progress)),
             vtext(data.message),
             vtext(data.pluginNamespace),
-            vtext(data.parameters),
+            vjson(data.parameters),
             vtext(data.result),
             vint(Int64(data.priority)),
             if (data.groupId.size > 0) { vtext(data.groupId) } else { vnull() },
@@ -1119,7 +1124,7 @@ public class TaskDao {
         ]
         let sql = """
             INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at, phase, waiting_reason, active_key)
-            VALUES ($1, $2, 'waiting', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, NULL, $13, $14, $15) RETURNING id
+            VALUES ($1, $2, 'waiting', $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, NULL, NULL, $13, $14, $15) RETURNING id
         """
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>

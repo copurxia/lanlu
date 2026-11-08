@@ -430,7 +430,9 @@ public class RecommendationService {
             let ranked = ArrayList<RecommendationScoredItem>()
             let effectiveTags = if (seed.id.size > 0) { seed.tags } else { sourceTags }
             let candidates = if (seed.id.size > 0) {
-                RecommendationDao.getArchiveRelatedCandidates(archiveId, safeCount * 16i32)
+                // 4.8 下推：overlap + 预排序在 SQL 完成，池大小 16× 收窄为 2×；
+                // 仓颉侧仍用 weightedJaccard 精确打分 + 多样性重排（语义不变）。
+                RecommendationPushdownDao.getArchiveRelatedCandidatesPushdown(archiveId, safeCount * 2i32)
             } else {
                 // For source items, use tag-based candidate lookup
                 let tagBuilder = ArrayList<String>()

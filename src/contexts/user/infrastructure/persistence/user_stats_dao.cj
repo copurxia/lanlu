@@ -192,7 +192,7 @@ public class UserStatsDao {
                    awt.created_at, awt.updated_at, awt.release_at, awt.relative_path, awt.file_size,
                    awt.pagecount, COALESCE(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT, 0) as last_read_time,
                    COALESCE(uas.progress, 0) as progress, awt.tags
-            FROM archive_metadata_search awt
+            FROM archive_search_docs awt
             INNER JOIN archives a ON awt.arcid = a.arcid
             INNER JOIN user_archive_status uas ON a.id = uas.archive_id
             WHERE uas.user_id = $1 AND uas.is_new = false
@@ -230,7 +230,7 @@ public class UserStatsDao {
                    awt.pagecount,
                    COALESCE(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT, 0) as last_read_time,
                    COALESCE(uas.progress, 0) as progress, awt.tags
-            FROM archive_metadata_search awt
+            FROM archive_search_docs awt
             INNER JOIN archives a ON awt.arcid = a.arcid
             INNER JOIN user_favorites uf ON a.id = uf.archive_id
             LEFT JOIN user_archive_status uas ON a.id = uas.archive_id AND uas.user_id = uf.user_id
@@ -255,7 +255,7 @@ public class UserStatsDao {
     }
 
     /**
-     * 将 archive_metadata_search 行（含 tags、last_read_time、progress）映射为 ArchiveData。
+     * 将 archive_search_docs 行（含 tags、last_read_time、progress）映射为 ArchiveData。
      * 列顺序需与 getRecentReadArchives/getRecentFavoriteArchives 的 SELECT 一致。
      */
     private static func mapArchivesWithTagsRow(row: Row): ArchiveData {

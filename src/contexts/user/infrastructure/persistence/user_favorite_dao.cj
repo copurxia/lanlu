@@ -30,14 +30,13 @@ public class UserFavoriteDao {
      */
     public static func addFavorite(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_favorite_dao")
+        // UPSERT：ON CONFLICT DO NOTHING，一次往返且并发安全（UNIQUE(user_id, archive_id) 兜底）
         let sql = """
             INSERT INTO user_favorites (user_id, archive_id, created_at)
-            SELECT $1, $2, CURRENT_TIMESTAMP
-            WHERE NOT EXISTS (
-                SELECT 1 FROM user_favorites WHERE user_id = $3 AND archive_id = $4
-            )
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, archive_id) DO NOTHING
         """
-        let params: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        let params: Array<Value> = [vint(userId), vint(archiveId)]
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
@@ -305,7 +304,7 @@ public class UserFavoriteDao {
     }
 
     /**
-     * 将 archive_metadata_search 行（含 tags、last_read_time、progress）映射为 ArchiveData。
+     * 将 archive_search_docs 行（含 tags、last_read_time、progress）映射为 ArchiveData。
      * 列顺序需与 getUserFavoriteArchives 的 SELECT 一致。
      */
     private static func mapArchivesWithTagsRow(row: Row): ArchiveData {
@@ -357,7 +356,7 @@ public class UserFavoriteDao {
                                awt.pagecount,
                                COALESCE(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT, 0) as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
-                        FROM archive_metadata_search awt
+                        FROM archive_search_docs awt
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_favorites uf ON a.id = uf.archive_id
                         LEFT JOIN user_archive_status uas ON a.id = uas.archive_id AND uas.user_id = uf.user_id

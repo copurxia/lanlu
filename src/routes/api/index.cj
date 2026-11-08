@@ -1,6 +1,7 @@
 package lanlu.routes.api
 
 import ignite.*
+import lanlu.contexts.system.interfaces.http.DbExplainController
 import lanlu.contexts.system.interfaces.http.InfoController
 import lanlu.contexts.system.interfaces.http.SystemSettingsController
 import lanlu.infrastructure.middleware.*
@@ -54,10 +55,25 @@ public func registerApiRoutes(router: App) {
     // 注册资源文件路由
     AssetsRoutes.configure(router)
 
+    // 注册 DB EXPLAIN 观测路由（admin）
+    registerDbExplainRoutes(router)
+
     // 注册服务器信息路由
     router.get("/api/info", { ctx =>
         InfoController.getServerInfo(ctx)
     })
+}
+
+/**
+ * 注册 DB EXPLAIN 观测路由（admin）
+ */
+private func registerDbExplainRoutes(router: App) {
+    let dbExplain = router.group("/api/admin/db")
+    dbExplain.use(AuthMiddleware.requireAdminMiddleware())
+
+    dbExplain.post("/explain", audited("db.admin.explain", { ctx =>
+        DbExplainController.explain(ctx)
+    }, riskLevel: 2))
 }
 
 /**

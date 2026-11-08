@@ -193,7 +193,8 @@ public class ArchiveDao {
         pattern: String,
         params: ArrayList<String>,
         tableAlias: String,
-        unaccentFunction: String
+        unaccentFunction: String,
+        tsQueryText!: String = ""
     ): String {
         params.add(pattern)
         params.add(pattern)
@@ -202,8 +203,21 @@ public class ArchiveDao {
         let filenameExpr = wrapSearchExpr("${tableAlias}.filename", unaccentFunction)
         let summaryExpr = wrapSearchExpr("${tableAlias}.summary", unaccentFunction)
         let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
-        return "(${titleExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${filenameExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} ILIKE ${patternExpr} ESCAPE '\\' OR " +
+        var cond = "(${titleExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${filenameExpr} ILIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} ILIKE ${patternExpr} ESCAPE '\\' OR " +
             buildTagLikeCondition(pattern, params, tableAlias, unaccentFunction)
+        // 整词命中走 GIN tsvector 索引（search_tsv 已有 idx_search_docs_tsv）。
+        // 'simple' 配置无词干化：tsquery 命中集是 ILIKE 命中集的子集（整词必然是子串），
+        // 因此 OR 语义与原纯 ILIKE 完全等价，只是给规划器多一条廉价的 GIN 位图路径。
+        // 【勿删本分支】注意分词边界限制（13k 行 EXPLAIN 实测，见 docs task-4 记录）：
+        // 'simple' 不切分下划线/点/中文连续词——'file_1000.zip'、'漫画标题编号1000' 均为单一
+        // lexeme，子串词 tsquery 命中 0 行，这些场景完全靠下方 ILIKE 兜底；tsquery 只在
+        // 查询词与分词边界对齐（空格分隔词/独立标签词/文件名整词）时经 GIN 产出额外命中
+        // （实测高选择性场景 10.5ms → 5.5ms）。删除此分支不会破坏语义，但会失去该路径增益。
+        if (tsQueryText.size > 0 && tableAlias == "archive_search_docs") {
+            params.add(tsQueryText)
+            cond += " OR ${tableAlias}.search_tsv @@ websearch_to_tsquery('simple', ?)"
+        }
+        return cond
     }
 
     private static func buildMetadataTagLikeCondition(
@@ -777,7 +791,7 @@ public class ArchiveDao {
         return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, "")
     }
 
-    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64, tankoubonId: String): (Array<ArchiveData>, Int64) {
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64, tankoubonId: String, keysetSortKey!: String = "", keysetId!: Int64 = -1): (Array<ArchiveData>, Int64) {
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
@@ -829,7 +843,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(termValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: termValue)
 
                             // 查询翻译匹配的标签，添加 OR 条件
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, termValue)
@@ -872,7 +886,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(phraseValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: phraseValue)
 
                             // 查询翻译匹配的标签
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, phraseValue)
@@ -905,7 +919,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(excludeValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: excludeValue)
 
                             // 查询翻译匹配的标签
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, excludeValue)
@@ -971,6 +985,25 @@ public class ArchiveDao {
                     let relevanceExpr = buildRelevanceExpr(filter, "", unaccentFunction)
                     let hasRelevance = filter.size > 0 && relevanceExpr != "1"
                     let minRelevanceThreshold = 0.05  // 最低相关度阈值
+
+                    // keyset（游标）分页：把 (排序键, id) 行比较条件下推进 WHERE。
+                    // 激活时跳过 OFFSET（见下方 LIMIT 拼接），排序键与 ORDER BY 列一致。
+                    // 语义说明：整页行集与 OFFSET 方式一致，只是用游标代替跳过 N 行。
+                    var keysetActive = false
+                    if (keysetSortKey.size > 0 && keysetId > 0) {
+                        let keysetCmp = if (order == "desc") { "<" } else { ">" }
+                        if (sortby == "id") {
+                            whereConditions.add("archive_search_docs.id " + keysetCmp + " ?::BIGINT")
+                            filterParams.add(keysetSortKey)
+                            keysetActive = true
+                        } else if (sortby == "date_added" || sortby == "created_at" || sortby == "updated_at" || sortby == "release_at") {
+                            let keysetCol = normalizeSearchTimeField(sortby)
+                            whereConditions.add("(archive_search_docs." + keysetCol + ", archive_search_docs.id) " + keysetCmp + " (?::timestamp, ?::BIGINT)")
+                            filterParams.add(keysetSortKey)
+                            filterParams.add(keysetId.toString())
+                            keysetActive = true
+                        }
+                    }
 
                     // 组合基础 WHERE（不包含相关度阈值）
                     var baseWhereClause = ""
@@ -1162,9 +1195,19 @@ public class ArchiveDao {
                         sql += " ORDER BY title ${orderDirection}"
                     }
 
+                    // keyset 分页需要确定序：主排序键相同的行按 id 平局裁决
+                    if (keysetActive && sortby != "id") {
+                        let keysetTieDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                        sql += ", archive_search_docs.id ${keysetTieDirection}"
+                    }
+
                     // start=-1 时不添加 LIMIT/OFFSET，返回全部数据（快速路径已自带分页）
                     if (start >= 0 && !useFastPage) {
-                        sql += " LIMIT ${count} OFFSET ${start}"
+                        if (keysetActive) {
+                            sql += " LIMIT ${count}"
+                        } else {
+                            sql += " LIMIT ${count} OFFSET ${start}"
+                        }
                     }
 
                     // 打印SQL语句用于调试
@@ -1216,6 +1259,89 @@ public class ArchiveDao {
                 getLogger("archive_dao").error("无法连接到数据库")
                 return (Array<ArchiveData>(), 0)
         }
+    }
+
+    // ===== keyset（游标）分页 =====
+    // 游标格式：<排序值>|<文档表 id>。仅支持确定性排序键（时间列 / id）；
+    // title 等文本排序因 locale 归一化不稳定且可能含分隔符，不支持游标。
+
+    public static func encodeKeysetCursor(sortValue: String, docId: Int64): String {
+        return sortValue + "|" + docId.toString()
+    }
+
+    private static func decodeKeysetCursor(cursor: String): Option<(String, Int64)> {
+        let bytes = cursor.toArray()
+        var sepIdx = -1
+        for (i in 0..bytes.size) {
+            if (bytes[i] == 124u8) {  // '|'
+                sepIdx = i
+            }
+        }
+        if (sepIdx <= 0 || sepIdx + 1 >= bytes.size) {
+            return None
+        }
+        let sortValue = cursor[0..sepIdx]
+        let idText = cursor[sepIdx + 1..bytes.size]
+        let idValue = try { Int64.parse(idText) } catch (_: Exception) { 0i64 }
+        if (idValue <= 0) {
+            return None
+        }
+        return Some((sortValue, idValue))
+    }
+
+    /**
+     * keyset（游标）分页搜索。
+     * - 支持 sortby：date_added/created_at/updated_at/release_at/id；其余排序回退 OFFSET 且不返回游标。
+     * - cursor 为空表示第一页（可走 OFFSET 或直接按游标模式取第一页）。
+     * - 返回 (rows, totalCount, nextCursor)；nextCursor 为空表示没有下一页或排序不支持。
+     * - 记录总数仍返回全量 COUNT（供 recordsTotal 展示）；深分页时 OFFSET 成本被游标取代。
+     */
+    public static func searchArchivesKeyset(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64, tankoubonId: String, cursor: String): (Array<ArchiveData>, Int64, String) {
+        let eligible = sortby == "id" || sortby == "date_added" || sortby == "created_at" || sortby == "updated_at" || sortby == "release_at"
+        if (!eligible) {
+            let (rows, total) = searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
+            return (rows, total, "")
+        }
+
+        var rows: Array<ArchiveData> = Array<ArchiveData>()
+        var total: Int64 = 0
+        var decoded = false
+        if (cursor.size > 0) {
+            match (decodeKeysetCursor(cursor)) {
+                case Some(pair) =>
+                    let (sortValue, docId) = pair
+                    let r = searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId, keysetSortKey: sortValue, keysetId: docId)
+                    rows = r[0]
+                    total = r[1]
+                    decoded = true
+                case None =>
+                    ()
+            }
+        }
+        if (!decoded) {
+            let r = searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
+            rows = r[0]
+            total = r[1]
+        }
+
+        // 满页才产出下一页游标
+        if (rows.size == 0 || rows.size < Int64(count)) {
+            return (rows, total, "")
+        }
+        let last = rows[rows.size - 1]
+        let sortVal = if (sortby == "id") {
+            last.internalId.toString()
+        } else if (sortby == "updated_at") {
+            last.updated_at
+        } else if (sortby == "release_at") {
+            last.release_at
+        } else {
+            last.created_at
+        }
+        if (sortVal.size == 0 || last.internalId <= 0) {
+            return (rows, total, "")
+        }
+        return (rows, total, encodeKeysetCursor(sortVal, last.internalId))
     }
 
     /**
@@ -1284,7 +1410,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(termValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: termValue)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, termValue)
                             for (tagName in translatedTags) {
@@ -1323,7 +1449,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(phraseValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: phraseValue)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, phraseValue)
                             for (tagName in translatedTags) {
@@ -1354,7 +1480,7 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(excludeValue)
-                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction)
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_search_docs", unaccentFunction, tsQueryText: excludeValue)
 
                             let translatedTags = getPreloadedTranslatedTags(translatedTagsLookup, excludeValue)
                             for (tagName in translatedTags) {

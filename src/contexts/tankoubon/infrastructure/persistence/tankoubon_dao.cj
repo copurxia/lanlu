@@ -299,6 +299,92 @@ public class TankoubonDao {
     }
 
     /**
+     * keyset（游标）分页取合集基础行：按 t.id（BIGSERIAL，确定序）排序。
+     * cursorId > 0 时取该 id 之后（ascending）或之前（descending）的一页。
+     * 列与 getAllTankoubons 完全一致，children 由调用方批量补齐。
+     */
+    public static func getTankoubonsKeysetPage(limit: Int32, ascending: Bool, cursorId: Int64): Array<TankoubonData> {
+        let dir = if (ascending) { "ASC" } else { "DESC" }
+        let cmp = if (ascending) { ">" } else { "<" }
+        var sql = """
+            SELECT
+                t.id,
+                t.tankoubon_id,
+                COALESCE(mo.title, '') AS name,
+                COALESCE(mo.description, '') AS summary,
+                COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
+                COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
+                COALESCE(t.auto_created, false),
+                COALESCE(t.source_category_id, 0),
+                COALESCE(t.source_relative_path, ''),
+                COALESCE(mo.release_at::TEXT, ''),
+                COALESCE(mo.created_at::TEXT, ''),
+                COALESCE(mo.updated_at::TEXT, '')
+            FROM tankoubons t
+            LEFT JOIN metadata_objects mo
+                   ON mo.entity_type = 'tankoubon'
+                  AND mo.entity_id = t.tankoubon_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    COALESCE(
+                        jsonb_object_agg(ma.slot, to_jsonb(ma.asset_id))
+                            FILTER (WHERE ma.asset_id > 0),
+                        '{}'::jsonb
+                    ) AS assets_json,
+                    COALESCE(MAX(CASE WHEN ma.slot = 'cover' THEN ma.asset_id ELSE 0 END), 0) AS cover_asset_id
+                FROM metadata_assets ma
+                WHERE ma.metadata_id = mo.id
+            ) asset_map ON true
+        """
+        if (cursorId > 0) {
+            sql += "            WHERE t.id " + cmp + " $1\n"
+        }
+        sql += "            ORDER BY t.id " + dir + " LIMIT " + limit.toString()
+        let params: Array<Value> = if (cursorId > 0) { [vint(cursorId)] } else { Array<Value>() }
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    return db.raw<TankoubonData>(sql, params, { row =>
+                        let tankoubon = TankoubonData()
+                        tankoubon.id = row.getOrNullInt64(0) ?? 0
+                        tankoubon.tankoubon_id = row.getOrNullText(1) ?? ""
+                        tankoubon.name = row.getOrNullText(2) ?? ""
+                        tankoubon.summary = row.getOrNullText(3) ?? ""
+                        tankoubon.cover_asset_id = row.getOrNullInt64(4) ?? 0
+                        tankoubon.assets_raw = (row.getOrNullText(5) ?? "").trimAscii()
+                        if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
+                        tankoubon.auto_created = row.getOrNullBool(6) ?? false
+                        tankoubon.source_category_id = row.getOrNullInt64(7) ?? 0
+                        tankoubon.source_relative_path = row.getOrNullText(8) ?? ""
+                        tankoubon.release_at = row.getOrNullText(9) ?? ""
+                        tankoubon.created_at = row.getOrNullText(10) ?? ""
+                        tankoubon.updated_at = row.getOrNullText(11) ?? ""
+                        tankoubon
+                    })
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("keyset查询Tankoubon失败", ("error", e.message))
+                    return Array<TankoubonData>()
+                }
+            case None =>
+                getLogger("tankoubon_dao").error("无法连接到数据库")
+                return Array<TankoubonData>()
+        }
+    }
+
+    /** 合集总数（keyset 分页的 recordsTotal）。 */
+    public static func countTankoubons(): Int64 {
+        match (DatabaseConfig.getDatabase()) {
+            case Some(db) =>
+                try {
+                    return db.rawOne<Int64>("SELECT COUNT(*) FROM tankoubons", [], { r => r.getOrNullInt64(0) ?? 0 }) ?? 0
+                } catch (_: Exception) {
+                    return 0
+                }
+            case None => return 0
+        }
+    }
+
+    /**
      * 获取所有Tankoubons。
      * includeArchives=false 时跳过逐合集的 children 查询（调用方应使用
      * getBatchArchivesInTankoubon 批量补齐，避免 N+1）。

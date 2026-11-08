@@ -164,17 +164,17 @@ public class PluginDao {
             vtext(plugin.tags),
             vtext(plugin.url_regex),
             vtext(plugin.source_id_regex),
-            vtext(plugin.pre_hooks),
-            vtext(plugin.after_hooks),
+            vjson(plugin.pre_hooks),
+            vjson(plugin.after_hooks),
             vtext(plugin.permissions),
             vtext(plugin.icon),
             vbool(plugin.enabled),
             vbool(plugin.installed),
             vbool(plugin.has_schema),
-            vtext(plugin.parameters),
+            vjson(plugin.parameters),
             vtext(plugin.update_url)
         ]
-        let sql = "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)"
+        let sql = "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19)"
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
@@ -204,18 +204,18 @@ public class PluginDao {
             vtext(plugin.tags),
             vtext(plugin.url_regex),
             vtext(plugin.source_id_regex),
-            vtext(plugin.pre_hooks),
-            vtext(plugin.after_hooks),
+            vjson(plugin.pre_hooks),
+            vjson(plugin.after_hooks),
             vtext(plugin.permissions),
             vtext(plugin.icon),
             vbool(plugin.enabled),
             vbool(plugin.installed),
             vbool(plugin.has_schema),
-            vtext(plugin.parameters),
+            vjson(plugin.parameters),
             vtext(plugin.update_url),
             vtext(plugin.namespace)
         ]
-        let sql = "UPDATE plugins SET name = $1, version = $2, description = $3, author = $4, entry = $5, plugin_type = $6, tags = $7, url_regex = $8, source_id_regex = $9, pre_hooks = $10, after_hooks = $11, permissions = $12, icon = $13, enabled = $14, installed = $15, has_schema = $16, parameters = $17, update_url = $18, updated_at = CURRENT_TIMESTAMP WHERE namespace = $19"
+        let sql = "UPDATE plugins SET name = $1, version = $2, description = $3, author = $4, entry = $5, plugin_type = $6, tags = $7, url_regex = $8, source_id_regex = $9, pre_hooks = $10::jsonb, after_hooks = $11::jsonb, permissions = $12, icon = $13, enabled = $14, installed = $15, has_schema = $16, parameters = $17::jsonb, update_url = $18, updated_at = CURRENT_TIMESTAMP WHERE namespace = $19"
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {

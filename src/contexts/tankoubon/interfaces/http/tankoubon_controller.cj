@@ -8,6 +8,7 @@ import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.infrastructure.middleware.*
 import std.collection.*
+import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.net.http.HttpStatusCode
 import stdx.encoding.json.stream.*
@@ -21,12 +22,40 @@ public class TankoubonController {
      */
     public static func getTankoubons(ctx: Ctx) {
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
-        let tankoubons = match (userIdOpt) {
-            case Some(userId) => TankoubonModel.getAllTankoubonsWithUser(userId)
-            case None => TankoubonModel.getAllTankoubonsWithUser(0)
+        let userId: Int64 = match (userIdOpt) {
+            case Some(id) => id
+            case None => 0
         }
+
+        // 可选 keyset（游标）分页：limit>0 时启用，游标为 tankoubons.id（BIGSERIAL 确定序）。
+        // 不带 limit 时保持旧行为：一次性返回全量（前端兼容）。
+        let limitStr = (ctx.query("limit") ?? "").trimAscii()
+        let cursorStr = (ctx.query("cursor") ?? "").trimAscii()
+        let orderParam = (ctx.query("order") ?? "asc").trimAscii().toAsciiLower()
+        let limit = try { Int32.parse(limitStr) } catch (_: Exception) { 0i32 }
+
         let out = ByteBuffer()
         let w = JsonWriter(out)
+        if (limit > 0) {
+            let cursorId = try { Int64.parse(cursorStr) } catch (_: Exception) { 0i64 }
+            let (tankoubons, total, nextCursorId) = TankoubonModel.getTankoubonsKeysetWithUser(userId, limit, cursorId, orderParam != "desc")
+            w.startObject()
+            w.writeName("filtered").writeValue(total)
+            w.writeName("result")
+            w.startArray()
+            for (i in 0..tankoubons.size) {
+                tankoubons[i].writeJson(w)
+            }
+            w.endArray()
+            w.writeName("total").writeValue(total)
+            w.writeName("next_cursor").writeValue(nextCursorId.toString())
+            w.endObject()
+            w.flush()
+            ctx.json(String.fromUtf8(readToEnd(out)))
+            return
+        }
+
+        let tankoubons = TankoubonModel.getAllTankoubonsWithUser(userId)
         w.startObject()
         w.writeName("filtered").writeValue(tankoubons.size)
         w.writeName("result")
@@ -36,6 +65,7 @@ public class TankoubonController {
         }
         w.endArray()
         w.writeName("total").writeValue(tankoubons.size)
+        w.writeName("next_cursor").writeValue("")
         w.endObject()
         w.flush()
         ctx.json(String.fromUtf8(readToEnd(out)))

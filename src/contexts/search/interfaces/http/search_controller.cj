@@ -401,6 +401,9 @@ public class SearchController {
         let dateFrom = ctx.query("date_from") ?? ""
         let dateTo = ctx.query("date_to") ?? ""
 
+        // keyset 分页游标：与 page/pageSize 正交；提供时深分页不再走 OFFSET
+        let cursorParam = (ctx.query("cursor") ?? "").trimAscii()
+
         // 处理语言参数（用于标签翻译）
         let lang = ctx.query("lang") ?? ""
 
@@ -503,7 +506,7 @@ public class SearchController {
             DerivedCacheUtils.getSearchResultVersion(),
             filter, category, page, pageSize, sortby, order,
             newOnly, untaggedOnly, groupByTanks, favoriteOnly,
-            dateFrom, dateTo, userId, tankoubonId, lang
+            dateFrom, dateTo, userId, tankoubonId, lang, cursorParam
         )
         if (cacheable) {
             match (readSearchResultCache(cacheKey)) {
@@ -557,28 +560,67 @@ public class SearchController {
             w.writeName("pageSize").writeValue(pageSize)
             w.writeName("recordsFiltered").writeValue(aggregateTotal)
             w.writeName("recordsTotal").writeValue(aggregateTotal)
+            w.writeName("next_cursor").writeValue("")
             w.endObject()
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             return
         }
 
-        let bundle = loadSearchPageBundle(
-            filter,
-            category,
-            Int32(start),
-            Int32(count),
-            sortby,
-            order,
-            newOnly,
-            untaggedOnly,
-            groupByTanks,
-            favoriteOnly,
-            dateFrom,
-            dateTo,
-            userId,
-            tankoubonId
-        )
+        var nextCursor = ""
+        var bundle = SearchPageBundle()
+        // keyset（游标）分页：确定性排序键（时间列/id）+ 非分组模式时走游标路径，
+        // 深分页不再扫描 OFFSET 之前的行；其余排序保持 OFFSET 兼容回退。
+        let keysetEligibleSort = sortby == "id" || sortby == "date_added" || sortby == "created_at" || sortby == "updated_at" || sortby == "release_at"
+        if (!groupByTanks && keysetEligibleSort) {
+            let (archiveRows, keysetTotal, keysetNext) = ArchiveDao.searchArchivesKeyset(
+                filter, category, start, count, sortby, order,
+                newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId, cursorParam
+            )
+            nextCursor = keysetNext
+            bundle.totalCount = keysetTotal
+            var pagedArchives = ArrayList<Archive>()
+            for (data in archiveRows) {
+                let archive = Archive()
+                archive.id = data.id
+                archive.internalId = data.internalId
+                archive.title = data.title
+                archive.filename = data.filename
+                archive.summary = data.summary
+                archive.thumbhash = data.thumbhash
+                archive.cover_asset_id = data.cover_asset_id
+                archive.release_at = data.release_at
+                archive.created_at = data.created_at
+                archive.updated_at = data.updated_at
+                archive.relative_path = data.relative_path
+                archive.file_size = data.file_size
+                archive.pagecount = data.pagecount
+                archive.archive_type = data.archive_type
+                archive.tags = data.tags
+                pagedArchives.add(archive)
+                bundle.responseItemTypes.add("archive")
+                bundle.responseItemIds.add(archive.id)
+                bundle.archiveMap[archive.id] = archive
+            }
+            bundle.archives = pagedArchives.toArray()
+        } else {
+            bundle = loadSearchPageBundle(
+                filter,
+                category,
+                Int32(start),
+                Int32(count),
+                sortby,
+                order,
+                newOnly,
+                untaggedOnly,
+                groupByTanks,
+                favoriteOnly,
+                dateFrom,
+                dateTo,
+                userId,
+                tankoubonId
+            )
+        }
 
         w.writeName("data")
         writeSearchDataArray(w, bundle, userId, lang)
@@ -587,6 +629,7 @@ public class SearchController {
         w.writeName("pageSize").writeValue(pageSize)
         w.writeName("recordsFiltered").writeValue(bundle.totalCount)
         w.writeName("recordsTotal").writeValue(bundle.totalCount)
+        w.writeName("next_cursor").writeValue(nextCursor)
         w.endObject()
         w.flush()
         let responseBody = String.fromUtf8(readToEnd(out))
@@ -623,13 +666,14 @@ public class SearchController {
         dateTo: String,
         userId: Int64,
         tankoubonId: String,
-        lang: String
+        lang: String,
+        cursor: String
     ): String {
         return "v${version.toString()}:u${userId.toString()}:f[${filter}]:c[${category}]" +
             ":p${page.toString()}:${pageSize.toString()}:s[${sortby}]:o[${order}]" +
             ":n${if (newOnly) { "1" } else { "0" }}:t${if (untaggedOnly) { "1" } else { "0" }}" +
             ":g${if (groupByTanks) { "1" } else { "0" }}:fv${if (favoriteOnly) { "1" } else { "0" }}" +
-            ":df[${dateFrom}]:dt[${dateTo}]:tk[${tankoubonId}]:l[${lang}]"
+            ":df[${dateFrom}]:dt[${dateTo}]:tk[${tankoubonId}]:l[${lang}]:cur[${cursor}]"
     }
 
     private static func readSearchResultCache(cacheKey: String): Option<String> {

@@ -40,6 +40,27 @@ public class DatabaseConfig {
         "postgres"
     }
 
+    /**
+     * 池监控指标（task-3）：(open, idle, waiting, borrowTimeouts)。
+     * 经 ConnectionPool 单例取 csorm.Database 再透传 driver 池真实计数。
+     */
+    public static func poolStats(): (Int64, Int64, Int64, Int64) {
+        match (ConnectionPool.getInstance().getDatabase()) {
+            case Some(d) => d.poolStats()
+            case None => (0, 0, 0, 0)
+        }
+    }
+
+    /**
+     * 池指标日志导出（周期性调用点：observability 汇总/健康检查）。info 一行，
+     * 饱和（waiting/borrowTimeouts > 0）时 stats() 内部已升 warn。
+     */
+    public static func logPoolStats(): Unit {
+        let (open, idle, waiting, timeouts) = poolStats()
+        getLogger("database").info(
+            "pool: open=${open} idle=${idle} inUse=${open - idle} waiting=${waiting} borrowTimeouts=${timeouts}")
+    }
+
     public static func getConnectionString(): String {
         let logger = getLogger("database")
         logger.debug("Using database connection string from DB_STRING")

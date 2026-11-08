@@ -372,7 +372,7 @@ public class RecommendationDao {
                             COALESCE(aws.updated_at::TEXT, ''),
                             COALESCE(aws.release_at::TEXT, ''),
                             COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
+                        FROM archive_search_docs aws
                         JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
                         JOIN metadata_tags mt ON mt.metadata_id = mo.id
                         WHERE mt.tag IN (${tagInClause})
@@ -415,7 +415,7 @@ public class RecommendationDao {
                     let sql = """
                         WITH seed AS (
                             SELECT aws.arcid, aws.category_id
-                            FROM archive_metadata_search aws
+                            FROM archive_search_docs aws
                             WHERE aws.arcid = $1
                         ),
                         seed_tags AS (
@@ -438,7 +438,7 @@ public class RecommendationDao {
                             COALESCE(aws.updated_at::TEXT, ''),
                             COALESCE(aws.release_at::TEXT, ''),
                             COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
+                        FROM archive_search_docs aws
                         JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
                         JOIN metadata_tags mt ON mt.metadata_id = mo.id
                         CROSS JOIN seed s
@@ -498,7 +498,7 @@ public class RecommendationDao {
                             COALESCE(aws.updated_at::TEXT, ''),
                             COALESCE(aws.release_at::TEXT, ''),
                             COUNT(DISTINCT mt.tag)::INT AS overlap_count
-                        FROM archive_metadata_search aws
+                        FROM archive_search_docs aws
                         JOIN metadata_objects mo ON mo.entity_type = 'archive' AND mo.entity_id = aws.arcid
                         JOIN metadata_tags mt ON mt.metadata_id = mo.id
                         WHERE mt.tag = ANY($1::text[])
@@ -658,31 +658,43 @@ public class RecommendationDao {
 
     public static func insertImpressions(rows: Array<RecommendationImpressionWriteRow>): Bool {
         if (rows.size == 0) { return true }
-        let sql = """
-            INSERT INTO recommendation_impressions (
-                user_id, session_key, scene, seed_entity_type, seed_entity_id,
-                item_type, item_id, position
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        """
+        // 多行 VALUES 批量插入：一次往返写 N 行（原实现每行一条 INSERT）。
+        // 每行 8 个参数，chunk 1000 行 = 8000 参数，远低于 PG 65535 参数上限。
+        let chunkSize = 1000
+        let colNames = "user_id, session_key, scene, seed_entity_type, seed_entity_id, item_type, item_id, position"
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    var affected: Int64 = 0
-                    for (row in rows) {
-                        let params: Array<Value> = [
-                            vint(row.userId),
-                            vtext(row.sessionKey),
-                            vtext(row.scene),
-                            vtext(row.seedEntityType),
-                            vtext(row.seedEntityId),
-                            vtext(row.itemType),
-                            vtext(row.itemId),
-                            vint(Int64(row.position))
-                        ]
-                        affected += db.execRaw(sql, params)
+                    var startIdx = 0
+                    while (startIdx < rows.size) {
+                        let endIdx = if (startIdx + chunkSize < rows.size) { startIdx + chunkSize } else { rows.size }
+                        var valuesClause = ""
+                        var params = ArrayList<Value>()
+                        var n = 0
+                        for (i in startIdx..endIdx) {
+                            let row = rows[i]
+                            if (n > 0) { valuesClause += ", " }
+                            valuesClause += "("
+                            let fieldValues = [vint(row.userId), vtext(row.sessionKey), vtext(row.scene),
+                                vtext(row.seedEntityType), vtext(row.seedEntityId),
+                                vtext(row.itemType), vtext(row.itemId), vint(Int64(row.position))]
+                            for (j in 0..fieldValues.size) {
+                                if (j > 0) { valuesClause += ", " }
+                                n += 1
+                                valuesClause += "${'$'}${n.toString()}"
+                                params.add(fieldValues[j])
+                            }
+                            valuesClause += ")"
+                        }
+                        let sql = "INSERT INTO recommendation_impressions (${colNames}) VALUES ${valuesClause}"
+                        let affected = db.execRaw(sql, params.toArray())
+                        if (affected < Int64(endIdx - startIdx)) {
+                            logger.error("写入推荐曝光失败", ("chunk_rows", (endIdx - startIdx).toString()), ("affected", affected.toString()))
+                            return false
+                        }
+                        startIdx = endIdx
                     }
-                    return affected >= Int64(rows.size)
+                    return true
                 } catch (e: Exception) {
                     logger.error("写入推荐曝光失败", ("error", e.message))
                     return false

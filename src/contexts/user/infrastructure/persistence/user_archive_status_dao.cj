@@ -27,27 +27,18 @@ public class UserArchiveStatusDao {
      */
     public static func setIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let updateSql = """
-            UPDATE user_archive_status
-            SET is_new = true, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = $1 AND archive_id = $2
-        """
-        let updateParams: Array<Value> = [vint(userId), vint(archiveId)]
-        let insertSql = """
+        // UPSERT：一次往返且并发安全（原 UPDATE-then-INSERT 依赖 UNIQUE 兜底，需两次查询）
+        let upsertSql = """
             INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-            SELECT $1, $2, true, CURRENT_TIMESTAMP
-            WHERE NOT EXISTS (
-                SELECT 1 FROM user_archive_status WHERE user_id = $3 AND archive_id = $4
-            )
+            VALUES ($1, $2, true, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, archive_id)
+            DO UPDATE SET is_new = true, updated_at = CURRENT_TIMESTAMP
         """
-        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        let upsertParams: Array<Value> = [vint(userId), vint(archiveId)]
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let updated = db.execRaw(updateSql, updateParams)
-                    if (updated <= 0) {
-                        db.execRaw(insertSql, insertParams)
-                    }
+                    let _ = db.execRaw(upsertSql, upsertParams)
                     let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "setIsNew:${archiveId.toString()}")
                     return true
                 } catch (e: Exception) {
@@ -65,27 +56,18 @@ public class UserArchiveStatusDao {
      */
     public static func clearIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let updateSql = """
-            UPDATE user_archive_status
-            SET is_new = false, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = $1 AND archive_id = $2
-        """
-        let updateParams: Array<Value> = [vint(userId), vint(archiveId)]
-        let insertSql = """
+        // UPSERT：一次往返且并发安全
+        let upsertSql = """
             INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-            SELECT $1, $2, false, CURRENT_TIMESTAMP
-            WHERE NOT EXISTS (
-                SELECT 1 FROM user_archive_status WHERE user_id = $3 AND archive_id = $4
-            )
+            VALUES ($1, $2, false, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, archive_id)
+            DO UPDATE SET is_new = false, updated_at = CURRENT_TIMESTAMP
         """
-        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(userId), vint(archiveId)]
+        let upsertParams: Array<Value> = [vint(userId), vint(archiveId)]
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let updated = db.execRaw(updateSql, updateParams)
-                    if (updated <= 0) {
-                        db.execRaw(insertSql, insertParams)
-                    }
+                    let _ = db.execRaw(upsertSql, upsertParams)
                     let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "clearIsNew:${archiveId.toString()}")
                     return true
                 } catch (e: Exception) {
@@ -107,29 +89,18 @@ public class UserArchiveStatusDao {
      */
     public static func updateProgress(userId: Int64, archiveId: Int64, progress: Int32): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let updateSql = """
-            UPDATE user_archive_status
-            SET is_new = false,
-                progress = $1,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = $2 AND archive_id = $3
-        """
-        let updateParams: Array<Value> = [vint(Int64(progress)), vint(userId), vint(archiveId)]
-        let insertSql = """
+        // UPSERT：一次往返且并发安全
+        let upsertSql = """
             INSERT INTO user_archive_status (user_id, archive_id, is_new, progress, updated_at)
-            SELECT $1, $2, false, $3, CURRENT_TIMESTAMP
-            WHERE NOT EXISTS (
-                SELECT 1 FROM user_archive_status WHERE user_id = $4 AND archive_id = $5
-            )
+            VALUES ($1, $2, false, $3, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, archive_id)
+            DO UPDATE SET is_new = false, progress = $3, updated_at = CURRENT_TIMESTAMP
         """
-        let insertParams: Array<Value> = [vint(userId), vint(archiveId), vint(Int64(progress)), vint(userId), vint(archiveId)]
+        let upsertParams: Array<Value> = [vint(userId), vint(archiveId), vint(Int64(progress))]
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    let updated = db.execRaw(updateSql, updateParams)
-                    if (updated <= 0) {
-                        db.execRaw(insertSql, insertParams)
-                    }
+                    let _ = db.execRaw(upsertSql, upsertParams)
                     let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "updateProgress:${archiveId.toString()}")
                     return true
                 } catch (e: Exception) {
@@ -359,7 +330,7 @@ public class UserArchiveStatusDao {
     }
 
     /**
-     * 将 archive_metadata_search 行（含 tags、last_read_time、progress）映射为 ArchiveData。
+     * 将 archive_search_docs 行（含 tags、last_read_time、progress）映射为 ArchiveData。
      * 列顺序需与 getUserReadArchives 的 SELECT 一致。
      */
     private static func mapArchivesWithTagsRow(row: Row): ArchiveData {
@@ -411,7 +382,7 @@ public class UserArchiveStatusDao {
                                awt.created_at, awt.updated_at, awt.release_at, awt.relative_path, awt.file_size,
                                awt.pagecount, COALESCE(EXTRACT(EPOCH FROM uas.updated_at)::BIGINT, 0) as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
-                        FROM archive_metadata_search awt
+                        FROM archive_search_docs awt
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_archive_status uas ON a.id = uas.archive_id
                         WHERE uas.user_id = $1 AND uas.is_new = false

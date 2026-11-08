@@ -162,8 +162,16 @@ public class ConnectionPool {
         let s = ConnectionPoolStats()
         match (db) {
             case Some(d) =>
-                s.open = d.poolSize()
-                s.idle = 0   // driver 未暴露 idle 计数，置 0
+                // driver 池真实指标（task-3：Database.poolStats() 暴露 idle/waiting/borrowTimeouts）
+                let (open, idle, waiting, timeouts) = d.poolStats()
+                s.open = open
+                s.idle = idle
+                s.inUse = open - idle
+                // waiting/borrowTimeouts 是饱和信号：非零时打 warn 日志导出（观测过载）。
+                if (waiting > 0 || timeouts > 0) {
+                    getLogger("connection_pool").warn(
+                        "连接池饱和信号: waiting=${waiting}, borrowTimeouts=${timeouts}, open=${open}, idle=${idle}")
+                }
             case None => ()
         }
         s

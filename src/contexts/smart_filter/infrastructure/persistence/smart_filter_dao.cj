@@ -185,12 +185,35 @@ public class SmartFilterDao {
      * 批量更新排序顺序
      */
     public static func batchUpdateSortOrder(orders: Array<(Int64, Int32)>): Bool {
-        let sql = "UPDATE smart_filters SET sort_order_num = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2"
+        if (orders.size == 0) { return true }
+        // 单条 UPDATE ... FROM (VALUES ...)：N 行一次往返，替代 N 次单行 UPDATE
+        // 行数上限受 PG 参数上限（65535）约束：每行 2 个参数，chunk 500 行 = 1000 参数
+        let chunkSize = 500
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
-                    for ((id, sortOrder) in orders) {
-                        db.execRaw(sql, [vint(Int64(sortOrder)), vint(id)])
+                    var startIdx = 0
+                    while (startIdx < orders.size) {
+                        let endIdx = if (startIdx + chunkSize < orders.size) { startIdx + chunkSize } else { orders.size }
+                        var valuesClause = ""
+                        var params = ArrayList<Value>()
+                        var n = 0
+                        for (i in startIdx..endIdx) {
+                            let (id, sortOrder) = orders[i]
+                            if (n > 0) {
+                                valuesClause += ", "
+                            }
+                            n += 1
+                            let p1 = n.toString()
+                            n += 1
+                            let p2 = n.toString()
+                            valuesClause += "(${'$'}${p1}::BIGINT, ${'$'}${p2}::INT)"
+                            params.add(vint(id))
+                            params.add(vint(Int64(sortOrder)))
+                        }
+                        let sql = "UPDATE smart_filters SET sort_order_num = v.val, updated_at = CURRENT_TIMESTAMP FROM (VALUES ${valuesClause}) AS v(id, val) WHERE smart_filters.id = v.id"
+                        db.execRaw(sql, params.toArray())
+                        startIdx = endIdx
                     }
                     return true
                 } catch (e: Exception) {
@@ -258,11 +281,11 @@ public class SmartFilterDao {
         var conds = ArrayList<Cond>()
         // newonly：只显示未读
         if (filter.newonly) {
-            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id=uas.archive_id WHERE a.arcid=archive_metadata_search.arcid AND uas.user_id=? AND uas.is_new=false)", [vint(0)]))
+            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id=uas.archive_id WHERE a.arcid=archive_search_docs.arcid AND uas.user_id=? AND uas.is_new=false)", [vint(0)]))
         }
         // untaggedonly：只显示无标签
         if (filter.untaggedonly) {
-            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id=mo.id WHERE mo.entity_type='archive' AND mo.entity_id=archive_metadata_search.arcid)", []))
+            conds.add(rawCond("NOT EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id=mo.id WHERE mo.entity_type='archive' AND mo.entity_id=archive_search_docs.arcid)", []))
         }
         // 日期范围
         if (filter.date_from.size > 0) {

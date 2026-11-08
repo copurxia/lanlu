@@ -57,6 +57,7 @@ func registerSearchDocMigrationsForTest(): Unit {
     MigrationRegistry.register(V027_DropUserTankoubonFavorites())
     MigrationRegistry.register(V028_UserTokensTimestamptz())
     MigrationRegistry.register(V029_SearchDocIndex())
+    MigrationRegistry.register(V030_JsonbColumns())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let _ = ExtensionMigrationRunner.runReadyMigrations()
@@ -158,5 +159,41 @@ func searchDocMatchesViewTest() {
                 """, [vtext(pattern)])
                 @Assert(viewCount, docCount)
             }
+    }
+}
+
+/**
+ * 全行级等价（4.1 视图迁移验收）：对有 metadata 根对象的 archive，
+ * 视图 archive_metadata_search 与文档表 archive_search_docs 的
+ * 16 个确定性列双向 EXCEPT 差集必须为 0。
+ * - 时间列仅在存在 metadata_objects 根行时比较（视图对缺根行的 COALESCE(CURRENT_TIMESTAMP)
+ *   是非确定值，文档表存的是刷新时刻的冻结值）；
+ * - search_tsv 不参与本断言：视图 C 权重用空格聚合、文档表用逗号聚合 tags 文本，
+ *   两者经 default parser 解析后语义等价但不保证逐 lexeme 相同（由
+ *   searchDocMatchesViewTest 从检索结果层面锁定）。
+ */
+@Test
+func searchDocFullRowEqualityTest() {
+    if (!ensureSearchDocTestDbOrSkip()) {
+        println("[skip] no test database for search doc full-row equality test")
+        return
+    }
+    match (DatabaseConfig.getDatabase()) {
+        case None => return
+        case Some(db) =>
+            let cols = "id, arcid, filename, title, summary, tags, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id"
+            let viewWithMeta = "SELECT " + cols + " FROM archive_metadata_search v WHERE EXISTS (SELECT 1 FROM metadata_objects mo WHERE mo.entity_type='archive' AND mo.entity_id=v.arcid)"
+            let docWithMeta = "SELECT " + cols + " FROM archive_search_docs d WHERE EXISTS (SELECT 1 FROM metadata_objects mo WHERE mo.entity_type='archive' AND mo.entity_id=d.arcid)"
+            let diffSql = "SELECT (SELECT COUNT(*) FROM (" + viewWithMeta + " EXCEPT " + docWithMeta + ") a) + (SELECT COUNT(*) FROM (" + docWithMeta + " EXCEPT " + viewWithMeta + ") b)"
+            let diff = scalarInt64(diffSql, [])
+            if (diff != 0) {
+                println("view/doc full-row diff rows: ${diff.toString()}")
+            }
+            @Assert(diff, 0)
+            // 行数一致：视图与文档表每个 archive 恰好一行
+            @Assert(
+                scalarInt64("SELECT COUNT(*) FROM archive_metadata_search", []),
+                scalarInt64("SELECT COUNT(*) FROM archive_search_docs", [])
+            )
     }
 }
