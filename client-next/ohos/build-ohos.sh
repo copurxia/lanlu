@@ -78,6 +78,7 @@ ST=$RES/ohos-stubs
 PFX=$RES/sdl3-ohos/prefix-single/lib
 PK=$CN/../packages
 ENG=$BUILD/target/aarch64-linux-ohos/release/lanlu_client_next
+export OHOS_STRIP=$NATIVE/llvm/bin/llvm-strip
 export OHOS_EXTRA_LIBS="$ST:$ST/ffmpeg:$PFX:$PK/webview/native/target/release:$PK/rocksdb_ffi/native:$PK/libavformat_ffi/native:$PK/libass_ffi/native:$PK/fontkit_ffi/native/target/release:$ENG"
 ps aux | grep -iE 'hvigor|daemon-process-boot-script' | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
 # 不动 .hvigor（守护进程持有 FUSE 句柄），只清生成物
@@ -88,4 +89,5 @@ for d in "$ST" "$ST/ffmpeg" "$PFX" "$PK/webview/native/target/release" "$PK/rock
   find "$d" -maxdepth 1 -name '*.so*' -type f -exec "$NATIVE/llvm/bin/llvm-strip" --strip-debug {} \; 2>/dev/null || true
 done
 (cd "$BUILD" && "$RES/packages/ohos/target/release/bin/main" gen --sign)
+fi
 echo "HAP: $BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap"
