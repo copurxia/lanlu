@@ -19,7 +19,7 @@ import java.security.MessageDigest
  * debug APK on port 8083; physical devices install once, then update in place.
  */
 object DebugUpdater {
-  private const val VERSION_URL = "http://192.168.0.111:8083/version.json"
+  private const val VERSION_URL = "http://192.168.0.131:8083/version.json"
   private const val PREFS = "lanlu_debug_updater"
 
   fun check(activity: Activity) {

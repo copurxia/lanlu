@@ -7,6 +7,13 @@ apply plugin: "com.facebook.react"
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
+    // 调试包独立化：把 debug 从 debuggableVariants 里移出，assembleDebug 也会嵌入
+    // JS bundle，安装后不依赖 Metro（解决换机/换网后红屏 “Unable to load script”）。
+    // 需要热重载/连 Metro 的调试壳时，用 -PdevBundle=false 恢复默认。
+    debuggableVariants = project.hasProperty("devBundle") && project.property("devBundle") == "false"
+        ? ["debug"]
+        : []
+
     /* Folders */
     //   The root of your project, i.e. where "package.json" lives. Default is '../..'
     // root = file("../../")
