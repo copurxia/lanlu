@@ -3,10 +3,12 @@ package lanlu_client_next
 // OHOS 移植自检实现（仅在 OHOS_SELFTEST=1 时由 ohos_entry 调用）。
 import std.env.getVariable
 import std.fs.{File, Path}
+import std.time.MonoTime
 import vips_ffi.*
 import qwest.*
 import libavformat_ffi.*
 import libass_ffi.*
+import libvlc_ffi.{VlcPlayer}
 import lanlu_client_next.ui.EMBEDDED_LOGO_PNG
 
 private func decodeMsg(p: String): String {
@@ -92,5 +94,42 @@ func ohosMediaSelftest(base: String): Unit {
         File.writeTo(Path(base + "/asstest.txt"), amsg.toArray())
     } catch (ex4: Exception) {
         File.writeTo(Path(base + "/asstest.txt"), ("EXC " + ex4.message).toArray())
+    }
+    try {
+        File.writeTo(Path(base + "/test.mp4"), TEST_MP4)
+        let vmsg = try {
+            let player = VlcPlayer()
+            player.open(base + "/test.mp4", muted: true)
+            var frames = 0
+            var lastW: Int32 = 0
+            var lastH: Int32 = 0
+            let t0 = MonoTime.now()
+            while (MonoTime.now() - t0 < Duration.second * 4) {
+                let _ = player.timeSec()  // 驱动解码（pull 模型）
+                let fr = player.takeFrame()
+                if (let Some(f) <- fr) {
+                    frames += 1
+                    lastW = f.width
+                    lastH = f.height
+                    if (frames == 1) {
+                        // 首帧校验像素非全黑
+                        var nonBlack = 0
+                        for (i in 0..1000) { if (f.rgba[Int64(i) * 4] > 10) { nonBlack += 1 } }
+                        if (nonBlack > 100) { frames += 1000 }  // 标记首帧有效
+                    }
+                }
+                sleep(Duration.millisecond * 30)
+            }
+            let dur = player.durationSec()
+            let t = player.timeSec()
+            player.stop()
+            player.close()
+            "frames=${frames} last=${lastW}x${lastH} dur=${dur}s time=${t}s"
+        } catch (ex5: Exception) {
+            "EXC ${ex5.message}"
+        }
+        File.writeTo(Path(base + "/vlctest.txt"), vmsg.toArray())
+    } catch (ex6: Exception) {
+        File.writeTo(Path(base + "/vlctest.txt"), ("EXC " + ex6.message).toArray())
     }
 }

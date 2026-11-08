@@ -17,6 +17,8 @@ public func cj_app_main(): Int64 {
     // stdx TLS 动态加载系统 openssl（app 命名空间默认搜不到）
     setVariable("STDX_OPENSSL_CRYPTO_FILE", "/system/lib64/platformsdk/libcrypto_openssl.z.so")
     setVariable("STDX_OPENSSL_SSL_FILE", "/system/lib64/platformsdk/libssl_openssl.z.so")
+    setVariable("LANLU_VLC_LOG", "/data/storage/el2/base/files/vlclog.txt")
+    setVariable("LLASS_LOG_FILE", "/data/storage/el2/base/files/asslog.txt")
     // 移植自检（图片/网络/字幕 probe），仅在显式开启时执行
     if ((getVariable("OHOS_SELFTEST") ?? "0") == "1") {
         ohosSelftest(base)

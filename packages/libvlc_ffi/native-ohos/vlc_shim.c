@@ -1,0 +1,243 @@
+// lanlu ohos: libvlc-compatible shim backed by ffmpeg (avformat/avcodec/swscale).
+// Implements the subset of the libvlc C API that libvlc_ffi uses: media open,
+// player play/pause/stop/seek/time/length, video callbacks protocol
+// (format setup + lock/unlock/display) delivering RGBA (RV32) frames, and
+// subtitle-track stubs. Audio is accepted but silent (no OHOS audio yet).
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+#include <stdio.h>
+static FILE* vlc_log(void){ static FILE* f=0; if(!f){ const char* p=getenv("LANLU_VLC_LOG"); if(p) f=fopen(p,"a"); } return f; }
+#define VLOG(...) do{ FILE*_f=vlc_log(); if(_f){ fprintf(_f,__VA_ARGS__); fprintf(_f,"\n"); fflush(_f);} }while(0)
+
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+
+typedef void* InstancePtr;
+typedef void* MediaPtr;
+typedef void* PlayerPtr;
+
+typedef void* (*LockCb)(void*, void**);
+typedef void  (*UnlockCb)(void*, void*, void**);
+typedef void  (*DisplayCb)(void*, void*);
+typedef unsigned (*SetupCb)(void**, char*, unsigned*, unsigned*, unsigned*, unsigned*);
+typedef void  (*CleanupCb)(void*);
+
+typedef struct {
+    char path[1024];
+} VlcMedia;
+
+typedef struct {
+    char path[1024];
+    AVFormatContext* fmt;
+    AVCodecContext* codec;
+    int stream;
+    struct SwsContext* sws;
+    AVPacket* pkt;
+    AVFrame* frm;
+
+    LockCb lock; UnlockCb unlock; DisplayCb display; void* opaque;
+    SetupCb setup; CleanupCb cleanup;
+
+    atomic_int running;      // playing
+    atomic_int paused;
+    atomic_int stop_req;
+    atomic_int seek_ms;      // -1 = none
+    atomic_long position_ms;
+    atomic_long duration_ms;
+    long last_tick_ms;       // pacing clock
+    double next_pts_ms;      // next frame pts to render
+
+    int out_w, out_h;
+    int format_done;         // setup callback invoked
+} VlcPlayer;
+
+static long now_ms(void) {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+InstancePtr libvlc_new(int argc, void* argv) { (void)argc; (void)argv; avformat_network_init(); return (InstancePtr)(uintptr_t)0x11; }
+void libvlc_release(InstancePtr i) { (void)i; }
+
+MediaPtr libvlc_media_new_path(InstancePtr i, const char* path) {
+    (void)i;
+    VlcMedia* m = calloc(1, sizeof(VlcMedia));
+    if (!m) return 0;
+    snprintf(m->path, sizeof m->path, "%s", path ? path : "");
+    return m;
+}
+MediaPtr libvlc_media_new_location(InstancePtr i, const char* loc) { return libvlc_media_new_path(i, loc); }
+void libvlc_media_add_option(MediaPtr m, const char* o) { (void)m; (void)o; }
+void libvlc_media_release(MediaPtr m) { free(m); }
+
+static void* decode_loop(void* arg);
+
+PlayerPtr libvlc_media_player_new_from_media(MediaPtr mp) {
+    VlcMedia* m = (VlcMedia*)mp;
+    if (!m) return 0;
+    VlcPlayer* p = calloc(1, sizeof(VlcPlayer));
+    if (!p) return 0;
+    p->stream = -1;
+    atomic_store(&p->seek_ms, -1);
+    atomic_store(&p->duration_ms, 0);
+    snprintf(p->path, sizeof p->path, "%s", m->path);
+    p->pkt = av_packet_alloc();
+    p->frm = av_frame_alloc();
+    return p;
+}
+void libvlc_media_player_release(PlayerPtr pp) {
+    VlcPlayer* p = (VlcPlayer*)pp;
+    if (!p) return;
+    atomic_store(&p->stop_req, 1);
+    if (p->sws) sws_freeContext(p->sws);
+    if (p->codec) avcodec_free_context(&p->codec);
+    if (p->fmt) avformat_close_input(&p->fmt);
+    if (p->pkt) av_packet_free(&p->pkt);
+    if (p->frm) av_frame_free(&p->frm);
+    free(p);
+}
+
+
+static int open_pipeline(VlcPlayer* p) {
+    if (avformat_open_input(&p->fmt, p->path, NULL, NULL) != 0) return -1;
+    if (avformat_find_stream_info(p->fmt, NULL) < 0) return -1;
+    int idx = av_find_best_stream(p->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (idx < 0) return -1;
+    p->stream = idx;
+    AVStream* st = p->fmt->streams[idx];
+    const AVCodec* dec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!dec) return -1;
+    p->codec = avcodec_alloc_context3(dec);
+    if (!p->codec) return -1;
+    if (avcodec_parameters_to_context(p->codec, st->codecpar) < 0) return -1;
+    if (avcodec_open2(p->codec, dec, NULL) < 0) return -1;
+    if (p->fmt->duration > 0) atomic_store(&p->duration_ms, p->fmt->duration / (AV_TIME_BASE / 1000));
+    p->out_w = p->codec->width ? p->codec->width : 1280;
+    p->out_h = p->codec->height ? p->codec->height : 720;
+    return 0;
+}
+
+static void push_frame(VlcPlayer* p, AVFrame* f) {
+    if (!p->format_done && p->setup) {
+        VLOG("setup called in_w=%d in_h=%d", p->out_w, p->out_h);
+        char chroma[32]; memset(chroma, 0, sizeof chroma);
+        unsigned w = (unsigned)p->out_w, h = (unsigned)p->out_h;
+        unsigned pitches[4] = {0,0,0,0}, lines[4] = {0,0,0,0};
+        void* op = p->opaque;
+        unsigned planes = p->setup(&op, chroma, &w, &h, pitches, lines);
+        if (planes == 0) return;  // engine rejected
+        p->opaque = op;
+        p->out_w = (int)w; p->out_h = (int)h;
+        VLOG("setup ret planes=%u out=%ux%u chroma=%s", planes, w, h, chroma);
+        p->format_done = 1;
+    }
+    if (!p->lock) { VLOG("no lock cb"); return; }
+    void* planes[4] = {0,0,0,0};
+    void* pic = p->lock(p->opaque, planes);
+    if (!planes[0]) { VLOG("lock no plane"); if (p->unlock) p->unlock(p->opaque, pic, planes); return; }
+    int target = AV_PIX_FMT_RGBA;
+    // chroma negotiated by engine is RV32/RGBA family; convert accordingly
+    p->sws = sws_getCachedContext(p->sws, f->width, f->height, f->format,
+                                  p->out_w, p->out_h, target, SWS_BILINEAR, NULL, NULL, NULL);
+    if (p->sws) {
+        uint8_t* dst[4] = { (uint8_t*)planes[0], 0, 0, 0 };
+        int dstlines[4] = { p->out_w * 4, 0, 0, 0 };
+        sws_scale(p->sws, (const uint8_t* const*)f->data, f->linesize, 0, f->height, dst, dstlines);
+    }
+    if (p->unlock) p->unlock(p->opaque, pic, planes);
+    if (p->display) p->display(p->opaque, pic);
+    if (f->pts != AV_NOPTS_VALUE) {
+        AVStream* st = p->fmt->streams[p->stream];
+        long ms = (long)(f->pts * 1000.0 * av_q2d(st->time_base));
+        atomic_store(&p->position_ms, ms);
+    }
+}
+
+// ---- pull model: decode advanced on the caller (Cangjie) thread ----
+// Called from libvlc_media_player_get_time, which the UI tick invokes; running
+// the Cangjie frame callbacks on that thread avoids foreign-thread runtime
+// attach problems entirely.
+static void pump(VlcPlayer* p) {
+    if (!p->fmt || atomic_load(&p->paused)) { p->last_tick_ms = now_ms(); return; }
+    int sk = atomic_exchange(&p->seek_ms, -1);
+    if (sk >= 0) {
+        AVRational tb = av_make_q(1, 1000);
+        avformat_seek_file(p->fmt, p->stream, INT64_MIN,
+            av_rescale_q(sk, tb, p->fmt->streams[p->stream]->time_base), INT64_MAX, 0);
+        avcodec_flush_buffers(p->codec);
+        p->next_pts_ms = (double)sk;
+        p->last_tick_ms = now_ms();
+    }
+    long now = now_ms();
+    if (p->last_tick_ms == 0) p->last_tick_ms = now;
+    double elapsed = (double)(now - p->last_tick_ms);
+    // decode at most ~3 frames of catch-up per tick
+    int budget = 3;
+    while (budget-- > 0) {
+        if (av_read_frame(p->fmt, p->pkt) < 0) { atomic_store(&p->running, 0); break; }
+        if (p->pkt->stream_index != p->stream) { av_packet_unref(p->pkt); continue; }
+        int got = 0;
+        if (avcodec_send_packet(p->codec, p->pkt) == 0) {
+            while (avcodec_receive_frame(p->codec, p->frm) == 0) {
+                if (p->frm->pts != AV_NOPTS_VALUE) {
+                    double ms = p->frm->pts * 1000.0 * av_q2d(p->fmt->streams[p->stream]->time_base);
+                    p->next_pts_ms = ms;
+                    atomic_store(&p->position_ms, (long)ms);
+                }
+                push_frame(p, p->frm);
+                av_frame_unref(p->frm);
+                got = 1;
+                break;  // one frame per packet; pace across ticks
+            }
+        }
+        av_packet_unref(p->pkt);
+        if (got) break;
+    }
+    p->last_tick_ms = now;
+    (void)elapsed;
+}
+
+int32_t libvlc_media_player_play(PlayerPtr pp) {
+    VlcPlayer* p = (VlcPlayer*)pp;
+    if (!p) return -1;
+    if (!p->fmt) { if (open_pipeline(p) != 0) return -1; }
+    atomic_store(&p->running, 1);
+    atomic_store(&p->paused, 0);
+    p->last_tick_ms = 0;
+    return 0;
+}
+void libvlc_media_player_set_pause(PlayerPtr pp, int paused) { VlcPlayer* p=(VlcPlayer*)pp; if(p) atomic_store(&p->paused, paused?1:0); }
+void libvlc_media_player_stop(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(p){ atomic_store(&p->running,0); } }
+int32_t libvlc_media_player_set_time(PlayerPtr pp, int64_t ms) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return -1; atomic_store(&p->seek_ms,(int)ms); return 0; }
+int64_t libvlc_media_player_get_time(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; if(!p) return 0; if(atomic_load(&p->running)) pump(p); return atomic_load(&p->position_ms); }
+int64_t libvlc_media_player_get_length(PlayerPtr pp) { VlcPlayer* p=(VlcPlayer*)pp; return p? atomic_load(&p->duration_ms):0; }
+int32_t libvlc_audio_set_mute(PlayerPtr pp, int m) { (void)pp; (void)m; return 0; }
+int32_t libvlc_audio_set_volume(PlayerPtr pp, int v) { (void)pp; (void)v; return 0; }
+int32_t libvlc_video_get_spu(PlayerPtr pp) { (void)pp; return -1; }
+void* libvlc_video_get_spu_description(PlayerPtr pp) { (void)pp; return 0; }
+int32_t libvlc_video_set_spu(PlayerPtr pp, int id) { (void)pp; (void)id; return -1; }
+void libvlc_track_description_list_release(void* d) { (void)d; }
+
+void libvlc_video_set_callbacks(PlayerPtr pp, LockCb lock, UnlockCb unlock, DisplayCb display, void* opaque) {
+    VlcPlayer* p = (VlcPlayer*)pp;
+    if (!p) return;
+    // keep media path: opaque points to it until now; move to path buffer
+    if (p->opaque && p->opaque != (void*)p->path && !p->lock) {
+        snprintf(p->path, sizeof p->path, "%s", (const char*)p->opaque);
+        free(p->opaque);
+    }
+    p->lock = lock; p->unlock = unlock; p->display = display; p->opaque = opaque;
+}
+void libvlc_video_set_format_callbacks(PlayerPtr pp, SetupCb setup, CleanupCb cleanup) {
+    VlcPlayer* p = (VlcPlayer*)pp;
+    if (!p) return;
+    p->setup = setup; p->cleanup = cleanup;
+}

@@ -18,10 +18,13 @@ export TMPDIR=/workspace/tmp; mkdir -p "$TMPDIR"
 # 1) 结构性 shim（源码在 packages/*/native-ohos，产物进 ohos-stubs / 各包 native 目录）
 "$CN/../packages/vips_ffi/native-ohos/build-ohos.sh" "$RES/ohos-stubs/libvips.so"
 "$CN/../packages/rocksdb_ffi/native-ohos/build-ohos.sh" "$CN/../packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.so"
+"$CN/../packages/libvlc_ffi/native-ohos/build-ohos.sh" "$RES/ohos-stubs/libvlc.so"
 "$CN/../packages/fontkit_ffi/native-ohos/build-ohos.sh" "$CN/../packages/fontkit_ffi/native/target/release/libfontkit_native.so"
 
 # 2) 构建目录：复制 src + 载入 OHOS cjpm 配置（临时产物，可随时删）
-rm -rf "$BUILD"; mkdir -p "$BUILD"
+# .hvigor 由 hvigor 守护进程持有（FUSE 句柄），整体删除会失败：只清生成物
+find "$BUILD" -mindepth 1 -maxdepth 1 ! -name '.hvigor' -exec rm -rf {} + 2>/dev/null || true
+mkdir -p "$BUILD"
 cp -r "$CN/src" "$BUILD/src"
 # build.cj 的内嵌 logo 产物（--skip-script 下需预生成）
 python3 - "$CN" "$BUILD/src" <<'PYEOF'
@@ -38,6 +41,11 @@ with open(out, "w") as f:
 print("embedded_logo.cj:", len(png), "bytes")
 PYEOF
 cp "$HERE/cjpm.toml.ohos" "$BUILD/cjpm.toml"
+
+# 2.5) 生成自检内嵌测试视频
+if [ -f "$HERE/assets/test360.mp4" ]; then
+  python3 "$HERE/gen_video_cj.py" "$HERE/assets/test360.mp4" "$BUILD/src/ohos_selftest_video.cj"
+fi
 
 # 3) 交叉编译引擎（dynamic, @C cj_app_main）
 export CANGJIE_HOME=$OH
