@@ -261,7 +261,7 @@ static void audio_write_cb(OH_AudioRenderer* r, void* user, void* data, int32_t 
     if (stats_enabled()) {
         static long long cb_calls = 0;
         cb_calls++;
-        if ((cb_calls % 200) == 0) {
+        if (cb_calls <= 3 || (cb_calls % 200) == 0) {
             int64_t fw = 0;
             if (p && p->renderer) OH_AudioRenderer_GetFramesWritten(p->renderer, &fw);
             VLOG("audio write cb calls=%lld frames=%lld", cb_calls, (long long)fw);
@@ -350,6 +350,7 @@ static void* audio_loop(void* arg) {
     } else {
         VLOG("audio: open_input/find_stream_info failed");
     }
+    VLOG("audio loop exit: astop=%d", p->astop);
     if (swr) swr_free(&swr);
     if (ac) avcodec_free_context(&ac);
     if (af) avformat_close_input(&af);
