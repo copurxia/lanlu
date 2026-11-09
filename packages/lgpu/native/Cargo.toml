@@ -1,0 +1,19 @@
+[package]
+name = "lanlu-lgpu-native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "L 层渲染器：wgpu 后端，导出 C ABI 给 Cangjie 使用（对标 Chromium ozone 的渲染部分）"
+
+[lib]
+name = "lgpu_native"
+crate-type = ["staticlib"]
+
+# 说明：wgpu 依赖在后续里程碑接入（P2）。P0 阶段先证明
+# "Rust → aarch64-linux-ohos staticlib → HAP → Cangjie FFI 调用" 这条链路可用，
+# 因此本 crate 刻意保持零依赖。
+[dependencies]
+
+[profile.release]
+opt-level = 2
+panic = "abort"

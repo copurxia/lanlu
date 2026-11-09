@@ -19,6 +19,7 @@ export TMPDIR=/workspace/tmp; mkdir -p "$TMPDIR"
 "$CN/../packages/vips_ffi/native-ohos/build-ohos.sh" "$RES/ohos-stubs/libvips.so"
 "$CN/../packages/rocksdb_ffi/native-ohos/build-ohos.sh" "$CN/../packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.so"
 "$CN/../packages/libvlc_ffi/native-ohos/build-ohos.sh" "$RES/ohos-stubs/libvlc.so"
+bash "$CN/../packages/lgpu/native-ohos/build-ohos.sh"
 "$CN/../packages/fontkit_ffi/native-ohos/build-ohos.sh" "$CN/../packages/fontkit_ffi/native/target/release/libfontkit_native.so"
 
 # 1.5) webview(Blitz) 交叉静态库（需 rust;已构建则就位）

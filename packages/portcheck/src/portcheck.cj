@@ -78,9 +78,35 @@ public func runClipboardProbeIfRequested(): Unit {
     } catch (_) {}
 }
 
+// L 层渲染器自检：C 调用 lgpu_self_check() 并把版本落 $HOME/lgpu.txt。
+// P0 阶段用来证明 "Rust staticlib → HAP → Cangjie FFI" 这条链路真的通了。
+foreign {
+    func lgpu_self_check(): Int32
+    func lgpu_version(): CString
+}
+
+func runLgpuProbe(): Unit {
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+        return
+    }
+    let base = getVariable("HOME") ?? "."
+    var out = ""
+    try {
+        let rc = unsafe { lgpu_self_check() }
+        let ver = unsafe { lgpu_version() }
+        out = "self_check=" + rc.toString() + "\nversion=" + ver.toString() + "\n"
+    } catch (e: Exception) {
+        out = "lgpu probe failed: " + e.toString() + "\n"
+    }
+    try {
+        File.writeTo(Path(base + "/lgpu.txt"), out.toArray())
+    } catch (_) {}
+}
+
 public func runIfEnabled(): Unit {
     runProbeIfRequested();
     runClipboardProbeIfRequested();
+    runLgpuProbe();
     if (!enabled()) {
         return
     }
