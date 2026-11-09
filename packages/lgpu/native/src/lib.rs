@@ -29,6 +29,21 @@ thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
+/// 第一条 wgpu 校验错误（诊断用；不被后续 set_error 覆盖）
+static GPU_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+fn set_gpu_error(msg: String) {
+    if let Ok(mut g) = GPU_ERROR.lock() {
+        if g.is_none() {
+            *g = Some(msg);
+        }
+    }
+}
+
+fn gpu_error() -> String {
+    GPU_ERROR.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
+}
+
 fn set_error(msg: impl Into<String>) {
     let s = msg.into();
     LAST_ERROR.with(|e| *e.borrow_mut() = CString::new(s).ok());
@@ -376,7 +391,7 @@ pub extern "C" fn lgpu_surface_init(surface: *mut c_void, width: u32, height: u3
     };
     // 把所有未捕获的 wgpu 校验错误/设备丢失记到 last_error，真机上才看得到原因
     device.on_uncaptured_error(std::sync::Arc::new(|err: wgpu::Error| {
-        set_error(format!("wgpu uncaptured: {err}"));
+        set_gpu_error(format!("{err}"));
     }));
     let adapter_name = adapter.get_info().name;
     device.set_device_lost_callback(move |reason, msg| {
@@ -1498,36 +1513,77 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
     if font.is_null() {
         return 0;
     }
-    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let w = 200u32;
-    let h = 120u32;
-    let fmt = ctx
-        .config
-        .as_ref()
-        .map(|c| c.format)
-        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+    let (w, h, fmt) = {
+        let ctx = unsafe { &*(surface as *const SurfaceCtx) };
+        let fmt = ctx
+            .config
+            .as_ref()
+            .map(|c| c.format)
+            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+        (200u32, 120u32, fmt)
+    };
 
-    // 复用当前帧的实例列表：先清空，再用 text_draw 灌入字形四边形
-    ctx.instances.clear();
-    ctx.tex_instances.clear();
+    // 清空当前帧的实例列表（短借用）
+    {
+        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+        ctx.instances.clear();
+        ctx.tex_instances.clear();
+    }
+
     let size = 48.0f32;
     let sample: &[u8] = b"AA";
     let advance = lgpu_text_draw(
         surface, font, sample.as_ptr(), sample.len(), 10.0, 10.0, size, 1.0, 1.0, 1.0, 1.0,
     );
 
-    let (Some(device), Some(queue), Some(tex_pipeline), Some(bind_group)) =
-        (ctx.device.as_ref(), ctx.queue.as_ref(), ctx.tex_pipeline.as_ref(), ctx.bind_group.as_ref())
-    else {
-        lgpu_font_destroy(font);
-        return 0;
+    // 取渲染需要的东西（克隆句柄），随后**不再**持有 ctx 借用
+    let (device, queue, tex_pipeline, bind_group, screen_buffer, tex_items, quad_count) = {
+        let ctx = unsafe { &*(surface as *const SurfaceCtx) };
+        match (
+            ctx.device.clone(),
+            ctx.queue.clone(),
+            ctx.tex_pipeline.clone(),
+            ctx.bind_group.clone(),
+            ctx.screen_buffer.clone(),
+        ) {
+            (Some(d), Some(q), Some(p), Some(b), Some(sb)) => {
+                let items = ctx.tex_instances.clone();
+                let n = items.len();
+                (d, q, p, b, sb, items, n)
+            }
+            _ => {
+                lgpu_font_destroy(font);
+                return 0;
+            }
+        }
     };
-    let tex_items: Vec<(gpu::TexInstance, *mut c_void)> = ctx.tex_instances.clone();
 
-    // 直接把纹理实例渲染到离屏（文本走纹理管线）
+    // 对照探针：一张已知的纯白纹理，画在 (120,10)-(160,50)。
+    // 若它可见而字形不可见，说明纹理管线正常、问题在图集内容。
+    let white_items: Vec<(gpu::TexInstance, *mut c_void)> = {
+        let tex = lgpu_texture_create(surface, 8, 8);
+        if tex.is_null() {
+            Vec::new()
+        } else {
+            let px8 = vec![255u8; 8 * 8 * 4];
+            lgpu_texture_upload(surface, tex, 0, 0, 8, 8, px8.as_ptr(), 8 * 4);
+            let mut v = tex_items.clone();
+            v.push((
+                gpu::TexInstance {
+                    dst: [120.0, 10.0, 40.0, 40.0],
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    tint: [1.0, 1.0, 1.0, 1.0],
+                    clip: [0.0, 0.0, 0.0, 0.0],
+                    color2: [1.0, 1.0, 1.0, 1.0],
+                },
+                tex,
+            ));
+            v
+        }
+    };
+
     let Some(buf) = render_tex_to_texture(
-        device, queue, tex_pipeline, bind_group, ctx,
-        w, h, fmt, &tex_items,
+        &device, &queue, &tex_pipeline, &bind_group, &screen_buffer, w, h, fmt, &white_items,
     ) else {
         lgpu_font_destroy(font);
         return 0;
@@ -1546,13 +1602,19 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
     }
     lgpu_font_destroy(font);
     if x0 == u32::MAX {
-        set_error(format!("selftest_text: nothing rendered (advance={advance:.1})"));
+        set_error(format!(
+            "selftest_text: nothing rendered (advance={advance:.1} quads={quad_count} known_white={} gpu_err={})",
+            px(&buf, w, 140, 30)[0],
+            gpu_error()
+        ));
         return 0;
     }
     let bw = (x1 - x0 + 1).min(255);
     let bh = (y1 - y0 + 1).min(255);
     set_error(format!(
-        "selftest_text: bbox=({x0},{y0})-({x1},{y1}) size=48 advance={advance:.1} glyph_h={bh}"
+        "selftest_text: bbox=({x0},{y0})-({x1},{y1}) size=48 advance={advance:.1} glyph_h={bh} quads={quad_count} known_white={} gpu_err={}",
+        px(&buf, w, 140, 30)[0],
+        gpu_error()
     ));
     ((bh as i32) << 8) | bw as i32
 }
@@ -1564,7 +1626,7 @@ fn render_tex_to_texture(
     queue: &wgpu::Queue,
     pipeline: &wgpu::RenderPipeline,
     bind_group: &wgpu::BindGroup,
-    ctx: &SurfaceCtx,
+    screen_buffer: &wgpu::Buffer,
     width: u32,
     height: u32,
     target_format: wgpu::TextureFormat,
@@ -1581,7 +1643,6 @@ fn render_tex_to_texture(
         view_formats: &[],
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    let screen_buffer = ctx.screen_buffer.as_ref()?;
     let screen: [f32; 12] = [
         width as f32, height as f32, 0.0, 0.0,
         1.0, 1.0, 0.0, 0.0,

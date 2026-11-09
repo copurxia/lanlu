@@ -157,7 +157,6 @@ struct Inst {
   @location(1) uv: vec4f,
   @location(2) tint: vec4f,
   @location(3) clip: vec4f,
-  @location(4) color2: vec4f,
 };
 
 struct VsOut {
@@ -188,10 +187,7 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   out.tint = inst.tint;
   out.clip = inst.clip;
   out.world = world;
-  out.color2 = inst.color2;
   // 渐变用的归一化位置（0..1），在矩形内
-  out.pixel_local = vec2f((p.x - inst.rect.x) / max(inst.rect.z, 1.0),
-                          (p.y - inst.rect.y) / max(inst.rect.w, 1.0));
   return out;
 }
 
