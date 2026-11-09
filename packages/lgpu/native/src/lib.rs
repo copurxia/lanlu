@@ -1800,3 +1800,40 @@ fn render_tex_to_texture(
     readback.unmap();
     Some(out)
 }
+
+// ---- 窗口：由 surfaceId 创建原生窗口（lwindow 用）---------------------------
+
+/// OHOS 的 NDK 接口：从 XComponent 的 surfaceId 拿到 OHNativeWindow*。
+/// 返回的窗口由系统持有，调用方只借用；surface 存活期间必须保持有效。
+extern "C" {
+    fn OH_NativeWindow_CreateNativeWindowFromSurfaceId(
+        surface_id: u64,
+        window: *mut *mut c_void,
+    ) -> i32;
+}
+
+/// 由 surfaceId 创建 OHNativeWindow*（失败返回 null）。
+/// lwindow 在**自己的线程**里用它建窗口，再把窗口交给 lgpu_surface_create，
+/// 全程不跨边界传指针（真机验证过：跨线程传窗口指针会 SIGSEGV）。
+#[no_mangle]
+pub extern "C" fn lgpu_native_window_from_surface_id(surface_id: u64) -> *mut c_void {
+    let mut window: *mut c_void = std::ptr::null_mut();
+    let rc = unsafe { OH_NativeWindow_CreateNativeWindowFromSurfaceId(surface_id, &mut window) };
+    if rc != 0 || window.is_null() {
+        set_error(format!(
+            "OH_NativeWindow_CreateNativeWindowFromSurfaceId failed: rc={rc} id={surface_id}"
+        ));
+        return std::ptr::null_mut();
+    }
+    window
+}
+
+/// 一步到位：surfaceId → wgpu surface 句柄。
+#[no_mangle]
+pub extern "C" fn lgpu_surface_create_from_id(surface_id: u64) -> *mut c_void {
+    let window = lgpu_native_window_from_surface_id(surface_id);
+    if window.is_null() {
+        return std::ptr::null_mut();
+    }
+    lgpu_surface_create(window)
+}

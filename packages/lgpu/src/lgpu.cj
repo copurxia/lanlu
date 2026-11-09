@@ -15,6 +15,7 @@ foreign {
     func lgpu_adapter_summary(out: CPointer<UInt8>, outLen: Int64): Int32
 
     func lgpu_surface_create(nativeWindow: CPointer<UInt8>): CPointer<UInt8>
+    func lgpu_surface_create_from_id(surfaceId: UInt64): CPointer<UInt8>
     func lgpu_surface_init(surface: CPointer<UInt8>, width: UInt32, height: UInt32): Int32
     func lgpu_surface_resize(surface: CPointer<UInt8>, width: UInt32, height: UInt32): Int32
     func lgpu_surface_destroy(surface: CPointer<UInt8>): Unit
@@ -121,6 +122,18 @@ public class Surface <: Resource {
             throw LgpuException("adopt: null surface handle")
         }
         return Surface(raw)
+    }
+
+    /// 由 XComponent 的 surfaceId 直接建 surface（lwindow 自建窗口用：
+    /// 全程在本线程完成，不跨边界传窗口指针）。
+    public static func fromSurfaceId(surfaceId: Int64): Surface {
+        initialize()
+        let h = unsafe { lgpu_surface_create_from_id(UInt64(surfaceId)) }
+        if (h.isNull()) {
+            let detail = unsafe { lgpu_last_error().toString() }
+            throw LgpuException("lgpu_surface_create_from_id failed: " + detail)
+        }
+        return Surface(h)
     }
 
     /// 建 device/queue 并配置 swapchain（尺寸为物理像素）。

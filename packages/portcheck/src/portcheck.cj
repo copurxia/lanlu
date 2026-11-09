@@ -4,9 +4,11 @@ package portcheck
 // 便于 `hdc file recv` 取回核对。桌面构建默认关闭，行为与之前一致。
 import std.env.getVariable
 import std.fs.{File, Path}
+import std.convert.*
 import libavformat_ffi.probeSubtitleStreams
 import sdl.input.Clipboard
 import lgpu
+import sdl
 
 public func enabled(): Bool {
     (getVariable("OHOS_SELFTEST") ?? "0") == "1"
@@ -137,6 +139,7 @@ public func runIfEnabled(): Unit {
     runClipboardProbeIfRequested();
     runLgpuProbe();
     runLgpuCjProbe();
+    runLwindowProbeIfRequested();
     if (!enabled()) {
         return
     }
@@ -144,4 +147,52 @@ public func runIfEnabled(): Unit {
     ohosImageSelftest(base)
     ohosNetSelftest(base)
     ohosMediaSelftest(base)
+}
+
+// lwindow 自建窗口探针：surfaceId 由 ArkTS 写进进程环境（LANLU_SURFACE_ID），
+// Cangjie 在**自己的线程**里建窗口 + surface 并画一帧，全程不跨边界传指针。
+func runLwindowProbeIfRequested(): Unit {
+    if ((getVariable("LANLU_PROBE_LWINDOW") ?? "0") != "1") {
+        return
+    }
+    let base = getVariable("HOME") ?? "."
+    var sidText = ""
+    var waited = 0
+    while (waited < 200) {
+        sidText = getVariable("LANLU_SURFACE_ID") ?? ""
+        if (sidText.size > 0) {
+            break
+        }
+        sleep(Duration.millisecond * 100)
+        waited++
+    }
+    var out = ""
+    if (sidText.size == 0) {
+        out = "lwindow probe: no surface id"
+    } else {
+        var sid: Int64 = 0
+        try {
+            sid = Int64.parse(sidText)
+        } catch (_) {
+            sid = 0
+        }
+        try {
+            let surface = lgpu.Surface.fromSurfaceId(sid)
+            surface.configure(240, 160)
+            let font = lgpu.Font.load("/system/fonts/HarmonyOS_Sans.ttf")
+            let canvas = lgpu.LgpuCanvas(surface, font)
+            surface.beginFrame(0.05, 0.07, 0.14, 1.0)
+            canvas.fillRoundedRect(sdl.Rect(8.0, 8.0, 120.0, 30.0), 8.0, sdl.Color(0xE8, 0xB0, 0x4B, 0xFF))
+            canvas.fillCircle(200.0, 30.0, 16.0, sdl.Color.rgb(80, 200, 255))
+            canvas.strokeLine(8.0, 120.0, 220.0, 120.0, sdl.Pen(width: 3.0, color: sdl.Color.rgb(255, 255, 255)))
+            canvas.text("lwindow+lgpu", 8.0, 60.0, sdl.Color.rgb(255, 255, 255), pointSize: 18.0)
+            surface.endFrame()
+            out = "lwindow probe: drawn ok sid=" + sidText + " waited=" + waited.toString()
+        } catch (e: Exception) {
+            out = "lwindow probe failed: " + e.toString()
+        }
+    }
+    try {
+        File.writeTo(Path(base + "/lwindow.txt"), out.toArray())
+    } catch (_) {}
 }
