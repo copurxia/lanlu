@@ -102,5 +102,8 @@ echo "HAP: $HAP_OUT"
 
 # 5) 静态验证门禁（分层 / 依赖闭包 / 关键符号）——失败即构建失败
 if [ "${CN_OHOS_SKIP_VERIFY:-0}" != "1" ]; then
-  CN="$CN" bash "$CN/../tools/verify-ohos.sh" "$HAP_OUT" || { echo "[FAIL] 静态验证未通过"; exit 1; }
+  # hapgen 阶段通常产出 unsigned（签名在 tools/sign-reuse 那步），两者任选其一
+  GATE_HAP="$HAP_OUT"
+  [ -f "$GATE_HAP" ] || GATE_HAP="$BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-unsigned.hap"
+  CN="$CN" bash "$CN/../tools/verify-ohos.sh" "$GATE_HAP" || { echo "[FAIL] 静态验证未通过"; exit 1; }
 fi

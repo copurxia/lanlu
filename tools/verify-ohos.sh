@@ -3,7 +3,16 @@
 # 用法: bash tools/verify-ohos.sh [<signed.hap>]
 set -uo pipefail
 cd "$(dirname "$0")/.."
-HAP="${1:-client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap}"
+OUT=client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default
+HAP="${1:-}"
+if [ -z "$HAP" ]; then
+  # 优先用签名版（真机安装用），构建阶段可能只有 unsigned
+  for cand in "$OUT/entry-default-signed.hap" "$OUT/entry-default-unsigned.hap"; do
+    [ -f "$cand" ] && HAP="$cand" && break
+  done
+fi
+[ -f "$HAP" ] || { echo "[FAIL] 找不到 HAP（先跑 build-ohos.sh）"; exit 1; }
+echo "检查 HAP: $HAP"
 fail=0
 
 echo "== 1/3 分层守卫 =="
