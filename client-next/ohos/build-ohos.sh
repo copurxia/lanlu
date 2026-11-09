@@ -56,7 +56,8 @@ fi
 
 # 2.6) 可选调试种子 KV（CN_OHOS_SEED_FILE=lanlu_kv.bin → src/ohos_seed.cj）
 if [ -n "${CN_OHOS_SEED_FILE:-}" ] && [ -f "${CN_OHOS_SEED_FILE}" ]; then
-  python3 "$HERE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$BUILD/src/ohos_seed.cj"
+  # 种子属于平台层：lwindow 首次启动时投放，生成到包内而非业务 src
+  python3 "$HERE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$CN/../packages/lwindow/src/ohos_seed.cj"
 fi
 
 # 3) 交叉编译引擎（dynamic, @C cj_app_main）

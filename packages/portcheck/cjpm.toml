@@ -1,0 +1,26 @@
+[package]
+cjc-version = "1.0.5"
+name = "portcheck"
+version = "0.1.0"
+output-type = "static"
+description = "移植自检（图片/网络/媒体/字幕）：跨平台代码，按 OHOS_SELFTEST=1 触发，结果写文件便于 hdc 取回。"
+
+[dependencies]
+vips_ffi = { path = "../vips_ffi" }
+qwest = { path = "../qwest" }
+libavformat_ffi = { path = "../libavformat_ffi" }
+libass_ffi = { path = "../libass_ffi" }
+libvlc_ffi = { path = "../libvlc_ffi" }
+webview = { path = "../webview" }
+fontkit_ffi = { path = "../fontkit_ffi" }
+
+# stdx 以二进制依赖方式引入（与 client-next / qwest 同款）。
+[target.x86_64-unknown-linux-gnu.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+[target.x86_64-w64-mingw32.bin-dependencies]
+  path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+[target.aarch64-linux-ohos]
+compile-option = "--sysroot=/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot -B/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"
+link-option = "-L /workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"

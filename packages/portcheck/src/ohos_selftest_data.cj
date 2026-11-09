@@ -1,4 +1,4 @@
-package lanlu_client_next
+package portcheck
 
 // 内嵌 30KB WebP 样例（用于 OHOS 图片解码自检）
 public let WEBP_SAMPLE: Array<UInt8> = [

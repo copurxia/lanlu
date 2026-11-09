@@ -7,6 +7,8 @@ output-type = "executable"
 
 [dependencies]
 cui = { path = "../packages/cangjie-gui" }
+lwindow = { path = "../packages/lwindow" }
+portcheck = { path = "../packages/portcheck" }
 vips_ffi = { path = "../packages/vips_ffi" }
 libvlc_ffi = { path = "../packages/libvlc_ffi" }
 webview = { path = "../packages/webview" }
@@ -37,3 +39,16 @@ link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/nativ
 link-option = "-L \"${MINGW_LIBRARY_PATH}\" -L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lvlc -lrocksdb -lstdc++ -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -lass -ldwrite -ld2d1 -lgdi32 -luser32 -luserenv -ladvapi32 -lole32 -loleaut32 -lbcrypt -lcrypt32 -lws2_32 -lntdll -lgcc_s --subsystem windows"
   [target.x86_64-w64-mingw32.bin-dependencies]
     path-option = [ "${CANGJIE_STDX_PATH}" ]
+
+# --- OHOS target metadata (migration WIP; renderer -> SDL3) ---
+[package.metadata.ohos]
+app-name = "Lanlu Client Next"
+bundle-name = "com.lanlu.clientnext"
+version-code = 1000000
+api-level = 26
+device-types = ["2in1"]
+module-name = "entry"
+shim-module = "lanlu_client_next_shim"
+entry-ability = "EntryAbility"
+page = "pages/Index"
+ui = "xcomponent"

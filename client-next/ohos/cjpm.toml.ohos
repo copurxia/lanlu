@@ -15,10 +15,12 @@ fontkit_ffi = { path = "../../../packages/fontkit_ffi" }
 qwest = { path = "../../../packages/qwest" }
 libavformat_ffi = { path = "../../../packages/libavformat_ffi" }
 libass_ffi = { path = "../../../packages/libass_ffi" }
+lwindow = { path = "../../../packages/lwindow" }
+portcheck = { path = "../../../packages/portcheck" }
 
 [package.metadata.ohos]
 app-name = "ClientNext"
-bundle-name = "com.example.clientnext"
+bundle-name = "com.example.cmakehap"
 version-code = 1000000
 api-level = 26
 device-types = ["2in1", "phone"]

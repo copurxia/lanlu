@@ -8,6 +8,8 @@ import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
 import std.time.MonoTime
 import webview.warmup
+import lwindow.{LWINDOW_PLATFORM, LWindowPlatform, initialize as lwindowInitialize}
+import portcheck.runIfEnabled
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
 func rootView(model: AppModel): Unit {
@@ -310,7 +312,17 @@ public func runApp(): Int64 {
     return 0
 }
 
-// 标准入口：Linux/Windows 直接跑 runApp；OHOS 由 @C cj_app_main（src/ohos_entry.cj）调 runApp。
+// 平台入口（SDLT3 libmain 的 SDL_main 经 Cangjie runtime 调用）。
+// 业务层不含任何平台差异：平台环境准备由 lwindow 适配层负责，移植自检由 portcheck 负责。
+@C
+public func cj_app_main(): Int64 {
+    lwindowInitialize()
+    runIfEnabled()
+    return runApp()
+}
+// 桌面入口（Linux/Windows/macOS）：同样只调平台无关 API。
 main(): Int64 {
+    lwindowInitialize()
+    runIfEnabled()
     return runApp()
 }

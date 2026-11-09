@@ -1,0 +1,8 @@
+[package]
+cjc-version = "1.0.5"
+name = "lwindow"
+version = "0.1.0"
+output-type = "static"
+description = "Lanlu 平台适配层（对标 Chromium ui/ozone）：进程环境/路径/字体/窗口动作/对话框/输入 的平台差异全部收敛于此，业务层与 cui 只见跨平台 API。"
+
+[dependencies]

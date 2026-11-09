@@ -1,4 +1,4 @@
-package lanlu_client_next
+package portcheck
 
 // OHOS 移植自检实现（仅在 OHOS_SELFTEST=1 时由 ohos_entry 调用）。
 import std.env.getVariable
@@ -10,7 +10,7 @@ import libavformat_ffi.*
 import libass_ffi.*
 import libvlc_ffi.{VlcPlayer}
 import webview.{WebviewSession, HtmlFrame, warmup as wvWarmup}
-import lanlu_client_next.ui.EMBEDDED_LOGO_PNG
+// 自检图片由本包自带（selftest_asset.cj）
 
 private func decodeMsg(p: String): String {
     let fn = unsafe { LibC.mallocCString(p) }
@@ -33,7 +33,7 @@ func ohosImageSelftest(base: String): Unit {
         let n = unsafe { LibC.mallocCString("lanlu-selftest") }
         let rc = VipsApi.initialize(n)
         unsafe { LibC.free(n) }
-        File.writeTo(Path(base + "/vt.png"), EMBEDDED_LOGO_PNG)
+        File.writeTo(Path(base + "/vt.png"), SELFTEST_PNG)
         File.writeTo(Path(base + "/vt.webp"), WEBP_SAMPLE)
         let m1 = decodeMsg(base + "/vt.png")
         let m2 = decodeMsg(base + "/vt.webp")

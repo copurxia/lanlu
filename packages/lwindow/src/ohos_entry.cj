@@ -1,14 +1,11 @@
-package lanlu_client_next
+package lwindow
 
-// OHOS 入口：由 SDL3 libmain 的 SDL_main 经 Cangjie runtime 加载后调用。
-// 仅做平台环境准备，然后复用与应用入口完全相同的 runApp()——
-// 本文件在 Linux/Windows 构建中同样参与编译（@C 导出未被调用，无副作用）。
+// OHOS 后端：平台环境准备（对标 Chromium ui/ozone 的 platform_impl）。
+// 由 lwindow 的平台选择逻辑在启动时调用；业务层只看到 LWindow.init()。
 import std.env.{getVariable, setVariable}
 import std.fs.{Directory, File, Path}
-import lanlu_client_next.ui.EMBEDDED_LOGO_PNG
 
-@C
-public func cj_app_main(): Int64 {
+func initPlatformOhos(): Unit {
     let base = "/data/storage/el2/base/files"
     setVariable("HOME", base)
     setVariable("XDG_CONFIG_HOME", base + "/.config")
@@ -44,17 +41,33 @@ public func cj_app_main(): Int64 {
             }
         } catch (_) {}
     }
-    // 移植自检（图片/网络/字幕 probe），仅在显式开启时执行
-    if ((getVariable("OHOS_SELFTEST") ?? "0") == "1") {
-        ohosSelftest(base)
+    // 测试钩子：$HOME/lanlu_env.txt（每行 KEY=VALUE，# 注释）注入进程环境变量。
+    // ArkTS 侧无法给应用进程设置环境变量，联调/自动化（如 LANLU_BENCH_*）需要这条通道。
+    // 文件不存在即空操作，对正常使用无影响。
+    // 优先设备侧可写目录 /data/local/tmp（hdc 可直接投放），其次应用沙箱内。
+    // File 没有 exists，用读取失败来区分。
+    var envText = ""
+    try {
+        envText = String.fromUtf8(File.readFrom(Path("/data/local/tmp/lanlu_env.txt")))
+    } catch (_) {
+        try {
+            envText = String.fromUtf8(File.readFrom(Path(base + "/lanlu_env.txt")))
+        } catch (_) {}
     }
-    return runApp()
+    if (envText.size > 0) {
+        for (line0 in envText.split("\n")) {
+            let line = line0.trimAscii()
+            if (line.size == 0 || line.startsWith("#")) {
+                continue
+            }
+            match (line.indexOf("=")) {
+                case Some(eq) =>
+                    if (eq > 0 && eq + 1 < line.size) {
+                        setVariable(line[0..eq], line[eq + 1..line.size])
+                    }
+                case None => ()
+            }
+        }
+    }
 }
 
-// 移植自检：解码内嵌 PNG/WebP、HTTP/HTTPS 回环、mkv 字幕探测、ASS 渲染。
-// 结果写入应用 files 目录（vipstest.txt/net.txt/net2.txt/avtest.txt/asstest.txt）。
-func ohosSelftest(base: String): Unit {
-    ohosImageSelftest(base)
-    ohosNetSelftest(base)
-    ohosMediaSelftest(base)
-}
