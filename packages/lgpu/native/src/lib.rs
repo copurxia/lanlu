@@ -360,6 +360,14 @@ pub extern "C" fn lgpu_surface_init(surface: *mut c_void, width: u32, height: u3
         alpha_mode: caps.alpha_modes[0],
         view_formats: vec![],
     };
+    // 把所有未捕获的 wgpu 校验错误/设备丢失记到 last_error，真机上才看得到原因
+    device.on_uncaptured_error(std::sync::Arc::new(|err: wgpu::Error| {
+        set_error(format!("wgpu uncaptured: {err}"));
+    }));
+    let adapter_name = adapter.get_info().name;
+    device.set_device_lost_callback(move |reason, msg| {
+        set_error(format!("device lost ({reason:?}) on {adapter_name}: {msg}"));
+    });
     ctx.surface.configure(&device, &config);
     ctx.device = Some(device);
     ctx.queue = Some(queue);
@@ -993,6 +1001,7 @@ fn render_to_texture(
     xform_offset: [f32; 2],
     width: u32,
     height: u32,
+    target_format: wgpu::TextureFormat,
     instances: &[gpu::RectInstance],
 ) -> Option<Vec<u8>> {
 
@@ -1002,7 +1011,8 @@ fn render_to_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        // 必须与管线 color target 的格式一致（= surface 格式），否则整个 pass 会被丢弃
+        format: target_format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
@@ -1073,12 +1083,15 @@ fn render_to_texture(
         },
         wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
     );
-    queue.submit(Some(encoder.finish()));
+    let submission = queue.submit(Some(encoder.finish()));
 
     let slice = readback.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    // wgpu 30: PollType::Wait 带字段；用 wait_indefinitely() 构造器
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    // 必须等**自己这次**提交完成；wait_indefinitely 只等"最近一次"，连续提交时会读到未写入的缓冲。
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission),
+        timeout: None,
+    });
     let data = match slice.get_mapped_range() {
         Ok(d) => d,
         Err(e) => {
@@ -1116,27 +1129,11 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
     let ctx = unsafe { &*(surface as *const SurfaceCtx) };
     let w = 200u32;
     let h = 120u32;
-    let white = [1.0, 1.0, 1.0, 1.0];
-    let no_clip = [0.0, 0.0, 0.0, 0.0];
-
-    let plain_a = gpu::RectInstance {
-        rect: [10.0, 10.0, 40.0, 20.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-        params: [0.0, 0.0, 0.0, 0.0],
-        clip: [0.0, 0.0, 0.0, 0.0],
-    };
-    let plain_b = gpu::RectInstance {
-        rect: [10.0, 50.0, 40.0, 20.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-        params: [0.0, 0.0, 0.0, 0.0],
-        clip: [0.0, 0.0, 0.0, 0.0],
-    };
-    let clipped = gpu::RectInstance {
-        rect: [10.0, 90.0, 40.0, 20.0],
-        color: [1.0, 1.0, 1.0, 1.0],
-        params: [0.0, 0.0, 0.0, 0.0],
-        clip: [10.0, 90.0, 40.0, 20.0],   // 恰好等于矩形：应完整可见
-    };
+    let fmt = ctx
+        .config
+        .as_ref()
+        .map(|c| c.format)
+        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
 
     let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(screen_buffer)) = (
         ctx.device.as_ref(),
@@ -1148,55 +1145,45 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         return 1 << 2;
     };
 
-    // 探针 A：两个不带裁剪的实例（验证多实例批次）
+    // 单探针：一个 100x20 的白条，裁剪到左侧 60px。
+    // 期望可见包围盒 = (20, 40) - (79, 59)；右半边必须不可见。
+    let inst = gpu::RectInstance {
+        rect: [20.0, 40.0, 100.0, 20.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [20.0, 40.0, 60.0, 100.0],   // 高度故意放大：若可见高度仍被压到 12，说明问题不在 scissor
+    };
+
     let Some(buf) = render_to_texture(
         device, queue, pipeline, bind_group, screen_buffer,
-        [1.0, 1.0], [0.0, 0.0], w, h, &[plain_a, plain_b],
+        [1.0, 1.0], [0.0, 0.0], w, h, fmt, &[inst],
     ) else {
         return 1 << 2;
     };
-    let a1 = px(&buf, w, 20, 20)[0];
-    let a2 = px(&buf, w, 20, 60)[0];
 
-    // 探针 B：单实例 + 与之相同的裁剪矩形（验证 scissor 是否把内容裁没了）
-    let Some(buf2) = render_to_texture(
-        device, queue, pipeline, bind_group, screen_buffer,
-        [1.0, 1.0], [0.0, 0.0], w, h, &[clipped],
-    ) else {
-        return 1 << 2;
-    };
-    let b1 = px(&buf2, w, 20, 100)[0];
-
-    // 探针 C：变换
-    let xform_inst = gpu::RectInstance {
-        rect: [10.0, 10.0, 20.0, 20.0],
-        color: [0.0, 1.0, 0.0, 1.0],
-        params: [0.0, 0.0, 0.0, 0.0],
-        clip: [0.0, 0.0, 0.0, 0.0],
-    };
-    let Some(buf3) = render_to_texture(
-        device, queue, pipeline, bind_group, screen_buffer,
-        [1.0, 1.0], [100.0, 0.0], w, h, &[xform_inst],
-    ) else {
-        return 1 << 2;
-    };
-    let shifted = px(&buf3, w, 120, 20)[1];
-    let origin = px(&buf3, w, 20, 20)[1];
-
-    let mut fail = 0;
-    if a1 < 200 || a2 < 200 {
-        fail |= 1;
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    for y in 0..h {
+        for x in 0..w {
+            if px(&buf, w, x, y)[0] > 60 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
     }
-    if b1 < 200 {
-        fail |= 2;
+    if x0 == u32::MAX {
+        set_error(format!("selftest: nothing rendered (fmt={fmt:?})"));
+        return 1;
     }
-    if shifted < 200 || origin > 40 {
-        fail |= 4;
-    }
-
+    // 允许 2px 抗锯齿误差
+    let ok = x0 <= 22 && y0 <= 42 && x1 >= 77 && x1 <= 82 && y1 >= 57 && y1 <= 61;
+    // 期望：x 被裁到 20..79，y 完整 40..59
+    let fail = if ok { 0 } else { 1 };
     set_error(format!(
-        "selftest diag: plain2_a={a1} plain2_b={a2} clip_eq_rect={b1} g_shifted={shifted} g_origin={origin} fail={fail}"
+        "selftest: visible bbox=({x0},{y0})-({x1},{y1}) expect (20,40)-(79,59) clip_ok={}",
+        ok
     ));
-    (fail & 0xFF) | ((a1 as i32) << 8) | ((b1 as i32) << 16) | (((shifted >> 4) as i32) << 24)
+    fail
 }
 
