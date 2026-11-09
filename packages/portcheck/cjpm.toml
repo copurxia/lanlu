@@ -15,6 +15,7 @@ webview = { path = "../webview" }
 fontkit_ffi = { path = "../fontkit_ffi" }
 sdl = { path = "../cangjie-gui/sdl" }
 lgpu = { path = "../lgpu" }
+lwindow = { path = "../lwindow" }
 
 # 备注：host 构建的 stdx 路径由根包（client-next）的 bin-dependencies 提供，本包不重复声明。
 [target.aarch64-linux-ohos]

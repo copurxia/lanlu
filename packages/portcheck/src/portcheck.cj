@@ -8,6 +8,7 @@ import std.convert.*
 import libavformat_ffi.probeSubtitleStreams
 import sdl.input.Clipboard
 import lgpu
+import lwindow
 import sdl
 
 public func enabled(): Bool {
@@ -188,6 +189,18 @@ func runLwindowProbeIfRequested(): Unit {
             canvas.text("lwindow+lgpu", 8.0, 60.0, sdl.Color.rgb(255, 255, 255), pointSize: 18.0)
             surface.endFrame()
             out = "lwindow probe: drawn ok sid=" + sidText + " waited=" + waited.toString()
+            // collect 5s（文件通道，读一次即可；这里短循环给 ArkTS 触摸留时间）
+            var evs = lwindow.readInputEvents()
+            var rounds = 0
+            while (rounds < 50 && evs.size == 0) {
+                sleep(Duration.millisecond * 100)
+                rounds++
+                evs = lwindow.readInputEvents()
+            }
+            out = out + " | events=" + evs.size.toString()
+            for (ev in evs) {
+                out = out + " [" + ev.x.toString() + "," + ev.y.toString() + " key=" + ev.key.toString() + "]"
+            }
         } catch (e: Exception) {
             out = "lwindow probe failed: " + e.toString()
         }
