@@ -46,9 +46,30 @@ public func runClipboardProbeIfRequested(): Unit {
     let want = "lanlu-clip-ok"
     try {
         Clipboard.setText(want)
-        let got = Clipboard.getText()
+        // 系统剪贴板写入是异步的：读之前忙等一小会儿并重试（不依赖 sleep API）
+        var got = ""
+        var attempts = 0
+        for (i in 0..8) {
+            attempts = i + 1
+            var spin: Int64 = 0
+            while (spin < 20000000) {
+                spin += 1
+            }
+            got = Clipboard.getText()
+            if (got == want) {
+                break
+            }
+        }
+        // 集成校验：直接预置 clip_in.txt（模拟系统层读桥写入），再经 Clipboard 后端读回，
+        // 用于验证引擎侧剪贴板后端接线（不依赖系统 pasteboard 授权）。
+        var backendGot = ""
+        try {
+            File.writeTo(Path(base + "/clip_in.txt"), "backend-read".toArray())
+            backendGot = Clipboard.getText()
+        } catch (_) {}
+        out += "backend=" + backendGot + "\n"
         out = "set=" + want + "\ngot=" + got + "\nmatch=" + (got == want).toString() + "\n" +
-            "hasText=" + Clipboard.hasText().toString() + "\n"
+            "hasText=" + Clipboard.hasText().toString() + "\nattempts=" + attempts.toString() + "\n"
     } catch (e: Exception) {
         out = "clipboard failed: " + e.toString() + "\n"
     }
