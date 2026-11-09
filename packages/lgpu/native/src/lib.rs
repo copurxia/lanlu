@@ -759,6 +759,28 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     };
     let (fw, fh) = (cfg.width, cfg.height);
 
+    // 纹理实例缓冲：整帧一次性上传（见下方 pass 内的说明）
+    let tex_need = ctx.tex_instances.len();
+    if tex_need > 0 {
+        let tstride = std::mem::size_of::<gpu::TexInstance>();
+        let need_bytes = tex_need * tstride;
+        let cap_bytes = ctx.tex_capacity * tstride;
+        if need_bytes > cap_bytes {
+            let cap = tex_need.next_power_of_two();
+            ctx.tex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("lgpu-tex-instances"),
+                size: (cap * tstride) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            ctx.tex_capacity = cap;
+        }
+        let items: Vec<gpu::TexInstance> = ctx.tex_instances.iter().map(|(i, _)| *i).collect();
+        if let Some(buf) = &ctx.tex_buffer {
+            queue.write_buffer(buf, 0, bytemuck::cast_slice(&items));
+        }
+    }
+
     // 实例缓冲按需增长（容量翻倍，避免每帧重分配）。
     let need = ctx.instances.len();
     if need > ctx.inst_capacity {
@@ -816,19 +838,20 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                 draw_rect_batches(&mut pass, pipeline, bind_group, buf, &ctx.instances, fw, fh);
             }
         }
-        // 纹理：每张纹理一次 draw（bind group 不同，无法合批；数量本来就少）
+        // 纹理：每张纹理一次 draw（bind group 不同，无法合批）。
+        // 注意：**不能**在 pass 内对同一个缓冲多次 write_buffer——写操作在提交时生效，
+        // 同一次 pass 的所有 draw 都会看到最后一次写入的参数（曾导致所有图元重叠到最后一张）。
         if !ctx.tex_instances.is_empty() {
-            if let (Some(tp), Some(tbuf), Some(queue2)) =
-                (&ctx.tex_pipeline, &ctx.tex_buffer, &ctx.queue)
-            {
-                for (inst, tex_ptr) in &ctx.tex_instances {
+            if let (Some(tp), Some(tbuf)) = (&ctx.tex_pipeline, &ctx.tex_buffer) {
+                let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
+                for (i, (inst, tex_ptr)) in ctx.tex_instances.iter().enumerate() {
                     let t = unsafe { &*(*tex_ptr as *const TexCtx) };
-                    queue2.write_buffer(tbuf, 0, bytemuck::bytes_of(inst));
                     pass.set_pipeline(tp);
                     apply_scissor(&mut pass, inst.clip, fw, fh);
                     pass.set_bind_group(0, bind_group, &[]);
                     pass.set_bind_group(1, &t.bind_group, &[]);
-                    pass.set_vertex_buffer(0, tbuf.slice(..));
+                    let begin = i as u64 * tstride;
+                    pass.set_vertex_buffer(0, tbuf.slice(begin..begin + tstride));
                     pass.draw(0..6, 0..1);
                 }
             }
@@ -1469,10 +1492,14 @@ fn render_tex_to_texture(
 
     let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lgpu-offscreen-tex-inst"),
-        size: std::mem::size_of::<gpu::TexInstance>() as u64,
+        size: (items.len().max(1) * std::mem::size_of::<gpu::TexInstance>()) as u64,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    if !items.is_empty() {
+        let flat: Vec<gpu::TexInstance> = items.iter().map(|(i, _)| *i).collect();
+        queue.write_buffer(&inst_buf, 0, bytemuck::cast_slice(&flat));
+    }
 
     let bytes_per_row = ((width * 4 + 255) / 256) * 256;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1505,11 +1532,12 @@ fn render_tex_to_texture(
         if !items.is_empty() {
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
-            for (inst, tex_ptr) in items {
+            let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
+            for (i, (_inst, tex_ptr)) in items.iter().enumerate() {
                 let t = unsafe { &*(*tex_ptr as *const TexCtx) };
-                queue.write_buffer(&inst_buf, 0, bytemuck::bytes_of(inst));
                 pass.set_bind_group(1, &t.bind_group, &[]);
-                pass.set_vertex_buffer(0, inst_buf.slice(..));
+                let begin = i as u64 * tstride;
+                pass.set_vertex_buffer(0, inst_buf.slice(begin..begin + tstride));
                 pass.draw(0..6, 0..1);
             }
         }
