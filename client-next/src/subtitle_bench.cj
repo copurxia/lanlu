@@ -32,6 +32,7 @@ public class SubtitleBench {
 
     private var phase: Int64 = 0
     private var steadyDeadline = MonoTime.now()
+    private var coldDeadline = MonoTime.now()
     private var waitGen: UInt64 = 0
     private var toggleIdx: Int64 = 0
     private var seekIdx: Int64 = 0
@@ -91,6 +92,9 @@ public class SubtitleBench {
             case Some(p) =>
                 if (p.pageType == want) {
                     println("[subtitle-bench] page ready type=${p.pageType} (pages=${model.pages.value.size})")
+                    // 无内嵌字幕轨的片源永远满足不了冷扫描条件：给 6s 超时照常推进，
+                    // 否则 seek/重开等阶段根本无法被测到。
+                    coldDeadline = MonoTime.now() + Duration.second * 6
                     phase = 2
                 }
             case None => ()
@@ -100,6 +104,12 @@ public class SubtitleBench {
     // 等待 probe + scan 完成（内嵌轨已枚举且无在途）。
     private func stepWaitCold(model: AppModel): Unit {
         let pb = model.playback
+        let timedOut = MonoTime.now() > coldDeadline
+        if (timedOut && pb.embeddedSubtitleStreams.size == 0) {
+            println("[subtitle-bench] cold scan timeout (no embedded subtitle track), continuing")
+            phase = 3
+            return
+        }
         if (pb.embeddedSubtitleStreams.size > 0 && !pb.subtitleProbeLoading && !pb.subtitleScanLoading) {
             SubtitlePerf.emit("probe_ms", SubtitlePerf.getGauge("subtitle_probe_e2e"), "ms")
             SubtitlePerf.emit("scan_ms", SubtitlePerf.getGauge("subtitle_scan_e2e"), "ms")
