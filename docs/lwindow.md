@@ -52,10 +52,14 @@ main(): Int64 { lwindowInitialize(); runIfEnabled(); return runApp() }
 
 - ✅ 进程环境（HOME/XDG/openssl 动态库路径）、fonts.conf、首次启动种子
 - ✅ 移植自检（从业务层 `src/ohos_*.cj` 全部移出，业务 `src/` 已无平台文件）
-- ⏳ 窗口动作（最小化/关闭/退出）：目前经 cui → sdl → 平台钩子，需上提到 lwindow
+- ✅ **窗口几何/缩放策略**：`preferredWindowGeometry()`（contentScale + 可用区钳制 + 最小 960×640）
+- ✅ **渲染驱动优先级**：`prepareRendererHints()`（Linux 桌面 vulkan→opengl 回退；Win/mac 交给 SDL 内置）
+- ✅ **桌面集成**：`prepareDesktopIntegration()`（Wayland libdecor 插件目录）
+- ✅ **系统字体回退**：`systemSansFontPath()`（无 fontconfig 平台用系统字体）
+- ⏳ 窗口动作（最小化/关闭/退出）：平台实现已在 ArkTS/C++ 壳内，cui 走 SDL 事件；后续把“请求→动作”统一成 lwindow API
 - ⏳ 文件对话框（open/save/folder）、IME 文本输入桥、剪贴板
-- ⏳ 显示信息（displayInfo/contentScale）与窗口尺寸钳制策略
-- ⏳ 图标设置、渲染器优先级（D3D/Metal/Vulkan 顺序）
+- ⏳ 图标设置（当前业务层调用 `Surface.loadPngFromMemory` + `setIcon`）
+
 
 ## 约束
 

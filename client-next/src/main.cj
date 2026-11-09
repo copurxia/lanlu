@@ -8,7 +8,8 @@ import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
 import std.time.MonoTime
 import webview.warmup
-import lwindow.{LWINDOW_PLATFORM, LWindowPlatform, initialize as lwindowInitialize}
+import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
+    prepareRendererHints, systemSansFontPath}
 import portcheck.runIfEnabled
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
@@ -103,33 +104,16 @@ public func runApp(): Int64 {
     // libdecor-cairo 插件（无 GTK 依赖，装饰照常绘制），GTK 插件不再加载，
     // 原生 Wayland 20/20 启动 0 SIGSEGV。渲染驱动优先级见下方独立段落。
     // 用户显式设置 LIBDECOR_PLUGIN_DIR / SDL_VIDEODRIVER / SDL_RENDER_DRIVER 时不覆盖。
-    if (getVariable("XDG_SESSION_TYPE") == "wayland") {
-        if (getVariable("LIBDECOR_PLUGIN_DIR").isNone()) {
-            // 以 /proc/self/exe 定位可执行文件再推导随仓库插件目录（不依赖启动目录），
-            // 检查到具体 .so 文件才设置——目录在而插件缺失时回退系统插件，避免无装饰窗口。
-            // 可执行文件位于 client-next/target/release/bin/，向上四级即仓库根。
-            let exeDir = canonicalize(Path("/proc/self/exe")).parent.toString()
-            let pluginDir = "${exeDir}/../../../../packages/cangjie-gui/sdl/libdecor-plugins"
-            if (exists(Path("${pluginDir}/libdecor-cairo.so"))) {
-                setVariable("LIBDECOR_PLUGIN_DIR", pluginDir)
-            }
-        }
-    }
+    // 平台启动准备（Wayland libdecor 插件目录等）由 lwindow 适配层负责。
+    prepareDesktopIntegration()
     // 渲染驱动优先级策略：D3D/Metal > vulkan > opengl > software。
     // Windows/macOS 不动——SDL 内置顺序里 D3D11/12、Metal 本来就在最前，自动选择即正确；
     // 但 SDL3 内置顺序把 opengl 排在 vulkan 之前（SDL_render.c），故 Linux 桌面会话
     // （wayland/x11）下显式指定 "vulkan,opengl"：SDL3 的 SDL_RENDER_DRIVER hint 支持逗号
     // 分隔回退列表（SDL_render.c 逐 token 尝试），vulkan 创建失败自动回退 opengl。
     // LANLU_SOFTWARE_RENDER=1 强制 software 兜底；用户显式 SDL_RENDER_DRIVER 永远优先。
-    if ((getVariable("XDG_SESSION_TYPE") == "wayland" || getVariable("XDG_SESSION_TYPE") == "x11") &&
-        SdlHints.get(SdlHint.CustomHint("SDL_RENDER_DRIVER")).isNone()) {
-        let driver = if (getVariable("LANLU_SOFTWARE_RENDER") == Some("1")) {
-            "software"
-        } else {
-            "vulkan,opengl"
-        }
-        SdlHints.set(SdlHint.CustomHint("SDL_RENDER_DRIVER"), driver)
-    }
+    // 渲染驱动优先级由 lwindow 按平台决定（Linux 桌面 vulkan>opengl；Win/mac 交给 SDL 内置顺序）。
+    prepareRendererHints()
     // Wayland 下任务栏/应用菜单的图标按 app_id 匹配同名 .desktop 文件（CI 打包安装
     // lanlu.desktop）；X11/Windows 的任务栏图标由下方 setIcon 直接生效。
     // 用户显式设置 SDL_APP_ID 时不覆盖。
@@ -189,25 +173,11 @@ public func runApp(): Int64 {
     // 查询失败回退 1.0。逻辑尺寸按可用桌面区钳制：默认 1440×900 在 150% 缩放的
     // 1080p 屏上物理 2160×1350 超界，收缩逻辑尺寸使 逻辑×scale ≤ usableBounds；
     // 钳制结果低于 960×640 最小窗口时不再收缩（宁可超界也保住最小可用布局）。
-    var uiScale: Float32 = 1.0
-    var winW = harnessWindowWidth()
-    var winH = harnessWindowHeight()
-    if (seedMode.size == 0) {
-        try {
-            let geo = primaryDisplayInfo().geometry
-            uiScale = geo.contentScale
-            let maxW = Int32(geo.usableBounds.w / uiScale)
-            let maxH = Int32(geo.usableBounds.h / uiScale)
-            if (maxW >= 960 && winW > maxW) {
-                winW = maxW
-            }
-            if (maxH >= 640 && winH > maxH) {
-                winH = maxH
-            }
-        } catch (_: Exception) {
-            uiScale = 1.0
-        }
-    }
+    // 窗口几何/缩放策略在 lwindow（平台层）；seedMode 钉死 1.0 以保 CI 快照像素确定性。
+    let geom = preferredWindowGeometry(harnessWindowWidth(), harnessWindowHeight(), pinScale: seedMode.size > 0)
+    let uiScale: Float32 = geom.scale
+    let winW: Int32 = geom.width
+    let winH: Int32 = geom.height
     println("[boot] 3.5 uiScale=${uiScale} window=${winW}x${winH} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 超采样档位：默认 AUTO（GPU 渲染 2x，software 回退 1x）。LANLU_PERF 实测 2x 超采样
     // 是帧成本大头（阅读页 present 15ms/帧），LANLU_SUPERSAMPLE=1 可关到 1x（文字边缘
@@ -224,13 +194,11 @@ public func runApp(): Int64 {
             // 标题栏由 ui/titlebar.cj 自绘（Task 8），阅读器页换用专用顶栏
             // ui/reader_bar.cj（T13）。
             borderless: true,
+            // 用户设置优先；否则取平台层的系统无衬线字体（无 fontconfig 平台才有，找不到则 None）。
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
-            } else if (exists(Path("/system/fonts/HarmonyOS_Sans_SC.ttf"))) {
-                // OHOS 等无 fontconfig 平台：系统存在该字体则直接用（Linux 上文件不存在自然回退 None）
-                Some("/system/fonts/HarmonyOS_Sans_SC.ttf")
             } else {
-                None
+                systemSansFontPath()
             }), theme: lanluThemeFor(settings.theme))
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
