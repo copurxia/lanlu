@@ -50,6 +50,25 @@ bash packages/vips_ffi/native-ohos/run-host-test.sh <image>
 # ASAN: decodeFileToRgba 的 handle/unref 序列 + resize/extract/gaussblur 链
 ```
 
+## 系统层补丁（packages/ohos/patches，见 ohos 仓库）
+
+SDL 的 OpenHarmony 后端缺两类能力，均在 SDL 源码上打补丁（重建 libSDL3.so）：
+
+1. `sdl3-openharmony-window-actions.patch`：最小化（原先 `#if 0` 空实现）→ 钩子转给 ArkTS `window.minimize()`；
+2. `sdl3-openharmony-file-dialogs.patch`：文件对话框（后端无实现，回调永不触发）→ 钩子转给 ArkTS 系统 picker（打开文件复制进沙箱；保存写入沙箱再复制到用户选的 uri）。
+
+两者都用 `dlsym` 注册，因此**未打补丁的 SDL 也能运行**（能力退化为无操作/取消）。
+
+## 平台补齐的其它能力（全部在 packages/ohos）
+
+| 能力 | 说明 |
+|---|---|
+| 键盘 | XComponent 焦点（`focusable/defaultFocus/requestFocus`）——否则 key 回调不触发 |
+| 文本输入 | IME 桥接：`insertText`→SDL 文本事件、删除/回车/方向/剪贴板→按键事件；桌面不弹软键盘、手机弹 |
+| 鼠标 | 窗口级过滤器 + 原点校准（disp→local） |
+| 关闭/最小化 | 引擎退出标志 → `terminateSelf`；SDL 钩子 → `window.minimize()` |
+| 文件对话框 | 打开/保存（见上） |
+
 ## 已知问题
 
 1. **DevEco 调试签名配额耗尽**（`Provision number exceeds limit`）：无法产出新的 signed HAP。
@@ -58,3 +77,23 @@ bash packages/vips_ffi/native-ohos/run-host-test.sh <image>
    - 影响：本轮的 vips double-free 修复尚未在真机复验（已由 ASAN 双向证明）。
 2. **真实鼠标位置**待用户实测（过滤器已注册 rc=0，坐标映射带连续校准）。
 3. 真实后端联调需要可运行的服务端环境（本机缺 libpq/rocksdb 等原生依赖）。
+
+## 播放链路（libvlc_ffi shim，OHOS 后端）
+
+- **单 demuxer**：视频与音频共用同一个 `AVFormatContext`（一条 HTTP 连接），音频包在 `pump()` 里解码，
+  避免"第二条连接 + 独立音频线程"带来的复杂度和偶发问题。
+- **音频输出**：`OH_AudioRenderer` 回调从环形缓冲取数据（s16 交错 48k 立体声）；
+  启动时激活音频会话（`OH_AudioSessionManager_SetScene(MEDIA)` + `ActivateAudioSession`）并注册中断回调。
+- **不使用 libswresample**：真机上 `swr_convert` 在 44.1k→48k 场景直接 SIGSEGV；
+  改为自带转换器（s16/s16p/s32/s32p/f32/f32p/u8/u8p + 线性重采样 + 单声道复制）。
+- **seek**：flush 音视频解码器 + 清空环形缓冲；`LANLU_SEEK_LOOP_MS`/`LANLU_SEEK_TARGETS` 可周期性验证。
+- **调试开关**（均为 env，生产不设即无副作用）：
+  | 变量 | 作用 |
+  |---|---|
+  | `LANLU_VLC_STATS=1` | 打印音频回调计数/音频采样数/视频帧数/解码头信息 |
+  | `LANLU_VLC_NO_AUDIO=1` | 跳过音频（二分定位音视频问题） |
+  | `LANLU_VLC_LOG` | 日志文件路径 |
+  | `LANLU_SEEK_LOOP_MS` / `LANLU_SEEK_TARGETS` | 周期性 seek 验证 |
+  | `LANLU_BENCH_*`（业务层） | 字幕/播放基准：ARCID/PAGE/PAGE_TYPE/PLAY_MS/SEEK_MS/NO_EXIT |
+- 真机已验证：H.264 视频 + PCM 音轨（48k 与 44.1k）连续播放、周期性 seek 后音视频继续、
+  重开（渲染器重建）后音频恢复。
