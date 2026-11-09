@@ -83,6 +83,7 @@ public func runClipboardProbeIfRequested(): Unit {
 foreign {
     func lgpu_self_check(): Int32
     func lgpu_version(): CString
+    func lgpu_debug_dump(out: CPointer<UInt8>, outLen: Int64): Int32
 }
 
 func runLgpuProbe(): Unit {
@@ -95,6 +96,14 @@ func runLgpuProbe(): Unit {
         let rc = unsafe { lgpu_self_check() }
         let ver = unsafe { lgpu_version() }
         out = "self_check=" + rc.toString() + "\nversion=" + ver.toString() + "\n"
+        // wgpu 实例 + 适配器枚举（VK_OHOS_surface 是否真的可用，看这里）
+        let buf = Array<UInt8>(8192, repeat: 0u8)
+        let handle = unsafe { acquireArrayRawData(buf) }
+        unsafe { lgpu_debug_dump(handle.pointer, 8192) }
+        unsafe { releaseArrayRawData(handle) }
+        let text = String.fromUtf8(buf)
+        let end = text.indexOf("\u{0}") ?? text.size
+        out += "---- wgpu ----\n" + text[0..end] + "\n"
     } catch (e: Exception) {
         out = "lgpu probe failed: " + e.toString() + "\n"
     }

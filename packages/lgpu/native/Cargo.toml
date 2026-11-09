@@ -9,10 +9,19 @@ description = "L 层渲染器：wgpu 后端，导出 C ABI 给 Cangjie 使用（
 name = "lgpu_native"
 crate-type = ["staticlib"]
 
-# 说明：wgpu 依赖在后续里程碑接入（P2）。P0 阶段先证明
-# "Rust → aarch64-linux-ohos staticlib → HAP → Cangjie FFI 调用" 这条链路可用，
-# 因此本 crate 刻意保持零依赖。
+# 只取 vulkan：OHOS 的呈现路径是 VK_OHOS_surface，不需要 dx12/metal/gles。
 [dependencies]
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "vulkan", "wgsl"] }
+# wgpu 30 的 enumerate_adapters/request_adapter 是 async：这个 crate 只做同步 FFI，
+# 用最小执行器把它们 block_on 掉（不引 tokio）。
+pollster = "=0.4.0"
+# 构造 RawWindowHandle::OhosNdk（XComponent 的 OHNativeWindow*）交给 wgpu-hal。
+raw-window-handle = "=0.6.2"
+
+# 上游 wgpu-hal 不支持 OHOS surface，这里用 horizon-ohos 打过补丁的 30.0.1
+# （src/vulkan/instance.rs 的 create_surface_ohos / VK_OHOS_surface）。
+[patch.crates-io]
+wgpu-hal = { path = "third_party/wgpu-hal" }
 
 [profile.release]
 opt-level = 2
