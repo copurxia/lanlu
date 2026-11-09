@@ -19,7 +19,7 @@ lwindow = { path = "../../../packages/lwindow" }
 portcheck = { path = "../../../packages/portcheck" }
 
 [package.metadata.ohos]
-app-name = "ClientNext"
+app-name = "Lanlu"
 bundle-name = "com.example.cmakehap"
 version-code = 1000000
 api-level = 26

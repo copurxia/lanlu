@@ -42,7 +42,7 @@ link-option = "-L \"${MINGW_LIBRARY_PATH}\" -L ../packages/libass_ffi/native -L 
 
 # --- OHOS target metadata (migration WIP; renderer -> SDL3) ---
 [package.metadata.ohos]
-app-name = "Lanlu Client Next"
+app-name = "Lanlu"
 bundle-name = "com.lanlu.clientnext"
 version-code = 1000000
 api-level = 26
