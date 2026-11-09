@@ -58,8 +58,11 @@ public func readInputEvents(): ArrayList<LWindowEvent> {
                 let key = try { Int32.parse(parts[3]) } catch (_) { 0i32 }
                 let kind = match (action) {
                     case 1 => LWindowEventType.PointerDown
+                    case 11 => LWindowEventType.PointerDown
                     case 2 => LWindowEventType.PointerMove
+                    case 10 => LWindowEventType.PointerMove
                     case 3 => LWindowEventType.PointerUp
+                    case 12 => LWindowEventType.PointerUp
                     case _ => LWindowEventType.Unknown
                 }
                 out.add(LWindowEvent(kind, x, y, key))
