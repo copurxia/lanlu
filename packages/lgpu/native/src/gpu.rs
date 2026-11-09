@@ -51,10 +51,12 @@ struct VsOut {
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
-  // 两个三角形拼成的矩形：(-1,-1) (1,-1) (1,1) (-1,1)
-  var cx: f32 = select(-1.0, 1.0, vi == 1u || vi == 2u || vi == 4u);
-  var cy: f32 = select(-1.0, 1.0, vi == 2u || vi == 3u || vi == 4u);
-  if (vi == 5u) { cx = -1.0; cy = 1.0; }
+  // 两个三角形拼成矩形（注意顺序：旧的写法让顶点 3/5 重合，第二个三角形退化，
+  // 结果每个矩形只画出半个 —— 真机上表现为"高度只有一半"）。
+  //   三角形 1: (-1,-1) (1,-1) (-1,1)
+  //   三角形 2: (-1,1)  (1,-1) (1,1)
+  var cx: f32 = select(-1.0, 1.0, vi == 1u || vi == 4u || vi == 5u);
+  var cy: f32 = select(-1.0, 1.0, vi == 2u || vi == 3u || vi == 5u);
 
   let half_size = vec2f(inst.rect.z * 0.5, inst.rect.w * 0.5);
   let center = vec2f(inst.rect.x, inst.rect.y) + half_size;
@@ -149,9 +151,12 @@ struct VsOut {
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
-  var cx: f32 = select(-1.0, 1.0, vi == 1u || vi == 2u || vi == 4u);
-  var cy: f32 = select(-1.0, 1.0, vi == 2u || vi == 3u || vi == 4u);
-  if (vi == 5u) { cx = -1.0; cy = 1.0; }
+  // 两个三角形拼成矩形（注意顺序：旧的写法让顶点 3/5 重合，第二个三角形退化，
+  // 结果每个矩形只画出半个 —— 真机上表现为"高度只有一半"）。
+  //   三角形 1: (-1,-1) (1,-1) (-1,1)
+  //   三角形 2: (-1,1)  (1,-1) (1,1)
+  var cx: f32 = select(-1.0, 1.0, vi == 1u || vi == 4u || vi == 5u);
+  var cy: f32 = select(-1.0, 1.0, vi == 2u || vi == 3u || vi == 5u);
 
   let p = vec2f(inst.dst.x + (cx * 0.5 + 0.5) * inst.dst.z,
                 inst.dst.y + (cy * 0.5 + 0.5) * inst.dst.w);

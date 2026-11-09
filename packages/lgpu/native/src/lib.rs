@@ -236,13 +236,21 @@ fn draw_rect_batches(
     let stride = std::mem::size_of::<gpu::RectInstance>() as u64;
     pass.set_pipeline(pipeline);
     pass.set_bind_group(0, bind_group, &[]);
-    // 逐实例一个 draw：真机上实例步进（instance_step）多条实例不出图（单条正常），
-    // 在查清驱动行为前先用这条已验证的路径；图元数量级本来就不大。
-    for (i, inst) in instances.iter().enumerate() {
-        apply_scissor(pass, inst.clip, width, height);
+    // 按 clip 连续分组：同组一次实例化 draw（一个 scissor 覆盖整组）。
+    // 之前"多实例不出图"的真因是四边形第二个三角形退化（只画出半个），已修。
+    let mut i = 0usize;
+    while i < instances.len() {
+        let clip = instances[i].clip;
+        let mut j = i + 1;
+        while j < instances.len() && instances[j].clip == clip {
+            j += 1;
+        }
+        apply_scissor(pass, clip, width, height);
         let begin = i as u64 * stride;
-        pass.set_vertex_buffer(0, buffer.slice(begin..begin + stride));
-        pass.draw(0..6, 0..1);
+        let end = j as u64 * stride;
+        pass.set_vertex_buffer(0, buffer.slice(begin..end));
+        pass.draw(0..6, 0..(j - i) as u32);
+        i = j;
     }
 }
 
@@ -1154,9 +1162,16 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         clip: [20.0, 40.0, 60.0, 100.0],   // 高度故意放大：若可见高度仍被压到 12，说明问题不在 scissor
     };
 
+    // 同组两个实例（验证实例化合批）+ 一个带变换的实例
+    let inst2 = gpu::RectInstance {
+        rect: [20.0, 80.0, 100.0, 20.0],
+        color: [0.0, 1.0, 0.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [20.0, 40.0, 60.0, 100.0],
+    };
     let Some(buf) = render_to_texture(
         device, queue, pipeline, bind_group, screen_buffer,
-        [1.0, 1.0], [0.0, 0.0], w, h, fmt, &[inst],
+        [1.0, 1.0], [0.0, 0.0], w, h, fmt, &[inst, inst2],
     ) else {
         return 1 << 2;
     };
@@ -1177,11 +1192,18 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         return 1;
     }
     // 允许 2px 抗锯齿误差
-    let ok = x0 <= 22 && y0 <= 42 && x1 >= 77 && x1 <= 82 && y1 >= 57 && y1 <= 61;
+    // 第二个实例的绿色块也必须出现（y 80..100，x 被裁到 20..80）
+    let mut g2 = 0u8;
+    for y in 80..100u32 {
+        for x in 20..80u32 {
+            g2 = g2.max(px(&buf, w, x, y)[1]);
+        }
+    }
+    let ok = x0 <= 22 && y0 <= 42 && x1 >= 77 && x1 <= 82 && y1 >= 57 && y1 <= 61 && g2 > 200;
     // 期望：x 被裁到 20..79，y 完整 40..59
     let fail = if ok { 0 } else { 1 };
     set_error(format!(
-        "selftest: visible bbox=({x0},{y0})-({x1},{y1}) expect (20,40)-(79,59) clip_ok={}",
+        "selftest: bbox=({x0},{y0})-({x1},{y1}) expect (20,40)-(79,59) second_green={g2} ok={}",
         ok
     ));
     fail
