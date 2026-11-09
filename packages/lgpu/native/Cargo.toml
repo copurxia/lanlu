@@ -11,6 +11,8 @@ crate-type = ["staticlib"]
 
 # 只取 vulkan：OHOS 的呈现路径是 VK_OHOS_surface，不需要 dx12/metal/gles。
 [dependencies]
+# 字形光栅化：ab_glyph 输出抗锯齿覆盖率位图（离线缓存有）
+ab_glyph = "=0.2.32"
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "vulkan", "wgsl"] }
 # wgpu 30 的 enumerate_adapters/request_adapter 是 async：这个 crate 只做同步 FFI，
 # 用最小执行器把它们 block_on 掉（不引 tokio）。
