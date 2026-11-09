@@ -56,7 +56,7 @@ HAP：`entry-default-signed.hap` ≈ **92.4 MB**（原 124.4 MB，经依赖库 S
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| IME 实际文本输入 | ⏳ 待验 | 桥接已 attach，但注入真实 IME 文本需人工键盘 |
+| IME 文本输入 | ✅ 已验证（桥接层） | 引擎收到 `[input] TEXT_INPUT text="hello-ohos"`（走 SDL user event 通道）；物理键盘拼音输入仍需人工抽查 |
 | AAC/Opus 真实样片 | ⏳ 待验 | 转换器已支持 fltp 等平面格式，但仓库内无带音轨的 AAC 样片可测 |
 | 正式包名/签名 | ⚠️ 权宜 | 现用 `com.example.cmakehap`（复用已有调试材料）；配额恢复后应改回 `com.lanlu.clientnext` 并生成正式 Profile |
 | 文件对话框三件套 | 🟡 部分验证 | **native→SDL→应用 回调链路已真机验证**（模拟选择返回路径）；系统 picker 由 OS 负责，其 UI 操作需人工确认（`LANLU_TEST_DIALOG=1` 可复现） |
@@ -82,3 +82,21 @@ HAP：`entry-default-signed.hap` ≈ **92.4 MB**（原 124.4 MB，经依赖库 S
 4. 判定：`Lx ≈ Dx - Ox`、`Ly ≈ Dy - Oy`（当前设备窗口 rect 原点为 (515,292)）。
    满足即鼠标定位正确；若纵向恒差约 70px，说明窗口矩形含了系统装饰高度（本工程窗口是 borderless，
    正常不应出现）。
+
+## 七、关键平台缺陷：进程内两份 SDL3（已修）
+
+现象：窗口动作/文件对话框"钩子注册成功"但无效；`SDL_PushEvent` 恒返回 0；IME 文本无法投递。
+
+根因：SDL3 的 SONAME 是 `libSDL3.so.0`，而 `libSDL3_ttf.so` 等按 `libSDL3.so` 文件名依赖；
+两个名字各自对应一个文件 → 进程里加载**两份 SDL3**：引擎初始化其中一份，壳（libmain）拿到另一份未初始化的。
+
+修复：`tools/make-sdl3-noversion.sh` 生成 `prefix-nov`（同一份库，SONAME 原地改短为 `libSDL3.so`），
+壳与引擎都用它链接 → 三方 DT_NEEDED 全部为 `libSDL3.so` → 只加载一份。
+
+修复后真机证据：
+```
+inited(VIDEO)=0x20 inited(EVENTS)=0x4000
+probe user push=1
+push=1 text=hello-ohos
+[input] TEXT_INPUT text="hello-ohos" (user event)
+```
