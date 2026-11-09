@@ -72,7 +72,13 @@ typedef struct {
     int out_w, out_h;
     int format_done;         // setup callback invoked
 
-    // audio
+    // audio：与视频共用同一个 AVFormatContext（单连接单 demuxer），
+    // 音频包在 pump() 里解码后写入 ring，由 OH_AudioRenderer 回调消费。
+    int astream;                 // 音频流索引，-1 = 无
+    AVCodecContext* acodec;
+    struct SwrContext* aswr;
+    AVFrame* fctx_tmp;           // 音频解码输出帧（复用，避免每次 malloc）
+    int aswr_ok;
     OH_AudioRenderer* renderer;
     pthread_t athread;
     int athread_started;
@@ -117,6 +123,12 @@ PlayerPtr libvlc_media_player_new_from_media(MediaPtr mp) {
     snprintf(p->path, sizeof p->path, "%s", m->path);
     p->pkt = av_packet_alloc();
     p->frm = av_frame_alloc();
+    p->fctx_tmp = av_frame_alloc();
+    p->astream = -1;
+    // 音频环形缓冲的锁/条件变量在整个播放器生命周期内只初始化一次：
+    // audio_start 可能被多次调用（重开/重播），在那里重复 init 而回调正在使用 → UB（真机 SIGSEGV）。
+    pthread_mutex_init(&p->amu, NULL);
+    pthread_cond_init(&p->acv, NULL);
     return p;
 }
 void libvlc_media_player_release(PlayerPtr pp) {
@@ -147,6 +159,18 @@ static int open_pipeline(VlcPlayer* p) {
     if (avcodec_parameters_to_context(p->codec, st->codecpar) < 0) return -1;
     if (avcodec_open2(p->codec, dec, NULL) < 0) return -1;
     if (p->fmt->duration > 0) atomic_store(&p->duration_ms, p->fmt->duration / (AV_TIME_BASE / 1000));
+    // 音频：同一 demuxer 内找音频流并打开解码器（不再单开第二条 HTTP 连接）
+    p->astream = av_find_best_stream(p->fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    if (p->astream >= 0) {
+        const AVCodec* adec = avcodec_find_decoder(p->fmt->streams[p->astream]->codecpar->codec_id);
+        if (adec) {
+            p->acodec = avcodec_alloc_context3(adec);
+            if (p->acodec && avcodec_parameters_to_context(p->acodec, p->fmt->streams[p->astream]->codecpar) >= 0) {
+                if (avcodec_open2(p->acodec, adec, NULL) != 0) { avcodec_free_context(&p->acodec); p->astream = -1; }
+            } else { p->astream = -1; }
+        } else { p->astream = -1; }
+    }
+    if (stats_enabled()) VLOG("pipeline: video_stream=%d audio_stream=%d", p->stream, p->astream);
     p->out_w = p->codec->width ? p->codec->width : 1280;
     p->out_h = p->codec->height ? p->codec->height : 720;
     return 0;
@@ -203,6 +227,68 @@ static void push_frame(VlcPlayer* p, AVFrame* f) {
 // Called from libvlc_media_player_get_time, which the UI tick invokes; running
 // the Cangjie frame callbacks on that thread avoids foreign-thread runtime
 // attach problems entirely.
+static void ring_write(VlcPlayer* p, const unsigned char* d, size_t n);
+static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt);
+
+// 音频包解码：与视频共用同一个 demuxer（pump 里调用），解码 → 重采样 → 环形缓冲。
+// 渲染器回调从环形缓冲取数据；不再需要独立的音频线程/第二条连接。
+static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt) {
+    if (!p->acodec || !p->fctx_tmp) return;
+    if (avcodec_send_packet(p->acodec, pkt) != 0) return;
+    while (avcodec_receive_frame(p->acodec, p->fctx_tmp) == 0) {
+        if (!p->aswr_ok) {
+            AVChannelLayout out_ch; av_channel_layout_default(&out_ch, 2);
+            AVChannelLayout in_ch;
+            if (p->fctx_tmp->ch_layout.nb_channels > 0) av_channel_layout_copy(&in_ch, &p->fctx_tmp->ch_layout);
+            else av_channel_layout_default(&in_ch, 2);
+            int rate = p->fctx_tmp->sample_rate > 0 ? p->fctx_tmp->sample_rate : 48000;
+            int rc = swr_alloc_set_opts2(&p->aswr, &out_ch, AV_SAMPLE_FMT_S16, 48000,
+                &in_ch, (enum AVSampleFormat)p->fctx_tmp->format, rate, 0, NULL);
+            if (rc == 0 && p->aswr && swr_init(p->aswr) == 0) {
+                p->aswr_ok = 1;
+                if (stats_enabled()) VLOG("audio swr ready: in_ch=%d rate=%d fmt=%d", in_ch.nb_channels, rate, p->fctx_tmp->format);
+            } else {
+                VLOG("audio swr init failed rc=%d", rc);
+            }
+        }
+        // 直通快路：源已是 S16/48k/2ch（我们自己的 PCM 样片就属此类）时免重采样，
+        // 直接用 memcpy——既省 CPU，也避开 swresample 在真机上的一处崩溃。
+        int direct = ((int)p->fctx_tmp->format == AV_SAMPLE_FMT_S16 &&
+                      p->fctx_tmp->sample_rate == 48000 &&
+                      p->fctx_tmp->ch_layout.nb_channels == 2);
+        if (direct && p->fctx_tmp->data[0]) {
+            size_t bytes = (size_t)p->fctx_tmp->nb_samples * 4;
+            for (;;) {
+                pthread_mutex_lock(&p->amu);
+                int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
+                pthread_mutex_unlock(&p->amu);
+                if (full == 0 || p->astop) break;
+                usleep(2000);
+            }
+            if (!p->astop) ring_write(p, p->fctx_tmp->data[0], bytes);
+        } else if (p->aswr_ok) {
+            const int out_cap = 2048;
+            uint8_t* obuf = NULL;
+            int outn = swr_convert(p->aswr, &obuf, out_cap, (const uint8_t**)p->fctx_tmp->data, p->fctx_tmp->nb_samples);
+            while (outn > 0) {
+                size_t bytes = (size_t)outn * 2 * 2;
+                for (;;) {
+                    pthread_mutex_lock(&p->amu);
+                    int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
+                    pthread_mutex_unlock(&p->amu);
+                    if (full == 0 || p->astop) break;
+                    usleep(2000);
+                }
+                if (p->astop) break;
+                ring_write(p, obuf, bytes);
+                if (swr_get_out_samples(p->aswr, 0) <= 0) break;
+                outn = swr_convert(p->aswr, &obuf, out_cap, NULL, 0);
+            }
+        }
+        av_frame_unref(p->fctx_tmp);
+    }
+}
+
 static void pump(VlcPlayer* p) {
     if (!p->fmt || atomic_load(&p->paused)) { p->last_tick_ms = now_ms(); return; }
     int sk = atomic_exchange(&p->seek_ms, -1);
@@ -211,6 +297,9 @@ static void pump(VlcPlayer* p) {
         avformat_seek_file(p->fmt, p->stream, INT64_MIN,
             av_rescale_q(sk, tb, p->fmt->streams[p->stream]->time_base), INT64_MAX, 0);
         avcodec_flush_buffers(p->codec);
+        if (p->acodec) avcodec_flush_buffers(p->acodec);
+        if (p->aswr) swr_convert(p->aswr, NULL, 0, NULL, 0);   // 丢弃重采样残留
+        pthread_mutex_lock(&p->amu); p->rhead = p->rtail = p->rsize = 0; pthread_mutex_unlock(&p->amu);
         p->next_pts_ms = (double)sk;
         p->last_tick_ms = now_ms();
     }
@@ -221,6 +310,11 @@ static void pump(VlcPlayer* p) {
     int budget = 3;
     while (budget-- > 0) {
         if (av_read_frame(p->fmt, p->pkt) < 0) { atomic_store(&p->running, 0); break; }
+        if (p->pkt->stream_index == p->astream && p->acodec) {
+            audio_decode_packet(p, p->pkt);
+            av_packet_unref(p->pkt);
+            continue;                     // 音频包不打断视频预算，继续读下一个
+        }
         if (p->pkt->stream_index != p->stream) { av_packet_unref(p->pkt); continue; }
         int got = 0;
         if (avcodec_send_packet(p->codec, p->pkt) == 0) {
@@ -426,7 +520,6 @@ static void audio_start(VlcPlayer* p) {
     if (getenv("LANLU_VLC_NO_AUDIO")) { VLOG("audio disabled by LANLU_VLC_NO_AUDIO"); return; }
     if (p->athread_started) return;
     p->astop = 0; atomic_store(&p->muted, 0);
-    pthread_mutex_init(&p->amu, NULL); pthread_cond_init(&p->acv, NULL);
     { size_t cap = 1024 * 1024; unsigned char* buf = malloc(cap);
       pthread_mutex_lock(&p->amu);
       p->ring = buf; p->rcap = cap; p->rhead = p->rtail = p->rsize = 0;
@@ -458,9 +551,8 @@ static void audio_start(VlcPlayer* p) {
     VLOG("audio session mgr=%p scene_rc=%d activate_rc=%d", (void*)sess_mgr, scene_rc, act_rc);
     int start_rc = -1;
     if (p->renderer) start_rc = (int)OH_AudioRenderer_Start(p->renderer);
-    int th_rc = pthread_create(&p->athread, NULL, audio_loop, p);
-    if (th_rc == 0) p->athread_started = 1;
-    VLOG("audio started renderer=%p start_rc=%d thread_rc=%d", (void*)p->renderer, start_rc, th_rc);
+    // 音频解码已并入 pump（单 demuxer），这里只负责渲染器与环形缓冲。
+    VLOG("audio started renderer=%p start_rc=%d (decode in pump)", (void*)p->renderer, start_rc);
 }
 static void audio_stop(VlcPlayer* p) {
     p->astop = 1;
