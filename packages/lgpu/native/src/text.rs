@@ -137,3 +137,15 @@ pub fn measure(font: &FontHandle, text: &str, px_size: f32) -> f32 {
         .map(|c| scaled.h_advance(font.font.glyph_id(c)))
         .sum()
 }
+
+/// 字体度量（按 px_size 缩放）：(ascent, descent, line_gap, units_per_em)。
+pub fn metrics(font: &FontHandle, px_size: f32) -> (f32, f32, f32, f32) {
+    use ab_glyph::Font as _;
+    let scale = PxScale::from(px_size);
+    let scaled = font.font.as_scaled(scale);
+    let ascent = scaled.ascent();
+    let descent = scaled.descent();
+    let gap = scaled.line_gap();
+    let upem = font.font.units_per_em().unwrap_or(1000.0);
+    (ascent, descent, gap, upem)
+}

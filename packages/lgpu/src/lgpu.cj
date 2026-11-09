@@ -31,6 +31,7 @@ foreign {
         radius: Float32, stroke: Float32, mode: Float32,
         r1: Float32, g1: Float32, b1: Float32, a1: Float32,
         r2: Float32, g2: Float32, b2: Float32, a2: Float32): Int32
+    func lgpu_font_metrics(font: CPointer<UInt8>, pxSize: Float32, out: CPointer<Float32>): Int32
     func lgpu_font_load_path(path: CPointer<UInt8>, pathLen: Int64): CPointer<UInt8>
     func lgpu_font_destroy(font: CPointer<UInt8>): Unit
     func lgpu_text_measure(font: CPointer<UInt8>, utf8: CPointer<UInt8>, len: Int64, pxSize: Float32): Float32
@@ -311,6 +312,18 @@ public class Font {
 
     internal func raw(): CPointer<UInt8> {
         handle
+    }
+
+    /// 字体度量：返回 (ascent, descent, lineGap, unitsPerEm)，均已按 pxSize 缩放。
+    public func metrics(pxSize: Float32): (Float32, Float32, Float32, Float32) {
+        let buf = Array<Float32>(4, repeat: 0.0f32)
+        let h = unsafe { acquireArrayRawData(buf) }
+        try {
+            checkRc(unsafe { lgpu_font_metrics(handle, pxSize, h.pointer) }, "lgpu_font_metrics")
+        } finally {
+            unsafe { releaseArrayRawData(h) }
+        }
+        (buf[0], buf[1], buf[2], buf[3])
     }
 
     /// 字符串宽度（像素）。

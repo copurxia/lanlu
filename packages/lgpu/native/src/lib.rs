@@ -1463,7 +1463,8 @@ pub extern "C" fn lgpu_text_draw(
     // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）
     let size_key = (px_size * 4.0) as u32;
     let mut pen_x = x;
-    let baseline = y + px_size * 0.8;
+    // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）
+    let baseline = y + text::metrics(fh, px_size).0;
     let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32)> = Vec::new();
 
     for ch in s.chars() {
@@ -1836,4 +1837,22 @@ pub extern "C" fn lgpu_surface_create_from_id(surface_id: u64) -> *mut c_void {
         return std::ptr::null_mut();
     }
     lgpu_surface_create(window)
+}
+
+/// 字体度量：out[0]=ascent, out[1]=descent, out[2]=line_gap, out[3]=units_per_em（均按 px_size 缩放）。
+/// 供 cui 的文本排版使用（行高、基线定位）。
+#[no_mangle]
+pub extern "C" fn lgpu_font_metrics(font: *mut c_void, px_size: f32, out: *mut f32) -> i32 {
+    if font.is_null() || out.is_null() || px_size <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let fh = unsafe { &*(font as *const text::FontHandle) };
+    let m = text::metrics(fh, px_size);
+    unsafe {
+        *out.add(0) = m.0;
+        *out.add(1) = m.1;
+        *out.add(2) = m.2;
+        *out.add(3) = m.3;
+    }
+    0
 }

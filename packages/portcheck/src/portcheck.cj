@@ -188,11 +188,14 @@ func runLwindowProbeIfRequested(): Unit {
             canvas.strokeLine(8.0, 120.0, 220.0, 120.0, sdl.Pen(width: 3.0, color: sdl.Color.rgb(255, 255, 255)))
             canvas.text("lwindow+lgpu", 8.0, 60.0, sdl.Color.rgb(255, 255, 255), pointSize: 18.0)
             surface.endFrame()
+            let (asc, desc, gap, upem) = font.metrics(19.5)
+            let lineH = asc - desc + gap
             out = "lwindow probe: drawn ok sid=" + sidText + " waited=" + waited.toString()
+            out = out + " | fontMetrics ascent=" + asc.toString() + " descent=" + desc.toString() + " gap=" + gap.toString() + " upem=" + upem.toString() + " lineH=" + lineH.toString()
             // collect 5s（文件通道，读一次即可；这里短循环给 ArkTS 触摸留时间）
             var evs = lwindow.readInputEvents()
             var rounds = 0
-            while (rounds < 50 && evs.size == 0) {
+            while (rounds < 150 && evs.size == 0) {
                 sleep(Duration.millisecond * 100)
                 rounds++
                 evs = lwindow.readInputEvents()
