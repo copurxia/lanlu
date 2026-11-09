@@ -97,6 +97,7 @@ public class PlaybackModel {
     private let subtitleCuesByAsset = HashMap<Int64, ArrayList<SubtitleCue>>()
     private var assRenderer: ?AssRenderer = None
     private let embeddedAssTracks = HashMap<Int32, AssTrack>()
+    private var subTraceCount = 0
     private let externalAssTracks = HashMap<Int64, AssTrack>()
     private var extractedSubtitleTracks = ArrayList<ExtractedSubtitleTrack>()
     private let externalSubtitleText = HashMap<Int64, (String, String)>()
@@ -537,6 +538,7 @@ public class PlaybackModel {
     }
 
     public func onEmbeddedSubtitleFailed(key: String, generation: UInt64, message: String): Unit {
+        perfLog("sub: scan FAILED key=${key} gen=${generation} msg=${message}")
         if (key != mediaKey || generation != mediaGeneration) {
             return
         }
@@ -567,6 +569,7 @@ public class PlaybackModel {
         if (!supported) {
             return
         }
+        perfLog("sub: toggle on stream=${streamIndex} scanLoading=${subtitleScanLoading} assTracks=${embeddedAssTracks.size}")
         activeEmbeddedStreamIndexes.add(streamIndex)
         sort(activeEmbeddedStreamIndexes, lessThan: {a, b => a < b}, stable: true)
         SubtitlePerf.spanStart("subtitle_switch")
@@ -634,6 +637,10 @@ public class PlaybackModel {
             case Some(renderer) =>
                 let renderStart = MonoTime.now()
                 let bitmap = renderer.render(Int64(positionSec * 1000.0), active.toArray())
+                if (perfLogEnabled() && subTraceCount < 8) {
+                    subTraceCount++
+                    perfLog("sub: render t=${Int64(positionSec * 1000.0)}ms active=${active.size} w=${bitmap.width} h=${bitmap.height} changed=${bitmap.changed}")
+                }
                 if (SubtitlePerf.enabled()) {
                     SubtitlePerf.sampleUs("subtitle_render", (MonoTime.now() - renderStart).toMicroseconds())
                     SubtitlePerf.countAdd("subtitle_render_count", 1)
@@ -763,9 +770,58 @@ public class PlaybackModel {
         prepareEmbeddedTracks(extractedSubtitleTracks)
     }
 
+    // 纯文本字幕（Matroska 的 S_TEXT/UTF8 等）没有 ASS 样式表，直接 newMatroskaTrack 后
+    // libass 能收事件但渲染不出像素（真机 trace: events=1/active=1 但 w=0 h=0）。
+    // 因此这类轨先拼一份最小可用的 ASS 文档（Script Info + Styles + Events）再解析。
+    private static let ASS_DEFAULT_HEADER = "[Script Info]\n" +
+        "ScriptType: v4.00+\n" +
+        "PlayResX: 1280\n" +
+        "PlayResY: 720\n" +
+        "WrapStyle: 0\n" +
+        "ScaledBorderAndShadow: yes\n" +
+        "\n" +
+        "[V4+ Styles]\n" +
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, " +
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, " +
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n" +
+        "Style: Default,Noto Sans CJK SC,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000," +
+        "0,0,0,0,100,100,0,0,1,2,1,2,40,40,48,1\n" +
+        "\n" +
+        "[Events]\n" +
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+
+    private static func assPad(v: Int64): String {
+        return if (v < 10) { "0" + v.toString() } else { v.toString() }
+    }
+
+    private static func assTimestamp(ms: Int64): String {
+        let total = if (ms < 0) { 0 } else { ms }
+        return (total / 3600000).toString() + ":" + assPad((total / 60000) % 60) + ":" +
+            assPad((total / 1000) % 60) + "." + assPad((total % 1000) / 10)
+    }
+
     private func prepareEmbeddedTracks(tracks: ArrayList<ExtractedSubtitleTrack>): Unit {
         match (assRenderer) {
             case Some(renderer) => for (extracted in tracks) {
+                var allPlain = extracted.codecPrivate.size == 0
+                for (event in extracted.events) {
+                    match (event.payloadKind) {
+                        case SubtitlePayloadKind.PlainText => ()
+                        case _ => allPlain = false
+                    }
+                }
+                if (allPlain) {
+                    var doc = ASS_DEFAULT_HEADER
+                    for (event in extracted.events) {
+                        let text = escapeAssText(String.fromUtf8(event.payload))
+                        let end = event.startMs + (if (event.durationMs > 0) { event.durationMs } else { 3000 })
+                        doc += "Dialogue: 0,${assTimestamp(event.startMs)},${assTimestamp(end)},Default,,0,0,0,,${text}\n"
+                    }
+                    let track = renderer.readAssDocument(doc.toArray())
+                    embeddedAssTracks[extracted.streamIndex] = track
+                    perfLog("sub: built ASS doc for plain-text stream=${extracted.streamIndex} events=${extracted.events.size}")
+                    continue
+                }
                 let track = renderer.newMatroskaTrack(extracted.codecPrivate)
                 var plainReadOrder: Int64 = 0
                 for (event in extracted.events) {
@@ -780,6 +836,7 @@ public class PlaybackModel {
                     track.addChunk(bytes, event.startMs, event.durationMs)
                 }
                 embeddedAssTracks[extracted.streamIndex] = track
+            perfLog("sub: extracted stream=${extracted.streamIndex} events=${extracted.events.size} codecPrivate=${extracted.codecPrivate.size}")
             }
             case None => ()
         }

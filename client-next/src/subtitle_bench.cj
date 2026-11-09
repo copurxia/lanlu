@@ -103,7 +103,9 @@ public class SubtitleBench {
                     if (subArg.size > 0) {
                         try {
                             let idx = Int32.parse(subArg)
+                            perfLog("bench: selecting subtitle stream=" + subArg)
                             model.playback.toggleEmbeddedSubtitle(idx)
+                            perfLog("bench: toggle returned stream=" + subArg)
                             println("[subtitle-bench] selected embedded subtitle stream=" + subArg)
                         } catch (_) {
                             println("[subtitle-bench] bad LANLU_BENCH_SUB_IDX=" + subArg)
