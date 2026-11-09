@@ -1,0 +1,8 @@
+[package]
+cjc-version = "1.2.0"
+name = "lgpu"
+version = "0.1.0"
+description = "L 层渲染器（wgpu/Vulkan）的 Cangjie 绑定"
+output-type = "static"
+
+[dependencies]

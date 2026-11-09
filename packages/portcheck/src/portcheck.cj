@@ -6,6 +6,7 @@ import std.env.getVariable
 import std.fs.{File, Path}
 import libavformat_ffi.probeSubtitleStreams
 import sdl.input.Clipboard
+import lgpu
 
 public func enabled(): Bool {
     (getVariable("OHOS_SELFTEST") ?? "0") == "1"
@@ -112,10 +113,30 @@ func runLgpuProbe(): Unit {
     } catch (_) {}
 }
 
+// L 层渲染器自检（Cangjie 包装层路径）：与 runLgpuProbe 的裸 C 调用互补，
+// 这条验证 packages/lgpu 的 Cangjie 绑定能编译、链接并被调用。
+func runLgpuCjProbe(): Unit {
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+        return
+    }
+    let base = getVariable("HOME") ?? "."
+    var out = ""
+    try {
+        out = "version=" + lgpu.version() + "\nself_check=" + lgpu.selfCheck().toString() + "\n"
+        out += "-- adapters --\n" + lgpu.adapterSummary() + "\n"
+    } catch (e: Exception) {
+        out = "lgpu cj probe failed: " + e.toString() + "\n"
+    }
+    try {
+        File.writeTo(Path(base + "/lgpu_cj.txt"), out.toArray())
+    } catch (_) {}
+}
+
 public func runIfEnabled(): Unit {
     runProbeIfRequested();
     runClipboardProbeIfRequested();
     runLgpuProbe();
+    runLgpuCjProbe();
     if (!enabled()) {
         return
     }

@@ -6,6 +6,7 @@ description = "lanlu desktop client built on CangjieGUI"
 output-type = "executable"
 
 [dependencies]
+lgpu = { path = "../packages/lgpu" }
 cui = { path = "../packages/cangjie-gui" }
 lwindow = { path = "../packages/lwindow" }
 portcheck = { path = "../packages/portcheck" }
