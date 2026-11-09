@@ -19,6 +19,8 @@ HAP：`entry-default-signed.hap` ≈ **92.4 MB**（原 124.4 MB，经依赖库 S
 | 窗口最小化 | 点击 (2493,332) → `ui window list` 变空、进程存活 | ✅ |
 | 重启后数据保留 | 沙箱 KV 文件持久；再次启动会话自动恢复 | ✅ |
 | 视频播放（H.264） | `video stats frames=60/120/180/240` 持续增长（MP4 与自封装 MKV 两种容器） | ✅ |
+| 字幕探测 | `LANLU_PROBE_URL` → `streams=3 idx=1 codec=ass lang=eng ...`（自造样片同样可探测） | ✅ |
+| 字幕渲染（libass） | 带样式 ASS 轨 `render w=265 h=39`、纯文本 SRT 轨 `w=185 h=34`，`subtitle-uploads` 0→1 | ✅ |
 | 音频播放（PCM 48k） | `audio write cb` 持续、`frames=191040→767040`（≈16s，48k 换算吻合） | ✅ |
 | 音频播放（PCM 44.1k，需重采样） | 同上量级，稳定；证明自研重采样可用 | ✅ |
 | seek | `LANLU_SEEK_LOOP_MS` 循环跳转 3 轮：视频帧 900→1200、音频帧 88320→664320 持续，进程存活 | ✅ |
