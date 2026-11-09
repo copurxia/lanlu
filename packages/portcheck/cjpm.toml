@@ -13,14 +13,9 @@ libass_ffi = { path = "../libass_ffi" }
 libvlc_ffi = { path = "../libvlc_ffi" }
 webview = { path = "../webview" }
 fontkit_ffi = { path = "../fontkit_ffi" }
+sdl = { path = "../cangjie-gui/sdl" }
 
-# stdx 以二进制依赖方式引入（与 client-next / qwest 同款）。
-[target.x86_64-unknown-linux-gnu.bin-dependencies]
-  path-option = [ "${CANGJIE_STDX_PATH}" ]
-
-[target.x86_64-w64-mingw32.bin-dependencies]
-  path-option = [ "${CANGJIE_STDX_PATH}" ]
-
+# 备注：host 构建的 stdx 路径由根包（client-next）的 bin-dependencies 提供，本包不重复声明。
 [target.aarch64-linux-ohos]
 compile-option = "--sysroot=/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot -B/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"
 link-option = "-L /workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"

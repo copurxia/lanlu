@@ -1,6 +1,7 @@
 package lanlu_client_next
 
 import std.env.getVariable
+import portcheck
 
 import lanlu_client_next.app.*
 import cui.media.pixelCacheDiagnosticsPublic
@@ -79,6 +80,8 @@ public class SubtitleBench {
 
     // P1 冷扫描：清缓存 + 打开阅读器视频页。
     private func stepInit(model: AppModel): Unit {
+        // 剪贴板自检需要 SDL 已初始化，放在 bench 循环里（runIfEnabled 阶段 SDL 尚未起来）
+        portcheck.runClipboardProbeIfRequested()
         SubtitlePerf.reset()
         model.clearSubtitleCache()
         println("[subtitle-bench] clearing subtitle cache, opening ${arcid} page ${page}")
@@ -94,6 +97,7 @@ public class SubtitleBench {
             case Some(p) =>
                 if (p.pageType == want) {
                     println("[subtitle-bench] page ready type=${p.pageType} (pages=${model.pages.value.size})")
+                    perfLog("bench: page ready type=${p.pageType} pages=${model.pages.value.size}")
                     // 无内嵌字幕轨的片源永远满足不了冷扫描条件：给 6s 超时照常推进，
                     // 否则 seek/重开等阶段根本无法被测到。
                     coldDeadline = MonoTime.now() + Duration.second * 6
