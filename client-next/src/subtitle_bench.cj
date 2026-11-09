@@ -1,5 +1,7 @@
 package lanlu_client_next
 
+import std.env.getVariable
+
 import lanlu_client_next.app.*
 import cui.media.pixelCacheDiagnosticsPublic
 import std.collection.ArrayList
@@ -95,6 +97,18 @@ public class SubtitleBench {
                     // 无内嵌字幕轨的片源永远满足不了冷扫描条件：给 6s 超时照常推进，
                     // 否则 seek/重开等阶段根本无法被测到。
                     coldDeadline = MonoTime.now() + Duration.second * 6
+                    // 联调：LANLU_BENCH_SUB_IDX=<streamIndex> 时自动选中该内嵌字幕轨，
+                    // 用于在真机上验证 libass 渲染是否真的发生（配合 LANLU_PERF_LOG 看 subtitle-uploads）。
+                    let subArg = getVariable("LANLU_BENCH_SUB_IDX") ?? ""
+                    if (subArg.size > 0) {
+                        try {
+                            let idx = Int32.parse(subArg)
+                            model.playback.toggleEmbeddedSubtitle(idx)
+                            println("[subtitle-bench] selected embedded subtitle stream=" + subArg)
+                        } catch (_) {
+                            println("[subtitle-bench] bad LANLU_BENCH_SUB_IDX=" + subArg)
+                        }
+                    }
                     phase = 2
                 }
             case None => ()
