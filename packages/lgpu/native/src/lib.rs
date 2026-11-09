@@ -7,6 +7,8 @@
 //! 本文件当前是 P2 的第一块：实例创建 + 适配器枚举 + surface 创建。
 //! 管线/绘制在后续加入（见 docs/l-layer-plan）。
 
+mod gpu;
+
 use std::cell::RefCell;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr::NonNull;
@@ -121,6 +123,13 @@ pub struct SurfaceCtx {
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     config: Option<wgpu::SurfaceConfiguration>,
+    pipeline: Option<wgpu::RenderPipeline>,
+    inst_buffer: Option<wgpu::Buffer>,
+    inst_capacity: usize,
+    screen_buffer: Option<wgpu::Buffer>,
+    bind_group: Option<wgpu::BindGroup>,
+    instances: Vec<gpu::RectInstance>,
+    clear_color: [f32; 4],
 }
 
 /// 用 XComponent 的 OHNativeWindow* 建 wgpu surface。
@@ -161,6 +170,13 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             device: None,
             queue: None,
             config: None,
+            pipeline: None,
+            inst_buffer: None,
+            inst_capacity: 0,
+            screen_buffer: None,
+            bind_group: None,
+            instances: Vec::new(),
+            clear_color: [0.0, 0.0, 0.0, 1.0],
         })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
@@ -361,5 +377,239 @@ pub extern "C" fn lgpu_surface_resize(surface: *mut c_void, width: u32, height: 
     config.height = height;
     ctx.surface.configure(device, &config);
     ctx.config = Some(config);
+    0
+}
+
+/// 初始化 SDF 管线（surface 已 init 后调用一次）。
+#[no_mangle]
+pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
+    if surface.is_null() {
+        set_error("null surface");
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(config)) = (&ctx.device, ctx.config.clone()) else {
+        set_error("surface not initialised");
+        return E_BAD_ARG;
+    };
+    if ctx.pipeline.is_some() {
+        return 0;
+    }
+
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("lgpu-sdf"),
+        source: wgpu::ShaderSource::Wgsl(gpu::SHADER.into()),
+    });
+
+    let screen_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-screen"),
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("lgpu-bgl"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("lgpu-bg"),
+        layout: &bgl,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: screen_buffer.as_entire_binding(),
+        }],
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("lgpu-layout"),
+        bind_group_layouts: &[Some(&bgl)],
+        immediate_size: 0,
+    });
+
+    let attrs = [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 0,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 16,
+            shader_location: 1,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 32,
+            shader_location: 2,
+        },
+    ];
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("lgpu-pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<gpu::RectInstance>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &attrs,
+            })],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+
+    ctx.screen_buffer = Some(screen_buffer);
+    ctx.bind_group = Some(bind_group);
+    ctx.pipeline = Some(pipeline);
+    0
+}
+
+/// 开始一帧：清屏 + 清空实例列表。
+#[no_mangle]
+pub extern "C" fn lgpu_frame_begin(surface: *mut c_void, r: f32, g: f32, b: f32, a: f32) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(queue), Some(config)) = (&ctx.queue, ctx.config.clone()) else {
+        return E_BAD_ARG;
+    };
+    ctx.instances.clear();
+    ctx.clear_color = [r, g, b, a];
+    let screen = [config.width as f32, config.height as f32, 0.0, 0.0];
+    if let Some(buf) = &ctx.screen_buffer {
+        queue.write_buffer(buf, 0, bytemuck::cast_slice(&screen));
+    }
+    0
+}
+
+/// 推一个矩形（radius>0 为圆角，stroke>0 为描边）。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_rect(
+    surface: *mut c_void,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    stroke: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> i32 {
+    if surface.is_null() || w <= 0.0 || h <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.instances.push(gpu::RectInstance {
+        rect: [x, y, w, h],
+        color: [r, g, b, a],
+        params: [radius, stroke, 0.0, 0.0],
+    });
+    0
+}
+
+/// 结束一帧：上传实例、绘制、present。
+#[no_mangle]
+pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(queue), Some(pipeline), Some(bind_group)) =
+        (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group)
+    else {
+        set_error("pipeline not initialised");
+        return E_BAD_ARG;
+    };
+
+    // 实例缓冲按需增长（容量翻倍，避免每帧重分配）。
+    let need = ctx.instances.len();
+    if need > ctx.inst_capacity {
+        let cap = need.next_power_of_two();
+        let size = (cap * std::mem::size_of::<gpu::RectInstance>()) as u64;
+        ctx.inst_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lgpu-instances"),
+            size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        ctx.inst_capacity = cap;
+    }
+    if need > 0 {
+        if let Some(buf) = &ctx.inst_buffer {
+            queue.write_buffer(buf, 0, bytemuck::cast_slice(&ctx.instances));
+        }
+    }
+
+    let frame = match ctx.surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+        other => {
+            set_error(format!("get_current_texture: {other:?}"));
+            return E_NO_DEVICE;
+        }
+    };
+    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("lgpu-frame"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: ctx.clear_color[0] as f64,
+                        g: ctx.clear_color[1] as f64,
+                        b: ctx.clear_color[2] as f64,
+                        a: ctx.clear_color[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if need > 0 {
+            if let Some(buf) = &ctx.inst_buffer {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, bind_group, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..need as u32);
+            }
+        }
+    }
+    queue.submit(Some(encoder.finish()));
+    queue.present(frame);
     0
 }

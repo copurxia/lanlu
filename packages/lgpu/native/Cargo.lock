@@ -237,6 +237,7 @@ dependencies = [
 name = "lanlu-lgpu-native"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "pollster",
  "raw-window-handle",
  "wgpu",

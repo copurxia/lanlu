@@ -17,6 +17,8 @@ wgpu = { version = "=30.0.1", default-features = false, features = ["std", "vulk
 pollster = "=0.4.0"
 # 构造 RawWindowHandle::OhosNdk（XComponent 的 OHNativeWindow*）交给 wgpu-hal。
 raw-window-handle = "=0.6.2"
+# 顶点/实例缓冲的 POD 转换（wgpu 要求 BufferAddress 对齐的字节视图）
+bytemuck = { version = "=1.25.2", features = ["derive"] }
 
 # 上游 wgpu-hal 不支持 OHOS surface，这里用 horizon-ohos 打过补丁的 30.0.1
 # （src/vulkan/instance.rs 的 create_surface_ohos / VK_OHOS_surface）。
