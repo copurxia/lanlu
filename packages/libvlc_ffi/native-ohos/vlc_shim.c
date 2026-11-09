@@ -29,6 +29,7 @@ static int stats_enabled(void) {
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 #include <ohaudio/native_audiostreambuilder.h>
+#include <ohaudio/native_audio_session_manager.h>
 #include <ohaudio/native_audiorenderer.h>
 #include <ohaudio/native_audiostream_base.h>
 
@@ -358,6 +359,12 @@ static void* audio_loop(void* arg) {
     if (fr) av_frame_free(&fr);
     return 0;
 }
+// 音频中断回调：被其它应用抢占/系统打断时至少留下痕迹（后续可在此恢复）。
+static void audio_interrupt_cb(OH_AudioRenderer* r, void* user, OH_AudioInterrupt_ForceType type, OH_AudioInterrupt_Hint hint) {
+    (void)r; (void)user;
+    VLOG("audio interrupt type=%d hint=%d", (int)type, (int)hint);
+}
+
 static void audio_start(VlcPlayer* p) {
     if (p->athread_started) return;
     p->rcap = 1024 * 1024; p->ring = malloc(p->rcap); p->rhead = p->rtail = p->rsize = 0;
@@ -371,9 +378,21 @@ static void audio_start(VlcPlayer* p) {
         OH_AudioStreamBuilder_SetEncodingType(b, AUDIOSTREAM_ENCODING_TYPE_RAW);
         OH_AudioStreamBuilder_SetRendererInfo(b, AUDIOSTREAM_USAGE_MUSIC);
         OH_AudioStreamBuilder_SetRendererWriteDataCallback(b, audio_write_cb, p);
+        OH_AudioStreamBuilder_SetRendererInterruptCallback(b, audio_interrupt_cb, p);
         OH_AudioStreamBuilder_GenerateRenderer(b, &p->renderer);
         OH_AudioStreamBuilder_Destroy(b);
     }
+    static OH_AudioSessionManager* sess_mgr = NULL;
+    if (!sess_mgr) OH_AudioManager_GetAudioSessionManager(&sess_mgr);
+    int scene_rc = -1, act_rc = -1;
+    if (sess_mgr) {
+        scene_rc = (int)OH_AudioSessionManager_SetScene(sess_mgr, AUDIO_SESSION_SCENE_MEDIA);
+        OH_AudioSession_Strategy st;
+        memset(&st, 0, sizeof st);
+        st.concurrencyMode = CONCURRENCY_DEFAULT;   /* 与其它应用共存的默认并发策略 */
+        act_rc = (int)OH_AudioSessionManager_ActivateAudioSession(sess_mgr, &st);
+    }
+    VLOG("audio session mgr=%p scene_rc=%d activate_rc=%d", (void*)sess_mgr, scene_rc, act_rc);
     int start_rc = -1;
     if (p->renderer) start_rc = (int)OH_AudioRenderer_Start(p->renderer);
     int th_rc = pthread_create(&p->athread, NULL, audio_loop, p);
