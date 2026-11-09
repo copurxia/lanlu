@@ -24,6 +24,15 @@ foreign {
     func lgpu_draw_rect(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_frame_end(surface: CPointer<UInt8>): Int32
+    func lgpu_draw_rect_gradient(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
+        radius: Float32, stroke: Float32, mode: Float32,
+        r1: Float32, g1: Float32, b1: Float32, a1: Float32,
+        r2: Float32, g2: Float32, b2: Float32, a2: Float32): Int32
+    func lgpu_font_load_path(path: CPointer<UInt8>, pathLen: Int64): CPointer<UInt8>
+    func lgpu_font_destroy(font: CPointer<UInt8>): Unit
+    func lgpu_text_measure(font: CPointer<UInt8>, utf8: CPointer<UInt8>, len: Int64, pxSize: Float32): Float32
+    func lgpu_text_draw(surface: CPointer<UInt8>, font: CPointer<UInt8>, utf8: CPointer<UInt8>, len: Int64,
+        x: Float32, y: Float32, pxSize: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Float32
     func lgpu_set_clip(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32): Int32
     func lgpu_set_transform(surface: CPointer<UInt8>, sx: Float32, sy: Float32, ox: Float32, oy: Float32): Int32
 
@@ -143,6 +152,44 @@ public class Surface <: Resource {
             "lgpu_draw_texture")
     }
 
+    /// 填充矩形（无圆角、无描边）。
+    public func fill(x: Float32, y: Float32, w: Float32, h: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        rect(x, y, w, h, 0.0, 0.0, r, g, b, a)
+    }
+
+    /// 水平/垂直渐变（mode=1 横向，mode=2 纵向）。
+    public func gradient(x: Float32, y: Float32, w: Float32, h: Float32, mode: Int64,
+        r1: Float32, g1: Float32, b1: Float32, a1: Float32,
+        r2: Float32, g2: Float32, b2: Float32, a2: Float32): Unit {
+        checkRc(unsafe { lgpu_draw_rect_gradient(handle, x, y, w, h, 0.0, 0.0, Float32(mode),
+            r1, g1, b1, a1, r2, g2, b2, a2) }, "lgpu_draw_rect_gradient")
+    }
+
+    /// 圆（SDF：等价于半径 = 半边的圆角矩形）。
+    public func circle(cx: Float32, cy: Float32, radius: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        this.rect(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, 0.0, r, g, b, a)
+    }
+
+    /// 圆描边。
+    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        this.rect(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, pen, r, g, b, a)
+    }
+
+    /// 绘制一段文本（UTF-8），返回前进宽度。
+    public func text(font: Font, content: String, x: Float32, y: Float32, pxSize: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Float32 {
+        let bytes = content.toArray()
+        let h = unsafe { acquireArrayRawData(bytes) }
+        try {
+            unsafe { lgpu_text_draw(handle, font.raw(), h.pointer, Int64(bytes.size), x, y, pxSize, r, g, b, a) }
+        } finally {
+            unsafe { releaseArrayRawData(h) }
+        }
+    }
+
     /// 结束一帧：提交并 present。
     public func endFrame(): Unit {
         checkRc(unsafe { lgpu_frame_end(handle) }, "lgpu_frame_end")
@@ -203,6 +250,53 @@ public class Texture {
     public func close(): Unit {
         if (!handle.isNull()) {
             owner.destroyTexture(handle)
+            handle = CPointer<UInt8>()
+        }
+    }
+}
+
+/// 字体句柄（由文件加载）。
+public class Font {
+    private var handle: CPointer<UInt8>
+
+    private init(handle: CPointer<UInt8>) {
+        this.handle = handle
+    }
+
+    /// 从字体文件加载。
+    public static func load(path: String): Font {
+        let bytes = path.toArray()
+        let bh = unsafe { acquireArrayRawData(bytes) }
+        let h = try {
+            unsafe { lgpu_font_load_path(bh.pointer, Int64(bytes.size)) }
+        } finally {
+            unsafe { releaseArrayRawData(bh) }
+        }
+        if (h.isNull()) {
+            let detail = unsafe { lgpu_last_error().toString() }
+            throw LgpuException("lgpu_font_load_path failed: ${detail}")
+        }
+        return Font(h)
+    }
+
+    internal func raw(): CPointer<UInt8> {
+        handle
+    }
+
+    /// 字符串宽度（像素）。
+    public func measure(content: String, pxSize: Float32): Float32 {
+        let bytes = content.toArray()
+        let h = unsafe { acquireArrayRawData(bytes) }
+        try {
+            unsafe { lgpu_text_measure(handle, h.pointer, Int64(bytes.size), pxSize) }
+        } finally {
+            unsafe { releaseArrayRawData(h) }
+        }
+    }
+
+    public func close(): Unit {
+        if (!handle.isNull()) {
+            unsafe { lgpu_font_destroy(handle) }
             handle = CPointer<UInt8>()
         }
     }

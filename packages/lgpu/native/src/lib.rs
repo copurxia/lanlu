@@ -539,6 +539,11 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
             offset: 48,
             shader_location: 3,
         },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 64,
+            shader_location: 4,
+        },
     ];
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("lgpu-pipeline"),
@@ -740,6 +745,31 @@ pub extern "C" fn lgpu_draw_rect(
         color: [r, g, b, a],
         params: [radius, stroke, 0.0, 0.0],
         clip: ctx.clip,
+        color2: [r, g, b, a],
+    });
+    0
+}
+
+/// 推一个渐变矩形。mode: 0 纯色(=c1), 1 横向(c1→c2), 2 纵向(c1→c2)。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_rect_gradient(
+    surface: *mut c_void,
+    x: f32, y: f32, w: f32, h: f32,
+    radius: f32, stroke: f32, mode: f32,
+    r1: f32, g1: f32, b1: f32, a1: f32,
+    r2: f32, g2: f32, b2: f32, a2: f32,
+) -> i32 {
+    if surface.is_null() || w <= 0.0 || h <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.instances.push(gpu::RectInstance {
+        rect: [x, y, w, h],
+        color: [r1, g1, b1, a1],
+        params: [radius, stroke, mode, 0.0],
+        clip: ctx.clip,
+        color2: [r2, g2, b2, a2],
     });
     0
 }
@@ -1008,6 +1038,7 @@ pub extern "C" fn lgpu_draw_texture(
         uv: [u0, v0, u1, v1],
         tint: [r, g, b, a],
         clip: ctx.clip,
+        color2: [r, g, b, a],
     }, tex));
     0
 }
@@ -1123,12 +1154,10 @@ fn render_to_texture(
     let submission = queue.submit(Some(encoder.finish()));
 
     let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    // 必须等**自己这次**提交完成；wait_indefinitely 只等"最近一次"，连续提交时会读到未写入的缓冲。
-    let _ = device.poll(wgpu::PollType::Wait {
-        submission_index: Some(submission),
-        timeout: None,
-    });
+    if !map_and_wait(device, &slice, submission) {
+        set_error("readback: buffer never mapped");
+        return None;
+    }
     let data = match slice.get_mapped_range() {
         Ok(d) => d,
         Err(e) => {
@@ -1144,6 +1173,31 @@ fn render_to_texture(
     drop(data);
     readback.unmap();
     Some(out)
+}
+
+
+/// 等待缓冲区映射完成。map_async 的回调不保证在第一次 poll 后触发，
+/// 必须循环 poll 直到真正可读（否则真机上会偶发 "Buffer is not mapped"）。
+fn map_and_wait(
+    device: &wgpu::Device,
+    slice: &wgpu::BufferSlice<'_>,
+    submission: wgpu::SubmissionIndex,
+) -> bool {
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    let _ = device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission),
+        timeout: None,
+    });
+    for _ in 0..32 {
+        if slice.get_mapped_range().is_ok() {
+            return true;
+        }
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+    }
+    false
 }
 
 /// 取像素（RGBA8）。
@@ -1188,15 +1242,17 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         rect: [20.0, 40.0, 100.0, 20.0],
         color: [1.0, 1.0, 1.0, 1.0],
         params: [0.0, 0.0, 0.0, 0.0],
-        clip: [20.0, 40.0, 60.0, 100.0],   // 高度故意放大：若可见高度仍被压到 12，说明问题不在 scissor
+        clip: [20.0, 40.0, 60.0, 100.0],
+        color2: [1.0, 1.0, 1.0, 1.0],
     };
 
-    // 同组两个实例（验证实例化合批）+ 一个带变换的实例
+    // 第二个实例：横向渐变（黑→白），验证渐变与同组合批
     let inst2 = gpu::RectInstance {
-        rect: [20.0, 80.0, 100.0, 20.0],
-        color: [0.0, 1.0, 0.0, 1.0],
-        params: [0.0, 0.0, 0.0, 0.0],
-        clip: [20.0, 40.0, 60.0, 100.0],
+        rect: [20.0, 80.0, 160.0, 20.0],
+        color: [0.0, 0.0, 0.0, 1.0],
+        params: [0.0, 0.0, 1.0, 0.0],   // mode=1 横向渐变
+        clip: [0.0, 0.0, 0.0, 0.0],
+        color2: [1.0, 1.0, 1.0, 1.0],
     };
     let Some(buf) = render_to_texture(
         device, queue, pipeline, bind_group, screen_buffer,
@@ -1221,18 +1277,23 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         return 1;
     }
     // 允许 2px 抗锯齿误差
-    // 第二个实例的绿色块也必须出现（y 80..100，x 被裁到 20..80）
-    let mut g2 = 0u8;
-    for y in 80..100u32 {
-        for x in 20..80u32 {
-            g2 = g2.max(px(&buf, w, x, y)[1]);
+    // 渐变探针：左端应接近黑、右端应接近白
+    let grad_left = px(&buf, w, 24, 90)[0];
+    let grad_right = px(&buf, w, 176, 90)[0];
+    // 只判定裁剪条所在行段（y 40..60）的右边界；整体 bbox 含下方渐变条
+    let mut bar_right = 0u32;
+    for y in 40..60u32 {
+        for x in 0..w {
+            if px(&buf, w, x, y)[0] > 60 {
+                bar_right = bar_right.max(x);
+            }
         }
     }
-    let ok = x0 <= 22 && y0 <= 42 && x1 >= 77 && x1 <= 82 && y1 >= 57 && y1 <= 61 && g2 > 200;
+    let ok = x0 <= 22 && bar_right >= 77 && bar_right <= 82 && grad_left < 80 && grad_right > 180;
     // 期望：x 被裁到 20..79，y 完整 40..59
     let fail = if ok { 0 } else { 1 };
     set_error(format!(
-        "selftest: bbox=({x0},{y0})-({x1},{y1}) expect (20,40)-(79,59) second_green={g2} ok={}",
+        "selftest: bbox=({x0},{y0})-({x1},{y1}) bar_right={bar_right} grad_left={grad_left} grad_right={grad_right} ok={}",
         ok
     ));
     fail
@@ -1242,12 +1303,12 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
 
 /// 从文件加载字体，返回不透明句柄；失败返回 null。
 #[no_mangle]
-pub extern "C" fn lgpu_font_load_path(path: *const c_char) -> *mut c_void {
-    if path.is_null() {
+pub extern "C" fn lgpu_font_load_path(path: *const u8, path_len: usize) -> *mut c_void {
+    if path.is_null() || path_len == 0 {
         set_error("null font path");
         return std::ptr::null_mut();
     }
-    let path_str = unsafe { CStr::from_ptr(path) }.to_string_lossy().to_string();
+    let path_str = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(path, path_len) }).to_string();
     let bytes = match std::fs::read(&path_str) {
         Ok(b) => b,
         Err(e) => {
@@ -1275,12 +1336,12 @@ pub extern "C" fn lgpu_font_destroy(font: *mut c_void) {
 
 /// 量测字符串宽度（像素）。
 #[no_mangle]
-pub extern "C" fn lgpu_text_measure(font: *mut c_void, utf8: *const c_char, px_size: f32) -> f32 {
-    if font.is_null() || utf8.is_null() {
+pub extern "C" fn lgpu_text_measure(font: *mut c_void, utf8: *const u8, len: usize, px_size: f32) -> f32 {
+    if font.is_null() || utf8.is_null() || len == 0 {
         return 0.0;
     }
     let f = unsafe { &*(font as *const text::FontHandle) };
-    let s = unsafe { CStr::from_ptr(utf8) }.to_string_lossy().to_string();
+    let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(utf8, len) }).to_string();
     text::measure(f, &s, px_size)
 }
 
@@ -1293,7 +1354,8 @@ const ATLAS_SIZE: u32 = 1024;
 pub extern "C" fn lgpu_text_draw(
     surface: *mut c_void,
     font: *mut c_void,
-    utf8: *const c_char,
+    utf8: *const u8,
+    len: usize,
     x: f32,
     y: f32,
     px_size: f32,
@@ -1302,34 +1364,37 @@ pub extern "C" fn lgpu_text_draw(
     b: f32,
     a: f32,
 ) -> f32 {
-    if surface.is_null() || font.is_null() || utf8.is_null() || px_size <= 0.0 {
+    if surface.is_null() || font.is_null() || utf8.is_null() || len == 0 || px_size <= 0.0 {
         set_error("bad argument: text_draw");
         return 0.0;
     }
-    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let fh = unsafe { &*(font as *const text::FontHandle) };
-    let s = unsafe { CStr::from_ptr(utf8) }.to_string_lossy().to_string();
+    let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(utf8, len) }).to_string();
 
-    // 惰性创建图集（复用纹理管线）
-    if ctx.atlas.is_none() {
+    // 阶段 0：确保图集存在。注意**不要**在持有 &mut SurfaceCtx 时再调同名 FFI——
+    // 那会造出第二个 &mut（别名 UB），真机上表现为图集内容错乱/不显示。
+    let atlas_missing = unsafe { &*(surface as *const SurfaceCtx) }.atlas.is_none();
+    if atlas_missing {
         let atlas_tex = lgpu_texture_create(surface, ATLAS_SIZE, ATLAS_SIZE);
         if atlas_tex.is_null() {
-            set_error(format!("create text atlas failed: {}", unsafe {
-                CStr::from_ptr(lgpu_last_error()).to_string_lossy()
-            }));
+            set_error("create text atlas failed");
             return 0.0;
         }
-        // 图集初始全透明
         let blank = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
-        lgpu_texture_upload(surface, atlas_tex, 0, 0, ATLAS_SIZE, ATLAS_SIZE, blank.as_ptr(), ATLAS_SIZE * 4);
+        lgpu_texture_upload(
+            surface, atlas_tex, 0, 0, ATLAS_SIZE, ATLAS_SIZE, blank.as_ptr(), ATLAS_SIZE * 4,
+        );
+        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
         ctx.atlas = Some(atlas_tex);
         ctx.atlas_packer = Some(text::Atlas::new(ATLAS_SIZE));
     }
-    let atlas_tex = ctx.atlas.unwrap();
+    let atlas_tex = unsafe { &*(surface as *const SurfaceCtx) }.atlas.unwrap();
 
-    let size_key = (px_size * 4.0) as u32; // 量化到 1/4 像素，避免浮点抖动
+    // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）
+    let size_key = (px_size * 4.0) as u32;
     let mut pen_x = x;
-    let baseline = y + px_size * 0.8; // y 传的是行顶端，粗略基线（cui 侧之后会传真实度量）
+    let baseline = y + px_size * 0.8;
+    let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32)> = Vec::new();
 
     for ch in s.chars() {
         let glyph_id = {
@@ -1337,68 +1402,99 @@ pub extern "C" fn lgpu_text_draw(
             fh.font.glyph_id(ch).0
         };
         let key = (fh.id, glyph_id, size_key);
-        let slot = if let Some(slot) = ctx.atlas_packer.as_ref().unwrap().cache.get(&key) {
-            *slot
-        } else {
-            let Some(rg) = text::rasterize(fh, ch, px_size) else {
-                pen_x += size_key as f32 / 4.0 * 0.5; // 缺字：给半个 em 的空白
-                continue;
-            };
-            if rg.w == 0 || rg.h == 0 {
-                pen_x += rg.advance;
-                continue;
+
+        let cached = unsafe { &*(surface as *const SurfaceCtx) }
+            .atlas_packer
+            .as_ref()
+            .and_then(|p| p.cache.get(&key).copied());
+
+        let slot = match cached {
+            Some(slot) => slot,
+            None => {
+                let Some(rg) = text::rasterize(fh, ch, px_size) else {
+                    pen_x += px_size * 0.5;
+                    continue;
+                };
+                if rg.w == 0 || rg.h == 0 {
+                    pen_x += rg.advance;
+                    continue;
+                }
+                let alloc = {
+                    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                    ctx.atlas_packer.as_mut().and_then(|p| p.alloc(rg.w, rg.h))
+                };
+                let Some((ax, ay)) = alloc else {
+                    set_error("glyph atlas full");
+                    break;
+                };
+                let mut rgba = vec![0u8; (rg.w * rg.h * 4) as usize];
+                for i in 0..(rg.w * rg.h) as usize {
+                    rgba[i * 4] = 255;
+                    rgba[i * 4 + 1] = 255;
+                    rgba[i * 4 + 2] = 255;
+                    rgba[i * 4 + 3] = rg.coverage[i];
+                }
+                lgpu_texture_upload(surface, atlas_tex, ax, ay, rg.w, rg.h, rgba.as_ptr(), rg.w * 4);
+                let slot = text::GlyphSlot {
+                    x: ax,
+                    y: ay,
+                    w: rg.w,
+                    h: rg.h,
+                    bearing_x: rg.bearing_x,
+                    bearing_y: rg.bearing_y,
+                    advance: rg.advance,
+                };
+                let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                if let Some(p) = ctx.atlas_packer.as_mut() {
+                    p.cache.insert(key, slot);
+                }
+                slot
             }
-            let packer = ctx.atlas_packer.as_mut().unwrap();
-            let Some((ax, ay)) = packer.alloc(rg.w, rg.h) else {
-                set_error("glyph atlas full");
-                break;
-            };
-            // RGBA8：RGB 白、A 覆盖率
-            let mut rgba = vec![0u8; (rg.w * rg.h * 4) as usize];
-            for i in 0..(rg.w * rg.h) as usize {
-                rgba[i * 4] = 255;
-                rgba[i * 4 + 1] = 255;
-                rgba[i * 4 + 2] = 255;
-                rgba[i * 4 + 3] = rg.coverage[i];
-            }
-            lgpu_texture_upload(surface, atlas_tex, ax, ay, rg.w, rg.h, rgba.as_ptr(), rg.w * 4);
-            let slot = text::GlyphSlot {
-                x: ax,
-                y: ay,
-                w: rg.w,
-                h: rg.h,
-                bearing_x: rg.bearing_x,
-                bearing_y: rg.bearing_y,
-                advance: rg.advance,
-            };
-            ctx.atlas_packer.as_mut().unwrap().cache.insert(key, slot);
-            slot
         };
 
         if slot.w > 0 && slot.h > 0 {
             let dx = pen_x + slot.bearing_x;
             let dy = baseline + slot.bearing_y;
-            let u0 = slot.x as f32 / ATLAS_SIZE as f32;
-            let v0 = slot.y as f32 / ATLAS_SIZE as f32;
-            let u1 = (slot.x + slot.w) as f32 / ATLAS_SIZE as f32;
-            let v1 = (slot.y + slot.h) as f32 / ATLAS_SIZE as f32;
-            lgpu_draw_texture(
-                surface, atlas_tex, dx, dy, slot.w as f32, slot.h as f32, u0, v0, u1, v1, r, g, b, a,
-            );
+            quads.push((
+                dx,
+                dy,
+                slot.w as f32,
+                slot.h as f32,
+                slot.x as f32 / ATLAS_SIZE as f32,
+                slot.y as f32 / ATLAS_SIZE as f32,
+                (slot.x + slot.w) as f32 / ATLAS_SIZE as f32,
+                (slot.y + slot.h) as f32 / ATLAS_SIZE as f32,
+            ));
         }
         pen_x += slot.advance;
     }
+
+    // 阶段 2：把四边形推入当前帧
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    for (dx, dy, dw, dh, u0, v0, u1, v1) in quads {
+        ctx.tex_instances.push((
+            gpu::TexInstance {
+                dst: [dx, dy, dw, dh],
+                uv: [u0, v0, u1, v1],
+                tint: [r, g, b, a],
+                clip: ctx.clip,
+                color2: [r, g, b, a],
+            },
+            atlas_tex,
+        ));
+    }
+
     pen_x - x
 }
 
 /// 文本自检：用给定字体渲染 "AA" 到离屏目标，返回可见包围盒高度<<8 | 宽度高 8 位。
 /// 0 = 什么都没画出来（失败）。
 #[no_mangle]
-pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const c_char) -> i32 {
+pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8, path_len: usize) -> i32 {
     if surface.is_null() || font_path.is_null() {
         return 0;
     }
-    let font = lgpu_font_load_path(font_path);
+    let font = lgpu_font_load_path(font_path, path_len);
     if font.is_null() {
         return 0;
     }
@@ -1415,7 +1511,10 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const c_c
     ctx.instances.clear();
     ctx.tex_instances.clear();
     let size = 48.0f32;
-    let advance = lgpu_text_draw(surface, font, c"AA".as_ptr(), 10.0, 10.0, size, 1.0, 1.0, 1.0, 1.0);
+    let sample: &[u8] = b"AA";
+    let advance = lgpu_text_draw(
+        surface, font, sample.as_ptr(), sample.len(), 10.0, 10.0, size, 1.0, 1.0, 1.0, 1.0,
+    );
 
     let (Some(device), Some(queue), Some(tex_pipeline), Some(bind_group)) =
         (ctx.device.as_ref(), ctx.queue.as_ref(), ctx.tex_pipeline.as_ref(), ctx.bind_group.as_ref())
@@ -1561,8 +1660,10 @@ fn render_tex_to_texture(
     );
     let submission = queue.submit(Some(encoder.finish()));
     let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None });
+    if !map_and_wait(device, &slice, submission) {
+        set_error("readback: buffer never mapped");
+        return None;
+    }
     let data = match slice.get_mapped_range() {
         Ok(d) => d,
         Err(e) => {

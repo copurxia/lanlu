@@ -18,6 +18,8 @@ pub struct RectInstance {
     pub params: [f32; 4],
     /// 裁剪矩形 x, y, w, h（像素；w <= 0 表示不裁剪）
     pub clip: [f32; 4],
+    /// 渐变终点色（params.z: 0=纯色 1=横向渐变 2=纵向渐变）
+    pub color2: [f32; 4],
 }
 
 pub const SHADER: &str = r#"
@@ -37,6 +39,7 @@ struct Inst {
   @location(1) color: vec4f,
   @location(2) params: vec4f,
   @location(3) clip: vec4f,
+  @location(4) color2: vec4f,
 };
 
 struct VsOut {
@@ -47,6 +50,8 @@ struct VsOut {
   @location(3) params: vec4f,
   @location(4) clip: vec4f,
   @location(5) world: vec2f,
+  @location(6) color2: vec4f,
+  @location(7) pixel_local: vec2f,
 };
 
 @vertex
@@ -75,6 +80,10 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   out.params = inst.params;
   out.clip = inst.clip;
   out.world = world;
+  out.color2 = inst.color2;
+  // 渐变用的归一化位置（0..1），在矩形内
+  out.pixel_local = vec2f((p.x - inst.rect.x) / max(inst.rect.z, 1.0),
+                          (p.y - inst.rect.y) / max(inst.rect.w, 1.0));
   return out;
 }
 
@@ -87,9 +96,16 @@ fn sd_round_box(p: vec2f, b: vec2f, r: f32) -> f32 {
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4f {
   // 裁剪由 render pass 的 scissor 负责（见 lib.rs 的批次分组），这里不再逐像素判断。
+  // 渐变：mode 1 = 横向，mode 2 = 纵向，其余按纯色
+  var base = in.color;
+  if (in.params.z > 0.5) {
+    let t = clamp(select(in.pixel_local.y, in.pixel_local.x, in.params.z < 1.5), 0.0, 1.0);
+    base = mix(in.color, in.color2, t);
+  }
   let radius = clamp(in.params.x, 0.0, min(in.half_size.x, in.half_size.y));
   let stroke = in.params.y;
   let d = sd_round_box(in.local, in.half_size, radius);
+  let color = base;
 
   if (stroke > 0.0) {
     // 描边：只保留 |d| 落在 [0, stroke] 的部分
@@ -98,12 +114,12 @@ fn fs(in: VsOut) -> @location(0) vec4f {
     let inner = 1.0 - smoothstep(-stroke, -stroke + aa, d);
     let cover = clamp(outer - inner, 0.0, 1.0);
     if (cover <= 0.001) { discard; }
-    return vec4f(in.color.rgb, in.color.a * cover);
+    return vec4f(color.rgb, color.a * cover);
   }
   let aa = fwidth(d);
   let cover = 1.0 - smoothstep(-aa, aa, d);
   if (cover <= 0.001) { discard; }
-  return vec4f(in.color.rgb, in.color.a * cover);
+  return vec4f(color.rgb, color.a * cover);
 }
 "#;
 
@@ -119,6 +135,8 @@ pub struct TexInstance {
     pub tint: [f32; 4],
     /// 裁剪矩形 x, y, w, h（像素；w <= 0 表示不裁剪）
     pub clip: [f32; 4],
+    /// 渐变终点色（params.z: 0=纯色 1=横向渐变 2=纵向渐变）
+    pub color2: [f32; 4],
 }
 
 pub const TEX_SHADER: &str = r#"
@@ -139,6 +157,7 @@ struct Inst {
   @location(1) uv: vec4f,
   @location(2) tint: vec4f,
   @location(3) clip: vec4f,
+  @location(4) color2: vec4f,
 };
 
 struct VsOut {
@@ -169,6 +188,10 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   out.tint = inst.tint;
   out.clip = inst.clip;
   out.world = world;
+  out.color2 = inst.color2;
+  // 渐变用的归一化位置（0..1），在矩形内
+  out.pixel_local = vec2f((p.x - inst.rect.x) / max(inst.rect.z, 1.0),
+                          (p.y - inst.rect.y) / max(inst.rect.w, 1.0));
   return out;
 }
 
