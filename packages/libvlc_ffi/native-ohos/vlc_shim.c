@@ -76,7 +76,9 @@ typedef struct {
     // 音频包在 pump() 里解码后写入 ring，由 OH_AudioRenderer 回调消费。
     int astream;                 // 音频流索引，-1 = 无
     AVCodecContext* acodec;
-    struct SwrContext* aswr;
+    struct SwrContext* aswr;   // 已不再使用（保留字段以免破坏 ABI 布局）
+    double apos;               // 自研重采样相位
+    int aprimed;
     AVFrame* fctx_tmp;           // 音频解码输出帧（复用，避免每次 malloc）
     int aswr_ok;
     OH_AudioRenderer* renderer;
@@ -230,6 +232,75 @@ static void push_frame(VlcPlayer* p, AVFrame* f) {
 static void ring_write(VlcPlayer* p, const unsigned char* d, size_t n);
 static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt);
 
+// 自带音频转换/重采样（输出固定 s16 交错 48k 立体声）。
+// 为什么不用 libswresample：真机上 swr_convert 在 44100→48000 场景直接 SIGSEGV
+// （同一构建下 48k 直通正常），排查成本高于自己实现。这里覆盖常见 PCM/AAC 解码输出
+// 格式：s16/s16p/s32/s32p/f32/f32p/u8，采样率用线性插值重采样，声道做单声道复制/多声道取前两路。
+typedef struct {
+    double pos;        // 重采样相位（输入采样点，全局推进）
+    int primed;
+} AudioConvState;
+
+static double conv_read_sample(const AVFrame* f, int ch, int i, int64_t n) {
+    if (i < 0 || i >= n) return 0.0;
+    switch (f->format) {
+        case AV_SAMPLE_FMT_S16:  return ((const int16_t*)f->data[0])[i * f->ch_layout.nb_channels + (ch < f->ch_layout.nb_channels ? ch : 0)] / 32768.0;
+        case AV_SAMPLE_FMT_S16P: return ((const int16_t*)f->data[ch < f->ch_layout.nb_channels ? ch : 0])[i] / 32768.0;
+        case AV_SAMPLE_FMT_S32:  return ((const int32_t*)f->data[0])[i * f->ch_layout.nb_channels + (ch < f->ch_layout.nb_channels ? ch : 0)] / 2147483648.0;
+        case AV_SAMPLE_FMT_S32P: return ((const int32_t*)f->data[ch < f->ch_layout.nb_channels ? ch : 0])[i] / 2147483648.0;
+        case AV_SAMPLE_FMT_FLT:  return ((const float*)f->data[0])[i * f->ch_layout.nb_channels + (ch < f->ch_layout.nb_channels ? ch : 0)];
+        case AV_SAMPLE_FMT_FLTP: return ((const float*)f->data[ch < f->ch_layout.nb_channels ? ch : 0])[i];
+        case AV_SAMPLE_FMT_U8:   return (((const uint8_t*)f->data[0])[i * f->ch_layout.nb_channels + (ch < f->ch_layout.nb_channels ? ch : 0)] - 128) / 128.0;
+        case AV_SAMPLE_FMT_U8P:  return (((const uint8_t*)f->data[ch < f->ch_layout.nb_channels ? ch : 0])[i] - 128) / 128.0;
+        default: return 0.0;
+    }
+}
+
+// 把一帧转换成 s16 交错 48k 立体声写进环形缓冲。返回写入的帧数。
+static int audio_convert_frame(VlcPlayer* p, AudioConvState* st, const AVFrame* f) {
+    int in_rate = f->sample_rate > 0 ? f->sample_rate : 48000;
+    int64_t n = f->nb_samples;
+    if (n <= 0) return 0;
+    double step = (double)in_rate / 48000.0;
+    if (step < 0.0001) step = 1.0;
+    if (!st->primed) { st->pos = 0.0; st->primed = 1; }
+
+    size_t cap_frames = (size_t)(n / step) + 4;
+    int16_t* out = (int16_t*)malloc(cap_frames * 2 * sizeof(int16_t));
+    if (!out) return 0;
+    size_t o = 0;
+    while (st->pos < (double)(n - 1) && o < cap_frames) {
+        int i0 = (int)st->pos;
+        double frac = st->pos - (double)i0;
+        for (int ch = 0; ch < 2; ch++) {
+            double s0 = conv_read_sample(f, ch, i0, n);
+            double s1 = conv_read_sample(f, ch, i0 + 1, n);
+            double v = s0 + (s1 - s0) * frac;
+            if (v > 1.0) v = 1.0;
+            if (v < -1.0) v = -1.0;
+            out[o * 2 + ch] = (int16_t)(v * 32767.0);
+        }
+        o++;
+        st->pos += step;
+    }
+    st->pos -= (double)n;      // 保留相位余量给下一帧
+    if (st->pos < 0.0) st->pos = 0.0;
+
+    size_t bytes = o * 2 * sizeof(int16_t);
+    if (bytes > 0) {
+        for (;;) {
+            pthread_mutex_lock(&p->amu);
+            int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
+            pthread_mutex_unlock(&p->amu);
+            if (full == 0 || p->astop) break;
+            usleep(2000);
+        }
+        if (!p->astop) ring_write(p, (const unsigned char*)out, bytes);
+    }
+    free(out);
+    return (int)o;
+}
+
 // 音频包解码：与视频共用同一个 demuxer（pump 里调用），解码 → 重采样 → 环形缓冲。
 // 渲染器回调从环形缓冲取数据；不再需要独立的音频线程/第二条连接。
 static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt) {
@@ -242,6 +313,7 @@ static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt) {
             if (p->fctx_tmp->ch_layout.nb_channels > 0) av_channel_layout_copy(&in_ch, &p->fctx_tmp->ch_layout);
             else av_channel_layout_default(&in_ch, 2);
             int rate = p->fctx_tmp->sample_rate > 0 ? p->fctx_tmp->sample_rate : 48000;
+            if (stats_enabled()) VLOG("swr alloc call in_ch=%d rate=%d fmt=%d", in_ch.nb_channels, rate, p->fctx_tmp->format);
             int rc = swr_alloc_set_opts2(&p->aswr, &out_ch, AV_SAMPLE_FMT_S16, 48000,
                 &in_ch, (enum AVSampleFormat)p->fctx_tmp->format, rate, 0, NULL);
             if (rc == 0 && p->aswr && swr_init(p->aswr) == 0) {
@@ -251,39 +323,10 @@ static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt) {
                 VLOG("audio swr init failed rc=%d", rc);
             }
         }
-        // 直通快路：源已是 S16/48k/2ch（我们自己的 PCM 样片就属此类）时免重采样，
-        // 直接用 memcpy——既省 CPU，也避开 swresample 在真机上的一处崩溃。
-        int direct = ((int)p->fctx_tmp->format == AV_SAMPLE_FMT_S16 &&
-                      p->fctx_tmp->sample_rate == 48000 &&
-                      p->fctx_tmp->ch_layout.nb_channels == 2);
-        if (direct && p->fctx_tmp->data[0]) {
-            size_t bytes = (size_t)p->fctx_tmp->nb_samples * 4;
-            for (;;) {
-                pthread_mutex_lock(&p->amu);
-                int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
-                pthread_mutex_unlock(&p->amu);
-                if (full == 0 || p->astop) break;
-                usleep(2000);
-            }
-            if (!p->astop) ring_write(p, p->fctx_tmp->data[0], bytes);
-        } else if (p->aswr_ok) {
-            const int out_cap = 2048;
-            uint8_t* obuf = NULL;
-            int outn = swr_convert(p->aswr, &obuf, out_cap, (const uint8_t**)p->fctx_tmp->data, p->fctx_tmp->nb_samples);
-            while (outn > 0) {
-                size_t bytes = (size_t)outn * 2 * 2;
-                for (;;) {
-                    pthread_mutex_lock(&p->amu);
-                    int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
-                    pthread_mutex_unlock(&p->amu);
-                    if (full == 0 || p->astop) break;
-                    usleep(2000);
-                }
-                if (p->astop) break;
-                ring_write(p, obuf, bytes);
-                if (swr_get_out_samples(p->aswr, 0) <= 0) break;
-                outn = swr_convert(p->aswr, &obuf, out_cap, NULL, 0);
-            }
+        {
+            AudioConvState st; st.pos = p->apos; st.primed = p->aprimed;
+            audio_convert_frame(p, &st, p->fctx_tmp);
+            p->apos = st.pos; p->aprimed = st.primed;
         }
         av_frame_unref(p->fctx_tmp);
     }
