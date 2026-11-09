@@ -114,3 +114,22 @@ SDL 的 OpenHarmony 后端缺两类能力，均在 SDL 源码上打补丁（重�
   | `LANLU_BENCH_*`（业务层） | 字幕/播放基准：ARCID/PAGE/PAGE_TYPE/PLAY_MS/SEEK_MS/NO_EXIT |
 - 真机已验证：H.264 视频 + PCM 音轨（48k 与 44.1k）连续播放、周期性 seek 后音视频继续、
   重开（渲染器重建）后音频恢复。
+
+## 性能观测（真机，HUAWEI MateBook Pro S）
+
+| 场景 | CPU（单核占比） | 说明 |
+|---|---|---|
+| 窗口可见但空闲 | **13.6%** | 引擎侧线程 `SDL_main` 仅 ~5%，其余是 ArkUI 对 XComponent 表面的持续合成 |
+| 窗口最小化 | **2.5%** | 说明引擎空闲已正确休眠（脏帧跳过 + 长等待），大头在可见时的窗口合成 |
+
+线程分解（空闲、可见）：
+```
+15.9%  tid=<主线程>  （ArkUI 合成 + 轮询）
+ 5.4%  tid=SDL_main （引擎事件/帧循环）
+ 2.5%  tid=OS_EVENT_POLL
+```
+
+引擎侧空闲策略（`desktop_app.cj`）：脏帧跳过 + `waitEventTimeout(idleWaitTimeoutMs(...))`，
+无定时帧时等待上限为 `Int32.Max`（真正阻塞），因此**引擎不会空转**；可见时的合成开销属系统行为。
+
+内存（60s 播放 soak）：RSS 稳定在 **~263–271 MB**，无增长。
