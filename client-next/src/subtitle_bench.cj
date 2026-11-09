@@ -111,6 +111,12 @@ public class SubtitleBench {
                             println("[subtitle-bench] bad LANLU_BENCH_SUB_IDX=" + subArg)
                         }
                     }
+                    // 联调：LANLU_BENCH_TAP_TURNS=1 时打开"点击边缘翻页"（默认关闭），
+                    // 便于用注入点击验证阅读器翻页。
+                    if (getVariable("LANLU_BENCH_TAP_TURNS") == Some("1")) {
+                        model.toggleReaderTapTurnPage()
+                        println("[subtitle-bench] tap-turn enabled")
+                    }
                     phase = 2
                 }
             case None => ()
