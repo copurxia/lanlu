@@ -314,9 +314,11 @@ class ReaderStageState {
         if (elapsed >= 5000) {
             let fps = Float64(videoPerfFrames) * 1000.0 / Float64(elapsed)
             let decodedFps = Float64(videoPerfFrames + videoPerfSkippedFrames) * 1000.0 / Float64(elapsed)
-            println("[video-perf] source=${width}x${height} ui-fps=${fps} decoded-fps=${decodedFps} " +
+            let perfLine = "[video-perf] source=${width}x${height} ui-fps=${fps} decoded-fps=${decodedFps} " +
                 "delivered=${videoPerfFrames} skipped=${videoPerfSkippedFrames} " +
-                "managed-frame-copies=0 subtitle-uploads=${subtitleUploads}")
+                "managed-frame-copies=0 subtitle-uploads=${subtitleUploads}"
+            println(perfLine)
+            perfLog(perfLine)
             videoPerfStartMs = nowMs
             videoPerfFrames = 0
             videoPerfSkippedFrames = 0
