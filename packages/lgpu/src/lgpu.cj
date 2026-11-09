@@ -114,6 +114,15 @@ public class Surface <: Resource {
         return Surface(h)
     }
 
+    /// 接管一个**已经存在**的 surface 句柄（由原生侧创建，例如窗口后端）。
+    /// 只包装指针，不负责释放底层窗口。
+    public static func adopt(raw: CPointer<UInt8>): Surface {
+        if (raw.isNull()) {
+            throw LgpuException("adopt: null surface handle")
+        }
+        return Surface(raw)
+    }
+
     /// 建 device/queue 并配置 swapchain（尺寸为物理像素）。
     public func configure(width: Int64, height: Int64): Unit {
         checkRc(unsafe { lgpu_surface_init(handle, UInt32(width), UInt32(height)) }, "lgpu_surface_init")

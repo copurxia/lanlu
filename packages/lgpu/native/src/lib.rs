@@ -29,6 +29,15 @@ thread_local! {
     static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
+/// 所有会改 SurfaceCtx 的 FFI 入口共用这把锁。
+/// 为什么需要：Cangjie 侧可能在**另一个线程**（例如窗口就绪后的绘制线程）调进 lgpu，
+/// 而 ArkTS 线程同时也在调（自检）；两份 &mut SurfaceCtx 并发就是数据竞争（真机上直接 SIGSEGV）。
+static SURF_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_surface() -> std::sync::MutexGuard<'static, ()> {
+    SURF_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 第一条 wgpu 校验错误（诊断用；不被后续 set_error 覆盖）
 static GPU_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
@@ -331,6 +340,7 @@ pub extern "C" fn lgpu_surface_init(surface: *mut c_void, width: u32, height: u3
         return E_BAD_ARG;
     }
     // SAFETY: 句柄来自 lgpu_surface_create，调用期间保持有效。
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     if ctx.config.is_some() {
         return 0; // 已初始化
@@ -412,6 +422,7 @@ pub extern "C" fn lgpu_present_clear(surface: *mut c_void, r: f32, g: f32, b: f3
         return E_BAD_ARG;
     }
     // SAFETY: 同上，句柄有效且线程由调用方保证（L 层主线程）。
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(device), Some(queue), Some(config)) = (&ctx.device, &ctx.queue, &ctx.config) else {
         set_error("surface not initialised");
@@ -467,6 +478,7 @@ pub extern "C" fn lgpu_surface_resize(surface: *mut c_void, width: u32, height: 
     if surface.is_null() || width == 0 || height == 0 {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(device), Some(mut config)) = (&ctx.device, ctx.config.clone()) else {
         set_error("surface not initialised");
@@ -486,6 +498,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
         set_error("null surface");
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(device), Some(config)) = (&ctx.device, ctx.config.clone()) else {
         set_error("surface not initialised");
@@ -685,6 +698,7 @@ pub extern "C" fn lgpu_frame_begin(surface: *mut c_void, r: f32, g: f32, b: f32,
     if surface.is_null() {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(queue), Some(config)) = (&ctx.queue, ctx.config.clone()) else {
         return E_BAD_ARG;
@@ -718,6 +732,7 @@ pub extern "C" fn lgpu_set_transform(surface: *mut c_void, sx: f32, sy: f32, ox:
     if surface.is_null() {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.xform_scale = [sx, sy];
     ctx.xform_offset = [ox, oy];
@@ -730,6 +745,7 @@ pub extern "C" fn lgpu_set_clip(surface: *mut c_void, x: f32, y: f32, w: f32, h:
     if surface.is_null() {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.clip = [x, y, w, h];
     0
@@ -754,6 +770,7 @@ pub extern "C" fn lgpu_draw_rect(
     if surface.is_null() || w <= 0.0 || h <= 0.0 {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.instances.push(gpu::RectInstance {
         rect: [x, y, w, h],
@@ -776,6 +793,7 @@ pub extern "C" fn lgpu_draw_line(
     if surface.is_null() || width <= 0.0 {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let dx = x2 - x1;
     let dy = y2 - y1;
@@ -809,6 +827,7 @@ pub extern "C" fn lgpu_draw_rect_gradient(
     if surface.is_null() || w <= 0.0 || h <= 0.0 {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.instances.push(gpu::RectInstance {
         rect: [x, y, w, h],
@@ -826,6 +845,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     if surface.is_null() {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(cfg)) =
         (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group, &ctx.config)
@@ -960,6 +980,7 @@ pub extern "C" fn lgpu_texture_create(
         set_error("bad argument: surface/width/height");
         return std::ptr::null_mut();
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let (Some(device), Some(sampler), Some(bgl)) =
         (&ctx.device, &ctx.tex_sampler, &ctx.tex_bgl)
@@ -1023,6 +1044,7 @@ pub extern "C" fn lgpu_texture_upload(
         set_error("bad argument: surface/tex/pixels");
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     let t = unsafe { &*(tex as *const TexCtx) };
     let Some(queue) = &ctx.queue else {
@@ -1078,6 +1100,7 @@ pub extern "C" fn lgpu_draw_texture(
     if surface.is_null() || tex.is_null() || dw <= 0.0 || dh <= 0.0 {
         return E_BAD_ARG;
     }
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.tex_instances.push((gpu::TexInstance {
         dst: [dx, dy, dw, dh],
@@ -1430,7 +1453,8 @@ pub extern "C" fn lgpu_text_draw(
         lgpu_texture_upload(
             surface, atlas_tex, 0, 0, ATLAS_SIZE, ATLAS_SIZE, blank.as_ptr(), ATLAS_SIZE * 4,
         );
-        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+        let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
         ctx.atlas = Some(atlas_tex);
         ctx.atlas_packer = Some(text::Atlas::new(ATLAS_SIZE));
     }
@@ -1466,7 +1490,8 @@ pub extern "C" fn lgpu_text_draw(
                     continue;
                 }
                 let alloc = {
-                    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
                     ctx.atlas_packer.as_mut().and_then(|p| p.alloc(rg.w, rg.h))
                 };
                 let Some((ax, ay)) = alloc else {
@@ -1490,7 +1515,8 @@ pub extern "C" fn lgpu_text_draw(
                     bearing_y: rg.bearing_y,
                     advance: rg.advance,
                 };
-                let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
                 if let Some(p) = ctx.atlas_packer.as_mut() {
                     p.cache.insert(key, slot);
                 }
@@ -1516,6 +1542,7 @@ pub extern "C" fn lgpu_text_draw(
     }
 
     // 阶段 2：把四边形推入当前帧
+    let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     for (dx, dy, dw, dh, u0, v0, u1, v1) in quads {
         ctx.tex_instances.push((
@@ -1556,7 +1583,8 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
 
     // 清空当前帧的实例列表（短借用）
     {
-        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+        let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
         ctx.instances.clear();
         ctx.tex_instances.clear();
     }
