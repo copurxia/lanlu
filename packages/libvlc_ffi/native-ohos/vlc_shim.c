@@ -332,9 +332,45 @@ static void audio_decode_packet(VlcPlayer* p, AVPacket* pkt) {
     }
 }
 
+// 联调钩子：LANLU_SEEK_LOOP_MS=<毫秒> + LANLU_SEEK_TARGETS="2000,8000,..."
+// 让播放循环周期性跳转到给定位置，用来在真机上验证 seek 后音画是否继续、是否同步。
+static int seek_test_next(long now) {
+    static long last = 0;
+    static int idx = 0;
+    static int parsed = 0;
+    static int count = 0;
+    static long targets[16];
+    const char* loop_env = getenv("LANLU_SEEK_LOOP_MS");
+    const char* tgt_env = getenv("LANLU_SEEK_TARGETS");
+    if (!loop_env || !tgt_env) return -1;
+    if (!parsed) {
+        parsed = 1;
+        const char* c = tgt_env;
+        while (*c && count < 16) {
+            long v = strtol(c, (char**)&c, 10);
+            targets[count++] = v;
+            if (*c == ',') c++;
+            else break;
+        }
+    }
+    if (count == 0) return -1;
+    long period = strtol(loop_env, NULL, 10);
+    if (period <= 0) period = 5000;
+    if (last == 0) { last = now; return -1; }
+    if (now - last < period) return -1;
+    last = now;
+    int t = (int)targets[idx % count];
+    idx++;
+    return t;
+}
+
 static void pump(VlcPlayer* p) {
     if (!p->fmt || atomic_load(&p->paused)) { p->last_tick_ms = now_ms(); return; }
     int sk = atomic_exchange(&p->seek_ms, -1);
+    if (sk < 0) {
+        int t = seek_test_next(now_ms());
+        if (t >= 0) { sk = t; VLOG("seek-test -> %d ms", t); }
+    }
     if (sk >= 0) {
         AVRational tb = av_make_q(1, 1000);
         avformat_seek_file(p->fmt, p->stream, INT64_MIN,
