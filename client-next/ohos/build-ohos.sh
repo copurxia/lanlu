@@ -94,4 +94,5 @@ for d in "$ST" "$ST/ffmpeg" "$PFX" "$PK/webview/native/target/release" "$PK/rock
   find "$d" -maxdepth 1 -name '*.so*' -type f -exec "$NATIVE/llvm/bin/llvm-strip" --strip-debug {} \; 2>/dev/null || true
 done
 (cd "$BUILD" && "$RES/packages/ohos/target/release/bin/main" gen --sign)
+
 echo "HAP: $BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap"
