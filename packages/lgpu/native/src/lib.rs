@@ -115,6 +115,14 @@ pub extern "C" fn lgpu_adapter_summary(out: *mut c_char, out_len: usize) -> i32 
     adapters.len() as i32
 }
 
+/// 一个 surface 的全部运行期状态：surface + 选中的 device/queue + 配置。
+pub struct SurfaceCtx {
+    surface: wgpu::Surface<'static>,
+    device: Option<wgpu::Device>,
+    queue: Option<wgpu::Queue>,
+    config: Option<wgpu::SurfaceConfiguration>,
+}
+
 /// 用 XComponent 的 OHNativeWindow* 建 wgpu surface。
 /// 成功返回不透明句柄（!= null），失败返回 null 并可用 `lgpu_last_error()` 取原因。
 #[no_mangle]
@@ -148,7 +156,12 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
     };
     // SAFETY: 调用方保证 native_window 在 surface 生命周期内有效（XComponent 存活期）。
     match unsafe { instance.create_surface_unsafe(target) } {
-        Ok(surface) => Box::into_raw(Box::new(surface)) as *mut c_void,
+        Ok(surface) => Box::into_raw(Box::new(SurfaceCtx {
+            surface,
+            device: None,
+            queue: None,
+            config: None,
+        })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
             std::ptr::null_mut()
@@ -163,7 +176,7 @@ pub extern "C" fn lgpu_surface_destroy(surface: *mut c_void) {
         return;
     }
     // SAFETY: 指针来自 lgpu_surface_create 的 Box::into_raw，且只释放一次。
-    drop(unsafe { Box::from_raw(surface as *mut wgpu::Surface<'static>) });
+    drop(unsafe { Box::from_raw(surface as *mut SurfaceCtx) });
 }
 
 /// 自检：实例可用且能枚举适配器则返回 0。
@@ -199,5 +212,154 @@ pub extern "C" fn lgpu_debug_dump(out: *mut c_char, out_len: usize) -> i32 {
         unsafe { CStr::from_ptr(lgpu_last_error()) }.to_string_lossy()
     );
     write_c_str(out, out_len, &text);
+    0
+}
+
+/// 在已有 surface 上初始化 device/queue 并按尺寸配置 swapchain。
+/// 0 = 成功；负值 = 失败（原因见 `lgpu_last_error()`）。
+#[no_mangle]
+pub extern "C" fn lgpu_surface_init(surface: *mut c_void, width: u32, height: u32) -> i32 {
+    if surface.is_null() || width == 0 || height == 0 {
+        set_error("bad argument: surface/width/height");
+        return E_BAD_ARG;
+    }
+    // SAFETY: 句柄来自 lgpu_surface_create，调用期间保持有效。
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    if ctx.config.is_some() {
+        return 0; // 已初始化
+    }
+    let guard = match instance_slot().lock() {
+        Ok(g) => g,
+        Err(_) => {
+            set_error("instance lock poisoned");
+            return E_NO_INSTANCE;
+        }
+    };
+    let Some(instance) = guard.as_ref() else {
+        set_error("instance missing");
+        return E_NO_INSTANCE;
+    };
+
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: Some(&ctx.surface),
+        apply_limit_buckets: false,
+    })) {
+        Ok(a) => a,
+        Err(e) => {
+            set_error(format!("request_adapter failed: {e}"));
+            return E_NO_ADAPTER;
+        }
+    };
+    let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("lgpu"),
+        ..Default::default()
+    })) {
+        Ok(pair) => pair,
+        Err(e) => {
+            set_error(format!("request_device failed: {e}"));
+            return E_NO_DEVICE;
+        }
+    };
+
+    let caps = ctx.surface.get_capabilities(&adapter);
+    let format = caps
+        .formats
+        .iter()
+        .copied()
+        .find(|f| f.is_srgb())
+        .unwrap_or_else(|| caps.formats[0]);
+
+    let config = wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        width,
+        height,
+        present_mode: wgpu::PresentMode::AutoVsync,
+        color_space: wgpu::SurfaceColorSpace::Auto,
+        desired_maximum_frame_latency: 2,
+        alpha_mode: caps.alpha_modes[0],
+        view_formats: vec![],
+    };
+    ctx.surface.configure(&device, &config);
+    ctx.device = Some(device);
+    ctx.queue = Some(queue);
+    ctx.config = Some(config);
+    0
+}
+
+/// 用给定颜色清一帧并 present（上屏自检）。
+#[no_mangle]
+pub extern "C" fn lgpu_present_clear(surface: *mut c_void, r: f32, g: f32, b: f32, a: f32) -> i32 {
+    if surface.is_null() {
+        set_error("null surface");
+        return E_BAD_ARG;
+    }
+    // SAFETY: 同上，句柄有效且线程由调用方保证（L 层主线程）。
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(queue), Some(config)) = (&ctx.device, &ctx.queue, &ctx.config) else {
+        set_error("surface not initialised");
+        return E_BAD_ARG;
+    };
+
+    let frame = match ctx.surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+        other => {
+            set_error(format!("get_current_texture: {other:?}"));
+            return E_NO_DEVICE;
+        }
+    };
+    let view = frame
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("lgpu-clear"),
+    });
+    {
+        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-clear-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: r as f64,
+                        g: g as f64,
+                        b: b as f64,
+                        a: a as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+    }
+    queue.submit(Some(encoder.finish()));
+    // wgpu 30：present 挪到了 Queue 上（SurfaceTexture 不再自带 present）。
+    queue.present(frame);
+    let _ = config;
+    0
+}
+
+/// 尺寸变化后重新配置 swapchain。
+#[no_mangle]
+pub extern "C" fn lgpu_surface_resize(surface: *mut c_void, width: u32, height: u32) -> i32 {
+    if surface.is_null() || width == 0 || height == 0 {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(mut config)) = (&ctx.device, ctx.config.clone()) else {
+        set_error("surface not initialised");
+        return E_BAD_ARG;
+    };
+    config.width = width;
+    config.height = height;
+    ctx.surface.configure(device, &config);
+    ctx.config = Some(config);
     0
 }
