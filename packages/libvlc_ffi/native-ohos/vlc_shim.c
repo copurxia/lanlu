@@ -12,6 +12,14 @@
 #include <unistd.h>
 #include <stdio.h>
 static FILE* vlc_log(void){ static FILE* f=0; if(!f){ const char* p=getenv("LANLU_VLC_LOG"); if(p) f=fopen(p,"a"); } return f; }
+// 播放统计（LANLU_VLC_STATS=1 时每 ~3s 打印一次音频采样数与视频帧数）：
+// 真机验证“确实在持续播放”需要这类计数，正常使用保持静默。
+static int stats_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) { const char* v = getenv("LANLU_VLC_STATS"); cached = (v && v[0] == '1') ? 1 : 0; }
+    return cached;
+}
+
 #define VLOG(...) do{ FILE*_f=vlc_log(); if(_f){ fprintf(_f,__VA_ARGS__); fprintf(_f,"\n"); fflush(_f);} }while(0)
 
 #include <libavformat/avformat.h>
@@ -143,7 +151,18 @@ static int open_pipeline(VlcPlayer* p) {
     return 0;
 }
 
+// 视频帧计数：真机验证“画面在持续输出”需要它（stats 开启时每 60 帧打印一次）。
+static void note_video_frame(VlcPlayer* p) {
+    static atomic_llong counter = 0;
+    long long n = atomic_fetch_add(&counter, 1) + 1;
+    if (stats_enabled() && (n % 60) == 0) {
+        VLOG("video stats frames=%lld", n);
+    }
+    (void)p;
+}
+
 static void push_frame(VlcPlayer* p, AVFrame* f) {
+    note_video_frame(p);
     if (!p->format_done && p->setup) {
         VLOG("setup called in_w=%d in_h=%d", p->out_w, p->out_h);
         char chroma[32]; memset(chroma, 0, sizeof chroma);
@@ -266,7 +285,18 @@ static void* audio_loop(void* arg) {
                 AVChannelLayout in_ch; av_channel_layout_copy(&in_ch, &ac->ch_layout);
                 swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000, &in_ch, ac->sample_fmt, ac->sample_rate, 0, NULL);
                 swr_init(swr);
+                struct timespec stat_ts; clock_gettime(CLOCK_MONOTONIC, &stat_ts);
+                long long stat_next = (long long)stat_ts.tv_sec + 3;
                 while (!p->astop) {
+                    if (stats_enabled()) {
+                        struct timespec now_ts; clock_gettime(CLOCK_MONOTONIC, &now_ts);
+                        if ((long long)now_ts.tv_sec >= stat_next) {
+                            stat_next = (long long)now_ts.tv_sec + 3;
+                            int64_t fw = 0;
+                            if (p->renderer) OH_AudioRenderer_GetFramesWritten(p->renderer, &fw);
+                            VLOG("audio stats frames_written=%lld ring=%u", (long long)fw, p->rsize);
+                        }
+                    }
                     // 跟随视频 seek：音频有自己的 demuxer/decoder，必须自行 seek，
                     // 否则 seek 后画面跳转而声音停在原位置。
                     int ask = atomic_exchange(&p->audio_seek_ms, -1);
