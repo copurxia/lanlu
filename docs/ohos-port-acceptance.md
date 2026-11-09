@@ -62,3 +62,23 @@ HAP：`entry-default-signed.hap` ≈ **92.4 MB**（原 124.4 MB，经依赖库 S
 | 文件对话框三件套 | ⏳ 待验 | 实现完成（picker + 回调），尚未在设备上走完选择流程 |
 | 鼠标位置 | ⏳ 待确认 | 用户此前反馈"位置不对"；过滤器已按窗口矩形自校准，需人工复核 |
 | 空闲 CPU | 观察 | 空闲截图差分为 0（不空转），但 top 累计均值显示 15–22%（疑 GC/运行时后台线程） |
+
+## 六、鼠标坐标自检（人工，10 秒）
+
+实现要点（`packages/ohos/templates_sdl3/entry/src/main/cpp/input_filter.cpp`）：
+1. ArkTS 侧 `startFilter(winId, rect.left, rect.top)` 把窗口矩形原点交给 native，`lanlu_seed_origin()` 记为初始原点；
+2. 物理鼠标事件走 `OH_NativeWindowManager_RegisterMouseEventFilter`，得到的是**屏幕坐标**，
+   native 减去原点得到窗口局部坐标后推入 SDL；
+3. 运行时还会用 SDL 自身 lane（XComponent 局部坐标）做**自校准**，两者一致时原点持续修正。
+
+自检步骤：
+1. `hdc shell hilog -r` 清日志；
+2. 用物理鼠标在窗口内移动几下（必须真鼠标，`uitest uiInput` 只能注入触摸，验证不到这条 lane）；
+3. 看日志：
+   ```
+   filter evt act=.. disp=(Dx,Dy) local=(Lx,Ly) btn=..
+   [LANLU-SHELL] startFilter win=.. rect=(Ox,Oy,W,H)
+   ```
+4. 判定：`Lx ≈ Dx - Ox`、`Ly ≈ Dy - Oy`（当前设备窗口 rect 原点为 (515,292)）。
+   满足即鼠标定位正确；若纵向恒差约 70px，说明窗口矩形含了系统装饰高度（本工程窗口是 borderless，
+   正常不应出现）。
