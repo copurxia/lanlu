@@ -100,3 +100,23 @@ probe user push=1
 push=1 text=hello-ohos
 [input] TEXT_INPUT text="hello-ohos" (user event)
 ```
+
+## 八、最终验收运行（本轮，全部同一构建）
+
+| # | 检查 | 证据 |
+|---|---|---|
+| A | 冷启动 | `pid=38397` 存活 |
+| B | 系统壳 | `hook registered ×2`、`LANLU-SHELL` 日志 ×2 |
+| C | 书库封面 | 金色像素 4143（窗口内截图统计） |
+| D | 音视频播放 | `video stats frames=240→300`、`audio write cb calls=400/600/800, frames=94080→478080` |
+| E | IME 文本桥 | `[input] TEXT_INPUT text="final-check" (user event)` |
+| F | 静态门禁 | `tools/verify-ohos.sh`：分层/依赖闭包/符号 全 PASS |
+
+### 仍未闭环（外部条件，非实现缺口）
+
+| 项 | 阻塞原因 |
+|---|---|
+| 正式包名/签名 | AGC `Provision number exceeds limit`（账号级配额；本轮再次确认：代理关掉后可走到 profile 阶段，仍被配额拦下） |
+| IME 拼音实际输入 | 需真实键盘（桥接层已用注入路径验证到引擎） |
+| AAC/Opus 码流 | 离线环境无从取得带音轨样片（转换器已支持 fltp 等平面格式） |
+| picker 选中/取消 | 本机系统 picker 进程 `service died`；已加 120s 超时兜底，取消路径已验证 |
