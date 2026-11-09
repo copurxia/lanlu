@@ -97,4 +97,10 @@ for d in "$ST" "$ST/ffmpeg" "$PFX" "$PK/webview/native/target/release" "$PK/rock
 done
 (cd "$BUILD" && "$RES/packages/ohos/target/release/bin/main" gen --sign)
 
-echo "HAP: $BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap"
+HAP_OUT="$BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap"
+echo "HAP: $HAP_OUT"
+
+# 5) 静态验证门禁（分层 / 依赖闭包 / 关键符号）——失败即构建失败
+if [ "${CN_OHOS_SKIP_VERIFY:-0}" != "1" ]; then
+  CN="$CN" bash "$CN/../tools/verify-ohos.sh" "$HAP_OUT" || { echo "[FAIL] 静态验证未通过"; exit 1; }
+fi
