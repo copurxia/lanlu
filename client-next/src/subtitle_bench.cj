@@ -268,7 +268,9 @@ public class SubtitleBench {
                 let idx = page - 1
                 match (model.reader.pageAt(idx)) {
                     case Some(p) =>
-                        if (p.pageType == "video" && pb.embeddedSubtitleStreams.size > 0 && !pb.subtitleScanLoading) {
+                        // 图片页也允许推进（否则图片类档案永远停在等待，测不到阅读器/翻页）
+                        if ((p.pageType == "video" || p.pageType == "image") &&
+                            (p.pageType == "image" || (pb.embeddedSubtitleStreams.size > 0 && !pb.subtitleScanLoading))) {
                             SubtitlePerf.spanEnd("subtitle_cache_hit_e2e")
                             SubtitlePerf.emit("cache_hit_ms", SubtitlePerf.getGauge("subtitle_cache_hit_e2e"), "ms")
                             SubtitlePerf.emit("subtitle_cache_hit_count", SubtitlePerf.getCounter("subtitle_cache_hit_count"), "n")
