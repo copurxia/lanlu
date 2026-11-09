@@ -28,11 +28,21 @@
 4. **hilog 会丢我们 native tag 的行**：诊断信息走返回值/文件，别依赖日志。
 5. **自检别用固定采样点猜坐标**：报内容包围盒（bbox）才有诊断价值。
 
+## 后端抽象（P4 起步）
+
+- packages/cangjie-gui/sdl/src/canvas.cj：`public interface Canvas` —— 视图只需要它，不用知道底层是 SDL 还是 wgpu。
+  已收口 14 个高频图元（fill / fillRoundedRect / fillRoundedRectSoft / strokeRect / strokeRoundedRect / strokeLine / line / fillCircle / strokeCircle / text / textWidth / textHeight / textCenter）。
+- sdl.Renderer 已实现 Canvas（行为零变化）。
+- lgpu.LgpuCanvas 已实现 Canvas（映射到 SDF/纹理管线，含旋转矩形实现的线段）。
+  迁移期注意：文本度量来自 ab_glyph，与 fontkit 在极端字号下可能差 1px；fillRoundedRectSoft 的 feather 暂按普通圆角处理（SDF 自带抗锯齿）。
+- 待 P5 删 sdl 时，把 Canvas 与 Color/Pen/Rect 一起搬到中立包。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
 - [ ] P3 文本：`rustybuzz`（已在离线 registry 缓存）做 shaping + 自建字形图集（SDF 或 grayscale）
-- [ ] P4 `cui` → `lgpu` 的 Renderer 适配层；开关 `CN_UI_BACKEND=sdl|lgpu`
+- [x] P4 抽象层：Canvas 接口 + sdl.Renderer/lgpu.LgpuCanvas 双实现（编译通过）
+- [ ] P4 切换：视图参数改为 Canvas、加 CN_UI_BACKEND=sdl|lgpu 开关、真机对照
 - [ ] P5 删除 `packages/cangjie-gui/sdl`、去掉 `libSDL3*.so`、窗口钩子改直连
 - [ ] P1 `lwindow`：自有事件队列（替换 `SDL_WaitEventTimeout`）、键位表迁移
 

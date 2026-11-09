@@ -24,6 +24,8 @@ foreign {
     func lgpu_draw_rect(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_frame_end(surface: CPointer<UInt8>): Int32
+    func lgpu_draw_line(surface: CPointer<UInt8>, x1: Float32, y1: Float32, x2: Float32, y2: Float32,
+        width: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_draw_rect_gradient(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, mode: Float32,
         r1: Float32, g1: Float32, b1: Float32, a1: Float32,
@@ -150,6 +152,12 @@ public class Surface <: Resource {
         r: Float32, g: Float32, b: Float32, a: Float32): Unit {
         checkRc(unsafe { lgpu_draw_texture(handle, tex.raw(), dx, dy, dw, dh, u0, v0, u1, v1, r, g, b, a) },
             "lgpu_draw_texture")
+    }
+
+    /// 画线段（旋转矩形实现）。
+    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, width: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        checkRc(unsafe { lgpu_draw_line(handle, x1, y1, x2, y2, width, r, g, b, a) }, "lgpu_draw_line")
     }
 
     /// 填充矩形（无圆角、无描边）。

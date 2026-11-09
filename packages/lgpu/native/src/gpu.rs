@@ -65,7 +65,13 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 
   let half_size = vec2f(inst.rect.z * 0.5, inst.rect.w * 0.5);
   let center = vec2f(inst.rect.x, inst.rect.y) + half_size;
-  var p = center + vec2f(cx, cy) * half_size;
+  // params.w = 旋转角（弧度）：线段、箭头等用得上（SDF 仍在未旋转的局部空间求解）
+  let rot = inst.params.w;
+  let cs = cos(rot);
+  let sn = sin(rot);
+  let local_off = vec2f(cx, cy) * half_size;
+  let rotated = vec2f(local_off.x * cs - local_off.y * sn, local_off.x * sn + local_off.y * cs);
+  var p = center + rotated;
   // 像素坐标 -> NDC（y 向下）
   let ndc = vec2f(p.x / screen.size.x * 2.0 - 1.0, 1.0 - p.y / screen.size.y * 2.0);
 
@@ -75,7 +81,7 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   var out: VsOut;
   out.pos = vec4f(ndc2, 0.0, 1.0);
   out.color = inst.color;
-  out.local = vec2f(cx, cy) * half_size;
+  out.local = local_off;
   out.half_size = half_size;
   out.params = inst.params;
   out.clip = inst.clip;

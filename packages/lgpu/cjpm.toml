@@ -6,3 +6,5 @@ description = "L 层渲染器（wgpu/Vulkan）的 Cangjie 绑定"
 output-type = "static"
 
 [dependencies]
+# 迁移期：Canvas 接口与 Color/Pen/Rect 还在 sdl 包里（P5 删 sdl 时会搬到中立包）
+sdl = { path = "../cangjie-gui/sdl" }

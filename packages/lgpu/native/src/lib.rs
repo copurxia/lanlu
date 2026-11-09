@@ -765,6 +765,37 @@ pub extern "C" fn lgpu_draw_rect(
     0
 }
 
+/// 画一条线段（用旋转矩形实现）：端点为线段两端，宽度为 width。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_line(
+    surface: *mut c_void,
+    x1: f32, y1: f32, x2: f32, y2: f32, width: f32,
+    r: f32, g: f32, b: f32, a: f32,
+) -> i32 {
+    if surface.is_null() || width <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= f32::EPSILON {
+        return 0;
+    }
+    let angle = dy.atan2(dx);
+    let cx = (x1 + x2) * 0.5;
+    let cy = (y1 + y2) * 0.5;
+    ctx.instances.push(gpu::RectInstance {
+        rect: [cx - len * 0.5, cy - width * 0.5, len, width],
+        color: [r, g, b, a],
+        params: [0.0, 0.0, 0.0, angle],
+        clip: ctx.clip,
+        color2: [r, g, b, a],
+    });
+    0
+}
+
 /// 推一个渐变矩形。mode: 0 纯色(=c1), 1 横向(c1→c2), 2 纵向(c1→c2)。
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
