@@ -258,6 +258,15 @@ static void ring_write(VlcPlayer* p, const unsigned char* d, size_t n) {
 }
 static void audio_write_cb(OH_AudioRenderer* r, void* user, void* data, int32_t size) {
     (void)r; VlcPlayer* p = (VlcPlayer*)user;
+    if (stats_enabled()) {
+        static long long cb_calls = 0;
+        cb_calls++;
+        if ((cb_calls % 200) == 0) {
+            int64_t fw = 0;
+            if (p && p->renderer) OH_AudioRenderer_GetFramesWritten(p->renderer, &fw);
+            VLOG("audio write cb calls=%lld frames=%lld", cb_calls, (long long)fw);
+        }
+    }
     unsigned char* out = (unsigned char*)data;
     int32_t got = 0;
     if (p && !atomic_load(&p->muted)) {
@@ -276,11 +285,17 @@ static void* audio_loop(void* arg) {
     struct SwrContext* swr = NULL; AVPacket* pkt = av_packet_alloc(); AVFrame* fr = av_frame_alloc();
     if (avformat_open_input(&af, p->path, NULL, NULL) == 0 && avformat_find_stream_info(af, NULL) >= 0) {
         int ai = av_find_best_stream(af, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+        if (stats_enabled()) VLOG("audio open: streams=%u best_audio=%d", af->nb_streams, ai);
         const AVCodec* dec = ai >= 0 ? avcodec_find_decoder(af->streams[ai]->codecpar->codec_id) : NULL;
+        if (stats_enabled()) {
+            VLOG("audio codec=%s dec=%p", ai >= 0 ? avcodec_get_name(af->streams[ai]->codecpar->codec_id) : "none", (void*)dec);
+        }
         if (dec) {
             ac = avcodec_alloc_context3(dec);
             avcodec_parameters_to_context(ac, af->streams[ai]->codecpar);
-            if (avcodec_open2(ac, dec, NULL) == 0) {
+            int open_rc = avcodec_open2(ac, dec, NULL);
+            if (stats_enabled()) VLOG("audio dec_open rc=%d", open_rc);
+            if (open_rc == 0) {
                 AVChannelLayout out_ch; av_channel_layout_default(&out_ch, 2);
                 AVChannelLayout in_ch; av_channel_layout_copy(&in_ch, &ac->ch_layout);
                 swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000, &in_ch, ac->sample_fmt, ac->sample_rate, 0, NULL);
@@ -332,6 +347,8 @@ static void* audio_loop(void* arg) {
                 }
             }
         }
+    } else {
+        VLOG("audio: open_input/find_stream_info failed");
     }
     if (swr) swr_free(&swr);
     if (ac) avcodec_free_context(&ac);
@@ -356,9 +373,11 @@ static void audio_start(VlcPlayer* p) {
         OH_AudioStreamBuilder_GenerateRenderer(b, &p->renderer);
         OH_AudioStreamBuilder_Destroy(b);
     }
-    if (p->renderer) OH_AudioRenderer_Start(p->renderer);
-    if (pthread_create(&p->athread, NULL, audio_loop, p) == 0) p->athread_started = 1;
-    VLOG("audio started renderer=%p", (void*)p->renderer);
+    int start_rc = -1;
+    if (p->renderer) start_rc = (int)OH_AudioRenderer_Start(p->renderer);
+    int th_rc = pthread_create(&p->athread, NULL, audio_loop, p);
+    if (th_rc == 0) p->athread_started = 1;
+    VLOG("audio started renderer=%p start_rc=%d thread_rc=%d", (void*)p->renderer, start_rc, th_rc);
 }
 static void audio_stop(VlcPlayer* p) {
     p->astop = 1;

@@ -83,13 +83,14 @@ public class SubtitleBench {
         phase = 1
     }
 
-    // 等待页表到货且当前页确为视频页。
+    // 等待页表到货且当前页为期望类型（默认 video；音频通路验证时设 LANLU_BENCH_PAGE_TYPE=audio）。
     private func stepWaitPages(model: AppModel): Unit {
         let idx = page - 1
+        let want = getVariable("LANLU_BENCH_PAGE_TYPE") ?? "video"
         match (model.reader.pageAt(idx)) {
             case Some(p) =>
-                if (p.pageType == "video") {
-                    println("[subtitle-bench] video page ready (pages=${model.pages.value.size})")
+                if (p.pageType == want) {
+                    println("[subtitle-bench] page ready type=${p.pageType} (pages=${model.pages.value.size})")
                     phase = 2
                 }
             case None => ()
