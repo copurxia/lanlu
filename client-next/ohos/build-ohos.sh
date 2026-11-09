@@ -77,7 +77,9 @@ export OHOS_TEMPLATES=$RES/packages/ohos/templates
 export OHOS_ASSETS=$RES/packages/ohos/assets/default
 export OHOS_LIBCXX=$RES/packages/ohos/assets/libcxx/libc++.so
 export OHOS_UI=sdl3
-export OHOS_SDL3_PREFIX=$RES/sdl3-ohos/prefix-single
+# prefix-nov：同一份 libSDL3，但 SONAME 被改短为 "libSDL3.so"，让壳(libmain)与引擎/ttf
+# 依赖同一个名字，进程里只加载一份 SDL3（双实例会导致钩子/事件队列错位、push 恒失败）。
+export OHOS_SDL3_PREFIX=$RES/sdl3-ohos/prefix-nov
 ST=$RES/ohos-stubs
 PFX=$RES/sdl3-ohos/prefix-single/lib
 PK=$CN/../packages
