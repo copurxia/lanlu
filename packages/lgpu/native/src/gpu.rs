@@ -85,3 +85,57 @@ fn fs(in: VsOut) -> @location(0) vec4f {
   return vec4f(in.color.rgb, in.color.a * cover);
 }
 "#;
+
+/// 一个纹理实例：目标矩形 + UV 子区 + 染色（tint 用来做淡入淡出/图片蒙层）。
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TexInstance {
+    /// 目标矩形 x, y, w, h（像素）
+    pub dst: [f32; 4],
+    /// UV 子区 u0, v0, u1, v1（0..1）
+    pub uv: [f32; 4],
+    /// 染色 r, g, b, a（与原色相乘）
+    pub tint: [f32; 4],
+}
+
+pub const TEX_SHADER: &str = r#"
+struct Screen { size: vec2f, _pad: vec2f };
+@group(0) @binding(0) var<uniform> screen: Screen;
+@group(1) @binding(0) var tex: texture_2d<f32>;
+@group(1) @binding(1) var samp: sampler;
+
+struct Inst {
+  @location(0) dst: vec4f,
+  @location(1) uv: vec4f,
+  @location(2) tint: vec4f,
+};
+
+struct VsOut {
+  @builtin(position) pos: vec4f,
+  @location(0) uv: vec2f,
+  @location(1) tint: vec4f,
+};
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
+  var cx: f32 = select(-1.0, 1.0, vi == 1u || vi == 2u || vi == 4u);
+  var cy: f32 = select(-1.0, 1.0, vi == 2u || vi == 3u || vi == 4u);
+  if (vi == 5u) { cx = -1.0; cy = 1.0; }
+
+  let p = vec2f(inst.dst.x + (cx * 0.5 + 0.5) * inst.dst.z,
+                inst.dst.y + (cy * 0.5 + 0.5) * inst.dst.w);
+  let ndc = vec2f(p.x / screen.size.x * 2.0 - 1.0, 1.0 - p.y / screen.size.y * 2.0);
+
+  var out: VsOut;
+  out.pos = vec4f(ndc, 0.0, 1.0);
+  out.uv = mix(inst.uv.xy, inst.uv.zw, vec2f(cx * 0.5 + 0.5, cy * 0.5 + 0.5));
+  out.tint = inst.tint;
+  return out;
+}
+
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4f {
+  let c = textureSample(tex, samp, in.uv);
+  return c * in.tint;
+}
+"#;

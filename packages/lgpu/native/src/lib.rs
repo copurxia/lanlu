@@ -130,6 +130,13 @@ pub struct SurfaceCtx {
     bind_group: Option<wgpu::BindGroup>,
     instances: Vec<gpu::RectInstance>,
     clear_color: [f32; 4],
+    tex_pipeline: Option<wgpu::RenderPipeline>,
+    tex_bgl: Option<wgpu::BindGroupLayout>,
+    tex_sampler: Option<wgpu::Sampler>,
+    tex_instances: Vec<(gpu::TexInstance, *mut c_void)>,
+    tex_buffer: Option<wgpu::Buffer>,
+    tex_capacity: usize,
+    tex_order: Vec<*mut c_void>,
 }
 
 /// 用 XComponent 的 OHNativeWindow* 建 wgpu surface。
@@ -177,6 +184,13 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             bind_group: None,
             instances: Vec::new(),
             clear_color: [0.0, 0.0, 0.0, 1.0],
+            tex_pipeline: None,
+            tex_bgl: None,
+            tex_sampler: None,
+            tex_instances: Vec::new(),
+            tex_buffer: None,
+            tex_capacity: 0,
+            tex_order: Vec::new(),
         })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
@@ -481,6 +495,88 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
         cache: None,
     });
 
+    // ---- 纹理管线（group0 = screen，group1 = texture+sampler）----
+    let tex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("lgpu-tex-shader"),
+        source: wgpu::ShaderSource::Wgsl(gpu::TEX_SHADER.into()),
+    });
+    let tex_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("lgpu-tex-bgl"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let tex_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("lgpu-tex-sampler"),
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let tex_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("lgpu-tex-layout"),
+        bind_group_layouts: &[Some(&bgl), Some(&tex_bgl)],
+        immediate_size: 0,
+    });
+    let tex_attrs = [
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 0, shader_location: 0 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 1 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 2 },
+    ];
+    let tex_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("lgpu-tex-pipeline"),
+        layout: Some(&tex_layout),
+        vertex: wgpu::VertexState {
+            module: &tex_shader,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<gpu::TexInstance>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &tex_attrs,
+            })],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &tex_shader,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    let tex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-tex-instance"),
+        size: std::mem::size_of::<gpu::TexInstance>() as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    ctx.tex_bgl = Some(tex_bgl);
+    ctx.tex_sampler = Some(tex_sampler);
+    ctx.tex_pipeline = Some(tex_pipeline);
+    ctx.tex_buffer = Some(tex_buffer);
+
     ctx.screen_buffer = Some(screen_buffer);
     ctx.bind_group = Some(bind_group);
     ctx.pipeline = Some(pipeline);
@@ -498,6 +594,7 @@ pub extern "C" fn lgpu_frame_begin(surface: *mut c_void, r: f32, g: f32, b: f32,
         return E_BAD_ARG;
     };
     ctx.instances.clear();
+    ctx.tex_instances.clear();
     ctx.clear_color = [r, g, b, a];
     let screen = [config.width as f32, config.height as f32, 0.0, 0.0];
     if let Some(buf) = &ctx.screen_buffer {
@@ -608,8 +705,182 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                 pass.draw(0..6, 0..need as u32);
             }
         }
+        // 纹理：每张纹理一次 draw（bind group 不同，无法合批；数量本来就少）
+        if !ctx.tex_instances.is_empty() {
+            if let (Some(tp), Some(tbuf), Some(queue2)) =
+                (&ctx.tex_pipeline, &ctx.tex_buffer, &ctx.queue)
+            {
+                for (inst, tex_ptr) in &ctx.tex_instances {
+                    let t = unsafe { &*(*tex_ptr as *const TexCtx) };
+                    queue2.write_buffer(tbuf, 0, bytemuck::bytes_of(inst));
+                    pass.set_pipeline(tp);
+                    pass.set_bind_group(0, bind_group, &[]);
+                    pass.set_bind_group(1, &t.bind_group, &[]);
+                    pass.set_vertex_buffer(0, tbuf.slice(..));
+                    pass.draw(0..6, 0..1);
+                }
+            }
+        }
     }
     queue.submit(Some(encoder.finish()));
     queue.present(frame);
     0
+}
+
+// ---- 纹理路径（图片 / 视频帧共用）------------------------------------------
+
+/// 一张 GPU 纹理 + 它的 bind group。句柄对 Cangjie 不透明。
+pub struct TexCtx {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+}
+
+/// 创建一张 RGBA8 纹理。返回不透明句柄，失败返回 null。
+#[no_mangle]
+pub extern "C" fn lgpu_texture_create(
+    surface: *mut c_void,
+    width: u32,
+    height: u32,
+) -> *mut c_void {
+    if surface.is_null() || width == 0 || height == 0 {
+        set_error("bad argument: surface/width/height");
+        return std::ptr::null_mut();
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(sampler), Some(bgl)) =
+        (&ctx.device, &ctx.tex_sampler, &ctx.tex_bgl)
+    else {
+        set_error("texture pipeline not initialised (call lgpu_pipeline_init first)");
+        return std::ptr::null_mut();
+    };
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("lgpu-tex"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("lgpu-tex-bg"),
+        layout: bgl,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+
+    Box::into_raw(Box::new(TexCtx {
+        texture,
+        view,
+        bind_group,
+        width,
+        height,
+    })) as *mut c_void
+}
+
+/// 上传一块 RGBA8 像素到纹理的 (x, y) 处。stride 是每行字节数。
+#[no_mangle]
+pub extern "C" fn lgpu_texture_upload(
+    surface: *mut c_void,
+    tex: *mut c_void,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    pixels: *const u8,
+    stride: u32,
+) -> i32 {
+    if surface.is_null() || tex.is_null() || pixels.is_null() {
+        set_error("bad argument: surface/tex/pixels");
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let t = unsafe { &*(tex as *const TexCtx) };
+    let Some(queue) = &ctx.queue else {
+        set_error("no queue");
+        return E_BAD_ARG;
+    };
+    if width == 0 || height == 0 || stride < width * 4 {
+        set_error("bad upload size");
+        return E_BAD_ARG;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(pixels, (stride * height) as usize) };
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &t.texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x, y, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(stride),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    0
+}
+
+/// 把一个纹理实例推入当前帧。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_texture(
+    surface: *mut c_void,
+    tex: *mut c_void,
+    dx: f32,
+    dy: f32,
+    dw: f32,
+    dh: f32,
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> i32 {
+    if surface.is_null() || tex.is_null() || dw <= 0.0 || dh <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.tex_instances.push((gpu::TexInstance {
+        dst: [dx, dy, dw, dh],
+        uv: [u0, v0, u1, v1],
+        tint: [r, g, b, a],
+    }, tex));
+    0
+}
+
+/// 释放纹理。
+#[no_mangle]
+pub extern "C" fn lgpu_texture_destroy(tex: *mut c_void) {
+    if tex.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
 }
