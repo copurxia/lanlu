@@ -16,16 +16,27 @@ pub struct RectInstance {
     pub color: [f32; 4],
     /// x: 圆角半径（像素）；y: 描边宽度（0 = 填充）；z/w: 预留
     pub params: [f32; 4],
+    /// 裁剪矩形 x, y, w, h（像素；w <= 0 表示不裁剪）
+    pub clip: [f32; 4],
 }
 
 pub const SHADER: &str = r#"
-struct Screen { size: vec2f, _pad: vec2f };
+struct Screen {
+  size: vec2f,
+  _pad0: vec2f,
+  // 全局变换（cui 的 transform 栈在帧内是全局作用）：p' = p * xy_scale + xy_offset
+  xform_scale: vec2f,
+  _pad1: vec2f,
+  xform_offset: vec2f,
+  _pad2: vec2f,
+};
 @group(0) @binding(0) var<uniform> screen: Screen;
 
 struct Inst {
   @location(0) rect: vec4f,
   @location(1) color: vec4f,
   @location(2) params: vec4f,
+  @location(3) clip: vec4f,
 };
 
 struct VsOut {
@@ -34,6 +45,8 @@ struct VsOut {
   @location(1) local: vec2f,
   @location(2) half_size: vec2f,
   @location(3) params: vec4f,
+  @location(4) clip: vec4f,
+  @location(5) world: vec2f,
 };
 
 @vertex
@@ -49,12 +62,17 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   // 像素坐标 -> NDC（y 向下）
   let ndc = vec2f(p.x / screen.size.x * 2.0 - 1.0, 1.0 - p.y / screen.size.y * 2.0);
 
+  let world = p * screen.xform_scale + screen.xform_offset;
+  let ndc2 = vec2f(world.x / screen.size.x * 2.0 - 1.0, 1.0 - world.y / screen.size.y * 2.0);
+
   var out: VsOut;
-  out.pos = vec4f(ndc, 0.0, 1.0);
+  out.pos = vec4f(ndc2, 0.0, 1.0);
   out.color = inst.color;
   out.local = vec2f(cx, cy) * half_size;
   out.half_size = half_size;
   out.params = inst.params;
+  out.clip = inst.clip;
+  out.world = world;
   return out;
 }
 
@@ -66,6 +84,7 @@ fn sd_round_box(p: vec2f, b: vec2f, r: f32) -> f32 {
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4f {
+  // 裁剪由 render pass 的 scissor 负责（见 lib.rs 的批次分组），这里不再逐像素判断。
   let radius = clamp(in.params.x, 0.0, min(in.half_size.x, in.half_size.y));
   let stroke = in.params.y;
   let d = sd_round_box(in.local, in.half_size, radius);
@@ -96,10 +115,19 @@ pub struct TexInstance {
     pub uv: [f32; 4],
     /// 染色 r, g, b, a（与原色相乘）
     pub tint: [f32; 4],
+    /// 裁剪矩形 x, y, w, h（像素；w <= 0 表示不裁剪）
+    pub clip: [f32; 4],
 }
 
 pub const TEX_SHADER: &str = r#"
-struct Screen { size: vec2f, _pad: vec2f };
+struct Screen {
+  size: vec2f,
+  _pad0: vec2f,
+  xform_scale: vec2f,
+  _pad1: vec2f,
+  xform_offset: vec2f,
+  _pad2: vec2f,
+};
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(1) @binding(0) var tex: texture_2d<f32>;
 @group(1) @binding(1) var samp: sampler;
@@ -108,12 +136,15 @@ struct Inst {
   @location(0) dst: vec4f,
   @location(1) uv: vec4f,
   @location(2) tint: vec4f,
+  @location(3) clip: vec4f,
 };
 
 struct VsOut {
   @builtin(position) pos: vec4f,
   @location(0) uv: vec2f,
   @location(1) tint: vec4f,
+  @location(2) clip: vec4f,
+  @location(3) world: vec2f,
 };
 
 @vertex
@@ -124,12 +155,15 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 
   let p = vec2f(inst.dst.x + (cx * 0.5 + 0.5) * inst.dst.z,
                 inst.dst.y + (cy * 0.5 + 0.5) * inst.dst.w);
-  let ndc = vec2f(p.x / screen.size.x * 2.0 - 1.0, 1.0 - p.y / screen.size.y * 2.0);
+  let world = p * screen.xform_scale + screen.xform_offset;
+  let ndc = vec2f(world.x / screen.size.x * 2.0 - 1.0, 1.0 - world.y / screen.size.y * 2.0);
 
   var out: VsOut;
   out.pos = vec4f(ndc, 0.0, 1.0);
   out.uv = mix(inst.uv.xy, inst.uv.zw, vec2f(cx * 0.5 + 0.5, cy * 0.5 + 0.5));
   out.tint = inst.tint;
+  out.clip = inst.clip;
+  out.world = world;
   return out;
 }
 

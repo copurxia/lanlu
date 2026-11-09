@@ -130,6 +130,9 @@ pub struct SurfaceCtx {
     bind_group: Option<wgpu::BindGroup>,
     instances: Vec<gpu::RectInstance>,
     clear_color: [f32; 4],
+    xform_scale: [f32; 2],
+    xform_offset: [f32; 2],
+    clip: [f32; 4],
     tex_pipeline: Option<wgpu::RenderPipeline>,
     tex_bgl: Option<wgpu::BindGroupLayout>,
     tex_sampler: Option<wgpu::Sampler>,
@@ -184,6 +187,9 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             bind_group: None,
             instances: Vec::new(),
             clear_color: [0.0, 0.0, 0.0, 1.0],
+            xform_scale: [1.0, 1.0],
+            xform_offset: [0.0, 0.0],
+            clip: [0.0, 0.0, 0.0, 0.0],
             tex_pipeline: None,
             tex_bgl: None,
             tex_sampler: None,
@@ -215,6 +221,48 @@ pub extern "C" fn lgpu_self_check() -> i32 {
     let mut buf = [0u8; 4096];
     let n = lgpu_adapter_summary(buf.as_mut_ptr(), buf.len());
     if n < 0 { n } else { 0 }
+}
+
+/// 按 clip 连续分组绘制矩形实例（每组一个 scissor + 一次 draw）。
+fn draw_rect_batches(
+    pass: &mut wgpu::RenderPass<'_>,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+    buffer: &wgpu::Buffer,
+    instances: &[gpu::RectInstance],
+    width: u32,
+    height: u32,
+) {
+    let stride = std::mem::size_of::<gpu::RectInstance>() as u64;
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    // 逐实例一个 draw：真机上实例步进（instance_step）多条实例不出图（单条正常），
+    // 在查清驱动行为前先用这条已验证的路径；图元数量级本来就不大。
+    for (i, inst) in instances.iter().enumerate() {
+        apply_scissor(pass, inst.clip, width, height);
+        let begin = i as u64 * stride;
+        pass.set_vertex_buffer(0, buffer.slice(begin..begin + stride));
+        pass.draw(0..6, 0..1);
+    }
+}
+
+/// 把 clip 矩形（像素，命中测试用 top-left 原点）转成 scissor（整数、裁到 surface 内）。
+fn apply_scissor(pass: &mut wgpu::RenderPass<'_>, clip: [f32; 4], width: u32, height: u32) {
+    if clip[2] <= 0.0 || clip[3] <= 0.0 {
+        pass.set_scissor_rect(0, 0, width, height);
+        return;
+    }
+    let x0 = clip[0].max(0.0).floor() as u32;
+    let y0 = clip[1].max(0.0).floor() as u32;
+    let x1 = (clip[0] + clip[2]).min(width as f32).ceil() as u32;
+    let y1 = (clip[1] + clip[3]).min(height as f32).ceil() as u32;
+    let w = x1.saturating_sub(x0);
+    let h = y1.saturating_sub(y0);
+    if w == 0 || h == 0 {
+        pass.set_scissor_rect(0, 0, 0, 0);
+    } else {
+        pass.set_scissor_rect(x0, y0, w, h);
+    }
 }
 
 fn write_c_str(out: *mut c_char, out_len: usize, text: &str) {
@@ -417,7 +465,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
 
     let screen_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lgpu-screen"),
-        size: 16,
+        size: 48,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -463,6 +511,11 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
             format: wgpu::VertexFormat::Float32x4,
             offset: 32,
             shader_location: 2,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x4,
+            offset: 48,
+            shader_location: 3,
         },
     ];
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -536,6 +589,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 0, shader_location: 0 },
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 1 },
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 2 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 3 },
     ];
     let tex_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("lgpu-tex-pipeline"),
@@ -596,10 +650,46 @@ pub extern "C" fn lgpu_frame_begin(surface: *mut c_void, r: f32, g: f32, b: f32,
     ctx.instances.clear();
     ctx.tex_instances.clear();
     ctx.clear_color = [r, g, b, a];
-    let screen = [config.width as f32, config.height as f32, 0.0, 0.0];
+    let screen: [f32; 12] = [
+        config.width as f32,
+        config.height as f32,
+        0.0,
+        0.0,
+        ctx.xform_scale[0],
+        ctx.xform_scale[1],
+        0.0,
+        0.0,
+        ctx.xform_offset[0],
+        ctx.xform_offset[1],
+        0.0,
+        0.0,
+    ];
     if let Some(buf) = &ctx.screen_buffer {
         queue.write_buffer(buf, 0, bytemuck::cast_slice(&screen));
     }
+    0
+}
+
+/// 设置当前帧的全局变换（p' = p * scale + offset）。传 (1,1,0,0) 复位。
+#[no_mangle]
+pub extern "C" fn lgpu_set_transform(surface: *mut c_void, sx: f32, sy: f32, ox: f32, oy: f32) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.xform_scale = [sx, sy];
+    ctx.xform_offset = [ox, oy];
+    0
+}
+
+/// 设置当前裁剪矩形（像素）。w 或 h <= 0 表示不裁剪。
+#[no_mangle]
+pub extern "C" fn lgpu_set_clip(surface: *mut c_void, x: f32, y: f32, w: f32, h: f32) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.clip = [x, y, w, h];
     0
 }
 
@@ -627,6 +717,7 @@ pub extern "C" fn lgpu_draw_rect(
         rect: [x, y, w, h],
         color: [r, g, b, a],
         params: [radius, stroke, 0.0, 0.0],
+        clip: ctx.clip,
     });
     0
 }
@@ -638,12 +729,13 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         return E_BAD_ARG;
     }
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let (Some(device), Some(queue), Some(pipeline), Some(bind_group)) =
-        (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group)
+    let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(cfg)) =
+        (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group, &ctx.config)
     else {
         set_error("pipeline not initialised");
         return E_BAD_ARG;
     };
+    let (fw, fh) = (cfg.width, cfg.height);
 
     // 实例缓冲按需增长（容量翻倍，避免每帧重分配）。
     let need = ctx.instances.len();
@@ -699,10 +791,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         });
         if need > 0 {
             if let Some(buf) = &ctx.inst_buffer {
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, bind_group, &[]);
-                pass.set_vertex_buffer(0, buf.slice(..));
-                pass.draw(0..6, 0..need as u32);
+                draw_rect_batches(&mut pass, pipeline, bind_group, buf, &ctx.instances, fw, fh);
             }
         }
         // 纹理：每张纹理一次 draw（bind group 不同，无法合批；数量本来就少）
@@ -714,6 +803,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                     let t = unsafe { &*(*tex_ptr as *const TexCtx) };
                     queue2.write_buffer(tbuf, 0, bytemuck::bytes_of(inst));
                     pass.set_pipeline(tp);
+                    apply_scissor(&mut pass, inst.clip, fw, fh);
                     pass.set_bind_group(0, bind_group, &[]);
                     pass.set_bind_group(1, &t.bind_group, &[]);
                     pass.set_vertex_buffer(0, tbuf.slice(..));
@@ -872,6 +962,7 @@ pub extern "C" fn lgpu_draw_texture(
         dst: [dx, dy, dw, dh],
         uv: [u0, v0, u1, v1],
         tint: [r, g, b, a],
+        clip: ctx.clip,
     }, tex));
     0
 }
@@ -884,3 +975,228 @@ pub extern "C" fn lgpu_texture_destroy(tex: *mut c_void) {
     }
     drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
 }
+
+// ---- 离屏渲染 + 读回自检 ---------------------------------------------------
+//
+// 为什么需要：截图做像素判定太脆弱（测试窗口和 UI 重叠、坐标随布局漂移）。
+// 这里把同一套管线渲染到离屏纹理，copy_texture_to_buffer 读回后**在库内断言**，
+// 结果是确定性的，后续任何渲染改动都能用它做回归。
+
+#[allow(clippy::too_many_arguments)]
+fn render_to_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+    screen_buffer: &wgpu::Buffer,
+    xform_scale: [f32; 2],
+    xform_offset: [f32; 2],
+    width: u32,
+    height: u32,
+    instances: &[gpu::RectInstance],
+) -> Option<Vec<u8>> {
+
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("lgpu-offscreen"),
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-offscreen-inst"),
+        size: (instances.len().max(1) * std::mem::size_of::<gpu::RectInstance>()) as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let screen: [f32; 12] = [
+        width as f32, height as f32, 0.0, 0.0,
+        xform_scale[0], xform_scale[1], 0.0, 0.0,
+        xform_offset[0], xform_offset[1], 0.0, 0.0,
+    ];
+    queue.write_buffer(screen_buffer, 0, bytemuck::cast_slice(&screen));
+    if !instances.is_empty() {
+        queue.write_buffer(&inst_buf, 0, bytemuck::cast_slice(instances));
+    }
+
+    let bytes_per_row = ((width * 4 + 255) / 256) * 256;
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-readback"),
+        size: (bytes_per_row * height) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("lgpu-offscreen"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-offscreen-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if !instances.is_empty() {
+            draw_rect_batches(&mut pass, pipeline, bind_group, &inst_buf, instances, width, height);
+        }
+    }
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    // wgpu 30: PollType::Wait 带字段；用 wait_indefinitely() 构造器
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let data = match slice.get_mapped_range() {
+        Ok(d) => d,
+        Err(e) => {
+            set_error(format!("map readback failed: {e:?}"));
+            return None;
+        }
+    };
+    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        let start = (row * bytes_per_row) as usize;
+        out.extend_from_slice(&data[start..start + (width * 4) as usize]);
+    }
+    drop(data);
+    readback.unmap();
+    Some(out)
+}
+
+/// 取像素（RGBA8）。
+fn px(buf: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * width + x) * 4) as usize;
+    [buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]
+}
+
+/// 离屏渲染自检：验证裁剪与变换。
+/// 返回值：低 2 位 flags（bit0 裁剪语义不符，bit1 变换不符，bit2 读回失败），
+/// 其余位打包三个探测像素的红色分量，便于真机定位：
+///   r1 = 全量裁剪矩形内像素（应为白）
+///   r2 = 半裁剪矩形内的左半像素（应为白）
+///   r3 = 半裁剪矩形外的右半像素（应为黑）
+#[no_mangle]
+pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
+    if surface.is_null() {
+        return 1 << 2;
+    }
+    let ctx = unsafe { &*(surface as *const SurfaceCtx) };
+    let w = 200u32;
+    let h = 120u32;
+    let white = [1.0, 1.0, 1.0, 1.0];
+    let no_clip = [0.0, 0.0, 0.0, 0.0];
+
+    let plain_a = gpu::RectInstance {
+        rect: [10.0, 10.0, 40.0, 20.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [0.0, 0.0, 0.0, 0.0],
+    };
+    let plain_b = gpu::RectInstance {
+        rect: [10.0, 50.0, 40.0, 20.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [0.0, 0.0, 0.0, 0.0],
+    };
+    let clipped = gpu::RectInstance {
+        rect: [10.0, 90.0, 40.0, 20.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [10.0, 90.0, 40.0, 20.0],   // 恰好等于矩形：应完整可见
+    };
+
+    let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(screen_buffer)) = (
+        ctx.device.as_ref(),
+        ctx.queue.as_ref(),
+        ctx.pipeline.as_ref(),
+        ctx.bind_group.as_ref(),
+        ctx.screen_buffer.as_ref(),
+    ) else {
+        return 1 << 2;
+    };
+
+    // 探针 A：两个不带裁剪的实例（验证多实例批次）
+    let Some(buf) = render_to_texture(
+        device, queue, pipeline, bind_group, screen_buffer,
+        [1.0, 1.0], [0.0, 0.0], w, h, &[plain_a, plain_b],
+    ) else {
+        return 1 << 2;
+    };
+    let a1 = px(&buf, w, 20, 20)[0];
+    let a2 = px(&buf, w, 20, 60)[0];
+
+    // 探针 B：单实例 + 与之相同的裁剪矩形（验证 scissor 是否把内容裁没了）
+    let Some(buf2) = render_to_texture(
+        device, queue, pipeline, bind_group, screen_buffer,
+        [1.0, 1.0], [0.0, 0.0], w, h, &[clipped],
+    ) else {
+        return 1 << 2;
+    };
+    let b1 = px(&buf2, w, 20, 100)[0];
+
+    // 探针 C：变换
+    let xform_inst = gpu::RectInstance {
+        rect: [10.0, 10.0, 20.0, 20.0],
+        color: [0.0, 1.0, 0.0, 1.0],
+        params: [0.0, 0.0, 0.0, 0.0],
+        clip: [0.0, 0.0, 0.0, 0.0],
+    };
+    let Some(buf3) = render_to_texture(
+        device, queue, pipeline, bind_group, screen_buffer,
+        [1.0, 1.0], [100.0, 0.0], w, h, &[xform_inst],
+    ) else {
+        return 1 << 2;
+    };
+    let shifted = px(&buf3, w, 120, 20)[1];
+    let origin = px(&buf3, w, 20, 20)[1];
+
+    let mut fail = 0;
+    if a1 < 200 || a2 < 200 {
+        fail |= 1;
+    }
+    if b1 < 200 {
+        fail |= 2;
+    }
+    if shifted < 200 || origin > 40 {
+        fail |= 4;
+    }
+
+    set_error(format!(
+        "selftest diag: plain2_a={a1} plain2_b={a2} clip_eq_rect={b1} g_shifted={shifted} g_origin={origin} fail={fail}"
+    ));
+    (fail & 0xFF) | ((a1 as i32) << 8) | ((b1 as i32) << 16) | (((shifted >> 4) as i32) << 24)
+}
+

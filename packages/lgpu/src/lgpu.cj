@@ -24,6 +24,8 @@ foreign {
     func lgpu_draw_rect(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_frame_end(surface: CPointer<UInt8>): Int32
+    func lgpu_set_clip(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32): Int32
+    func lgpu_set_transform(surface: CPointer<UInt8>, sx: Float32, sy: Float32, ox: Float32, oy: Float32): Int32
 
     func lgpu_texture_create(surface: CPointer<UInt8>, width: UInt32, height: UInt32): CPointer<UInt8>
     func lgpu_texture_upload(surface: CPointer<UInt8>, tex: CPointer<UInt8>, x: UInt32, y: UInt32,
@@ -115,6 +117,16 @@ public class Surface <: Resource {
     /// 开始一帧：清屏色 + 清空绘制列表。
     public func beginFrame(r: Float32, g: Float32, b: Float32, a: Float32): Unit {
         checkRc(unsafe { lgpu_frame_begin(handle, r, g, b, a) }, "lgpu_frame_begin")
+    }
+
+    /// 设置当前裁剪矩形（像素）；w/h <= 0 取消裁剪。
+    public func setClip(x: Float32, y: Float32, w: Float32, h: Float32): Unit {
+        checkRc(unsafe { lgpu_set_clip(handle, x, y, w, h) }, "lgpu_set_clip")
+    }
+
+    /// 设置全局变换 p' = p * (sx,sy) + (ox,oy)；(1,1,0,0) 复位。
+    public func setTransform(sx: Float32, sy: Float32, ox: Float32, oy: Float32): Unit {
+        checkRc(unsafe { lgpu_set_transform(handle, sx, sy, ox, oy) }, "lgpu_set_transform")
     }
 
     /// 推一个矩形（radius > 0 圆角，stroke > 0 描边）。
