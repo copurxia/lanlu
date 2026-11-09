@@ -60,6 +60,9 @@ if [ -n "${CN_OHOS_SEED_FILE:-}" ] && [ -f "${CN_OHOS_SEED_FILE}" ]; then
   python3 "$HERE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$CN/../packages/lwindow/src/ohos_seed.cj"
 fi
 
+# 2.9) 分层守卫：业务/UI/绑定层不得出现平台专有代码（平台差异归 lwindow/ohos 包）
+bash "$CN/../tools/check-layering.sh" || { echo "分层检查未通过，终止构建"; exit 1; }
+
 # 3) 交叉编译引擎（dynamic, @C cj_app_main）
 export CANGJIE_HOME=$OH
 export LD_LIBRARY_PATH=$BASE/runtime/lib/linux_x86_64_cjnative:$OH/lib/linux_x86_64_cjnative
