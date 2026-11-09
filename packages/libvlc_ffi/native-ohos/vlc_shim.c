@@ -245,15 +245,28 @@ static void pump(VlcPlayer* p) {
 
 
 // ---------------- audio (OH_AudioRenderer + ffmpeg, pure-C thread) -------------
+// 写入环形缓冲：memcpy 分两段（跨尾部时），临界区只包住指针与 memcpy，
+// 避免逐字节持锁把音频回调线程饿死（真机曾表现为回调 3 次后不再被拉取）。
 static void ring_write(VlcPlayer* p, const unsigned char* d, size_t n) {
-    pthread_mutex_lock(&p->amu);
-    for (size_t i = 0; i < n; i++) {
-        if (p->rsize >= p->rcap) { // full: drop oldest
-            p->rtail = (p->rtail + 1) % p->rcap; p->rsize--;
-        }
-        p->ring[p->rhead] = d[i];
-        p->rhead = (p->rhead + 1) % p->rcap; p->rsize++;
+    if (!p || n == 0) return;
+    if (n > p->rcap) {           // 超过整圈：只保留最后 rcap 字节
+        d += (n - p->rcap);
+        n = p->rcap;
     }
+    pthread_mutex_lock(&p->amu);
+    if (!p->ring) { pthread_mutex_unlock(&p->amu); return; }
+    while (p->rsize + n > p->rcap) {   // 满：丢最旧，保证新数据完整写入
+        size_t drop = p->rsize + n - p->rcap;
+        if (drop > p->rsize) drop = p->rsize;
+        p->rtail = (p->rtail + drop) % p->rcap;
+        p->rsize -= drop;
+    }
+    size_t first = p->rcap - p->rhead;
+    if (first > n) first = n;
+    memcpy(p->ring + p->rhead, d, first);
+    if (n > first) memcpy(p->ring, d + first, n - first);
+    p->rhead = (p->rhead + n) % p->rcap;
+    p->rsize += n;
     pthread_cond_signal(&p->acv);
     pthread_mutex_unlock(&p->amu);
 }
@@ -271,11 +284,26 @@ static void audio_write_cb(OH_AudioRenderer* r, void* user, void* data, int32_t 
     unsigned char* out = (unsigned char*)data;
     int32_t got = 0;
     if (p && !atomic_load(&p->muted)) {
+        size_t want = (size_t)size;
         pthread_mutex_lock(&p->amu);
-        while (got < size && p->rsize > 0) {
-            out[got++] = p->ring[p->rtail];
-            p->rtail = (p->rtail + 1) % p->rcap; p->rsize--;
+        // p->ring 可能已被 audio_stop 释放：必须在锁内判空后再访问，
+        // 否则回调线程会读到已释放内存（真机表现为播放约 4s 后 SIGSEGV）。
+        if (!p->ring) {
+            pthread_mutex_unlock(&p->amu);
+            for (; got < size; got++) out[got] = 0;
+            return;
         }
+        size_t avail0 = 0; (void)avail0;
+        size_t avail = p->rsize < want ? p->rsize : want;
+        size_t first = p->rcap - p->rtail;
+        if (first > avail) first = avail;
+        if (avail) {
+            memcpy(out, p->ring + p->rtail, first);
+            if (avail > first) memcpy(out + first, p->ring, avail - first);
+            p->rtail = (p->rtail + avail) % p->rcap;
+            p->rsize -= avail;
+        }
+        got = (int32_t)avail;
         pthread_mutex_unlock(&p->amu);
     }
     for (; got < size; got++) out[got] = 0;
@@ -297,10 +325,11 @@ static void* audio_loop(void* arg) {
             int open_rc = avcodec_open2(ac, dec, NULL);
             if (stats_enabled()) VLOG("audio dec_open rc=%d", open_rc);
             if (open_rc == 0) {
-                AVChannelLayout out_ch; av_channel_layout_default(&out_ch, 2);
-                AVChannelLayout in_ch; av_channel_layout_copy(&in_ch, &ac->ch_layout);
-                swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000, &in_ch, ac->sample_fmt, ac->sample_rate, 0, NULL);
-                swr_init(swr);
+                // swr 惰性初始化：PCM 等流在 avcodec_open2 后 ch_layout/sample_rate 可能仍为空，
+                // 用首帧的真实参数建立重采样器（此前直接初始化会导致 swr_convert 崩溃）。
+                int swr_ok = 0;
+                if (stats_enabled()) VLOG("audio params before first frame: ch=%d rate=%d fmt=%d",
+                    ac->ch_layout.nb_channels, ac->sample_rate, (int)ac->sample_fmt);
                 struct timespec stat_ts; clock_gettime(CLOCK_MONOTONIC, &stat_ts);
                 long long stat_next = (long long)stat_ts.tv_sec + 3;
                 while (!p->astop) {
@@ -327,19 +356,46 @@ static void* audio_loop(void* arg) {
                     if (pkt->stream_index != ai) { av_packet_unref(pkt); continue; }
                     if (avcodec_send_packet(ac, pkt) == 0) {
                         while (avcodec_receive_frame(ac, fr) == 0) {
-                            uint8_t* obuf = NULL; int outn = swr_convert(swr, &obuf, fr->nb_samples,
+                            if (!swr_ok) {
+                                AVChannelLayout out_ch; av_channel_layout_default(&out_ch, 2);
+                                AVChannelLayout in_ch;
+                                if (fr->ch_layout.nb_channels > 0) {
+                                    av_channel_layout_copy(&in_ch, &fr->ch_layout);
+                                } else {
+                                    av_channel_layout_default(&in_ch, 2);
+                                }
+                                int rate = fr->sample_rate > 0 ? fr->sample_rate : ac->sample_rate;
+                                if (rate <= 0) rate = 48000;
+                                int rc2 = swr_alloc_set_opts2(&swr, &out_ch, AV_SAMPLE_FMT_S16, 48000,
+                                    &in_ch, (enum AVSampleFormat)fr->format, rate, 0, NULL);
+                                if (rc2 == 0 && swr && swr_init(swr) == 0) {
+                                    swr_ok = 1;
+                                    if (stats_enabled()) VLOG("audio swr ready: in_ch=%d rate=%d fmt=%d",
+                                        in_ch.nb_channels, rate, fr->format);
+                                } else {
+                                    VLOG("audio swr init failed rc=%d", rc2);
+                                }
+                            }
+                            if (!swr_ok) { av_frame_unref(fr); continue; }
+                            // 规范用法：固定输出容量 + 排空 swr 内部缓冲，避免以
+                            // nb_samples 作为 out_count 时因重采样比例导致的越界。
+                            const int out_cap = 2048;   // 帧
+                            uint8_t* obuf = NULL;
+                            int outn = swr_convert(swr, &obuf, out_cap,
                                 (const uint8_t**)fr->data, fr->nb_samples);
-                            if (outn > 0) {
+                            while (outn > 0) {
                                 size_t bytes = (size_t)outn * 2 * 2;  // 2ch s16
-                                // backpressure: wait while ring nearly full
                                 for (;;) {
                                     pthread_mutex_lock(&p->amu);
-                                    int full = (p->rsize + bytes) > p->rcap;
+                                    int full = (p->rcap == 0) || (p->rsize + bytes) > p->rcap;
                                     pthread_mutex_unlock(&p->amu);
-                                    if (!full || p->astop) break;
-                                    usleep(10000);
+                                    if (full == 0 || p->astop) break;
+                                    usleep(5000);
                                 }
+                                if (p->astop) break;
                                 ring_write(p, obuf, bytes);
+                                if (swr_get_out_samples(swr, 0) <= 0) break;
+                                outn = swr_convert(swr, &obuf, out_cap, NULL, 0);
                             }
                             av_frame_unref(fr);
                         }
@@ -366,10 +422,15 @@ static void audio_interrupt_cb(OH_AudioRenderer* r, void* user, OH_AudioInterrup
 }
 
 static void audio_start(VlcPlayer* p) {
+    // 调试开关：完全跳过音频线程（用于二分定位音视频问题）
+    if (getenv("LANLU_VLC_NO_AUDIO")) { VLOG("audio disabled by LANLU_VLC_NO_AUDIO"); return; }
     if (p->athread_started) return;
-    p->rcap = 1024 * 1024; p->ring = malloc(p->rcap); p->rhead = p->rtail = p->rsize = 0;
     p->astop = 0; atomic_store(&p->muted, 0);
     pthread_mutex_init(&p->amu, NULL); pthread_cond_init(&p->acv, NULL);
+    { size_t cap = 1024 * 1024; unsigned char* buf = malloc(cap);
+      pthread_mutex_lock(&p->amu);
+      p->ring = buf; p->rcap = cap; p->rhead = p->rtail = p->rsize = 0;
+      pthread_mutex_unlock(&p->amu); }
     OH_AudioStreamBuilder* b = NULL;
     if (OH_AudioStreamBuilder_Create(&b, AUDIOSTREAM_TYPE_RENDERER) == AUDIOSTREAM_SUCCESS && b) {
         OH_AudioStreamBuilder_SetSamplingRate(b, 48000);
@@ -379,6 +440,8 @@ static void audio_start(VlcPlayer* p) {
         OH_AudioStreamBuilder_SetRendererInfo(b, AUDIOSTREAM_USAGE_MUSIC);
         OH_AudioStreamBuilder_SetRendererWriteDataCallback(b, audio_write_cb, p);
         OH_AudioStreamBuilder_SetRendererInterruptCallback(b, audio_interrupt_cb, p);
+        // 20ms/次（960 帧）：块大一些，回调频率降低，抗调度抖动
+        OH_AudioStreamBuilder_SetFrameSizeInCallback(b, 960);
         OH_AudioStreamBuilder_GenerateRenderer(b, &p->renderer);
         OH_AudioStreamBuilder_Destroy(b);
     }
@@ -403,7 +466,9 @@ static void audio_stop(VlcPlayer* p) {
     p->astop = 1;
     if (p->athread_started) { pthread_join(p->athread, NULL); p->athread_started = 0; }
     if (p->renderer) { int64_t fw = 0; OH_AudioRenderer_GetFramesWritten(p->renderer, &fw); VLOG("audio frames_written=%lld", (long long)fw); OH_AudioRenderer_Stop(p->renderer); OH_AudioRenderer_Release(p->renderer); p->renderer = NULL; }
-    if (p->ring) { free(p->ring); p->ring = NULL; }
+    pthread_mutex_lock(&p->amu);
+    if (p->ring) { free(p->ring); p->ring = NULL; p->rcap = 0; p->rhead = p->rtail = p->rsize = 0; }
+    pthread_mutex_unlock(&p->amu);
 }
 
 int32_t libvlc_media_player_play(PlayerPtr pp) {

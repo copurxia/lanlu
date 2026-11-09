@@ -266,6 +266,12 @@ public class SubtitleBench {
             writeSummary(outPath)
         }
         done = true
+        // LANLU_BENCH_NO_EXIT=1：跑完不退出、不停止播放——用于观察长时间播放
+        //（如音频持续拉取、帧率稳定性），也方便人接管界面继续操作。
+        if ((getVariable("LANLU_BENCH_NO_EXIT") ?? "0") == "1") {
+            println("[subtitle-bench] finished (no-exit mode; playback continues)")
+            return
+        }
         model.playback.stop()
         exit(0)
     }
