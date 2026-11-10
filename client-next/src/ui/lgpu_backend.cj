@@ -13,7 +13,7 @@ import lgpu.{Font, LgpuCanvas, Surface}
 import lwindow
 import lwindow.{LWindowEventType}
 import lwindow.systemSansFontPath
-import sdl.{Canvas, MouseButton, SdlWindow, UiEvent, WindowSpec}
+import sdl.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
 import sdl.input.{cursorsEnabled}
 import sdl
 
@@ -128,6 +128,19 @@ public func installHeadlessInputSource(): Unit {
         return
     }
     sdl.headlessEventSource = Some({ =>
+        // 1) IME 文本
+        let texts = lwindow.readTextInputs()
+        if (texts.size > 0) {
+            return Some(UiEvent.TextInput(texts[0]))
+        }
+        // 2) 按键
+        let keyEvents = lwindow.readKeyEvents()
+        if (keyEvents.size > 0) {
+            let tuple = keyEvents[0]
+            let key = keyFromName(tuple[1])
+            return Some(if (tuple[0]) { UiEvent.KeyDown(key, tuple[2].size > 0) } else { UiEvent.KeyUp(key) })
+        }
+        // 3) 指针
         let events = lwindow.readInputEvents()
         if (events.size == 0) {
             return None
@@ -148,5 +161,29 @@ public func installLgpuProbeWindowCommand(command: String): Unit {
     spawn {
         sleep(Duration.second * 5)
         lwindow.requestWindowCommand(command)
+    }
+}
+
+/// 壳层传来的按键名 → Key 枚举。
+func keyFromName(name: String): Key {
+    match (name) {
+        case "Escape" => Key.Escape
+        case "Backspace" => Key.Backspace
+        case "Enter" => Key.Enter
+        case "Tab" => Key.Tab
+        case "Delete" => Key.Delete
+        case "Space" => Key.Space
+        case "Home" => Key.Home
+        case "End" => Key.End
+        case "Left" => Key.Left
+        case "Right" => Key.Right
+        case "Up" => Key.Up
+        case "Down" => Key.Down
+        case _ =>
+            if (name.size == 1) {
+                Key.Letter(UInt8(name.toArray()[0]))
+            } else {
+                Key.RawScancode(0)
+            }
     }
 }

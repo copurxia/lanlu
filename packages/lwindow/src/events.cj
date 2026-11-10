@@ -73,3 +73,68 @@ public func readInputEvents(): ArrayList<LWindowEvent> {
     }
     return out
 }
+
+// ---- P5：键盘/文本输入桥 --------------------------------------------------
+// 壳层（native）把 IME 提交的文本与按键写入文本文件，这里读出来交给引擎。
+// 与指针事件同一套通道：读后清空，避免重复投递。
+
+/// 读取并清空 IME 提交的文本（每行一条）。
+public func readTextInputs(): ArrayList<String> {
+    let out = ArrayList<String>()
+    let home = getVariable("HOME")
+    match (home) {
+        case None => return out
+        case Some(base) =>
+            let path = base + "/text_input.txt"
+            var text = ""
+            try {
+                text = String.fromUtf8(File.readFrom(Path(path)))
+            } catch (_) {
+                return out
+            }
+            if (text.size == 0) {
+                return out
+            }
+            for (line in text.split("\n")) {
+                let t = line.trimAscii()
+                if (t.size > 0) {
+                    out.add(t)
+                }
+            }
+            try {
+                File.writeTo(Path(path), Array<UInt8>())
+            } catch (_) {}
+    }
+    out
+}
+
+/// 读取并清空按键事件，元素为 (isDown, 名字, 修饰键)。
+public func readKeyEvents(): ArrayList<(Bool, String, String)> {
+    let out = ArrayList<(Bool, String, String)>()
+    let home = getVariable("HOME")
+    match (home) {
+        case None => return out
+        case Some(base) =>
+            let path = base + "/key_events.txt"
+            var text = ""
+            try {
+                text = String.fromUtf8(File.readFrom(Path(path)))
+            } catch (_) {
+                return out
+            }
+            if (text.size == 0) {
+                return out
+            }
+            for (line in text.split("\n")) {
+                let parts = line.split("|")
+                if (parts.size >= 3) {
+                    let isDown = parts[0].trimAscii() == "down"
+                    out.add((isDown, parts[1].trimAscii(), parts[2].trimAscii()))
+                }
+            }
+            try {
+                File.writeTo(Path(path), Array<UInt8>())
+            } catch (_) {}
+    }
+    out
+}
