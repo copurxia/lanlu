@@ -50,16 +50,38 @@ public class LgpuCanvas <: Canvas {
 
     /// 开始一帧：清屏 + 可选的整体缩放（用于把逻辑尺寸的 UI 画进小窗口预览）。
     public var scale: Float32 = 1.0
+    // 联调：把每帧清屏色强制成不透明红，用于判断"surface 能否上屏"（与 UI 绘制无关）。
+    public var forceClearRed: Bool = false
+
+    private var firstFrame = true
 
     public func beginFrame(clear: Color): Unit {
+        if (forceClearRed) {
+            surface.beginFrame(1.0, 0.0, 0.0, 1.0)
+            if (firstFrame) {
+                firstFrame = false
+                probeTrace("first frame RED clear scale=" + scale.toString())
+            }
+            return
+        }
+        if (firstFrame) {
+            firstFrame = false
+            probeTrace("first frame begin scale=" + scale.toString())
+        }
         if (scale != 1.0) {
             surface.setTransform(scale, scale, 0.0, 0.0)
         }
         surface.beginFrame(channel(clear.r), channel(clear.g), channel(clear.b), channel(clear.a))
     }
 
+    private var firstPresent = true
+
     public func present(): Unit {
         surface.endFrame()
+        if (firstPresent) {
+            firstPresent = false
+            probeTrace("first frame present err=[" + lastErrorText() + "]")
+        }
     }
 
     // 裁剪栈：保存逻辑坐标，应用到 surface 时按 scale 换算成世界像素。

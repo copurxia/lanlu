@@ -8,10 +8,23 @@ package lanlu_client_next.ui
 
 import std.convert.*
 import std.env.getVariable
+import std.fs.{exists as fsExists, Path as FsPath, File as FsFile}
 import lgpu.{Font, LgpuCanvas, Surface}
 import lwindow.systemSansFontPath
 import sdl.Canvas
 import sdl
+
+func probeTrace(line: String): Unit {
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+        return
+    }
+    let home = getVariable("HOME") ?? "."
+    let path = FsPath(home + "/probe_trace.txt")
+    try {
+        let old = if (fsExists(path)) { String.fromUtf8(FsFile.readFrom(path)) } else { "" }
+        FsFile.writeTo(path, (old + line + String.fromUtf8(Array<UInt8>(1, repeat: 10))).toArray())
+    } catch (_) {}
+}
 
 public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     if ((getVariable("CN_UI_BACKEND") ?? "sdl") != "lgpu") {
@@ -57,6 +70,7 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         case None => return false
     }
     let font = Font.load(fontPath)
+    probeTrace("install main=" + isMain.toString() + " sid=" + sid.toString() + " " + surfW.toString() + "x" + surfH.toString())
     let canvas = LgpuCanvas(surface, font)
     var scaleText = getVariable("LANLU_LGPU_SCALE") ?? (if (isMain) { "1.0" } else { "0.25" })
     var scale: Float32 = if (isMain) { 1.0 } else { 0.25 }
@@ -64,6 +78,9 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         scale = Float32.parse(scaleText)
     } catch (_) {}
     canvas.scale = scale
+    if ((getVariable("LANLU_MAIN_PROBE_FILL") ?? "0") == "1") {
+        canvas.forceClearRed = true
+    }
     // 纹理委派：SDL 纹理创建/更新时把 RGBA 像素送给 lgpu 后端
     sdl.texturePngSink = {id, bytes => canvas.uploadTexturePng(id, bytes)}
     sdl.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
