@@ -14,8 +14,9 @@ import lwindow
 import lwindow.{LWindowEventType}
 import lwindow.systemSansFontPath
 import sdl.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
-import sdl.input.{cursorsEnabled}
+import sdl.input.{ClipboardBackend, clipboardBackend, cursorsEnabled}
 import sdl
+import sdl.input
 
 func probeTrace(line: String): Unit {
     if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
@@ -134,6 +135,9 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
 public func installHeadlessInputSource(): Unit {
     // 窗口控制：headless 下交给平台层（写命令文件，ArkTS 轮询执行）
     sdl.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
+    // 剪贴板：SDL 在真机读不到系统剪贴板，改走 L 层（文件通道 + ArkTS pasteboard）
+    clipboardBackend = LWindowClipboard()
+
     // 无 SDL 窗口：鼠标样式由 L 层负责
     cursorsEnabled = false
     if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
@@ -197,5 +201,20 @@ func keyFromName(name: String): Key {
             } else {
                 Key.RawScancode(0)
             }
+    }
+}
+
+/// L 层剪贴板后端（引擎 → ArkTS → OHOS pasteboard）。
+class LWindowClipboard <: ClipboardBackend {
+    public func setText(text: String): Unit {
+        lwindow.clipboardSetText(text)
+    }
+
+    public func getText(): String {
+        lwindow.clipboardGetText()
+    }
+
+    public func hasText(): Bool {
+        lwindow.clipboardHasText()
     }
 }
