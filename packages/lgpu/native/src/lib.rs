@@ -1433,8 +1433,16 @@ pub extern "C" fn lgpu_text_draw(
     b: f32,
     a: f32,
 ) -> f32 {
-    if surface.is_null() || font.is_null() || utf8.is_null() || len == 0 || px_size <= 0.0 {
-        set_error("bad argument: text_draw");
+    // 空字符串是合法调用（UI 里大量存在空标签）：直接当 no-op，不设错误。
+    // 之前把 len==0 当坏参数，既污染 lgpu_last_error，又让"首个错误"变成噪声。
+    if len == 0 {
+        return 0.0;
+    }
+    if surface.is_null() || font.is_null() || utf8.is_null() || px_size <= 0.0 {
+        set_error(format!(
+            "bad argument: text_draw surface_null={} font_null={} utf8_null={} len={} px={:.3} x={:.1} y={:.1}",
+            surface.is_null(), font.is_null(), utf8.is_null(), len, px_size, x, y
+        ));
         return 0.0;
     }
     let fh = unsafe { &*(font as *const text::FontHandle) };

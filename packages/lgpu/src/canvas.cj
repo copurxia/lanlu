@@ -68,6 +68,10 @@ public class LgpuCanvas <: Canvas {
             firstFrame = false
             probeTrace("first frame begin scale=" + scale.toString())
         }
+        // 每帧重置裁剪栈：Renderer.beginScene 只清它自己的栈（SDL 侧），
+        // 后端栈不清会跨帧累积，表现为"越画越少"（只剩顶部一条）。
+        clipStack.clear()
+        surface.setClip(0.0, 0.0, 0.0, 0.0)
         if (scale != 1.0) {
             surface.setTransform(scale, scale, 0.0, 0.0)
         }

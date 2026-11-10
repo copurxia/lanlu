@@ -69,6 +69,7 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         case Some(p) => p
         case None => return false
     }
+    probeTrace("font path=" + fontPath)
     let font = Font.load(fontPath)
     probeTrace("install main=" + isMain.toString() + " sid=" + sid.toString() + " " + surfW.toString() + "x" + surfH.toString())
     let canvas = LgpuCanvas(surface, font)
