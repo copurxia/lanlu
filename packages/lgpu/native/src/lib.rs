@@ -1819,7 +1819,14 @@ extern "C" {
         surface_id: u64,
         window: *mut *mut c_void,
     ) -> i32;
+    // 设置缓冲几何/格式：XComponent 的 surface 在 attach 之前几何量可能是 0，
+    // 不设置的话 Vulkan swapchain 会建在 0x0 上、present 出去看不到东西。
+    fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: i32, ...) -> i32;
 }
+
+// OH_NativeWindow_NativeWindowHandleOpt 的命令码（native_window/external_window.h）
+const NATIVE_WINDOW_SET_BUFFER_GEOMETRY: i32 = 0;
+const NATIVE_WINDOW_SET_FORMAT: i32 = 3;
 
 /// 由 surfaceId 创建 OHNativeWindow*（失败返回 null）。
 /// lwindow 在**自己的线程**里用它建窗口，再把窗口交给 lgpu_surface_create，
@@ -1835,6 +1842,35 @@ pub extern "C" fn lgpu_native_window_from_surface_id(surface_id: u64) -> *mut c_
         return std::ptr::null_mut();
     }
     window
+}
+
+/// 给 surfaceId 对应的 native window 显式设置缓冲几何与格式（RGBA_8888）。
+#[no_mangle]
+pub extern "C" fn lgpu_native_window_set_geometry(
+    surface_id: u64,
+    width: u32,
+    height: u32,
+) -> i32 {
+    let window = lgpu_native_window_from_surface_id(surface_id);
+    if window.is_null() {
+        return -1;
+    }
+    let rc_geo = unsafe {
+        OH_NativeWindow_NativeWindowHandleOpt(
+            window,
+            NATIVE_WINDOW_SET_BUFFER_GEOMETRY,
+            width as i32,
+            height as i32,
+        )
+    };
+    // RGBA_8888 = 0x1 (OHOS PixelFormat); 失败不致命
+    let _rc_fmt = unsafe {
+        OH_NativeWindow_NativeWindowHandleOpt(window, NATIVE_WINDOW_SET_FORMAT, 0x1i32)
+    };
+    if rc_geo != 0 {
+        set_error(format!("set buffer geometry failed: rc={rc_geo} {width}x{height}"));
+    }
+    rc_geo
 }
 
 /// 一步到位：surfaceId → wgpu surface 句柄。

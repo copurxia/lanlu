@@ -15,6 +15,7 @@ foreign {
     func lgpu_adapter_summary(out: CPointer<UInt8>, outLen: Int64): Int32
 
     func lgpu_surface_create(nativeWindow: CPointer<UInt8>): CPointer<UInt8>
+    func lgpu_native_window_set_geometry(surfaceId: UInt64, width: UInt32, height: UInt32): Int32
     func lgpu_surface_create_from_id(surfaceId: UInt64): CPointer<UInt8>
     func lgpu_surface_init(surface: CPointer<UInt8>, width: UInt32, height: UInt32): Int32
     func lgpu_surface_resize(surface: CPointer<UInt8>, width: UInt32, height: UInt32): Int32
@@ -97,6 +98,8 @@ public func adapterSummary(): String {
 /// 呈现场（一个 XComponent 原生窗口对应一个 Surface）。
 public class Surface <: Resource {
     private var handle: CPointer<UInt8>
+    /// 创建来源的 surfaceId（0 = 非 surfaceId 创建）
+    public var surfaceId: Int64 = 0
 
     private init(handle: CPointer<UInt8>) {
         this.handle = handle
@@ -136,11 +139,18 @@ public class Surface <: Resource {
             let detail = unsafe { lgpu_last_error().toString() }
             throw LgpuException("lgpu_surface_create_from_id failed: " + detail)
         }
-        return Surface(h)
+        let s = Surface(h)
+        s.surfaceId = surfaceId
+        return s
     }
 
     /// 建 device/queue 并配置 swapchain（尺寸为物理像素）。
     public func configure(width: Int64, height: Int64): Unit {
+        // 先给 native window 设缓冲几何/格式，再建 swapchain：XComponent 的 surface
+        // 在 attach 前几何量可能为 0，直接建 swapchain 会导致 present 后不可见。
+        if (surfaceId > 0) {
+            let _ = unsafe { lgpu_native_window_set_geometry(UInt64(surfaceId), UInt32(width), UInt32(height)) }
+        }
         checkRc(unsafe { lgpu_surface_init(handle, UInt32(width), UInt32(height)) }, "lgpu_surface_init")
         checkRc(unsafe { lgpu_pipeline_init(handle) }, "lgpu_pipeline_init")
     }
