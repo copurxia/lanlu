@@ -214,6 +214,14 @@ public class LgpuCanvas <: Canvas {
             channel(color.r), channel(color.g), channel(color.b), channel(color.a))
     }
 
+    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {
+        // 渐变直接推给 lgpu（mode 1=横向，2=纵向）
+        let mode = if (vertical) { Int64(2) } else { Int64(1) }
+        surface.gradient(rect.x, rect.y, rect.w, rect.h, mode, Float32(from.r) / 255.0,
+            Float32(from.g) / 255.0, Float32(from.b) / 255.0, Float32(from.a) / 255.0,
+            Float32(to.r) / 255.0, Float32(to.g) / 255.0, Float32(to.b) / 255.0, Float32(to.a) / 255.0)
+    }
+
     public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {
         surface.rect(rect.x, rect.y, rect.w, rect.h, radius, 0.0,
             channel(color.r), channel(color.g), channel(color.b), channel(color.a))
