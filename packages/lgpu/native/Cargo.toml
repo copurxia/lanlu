@@ -13,6 +13,8 @@ crate-type = ["staticlib"]
 [dependencies]
 # 字形光栅化：ab_glyph 输出抗锯齿覆盖率位图（离线缓存有）
 ab_glyph = "=0.2.32"
+# PNG 解码（图片纹理直载）
+png = "=0.17.16"
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "vulkan", "wgsl"] }
 # wgpu 30 的 enumerate_adapters/request_adapter 是 async：这个 crate 只做同步 FFI，
 # 用最小执行器把它们 block_on 掉（不引 tokio）。

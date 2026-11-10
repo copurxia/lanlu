@@ -1856,3 +1856,85 @@ pub extern "C" fn lgpu_font_metrics(font: *mut c_void, px_size: f32, out: *mut f
     }
     0
 }
+
+// ---- PNG 纹理（图片路径）----------------------------------------------------
+
+/// 直接从 PNG 字节创建纹理（解码在 Rust 侧，避免把像素跨语言搬运）。
+/// out_w/out_h 可空；成功返回纹理句柄，失败 null。
+#[no_mangle]
+pub extern "C" fn lgpu_texture_create_from_png(
+    surface: *mut c_void,
+    bytes: *const u8,
+    len: usize,
+    out_w: *mut u32,
+    out_h: *mut u32,
+) -> *mut c_void {
+    if surface.is_null() || bytes.is_null() || len == 0 {
+        set_error("bad argument: png");
+        return std::ptr::null_mut();
+    }
+    let data = unsafe { std::slice::from_raw_parts(bytes, len) };
+    // png 0.17: Decoder::new 直接返回 Decoder（错误在 read_info/next_frame 才报）
+    let mut decoder = png::Decoder::new(data);
+    // 统一转成 RGBA8
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = match decoder.read_info() {
+        Ok(r) => r,
+        Err(e) => {
+            set_error(format!("png read_info: {e}"));
+            return std::ptr::null_mut();
+        }
+    };
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = match reader.next_frame(&mut buf) {
+        Ok(i) => i,
+        Err(e) => {
+            set_error(format!("png decode: {e}"));
+            return std::ptr::null_mut();
+        }
+    };
+    let (w, h) = (info.width, info.height);
+    // 按实际颜色类型补齐为 RGBA
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    match info.color_type {
+        png::ColorType::Rgba => rgba.copy_from_slice(&buf[..(w * h * 4) as usize]),
+        png::ColorType::Rgb => {
+            for i in 0..(w * h) as usize {
+                rgba[i * 4] = buf[i * 3];
+                rgba[i * 4 + 1] = buf[i * 3 + 1];
+                rgba[i * 4 + 2] = buf[i * 3 + 2];
+                rgba[i * 4 + 3] = 255;
+            }
+        }
+        png::ColorType::Grayscale => {
+            for i in 0..(w * h) as usize {
+                let v = buf[i];
+                rgba[i * 4] = v;
+                rgba[i * 4 + 1] = v;
+                rgba[i * 4 + 2] = v;
+                rgba[i * 4 + 3] = 255;
+            }
+        }
+        other => {
+            set_error(format!("png unsupported color type: {other:?}"));
+            return std::ptr::null_mut();
+        }
+    }
+
+    let tex = lgpu_texture_create(surface, w, h);
+    if tex.is_null() {
+        return std::ptr::null_mut();
+    }
+    let rc = lgpu_texture_upload(surface, tex, 0, 0, w, h, rgba.as_ptr(), w * 4);
+    if rc != 0 {
+        lgpu_texture_destroy(tex);
+        return std::ptr::null_mut();
+    }
+    if !out_w.is_null() {
+        unsafe { *out_w = w };
+    }
+    if !out_h.is_null() {
+        unsafe { *out_h = h };
+    }
+    tex
+}
