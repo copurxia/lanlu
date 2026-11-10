@@ -119,6 +119,8 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
 /// P5：headless 窗口的输入源——把 L 层事件桥映射成 UiEvent。
 /// 必须在创建 headless 窗口之前调用（DesktopApp 内部读 CN_WINDOW）。
 public func installHeadlessInputSource(): Unit {
+    // 窗口控制：headless 下交给平台层（写命令文件，ArkTS 轮询执行）
+    sdl.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
     if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
         return
     }
@@ -136,4 +138,12 @@ public func installHeadlessInputSource(): Unit {
             case _ => Some(UiEvent.Unknown(0))
         }
     })
+}
+
+/// 联调：延迟 5 秒触发一次窗口命令（验证 L 层窗口控制通道）。
+public func installLgpuProbeWindowCommand(command: String): Unit {
+    spawn {
+        sleep(Duration.second * 5)
+        lwindow.requestWindowCommand(command)
+    }
 }

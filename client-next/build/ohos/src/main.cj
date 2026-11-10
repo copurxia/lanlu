@@ -218,6 +218,11 @@ public func runApp(): Int64 {
             }), theme: lanluThemeFor(settings.theme),
     )
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 联调：LANLU_PROBE_WINCMD=minimize|maximize|restore 启动后触发一次窗口命令
+    let probeCmd = getVariable("LANLU_PROBE_WINCMD") ?? ""
+    if (probeCmd.size > 0) {
+        installLgpuProbeWindowCommand(probeCmd)
+    }
     // P4 对照开关：CN_UI_BACKEND=lgpu 时整棵 UI 交给 lgpu 绘制
     var lgpuBackend = false
     try {
