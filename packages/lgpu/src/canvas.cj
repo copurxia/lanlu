@@ -1,5 +1,6 @@
 package lgpu
 
+import std.collection.ArrayList
 import sdl.{Canvas, Color, Pen, Rect}
 
 // lgpu（wgpu）实现的 Canvas：把视图图元映射到 L 层的 SDF/纹理管线。
@@ -35,6 +36,35 @@ public class LgpuCanvas <: Canvas {
 
     public func present(): Unit {
         surface.endFrame()
+    }
+
+    // 裁剪栈：保存逻辑坐标，应用到 surface 时按 scale 换算成世界像素。
+    private var clipStack: ArrayList<Rect> = ArrayList<Rect>()
+
+    public func pushClip(rect: Rect): Unit {
+        let effective = if (clipStack.isEmpty()) {
+            rect
+        } else {
+            clipStack[clipStack.size - 1].intersection(rect)
+        }
+        clipStack.add(effective)
+        applyClip()
+    }
+
+    public func popClip(): Unit {
+        if (!clipStack.isEmpty()) {
+            clipStack.remove(at: clipStack.size - 1)
+        }
+        applyClip()
+    }
+
+    private func applyClip(): Unit {
+        if (clipStack.isEmpty()) {
+            surface.setClip(0.0, 0.0, 0.0, 0.0)
+        } else {
+            let top = clipStack[clipStack.size - 1]
+            surface.setClip(top.x * scale, top.y * scale, top.w * scale, top.h * scale)
+        }
     }
 
     public func fill(rect: Rect, color: Color): Unit {
