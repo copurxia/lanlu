@@ -134,6 +134,29 @@ filter_origin: ox=515.0 oy=292.0 calibrated=1
 
 取证入口：`startFilter(winId, rect.left, rect.top)` 会把原点写进 `$HOME/filter_origin.txt`。
 
+## 视觉验收（R62，真机截图）
+
+截图方法（devecocli 在 Linux 容器不可用，改用系统工具）：
+
+```bash
+hdc -t <dev> shell "snapshot_display -f /data/local/tmp/v.jpeg"
+hdc -t <dev> file recv /data/local/tmp/v.jpeg /tmp/v.jpeg
+magick /tmp/v.jpeg -crop 2090x1394+515+292 +repage win.png   # 裁到窗口区域
+magick win.png -format %c -depth 8 histogram:info: | sort -rn | head -5
+```
+
+实测结果（窗口 2090×1394）：
+
+```
+#3C3B40  2384603 px   主背景（设计值 #3B3B40，jpeg 色偏 1）
+#4E4D53   321397 px   标题栏 / 面板（设计值 #53535A 附近）
+#535459    65917 px   次级表面
+#847757     9852 px   强调色（设计值 #837757）
+颜色总数 7511，亮像素（文字）13299，mean=0.256 std=0.052
+```
+
+→ 调色板与设计一致、文字像素存在、无大面积纯黑/纯白，说明**整窗渲染 + 纹理 + 文字都在正常工作**。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
