@@ -10,8 +10,10 @@ import std.convert.*
 import std.env.getVariable
 import std.fs.{exists as fsExists, Path as FsPath, File as FsFile}
 import lgpu.{Font, LgpuCanvas, Surface}
+import lwindow.{readInputEvents, LWindowEventType}
+import lwindow
 import lwindow.systemSansFontPath
-import sdl.Canvas
+import sdl.{Canvas, MouseButton, SdlWindow, UiEvent, WindowSpec}
 import sdl
 
 func probeTrace(line: String): Unit {
@@ -87,4 +89,27 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     sdl.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     apply(canvas)
     return true
+}
+
+/// P5：用 L 层窗口 + lgpu 后端替代 SDL 窗口。
+/// 返回 null 表示未启用（CN_WINDOW != lgpu）。
+public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
+    if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
+        return None
+    }
+    let window = SdlWindow.headless(spec)
+    // 事件源：L 层输入桥（文件通道）→ UiEvent
+    sdl.headlessEventSource = Some({ =>
+        match (readInputEvents().first()) {
+            case Some(ev) =>
+                match (ev.kind) {
+                    case LWindowEventType.PointerDown => Some(UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y))
+                    case LWindowEventType.PointerMove => Some(UiEvent.MouseMove(ev.x, ev.y))
+                    case LWindowEventType.PointerUp => Some(UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y))
+                    case _ => Some(UiEvent.Unknown(0))
+                }
+            case None => None
+        }
+    })
+    return window
 }

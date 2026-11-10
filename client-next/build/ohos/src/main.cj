@@ -213,7 +213,17 @@ public func runApp(): Int64 {
                 Some(settings.fontPath)
             } else {
                 systemSansFontPath()
-            }), theme: lanluThemeFor(settings.theme))
+            }), theme: lanluThemeFor(settings.theme),
+            // P5：CN_WINDOW=lgpu 时不建 SDL 窗口，改由 L 层窗口 + lgpu 后端承担
+            windowFactory!: match (makeHeadlessWindow(WindowSpec(
+                title: "lanlu",
+                width: Int32(windowWidth),
+                height: Int32(windowHeight),
+                scale: windowScale,
+                borderless: true))) {
+                case Some(w) => Some({_ => w})
+                case None => None
+            })
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // P4 对照开关：CN_UI_BACKEND=lgpu 时整棵 UI 交给 lgpu 绘制
     var lgpuBackend = false
