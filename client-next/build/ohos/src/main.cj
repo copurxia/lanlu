@@ -312,13 +312,8 @@ public func runApp(): Int64 {
     // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
     // Wayland 无窗口图标协议（图标靠上方 app_id 匹配 .desktop），SDL 会返回
     // unsupported——忽略即可，不影响 X11/Windows 的设置效果。
-    let iconSurface = Surface.loadPngFromMemory(EMBEDDED_LOGO_PNG)
-    app.manage(iconSurface)
-    try {
-        app.sdlWindow.setIcon(iconSurface)
-    } catch (_: Exception) {
-        ()
-    }
+    // P5：窗口图标由 ArkTS/module.json 提供，SDL 的 Surface/setIcon 通道已移除。
+    let _ = EMBEDDED_LOGO_PNG
     // 无边框已在 WindowSpec(borderless: true) 创建时生效（见上方 WindowSpec 注释）。
     syncTitleBarDragRegion(app.sdlWindow, model)
     println("[boot] 5 entering main loop t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
