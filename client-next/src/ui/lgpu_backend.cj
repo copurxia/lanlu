@@ -11,6 +11,7 @@ import std.env.getVariable
 import lgpu.{Font, LgpuCanvas, Surface}
 import lwindow.systemSansFontPath
 import sdl.Canvas
+import sdl
 
 public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     if ((getVariable("CN_UI_BACKEND") ?? "sdl") != "lgpu") {
@@ -48,6 +49,8 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         scale = Float32.parse(scaleText)
     } catch (_) {}
     canvas.scale = scale
+    // 纹理委派：SDL 纹理创建/更新时把 RGBA 像素送给 lgpu 后端
+    sdl.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     apply(canvas)
     return true
 }

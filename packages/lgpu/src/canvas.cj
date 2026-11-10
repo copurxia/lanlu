@@ -1,6 +1,9 @@
 package lgpu
 
+import std.env.getVariable
+import std.fs.{File, Path, exists}
 import std.collection.ArrayList
+import std.collection.HashMap
 import sdl.{Canvas, Color, Pen, Rect}
 
 // lgpu（wgpu）实现的 Canvas：把视图图元映射到 L 层的 SDF/纹理管线。
@@ -65,6 +68,66 @@ public class LgpuCanvas <: Canvas {
             let top = clipStack[clipStack.size - 1]
             surface.setClip(top.x * scale, top.y * scale, top.w * scale, top.h * scale)
         }
+    }
+
+    // 纹理缓存：sdl.Texture.id → lgpu 纹理（像素经 texturePixelsSink 注册进来）。
+    private var textures: HashMap<Int64, Texture> = HashMap<Int64, Texture>()
+    // 纹理尺寸（用于把 source 矩形换算成 UV）
+    private var textureSizes: HashMap<Int64, (Float32, Float32)> = HashMap<Int64, (Float32, Float32)>()
+
+    /// 注册/更新一张后端纹理（由 sdl.texturePixelsSink 调用）。
+    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {
+        if (width <= 0 || height <= 0) {
+            return
+        }
+        let tex = match (textures.get(id)) {
+            case Some(existing) => existing
+            case None =>
+                let created = surface.createTexture(Int64(width), Int64(height))
+                textures[id] = created
+                created
+        }
+        textureSizes[id] = (Float32(width), Float32(height))
+        // 真机验证用：记录纹理上传（LANLU_PROBE_LGPU=1 时）
+        if ((getVariable("LANLU_PROBE_LGPU") ?? "0") == "1") {
+            let base = getVariable("HOME") ?? "."
+            try {
+                let path = Path(base + "/lgpu_textures.txt")
+                let existing = if (exists(path)) { String.fromUtf8(File.readFrom(path)) } else { "" }
+                File.writeTo(path, (existing + "id=" + id.toString() + " " + width.toString() + "x" + height.toString() + "\n").toArray())
+            } catch (_) {}
+        }
+        tex.upload(pixels, 0, 0, Int64(width), Int64(height), Int64(width) * 4)
+    }
+
+    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {
+        let tex = match (textures.get(id)) {
+            case Some(t) => t
+            case None => return
+        }
+        // UV 子区：source 为空表示整张纹理
+        var u0 = 0.0f32
+        var v0 = 0.0f32
+        var u1 = 1.0f32
+        var v1 = 1.0f32
+        match (source) {
+            case Some(src) =>
+                match (textureSizes.get(id)) {
+                    case Some(size) =>
+                        let tw = size[0]
+                        let th = size[1]
+                        if (tw > 0.0 && th > 0.0) {
+                            u0 = src.x / tw
+                            v0 = src.y / th
+                            u1 = (src.x + src.w) / tw
+                            v1 = (src.y + src.h) / th
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
+        surface.texture(tex, destination.x * scale, destination.y * scale,
+            destination.w * scale, destination.h * scale, u0, v0, u1, v1, 1.0, 1.0, 1.0, alpha)
     }
 
     public func fill(rect: Rect, color: Color): Unit {
