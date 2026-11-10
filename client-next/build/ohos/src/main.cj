@@ -5,13 +5,26 @@ import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
 import std.env.{getVariable, setVariable}
-import std.fs.{canonicalize, exists, Path}
+import std.fs.{canonicalize, exists as fsExists, Path as FsPath, File as FsFile}
 import std.time.MonoTime
 import webview.warmup
 import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
     prepareRendererHints, systemSansFontPath}
 import qwest.ClientBuilder
 import portcheck.runIfEnabled
+
+// 联调 trace：追加一行到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
+func probeTraceLine(line: String): Unit {
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+        return
+    }
+    let home = getVariable("HOME") ?? "."
+    let path = FsPath(home + "/probe_trace.txt")
+    try {
+        let old = if (fsExists(path)) { String.fromUtf8(FsFile.readFrom(path)) } else { "" }
+        FsFile.writeTo(path, (old + line + String.fromUtf8(Array<UInt8>(1, repeat: 10))).toArray())
+    } catch (_) {}
+}
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
 func rootView(model: AppModel): Unit {
@@ -209,6 +222,7 @@ public func runApp(): Int64 {
     } catch (e: Exception) {
         println("[boot] lgpu backend install failed: " + e.toString())
     }
+    probeTraceLine("backend installed=" + lgpuBackend.toString())
     if (lgpuBackend) {
         println("[boot] UI backend = lgpu (wgpu/Vulkan)")
         // 纹理路径自检：LANLU_PROBE_TEX=1 时从 /data/local/tmp/probe.png 加载一张纹理，
@@ -219,12 +233,15 @@ public func runApp(): Int64 {
             try {
                 let client = ClientBuilder().build()
                 let resp = client.get(texUrl).send()
+                probeTraceLine("http status=" + resp.status.toString() + " url=" + texUrl)
                 if (resp.status == 200) {
                     let bytes = resp.bytes()
                     let id = app.probeLoadPngBytes(bytes)
+                    probeTraceLine("probeLoadPngBytes id=" + id.toString() + " bytes=" + bytes.size.toString())
                     println("[boot] probe texture (http) id=" + id.toString() + " bytes=" + bytes.size.toString())
                 }
             } catch (e: Exception) {
+                probeTraceLine("http failed: " + e.toString())
                 println("[boot] probe texture http failed: " + e.toString())
             }
         }

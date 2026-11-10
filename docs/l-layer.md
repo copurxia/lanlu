@@ -46,6 +46,20 @@
 已确认可行的：只把 **surfaceId 数字**写进进程环境，Cangjie 侧自建窗口/surface 并绘制（round 12 真机验证通过）。
 下一轮输入桥建议：C++ 侧用**纯 C 结构**（固定数组 + volatile 索引，不用 std::deque/std::mutex、不中途 #include），先只提供 `lanlu_poll_input` 且 Cangjie 只在**单点**调用一次验证，再逐步加频率。
 
+## 纹理委派验证（P4 达成，真机）
+
+`$HOME/probe_trace.txt`（`LANLU_PROBE_LGPU=1` 时写入）真机输出：
+```
+backend installed=true
+http status=200 url=http://192.168.0.131:8080/probe.png
+png id=1 bytes=4898        ← lgpu 内解码 + 上传（64x64 渐变 PNG）
+probeLoadPngBytes id=1 bytes=4898
+png id=2 bytes=4268        ← 应用自身的内嵌 logo，走同一条纹理路径
+```
+
+结论：PNG 字节 → lgpu 纹理 → UI 绘制 的委派链路在真机可用；
+排查经验：**应用进程读不到 /data/local/tmp**，探针资源走 HTTP（mock `/probe.png`）最省事。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）

@@ -17,6 +17,27 @@ func channel(v: UInt8): Float32 {
     Float32(v) / 255.0
 }
 
+// 联调 trace：把关键步骤追加到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
+func probeTrace(line: String): Unit {
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+        return
+    }
+    let home = getVariable("HOME") ?? "."
+    let path = Path(home + "/probe_trace.txt")
+    try {
+        let old = if (exists(path)) { String.fromUtf8(File.readFrom(path)) } else { "" }
+        File.writeTo(path, (old + line + nline()).toArray())
+    } catch (_) {}
+}
+
+func lastErrorText(): String {
+    unsafe { lgpu_last_error().toString() }
+}
+
+func nline(): String {
+    String.fromUtf8(Array<UInt8>(1, repeat: 10))
+}
+
 public class LgpuCanvas <: Canvas {
     private let surface: Surface
     private let font: Font
@@ -88,6 +109,7 @@ public class LgpuCanvas <: Canvas {
                 created
         }
         textureSizes[id] = (Float32(width), Float32(height))
+        probeTrace("pixels id=" + id.toString() + " " + width.toString() + "x" + height.toString())
         // 真机验证用：记录纹理上传（LANLU_PROBE_LGPU=1 时）
         if ((getVariable("LANLU_PROBE_LGPU") ?? "0") == "1") {
             let base = getVariable("HOME") ?? "."
@@ -98,6 +120,17 @@ public class LgpuCanvas <: Canvas {
             } catch (_) {}
         }
         tex.upload(pixels, 0, 0, Int64(width), Int64(height), Int64(width) * 4)
+    }
+
+    /// 注册一张 PNG 纹理（解码在 lgpu 内完成）。
+    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {
+        match (surface.createTextureFromPng(bytes)) {
+            case Some(tex) =>
+                textures[id] = tex
+                probeTrace("png id=" + id.toString() + " bytes=" + bytes.size.toString())
+            case None =>
+                probeTrace("png failed id=" + id.toString() + " err=" + lastErrorText())
+        }
     }
 
     public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {
