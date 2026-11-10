@@ -11,6 +11,7 @@ import webview.warmup
 import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
     prepareRendererHints, systemSansFontPath}
 import qwest.ClientBuilder
+import sdl.input.{Clipboard}
 import portcheck.runIfEnabled
 
 // 联调 trace：追加一行到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
@@ -218,6 +219,21 @@ public func runApp(): Int64 {
             }), theme: lanluThemeFor(settings.theme),
     )
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // 联调：LANLU_PROBE_CLIP=1 启动后写一次剪贴板并读回（验证 L 层剪贴板通路）
+    if ((getVariable("LANLU_PROBE_CLIP") ?? "0") == "1") {
+        spawn {
+            sleep(Duration.second * 3)
+            try {
+                Clipboard.setText("probe-clip-测试")
+                probeTraceLine("clip set ok")
+                sleep(Duration.millisecond * 600)
+                let back = Clipboard.getText()
+                probeTraceLine("clip read=[" + back + "]")
+            } catch (e: Exception) {
+                probeTraceLine("clip failed: " + e.toString())
+            }
+        }
+    }
     // 联调：LANLU_PROBE_WINCMD=minimize|maximize|restore 启动后触发一次窗口命令
     let probeCmd = getVariable("LANLU_PROBE_WINCMD") ?? ""
     if (probeCmd.size > 0) {
