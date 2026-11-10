@@ -90,6 +90,20 @@ present err=[]        ← 首帧无错误
 - 判断"是否被合成"的可靠办法：`LANLU_MAIN_PROBE_FILL=1` 强制红清屏，数窗口内红像素。
 - `lgpu_text_draw` 的 `len==0`（空标签）是合法调用，不能当坏参数。
 
+## 去掉 libSDL3 的最后障碍（R42 结论）
+
+**壳层**已经完全不依赖 SDL（CMake/EntryAbility/ArkTS/打包配置都清了，引擎由 `libmain` 构造函数启动）。
+但尝试把 `-lSDL3 -lSDL3_ttf` 从引擎 link-option 移除时，进程启动即 **Cpp Crash**：
+
+原因是 `packages/cangjie-gui/sdl` 里仍留有 391 处 SDL 调用 / 158 个不同函数（texture/renderer/
+system_info/displays/clipboard/surface…）。这些代码在 lgpu 模式下**不执行**，但**仍被编译进引擎**，
+移除 `-lSDL3` 后符号无法解析 → 加载期崩溃。
+
+所以最终移除 SDL 库的顺序是：
+1. 删除或改写这 391 处调用（能删的删：dead code；必须的改 lgpu 实现）
+2. 再移除 `-lSDL3 -lSDL3_ttf` 与 `OHOS_EXTRA_LIBS` 里的 SDL 前缀
+3. 验证 HAP 内无 `libSDL3*.so`、`readelf -d` 无 SDL NEEDED
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
