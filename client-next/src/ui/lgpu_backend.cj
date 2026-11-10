@@ -30,20 +30,32 @@ func probeTrace(line: String): Unit {
 }
 
 public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
-    if ((getVariable("CN_UI_BACKEND") ?? "sdl") != "lgpu") {
+    // P5：引擎现在由壳层在 libmain 加载时自启动，可能早于 ArkTS 设置环境变量。
+    // 这里最多等 5 秒让 CN_UI_BACKEND 就绪（onCreate 里设置，通常 <1 秒）。
+    var backend = getVariable("CN_UI_BACKEND") ?? ""
+    var envWait = 0
+    while (backend.size == 0 && envWait < 50) {
+        sleep(Duration.millisecond * 100)
+        envWait++
+        backend = getVariable("CN_UI_BACKEND") ?? ""
+    }
+    probeTrace("backend mode=" + backend + " waited=" + envWait.toString())
+    if (backend != "lgpu") {
         return false
     }
-    // 等 ArkTS 的 XComponent onLoad 把 surfaceId 写进进程环境（最多 10 秒）。
-    // 优先用整窗 surface（LANLU_MAIN_SURFACE_ID，P5 预演）；没有则用测试小窗。
+    // 等 ArkTS 把整窗 surfaceId 写进进程环境（最多 15 秒）。
+    // 必须优先等 LANLU_MAIN_SURFACE_ID：测试小窗（LANLU_SURFACE_ID）会先就绪，
+    // 过早回退会导致后端画到 240x160 的小窗上。
     var sidText = getVariable("LANLU_MAIN_SURFACE_ID") ?? ""
     var waited = 0
-    while (sidText.size == 0 && waited < 100) {
+    while (sidText.size == 0 && waited < 150) {
         sleep(Duration.millisecond * 100)
         waited++
         sidText = getVariable("LANLU_MAIN_SURFACE_ID") ?? ""
-        if (sidText.size == 0) {
-            sidText = getVariable("LANLU_SURFACE_ID") ?? ""
-        }
+    }
+    if (sidText.size == 0) {
+        // 兜底：没有整窗时用测试小窗（仅调试）
+        sidText = getVariable("LANLU_SURFACE_ID") ?? ""
     }
     if (sidText.size == 0) {
         return false
