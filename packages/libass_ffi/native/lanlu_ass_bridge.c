@@ -15,6 +15,27 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+static FILE *llass_log_file = NULL;
+static void llass_msg_cb(int level, const char *fmt, va_list args, void *ctx) {
+    (void)level; (void)ctx;
+    if (!llass_log_file) {
+        const char *path = getenv("LLASS_LOG_FILE");
+        if (!path) {
+            const char *hm = getenv("HOME");
+            if (hm) { char p2[512]; snprintf(p2, sizeof p2, "%s/asslog.txt", hm); path = p2; }
+        }
+        if (!path) return;
+        llass_log_file = fopen(path, "a");
+        if (!llass_log_file) return;
+    }
+    fprintf(llass_log_file, "[ass] ");
+    vfprintf(llass_log_file, fmt, args);
+    fprintf(llass_log_file, "\n");
+    fflush(llass_log_file);
+}
 
 #define LLASS_MAX_DIMENSION 16384
 #define LLASS_MAX_INPUT (64 * 1024 * 1024)
@@ -94,7 +115,38 @@ LLASSRenderer *llass_renderer_new(int32_t width, int32_t height, char **error) {
     ass_set_margins(value->renderer, 0, 0, 0, 0);
     ass_set_use_margins(value->renderer, 0);
     ass_set_pixel_aspect(value->renderer, 1.0);
-    ass_set_fonts(value->renderer, NULL, NULL, ASS_FONTPROVIDER_AUTODETECT, NULL, 1);
+    /* OHOS: no fontconfig; fall back to a known system font file as the sole provider. */
+    {
+        const char *default_font = getenv("LLASS_DEFAULT_FONT");
+        if (!default_font || access(default_font, R_OK) != 0) default_font = "/system/fonts/HarmonyOS_Sans_SC.ttf";
+        if (access(default_font, R_OK) != 0) default_font = "/system/fonts/HarmonyOS_Sans.ttf";
+        if (access(default_font, R_OK) != 0) default_font = "/system/fonts/DroidSansFallback.ttf";
+        if (access(default_font, R_OK) != 0) default_font = NULL;
+        {
+        const char *lp = getenv("LLASS_LOG_FILE");
+        const char *hm = getenv("HOME");
+        FILE *pf = NULL;
+        if (lp) { pf = fopen(lp, "a"); if (pf) { fprintf(pf, "probe: env path font=%s\n", default_font ? default_font : "(none)"); } }
+        if (!pf && hm) { char p2[512]; snprintf(p2, sizeof p2, "%s/asslog.txt", hm); pf = fopen(p2, "a"); if (pf) { fprintf(pf, "probe: home path font=%s\n", default_font ? default_font : "(none)"); } }
+        if (!pf) { pf = fopen("asslog.txt", "a"); if (pf) { fprintf(pf, "probe: cwd path font=%s\n", default_font ? default_font : "(none)"); } }
+        if (pf) {
+            /* freetype open test */
+            FT_Library ftlib = NULL;
+            if (FT_Init_FreeType(&ftlib) == 0) {
+                FT_Face face = NULL;
+                FT_Error fe = FT_New_Face(ftlib, default_font ? default_font : "(none)", 0, &face);
+                fprintf(pf, "ft_new_face: %s -> err=%d faces=%ld\n", default_font ? default_font : "(none)", (int)fe, face ? (long)face->num_faces : -1L);
+                if (face) FT_Done_Face(face);
+                FT_Done_FreeType(ftlib);
+            } else {
+                fprintf(pf, "ft_init failed\n");
+            }
+            fclose(pf);
+        }
+    }
+    ass_set_message_cb(value->library, llass_msg_cb, NULL);
+        ass_set_fonts(value->renderer, default_font, NULL, ASS_FONTPROVIDER_NONE, NULL, 1);
+    }
     return value;
 }
 

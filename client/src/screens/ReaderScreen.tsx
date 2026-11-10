@@ -104,8 +104,16 @@ import {readerItemIndexForPage, webtoonIndexForPage} from './reader/readerIndex'
 import {resolveTapAction} from './reader/tapZones';
 import {ReaderLoadingState, ReaderPageLoading} from './reader/ReaderLoading';
 import {
+  getReaderPageLoadState,
+  getReaderPageSize,
+  resetReaderPageLoadState,
   resetReaderPageLoadStates,
+  resetReaderPageSizes,
+  setActiveReaderPage,
   setReaderPageLoadState,
+  setReaderPageSize,
+  useIsReaderPageActive,
+  useReaderPageSizeVersion,
 } from './reader/pageLoadState';
 import {ScreenState} from '../components/ScreenState';
 import {
@@ -918,6 +926,10 @@ export function ReaderScreen({route, navigation}: Props) {
   const settingsHydratedRef = useRef(false);
   const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoPreferredLaneItemKey = useRef('');
+  const activeReaderPageResetRef = useRef(true);
+  // Latest renderers for the two reader lists; see stableWebtoonRenderer below.
+  const renderWebtoonItemRef = useRef<((info: ListRenderItemInfo<ReaderWebtoonItem>) => React.ReactNode) | null>(null);
+  const renderPagedItemRef = useRef<((info: ListRenderItemInfo<ReaderItem>) => React.ReactNode) | null>(null);
 
   useEffect(() => {
     const subscription = Dimensions.addEventListener(
@@ -1029,6 +1041,12 @@ export function ReaderScreen({route, navigation}: Props) {
     progressSeekLockedRef.current = progressSeekLocked;
   }, [progressSeekLocked]);
 
+  // Publish the active page for per-cell media gating; only the cells whose
+  // active status flipped re-render.
+  useEffect(() => {
+    setActiveReaderPage(currentPage);
+  }, [currentPage]);
+
   const unlockProgressSeekAfter = useCallback((delay = 700) => {
     if (progressSeekUnlockTimer.current) {
       clearTimeout(progressSeekUnlockTimer.current);
@@ -1133,6 +1151,14 @@ export function ReaderScreen({route, navigation}: Props) {
         }
       })();
       const displayMetadata = source?.metadata || page.metadata;
+      // Seed geometry from page metadata so getItemLayout offsets and webtoon
+      // aspect ratios are correct before the first decode completes.
+      const seedMeta = displayMetadata as Record<string, unknown> | undefined;
+      const seedWidth = Number(seedMeta?.width ?? seedMeta?.naturalWidth ?? seedMeta?.w);
+      const seedHeight = Number(seedMeta?.height ?? seedMeta?.naturalHeight ?? seedMeta?.h);
+      if (Number.isFinite(seedWidth) && Number.isFinite(seedHeight) && seedWidth > 0 && seedHeight > 0) {
+        setReaderPageSize(basePage.pageNumber, seedWidth, seedHeight);
+      }
       const dedicatedThumbPath =
         displayMetadata?.thumb?.trim() || assetPath(displayMetadata?.thumb_asset_id) || '';
       const thumbnailPath = dedicatedThumbPath || (effectiveType === 'image' ? url : '');
@@ -1224,6 +1250,7 @@ export function ReaderScreen({route, navigation}: Props) {
           delete next[page.pageNumber];
           return next;
         });
+        resetReaderPageLoadState(page.pageNumber);
       }
 
       try {
@@ -1294,6 +1321,7 @@ export function ReaderScreen({route, navigation}: Props) {
     setImageLoadProgressByPage({});
     resetReaderPageLoadStates();
     setImageReloadNonceByPage({});
+    activeReaderPageResetRef.current = true;
     setHtmlContents({});
     setHtmlHeights({});
     setWebtoonHeights({});
@@ -1477,6 +1505,7 @@ export function ReaderScreen({route, navigation}: Props) {
           delete next[page.pageNumber];
           return next;
         });
+        setReaderPageLoadState(page.pageNumber, {phase: 'ready', progress: 100, error: undefined});
         appendDiagnosticLog('html.content.load', {
           archiveId: page.sourceArchiveId || archiveId,
           page: page.pageNumber,
@@ -1488,6 +1517,7 @@ export function ReaderScreen({route, navigation}: Props) {
       } catch (err) {
         const message = extractApiError(err, 'Failed to load HTML content');
         setFailedPages(current => ({...current, [page.pageNumber]: message}));
+        setReaderPageLoadState(page.pageNumber, {phase: 'error', progress: 0, error: message});
         appendDiagnosticLog('html.content.error', {
           archiveId: page.sourceArchiveId || archiveId,
           page: page.pageNumber,
@@ -1868,7 +1898,10 @@ export function ReaderScreen({route, navigation}: Props) {
         return Math.min(height, Math.max(1, webtoonContentWidth * (9 / 16))) + webtoonGap;
       }
       if (page.effectiveType === 'audio') return height + webtoonGap;
-      const imageSize = imageSizeByPage[page.pageNumber];
+      const imageSize =
+        getReaderPageSize(page.pageNumber).width !== undefined
+          ? (getReaderPageSize(page.pageNumber) as {width: number; height: number})
+          : imageSizeByPage[page.pageNumber];
       if (imageSize?.width && imageSize.height) {
         return Math.max(1, webtoonContentWidth * (imageSize.height / imageSize.width)) + webtoonGap;
       }
@@ -2621,6 +2654,7 @@ export function ReaderScreen({route, navigation}: Props) {
       delete next[pageNumber];
       return next;
     });
+    resetReaderPageLoadState(pageNumber);
     setImageReloadNonceByPage(current => ({
       ...current,
       [pageNumber]: (current[pageNumber] || 0) + 1,
@@ -2633,13 +2667,16 @@ export function ReaderScreen({route, navigation}: Props) {
     setImageLoadProgressByPage(current =>
       current[pageNumber] === 100 ? current : {...current, [pageNumber]: 100},
     );
+    setReaderPageLoadState(pageNumber, {phase: 'ready', progress: 100, error: undefined});
   }, [archiveId]);
 
   const failWidePage = useCallback((pageNumber: number, message?: string) => {
+    const resolved = message?.trim() ? message : 'Image failed to load.';
     setFailedPages(current => ({
       ...current,
-      [pageNumber]: message?.trim() ? message : 'Image failed to load.',
+      [pageNumber]: resolved,
     }));
+    setReaderPageLoadState(pageNumber, {phase: 'error', progress: 0, error: resolved});
   }, []);
 
   function handleSelectSource(value: number) {
@@ -2659,6 +2696,7 @@ export function ReaderScreen({route, navigation}: Props) {
       delete next[pageNumber];
       return next;
     });
+    resetReaderPageLoadState(pageNumber);
     setImageReloadNonceByPage(current => {
       if (current[pageNumber] == null) return current;
       const next = {...current};
@@ -2968,7 +3006,8 @@ export function ReaderScreen({route, navigation}: Props) {
       }
       return;
     }
-    if (!currentLoaded) return;
+    // Preload neighbors as soon as their sources exist; waiting for the
+    // current page's own decode makes every flip stall on a cold download.
     const sources: FastImageSource[] = [];
     for (let offset = 1; offset <= 2; offset += 1) {
       const page = pages[currentPage - 1 + offset];
@@ -3099,22 +3138,23 @@ export function ReaderScreen({route, navigation}: Props) {
     });
   }, [activeMediaPages, archiveId, currentPage]);
 
+  const sizeVersion = useReaderPageSizeVersion();
   const webtoonExtraData = useMemo(() => ({
-    currentPage,
     failedPages,
     htmlContents,
     htmlHeights,
     loadedPages,
-  }), [currentPage, failedPages, htmlContents, htmlHeights, loadedPages]);
+    sizeVersion,
+  }), [failedPages, htmlContents, htmlHeights, loadedPages, sizeVersion]);
 
   const pagedExtraData = useMemo(() => ({
-    currentPage,
     failedPages,
     htmlContents,
     htmlHeights,
     loadedPages,
+    sizeVersion,
     widePageResults,
-  }), [currentPage, failedPages, htmlContents, htmlHeights, loadedPages, widePageResults]);
+  }), [failedPages, htmlContents, htmlHeights, loadedPages, sizeVersion, widePageResults]);
 
   if (loading) {
     return (
@@ -3154,7 +3194,9 @@ export function ReaderScreen({route, navigation}: Props) {
     webtoon = false,
     mediaActive = true,
   ) => {
-    const commonError = failedPages[page.pageNumber];
+    const loadStateEntry = getReaderPageLoadState(page.pageNumber);
+    const isStorePageReady = loadStateEntry.phase === 'ready';
+    const commonError = failedPages[page.pageNumber] || loadStateEntry.error;
     const frameStyle = webtoon
       ? [styles.webtoonPage, {width: pageWidth}, page.effectiveType === 'video' ? {aspectRatio: 16 / 9, maxHeight: height} : null]
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
@@ -4140,11 +4182,19 @@ export function ReaderScreen({route, navigation}: Props) {
       );
     }
 
-    const webtoonImageSize = webtoon ? imageSizeByPage[page.pageNumber] : undefined;
+    let webtoonImageSize: {width?: number; height?: number} | undefined = webtoon
+      ? getReaderPageSize(page.pageNumber)
+      : undefined;
+    if (webtoon && webtoonImageSize?.width === undefined) {
+      const seeded = imageSizeByPage[page.pageNumber];
+      if (seeded?.width && seeded.height) {
+        webtoonImageSize = {width: seeded.width, height: seeded.height};
+      }
+    }
     const webtoonImageStyle = webtoon
       ? [
           styles.webtoonImage,
-          webtoonImageSize
+          webtoonImageSize?.width && webtoonImageSize.height
             ? {aspectRatio: webtoonImageSize.width / webtoonImageSize.height, height: undefined}
             : {aspectRatio: 0.72},
         ]
@@ -4192,10 +4242,14 @@ export function ReaderScreen({route, navigation}: Props) {
         if (existing && existing.width === imageWidth && existing.height === imageHeight) return prev;
         return {...prev, [page.pageNumber]: {width: imageWidth, height: imageHeight}};
       });
+      // Per-page geometry lives in the external store: memoized cells and the
+      // offset tables read it without the whole list re-rendering.
+      setReaderPageSize(page.pageNumber, imageWidth, imageHeight);
     };
 
     const resetImageLoadState = () => {
       setReaderPageLoadState(page.pageNumber, {phase: 'loading', progress: 0, error: undefined});
+      resetReaderPageLoadState(page.pageNumber);
       setLoadedPages(current => {
         if (!current[page.pageNumber]) return current;
         const next = {...current};
@@ -4227,7 +4281,7 @@ export function ReaderScreen({route, navigation}: Props) {
     const failImage = (message?: string) => {
       const resolved =
         typeof message === 'string' && message.trim() ? message : 'Image failed to load.';
-      setReaderPageLoadState(page.pageNumber, {phase: 'error', error: resolved});
+      setReaderPageLoadState(page.pageNumber, {phase: 'error', progress: 0, error: resolved});
       reportDebug('reader.image.error', {
         archiveId,
         page: page.pageNumber,
@@ -4248,13 +4302,13 @@ export function ReaderScreen({route, navigation}: Props) {
 
     const markImageLoaded = () => {
       setReaderPageLoadState(page.pageNumber, {phase: 'ready', progress: 100, error: undefined});
+      setLoadedPages(current => (current[page.pageNumber] ? current : {...current, [page.pageNumber]: true}));
+      setImageLoadProgressByPage(current => (current[page.pageNumber] === 100 ? current : {...current, [page.pageNumber]: 100}));
       reportDebug('reader.image.loaded', {
         archiveId,
         page: page.pageNumber,
         uri: page.imageSource?.uri || '',
       });
-      setLoadedPages(current => ({...current, [page.pageNumber]: true}));
-      setImageLoadProgressByPage(current => ({...current, [page.pageNumber]: 100}));
     };
     const pageLoadingLabels = {
       queued: t('reader.pageQueued'),
@@ -4317,7 +4371,7 @@ export function ReaderScreen({route, navigation}: Props) {
       <View style={frameStyle}>
         {page.imageSource ? (
           <>
-            {!loadedPages[page.pageNumber] &&
+            {!isStorePageReady &&
             !commonError &&
             page.hasDedicatedThumbnail &&
             page.thumbnailSource?.uri &&
@@ -4329,7 +4383,7 @@ export function ReaderScreen({route, navigation}: Props) {
                 style={StyleSheet.absoluteFill}
               />
             ) : null}
-            {!loadedPages[page.pageNumber] && !commonError ? (
+            {!isStorePageReady && !commonError ? (
               <View style={styles.loadingOverlay}>
                 <ReaderPageLoading
                   labels={pageLoadingLabels}
@@ -4407,6 +4461,7 @@ export function ReaderScreen({route, navigation}: Props) {
       </View>
     );
   };
+
 
   const horizontal = settings.readingMode === 'single-ltr' || settings.readingMode === 'single-rtl';
   const pageFrameHeight = height;
@@ -4596,6 +4651,19 @@ export function ReaderScreen({route, navigation}: Props) {
     );
   };
 
+  // Latest renderers, kept in refs so the list prop identity stays stable:
+  // CellRenderer is a PureComponent, so a fresh closure passed as renderItem
+  // would invalidate every mounted cell on each screen render even when
+  // nothing visible changed.
+  const stableWebtoonRenderer = useCallback(
+    (info: ListRenderItemInfo<ReaderWebtoonItem>) => renderWebtoonItemRef.current?.(info) ?? null,
+    [],
+  );
+  const stablePagedRenderer = useCallback(
+    (info: ListRenderItemInfo<ReaderItem>) => renderPagedItemRef.current?.(info) ?? null,
+    [],
+  );
+
   const renderWebtoonItem = ({item}: ListRenderItemInfo<ReaderWebtoonItem>) => {
     if ('kind' in item && item.kind === 'collection-end') {
       const colPageNum = pages.length + 1;
@@ -4618,9 +4686,6 @@ export function ReaderScreen({route, navigation}: Props) {
       );
     }
     const page = item as ReaderPage;
-    const pageIdx = page.pageNumber - 1;
-    const currentIdx = Math.max(0, Math.min(currentPage - 1, pages.length - 1));
-    const mediaActiveStable = Math.abs(pageIdx - currentIdx) <= 1;
     const estimatedHeight = getEstimatedWebtoonItemHeight(item);
     return (
       <View
@@ -4646,10 +4711,13 @@ export function ReaderScreen({route, navigation}: Props) {
           styles.webtoonItem,
           {paddingBottom: webtoonGap, paddingHorizontal: webtoonPadding},
         ]}>
-        {renderMedia(page, webtoonContentWidth, undefined, true, mediaActiveStable)}
+        {renderMedia(page, webtoonContentWidth, undefined, true, true)}
       </View>
     );
   };
+
+  renderWebtoonItemRef.current = renderWebtoonItem;
+  renderPagedItemRef.current = renderItem;
 
   return (
     <View style={styles.screen}>
@@ -4713,8 +4781,14 @@ export function ReaderScreen({route, navigation}: Props) {
             }}
             onViewableItemsChanged={onWebtoonViewableItemsChanged.current}
             ref={webtoonRef}
+            maintainVisibleContentPosition={{
+              // Anchor to the first fully-visible page; late size corrections
+              // for pages above keep the reading position visually stable.
+              minIndexForVisible: 0,
+              autoscrollToTopThreshold: 10,
+            }}
             removeClippedSubviews={false}
-            renderItem={renderWebtoonItem}
+            renderItem={stableWebtoonRenderer}
             scrollEnabled={!webtoonZoomed}
             scrollEventThrottle={100}
             showsVerticalScrollIndicator={false}
@@ -4747,7 +4821,7 @@ export function ReaderScreen({route, navigation}: Props) {
           onViewableItemsChanged={onViewableItemsChanged.current}
           pagingEnabled
           ref={listRef}
-          renderItem={renderItem}
+          renderItem={stablePagedRenderer}
           removeClippedSubviews={false}
           scrollEnabled={pagedZoomedPage == null}
           showsHorizontalScrollIndicator={false}

@@ -37,7 +37,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val EVENT_NAME = "LanluLongImageEvent"
-private const val MAX_CACHED_STRIPS = 4
+private const val MAX_CACHED_STRIPS = 8
 private const val MAX_FALLBACK_DIMENSION = 4096
 private const val MAX_CACHE_BYTES = 384L * 1024 * 1024
 private const val DOWNLOAD_CONCURRENCY = 4
@@ -87,6 +87,13 @@ class LanluLongImageView(context: Context) : View(context) {
   private var errorMessage: String? = null
   private var decoder: BitmapRegionDecoder? = null
   private var fallbackBitmap: Bitmap? = null
+  // +1 scrolling down, -1 scrolling up; drives how many strips are prefetched
+  // past the visible range so a fling does not outrun the decode pool.
+  private var scrollDirection = 1
+  private var lastDrawnTopStrip = -1
+  private var lastDrawnBottomStrip = -1
+  private var firstVisibleStrip = 0
+  private var lastVisibleStrip = 0
 
   internal var debugDecodedStripCount = 0
     private set
@@ -474,6 +481,10 @@ class LanluLongImageView(context: Context) : View(context) {
     scale = width.toFloat() / scaledWidth
     stripScaledHeight = LongImageGeometry.stripScaledHeight(scaledWidth)
     clearStrips()
+    lastDrawnTopStrip = -1
+    lastDrawnBottomStrip = -1
+    firstVisibleStrip = 0
+    lastVisibleStrip = 0
   }
 
   private fun emitSize() {
@@ -510,6 +521,14 @@ class LanluLongImageView(context: Context) : View(context) {
     if (clip.isEmpty) clip.set(0, 0, width, viewHeight)
     val first = (clip.top / scale / stripScaledHeight).toInt().coerceIn(0, stripCount - 1)
     val last = (clip.bottom / scale / stripScaledHeight).toInt().coerceIn(first, stripCount - 1)
+    // Infer scroll direction from how the visible window moved since the last
+    // draw; the anchor point follows the list scroll with no extra callbacks.
+    if (lastDrawnTopStrip >= 0 && first != lastDrawnTopStrip) {
+      scrollDirection = if (first > lastDrawnTopStrip) 1 else -1
+    }
+    lastDrawnTopStrip = first
+    firstVisibleStrip = first
+    lastVisibleStrip = last
 
     var drewAny = false
     for (index in first..last) {
@@ -523,7 +542,18 @@ class LanluLongImageView(context: Context) : View(context) {
       canvas.drawBitmap(bitmap, null, Rect(0, top, width, bottom), paint)
       drewAny = true
     }
-    scheduleStrip(last + 1)
+    // Prefetch past the viewport in the scroll direction: one strip behind as
+    // insurance, two ahead. Decoding is async, so an over-schedule that the
+    // user never reaches is recycled by the LRU without blocking the UI.
+    val forward = if (scrollDirection >= 0) 2 else 1
+    val backward = if (scrollDirection >= 0) 1 else 2
+    for (index in (last + 1)..(last + forward)) {
+      scheduleStrip(index)
+    }
+    for (index in (first - backward) until first) {
+      scheduleStrip(index)
+    }
+    lastDrawnBottomStrip = last
     if (!loadedEmitted && drewAny) {
       loadedEmitted = true
       emitEvent("load")
@@ -582,6 +612,10 @@ class LanluLongImageView(context: Context) : View(context) {
           bitmap.recycle()
           return@post
         }
+        // Upload the GPU texture now, on the decode thread: the first
+        // drawBitmap of an unprepared bitmap would otherwise do it on the UI
+        // thread, right in the middle of a fling.
+        bitmap.prepareToDraw()
         putStrip(index, bitmap)
         invalidate()
       }
@@ -592,11 +626,17 @@ class LanluLongImageView(context: Context) : View(context) {
     strips[index] = bitmap
     debugDecodedStripCount++
     while (strips.size > MAX_CACHED_STRIPS) {
-      val iterator = strips.entries.iterator()
-      if (!iterator.hasNext()) break
-      val eldest = iterator.next()
-      eldest.value.recycle()
-      iterator.remove()
+      // Evict the cached strip farthest from the visible window; a pure
+      // insertion-order eviction keeps re-decoding the strip the user just
+      // scrolled back into. The incoming strip is never a candidate: dropping
+      // it right after decode would waste the pool slot it just used.
+      val farthest = strips.keys
+        .filter { it != index }
+        .maxByOrNull { key ->
+          if (key >= firstVisibleStrip) key - lastVisibleStrip else firstVisibleStrip - key
+        }
+        ?: break
+      strips.remove(farthest)?.recycle()
     }
   }
 

@@ -3,9 +3,15 @@ import TestRenderer, {act} from 'react-test-renderer';
 
 import {
   getReaderPageLoadState,
+  getReaderPageSize,
   resetReaderPageLoadStates,
+  resetReaderPageSizes,
+  setActiveReaderPage,
   setReaderPageLoadState,
+  setReaderPageSize,
+  useIsReaderPageActive,
   useReaderPageLoadState,
+  useReaderPageSizeVersion,
   type ReaderPageLoadState,
 } from './pageLoadState';
 
@@ -71,5 +77,73 @@ describe('reader page load state', () => {
     resetReaderPageLoadStates();
     expect(getReaderPageLoadState(1)).toEqual({phase: 'queued', progress: 0});
     expect(getReaderPageLoadState(2)).toEqual({phase: 'queued', progress: 0});
+  });
+
+  it('stores decoded sizes and bumps the size version', () => {
+    let versionSeen = -1;
+    const Probe = () => {
+      versionSeen = useReaderPageSizeVersion();
+      return null;
+    };
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(<Probe />);
+    });
+    const initialVersion = versionSeen;
+
+    act(() => setReaderPageSize(7, 800, 1200));
+    expect(getReaderPageSize(7)).toEqual({width: 800, height: 1200});
+    expect(versionSeen).toBe(initialVersion + 1);
+
+    // Same size again: no version bump, no re-render.
+    act(() => setReaderPageSize(7, 800, 1200));
+    expect(versionSeen).toBe(initialVersion + 1);
+
+    // Invalid sizes are ignored.
+    act(() => setReaderPageSize(8, 0, 1200));
+    act(() => setReaderPageSize(8, 800, Number.NaN));
+    expect(getReaderPageSize(8)).toEqual({});
+
+    act(() => resetReaderPageSizes());
+    expect(getReaderPageSize(7)).toEqual({});
+    // Load phases survive a size-only reset.
+    setReaderPageLoadState(9, {phase: 'ready', progress: 100});
+    act(() => setReaderPageSize(9, 100, 200));
+    act(() => resetReaderPageSizes());
+    expect(getReaderPageLoadState(9).phase).toBe('ready');
+
+    act(() => renderer.unmount());
+  });
+
+  it('flips active page notifications only for affected pages', () => {
+    const Probe = ({page}: {page: number}) => {
+      activeSeen[page] = useIsReaderPageActive(page, 1);
+      return null;
+    };
+    const activeSeen: Record<number, boolean> = {};
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(
+        <>
+          <Probe page={4} />
+          <Probe page={7} />
+        </>,
+      );
+    });
+    // Active page starts at 0, so nothing in range yet.
+    act(() => setActiveReaderPage(5));
+    expect(activeSeen[4]).toBe(true);
+    expect(activeSeen[7]).toBe(false);
+
+    act(() => setActiveReaderPage(8));
+    expect(activeSeen[4]).toBe(false);
+    expect(activeSeen[7]).toBe(true);
+
+    // Same page again: no notifications.
+    const rendersBefore = Object.values(activeSeen).length;
+    act(() => setActiveReaderPage(8));
+    expect(Object.values(activeSeen).length).toBe(rendersBefore);
+
+    act(() => renderer.unmount());
   });
 });

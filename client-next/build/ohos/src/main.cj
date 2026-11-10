@@ -1,6 +1,8 @@
 package lanlu_client_next
 
 import cui.*
+import cui.desktop.{frameProbeHook}
+import lgpu.{captureRequest, captureSize, captureWriteTo}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
@@ -204,14 +206,24 @@ public func runApp(): Int64 {
     }
     // P5：headless 窗口的输入源（必须在建窗口之前挂上）
     installHeadlessInputSource()
+    // 联调：LANLU_PROBE_CAPTURE=1 —— 在渲染循环内按帧触发 GPU 抓帧并写文件
+    if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
+        frameProbeHook = { frame: Int64 =>
+            if (frame == 3) {
+                captureRequest()
+                probeTraceLine("capture requested")
+            } else if (frame == 6) {
+                let (w, h) = captureSize()
+                let home = getVariable("HOME") ?? "."
+                let rc = captureWriteTo(home + "/capture.rgba")
+                probeTraceLine("capture " + w.toString() + "x" + h.toString() + " rc=" + rc.toString())
+            }
+        }
+    }
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
-            // 无边框窗口：创建时即无 OS 装饰（替代旧的事后 setBordered(false)），
-            // Wayland 下 libdecor-cairo 不再先栅格化一遍随即摘除的标题栏装饰；
-            // 标题栏由 ui/titlebar.cj 自绘（Task 8），阅读器页换用专用顶栏
-            // ui/reader_bar.cj（T13）。
+            // 无边框窗口：创建时即无 OS 装饰；标题栏由 ui/titlebar.cj 自绘。
             borderless: true,
-            // 用户设置优先；否则取平台层的系统无衬线字体（无 fontconfig 平台才有，找不到则 None）。
             fontPath: if (settings.fontPath.size > 0) {
                 Some(settings.fontPath)
             } else {

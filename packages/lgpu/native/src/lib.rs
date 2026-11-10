@@ -994,51 +994,6 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     }
     queue.submit(Some(encoder.finish()));
-    // 抓帧：把刚渲染完的 surface 纹理拷进读回缓冲（Modal 模糊/转场快照用）
-    if CAPTURE_REQ.swap(false, std::sync::atomic::Ordering::SeqCst) {
-        let cw = fw.max(1);
-        let ch = fh.max(1);
-        let c_bpr = ((cw * 4 + 255) / 256) * 256;
-        let c_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("lgpu-capture"),
-            size: (c_bpr as u64) * (ch as u64),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut c_enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("lgpu-capture-enc"),
-        });
-        c_enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &frame.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &c_buf,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(c_bpr),
-                    rows_per_image: Some(ch),
-                },
-            },
-            wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
-        );
-        let c_sub = queue.submit(Some(c_enc.finish()));
-        let c_slice = c_buf.slice(..);
-        if map_and_wait(device, &c_slice, c_sub) {
-            let c_data = match c_slice.get_mapped_range() { Ok(v) => v, Err(_) => return E_NO_DEVICE };
-            let mut out = Vec::with_capacity((cw * ch * 4) as usize);
-            for row in 0..ch {
-                let start = (row * c_bpr) as usize;
-                out.extend_from_slice(&c_data[start..start + (cw * 4) as usize]);
-            }
-            drop(c_data);
-            c_buf.unmap();
-            if let Ok(mut g) = CAPTURE_DATA.lock() { *g = Some((cw, ch, out)); }
-        }
-    }
     queue.present(frame);
     0
 }
