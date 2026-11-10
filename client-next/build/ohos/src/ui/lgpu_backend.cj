@@ -17,13 +17,17 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     if ((getVariable("CN_UI_BACKEND") ?? "sdl") != "lgpu") {
         return false
     }
-    // 等 ArkTS 的 XComponent onLoad 把 surfaceId 写进进程环境（最多 10 秒）
-    var sidText = getVariable("LANLU_SURFACE_ID") ?? ""
+    // 等 ArkTS 的 XComponent onLoad 把 surfaceId 写进进程环境（最多 10 秒）。
+    // 优先用整窗 surface（LANLU_MAIN_SURFACE_ID，P5 预演）；没有则用测试小窗。
+    var sidText = getVariable("LANLU_MAIN_SURFACE_ID") ?? ""
     var waited = 0
     while (sidText.size == 0 && waited < 100) {
         sleep(Duration.millisecond * 100)
         waited++
-        sidText = getVariable("LANLU_SURFACE_ID") ?? ""
+        sidText = getVariable("LANLU_MAIN_SURFACE_ID") ?? ""
+        if (sidText.size == 0) {
+            sidText = getVariable("LANLU_SURFACE_ID") ?? ""
+        }
     }
     if (sidText.size == 0) {
         return false
@@ -34,8 +38,19 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     } catch (_) {
         return false
     }
+    let isMain = (getVariable("LANLU_MAIN_SURFACE_ID") ?? "").size > 0
+    var surfW: Int64 = 240
+    var surfH: Int64 = 160
+    if (isMain) {
+        try { surfW = Int64.parse(getVariable("LANLU_MAIN_W") ?? "0") } catch (_) {}
+        try { surfH = Int64.parse(getVariable("LANLU_MAIN_H") ?? "0") } catch (_) {}
+        if (surfW <= 0 || surfH <= 0) {
+            surfW = 2090
+            surfH = 1394
+        }
+    }
     let surface = Surface.fromSurfaceId(sid)
-    surface.configure(240, 160)
+    surface.configure(surfW, surfH)
     // 字体路径由平台层给出（分层规则：业务层不写平台路径）
     let fontPath = match (systemSansFontPath()) {
         case Some(p) => p
@@ -43,8 +58,8 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     }
     let font = Font.load(fontPath)
     let canvas = LgpuCanvas(surface, font)
-    var scaleText = getVariable("LANLU_LGPU_SCALE") ?? "0.25"
-    var scale: Float32 = 0.25
+    var scaleText = getVariable("LANLU_LGPU_SCALE") ?? (if (isMain) { "1.0" } else { "0.25" })
+    var scale: Float32 = if (isMain) { 1.0 } else { 0.25 }
     try {
         scale = Float32.parse(scaleText)
     } catch (_) {}
