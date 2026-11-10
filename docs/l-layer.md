@@ -37,6 +37,15 @@
   迁移期注意：文本度量来自 ab_glyph，与 fontkit 在极端字号下可能差 1px；fillRoundedRectSoft 的 feather 暂按普通圆角处理（SDF 自带抗锯齿）。
 - 待 P5 删 sdl 时，把 Canvas 与 Color/Pen/Rect 一起搬到中立包。
 
+## 输入桥的坑（本轮实测）
+
+尝试过的方案与结果：
+1. Cangjie 线程直接拿原生 surface 指针绘制 → **SIGSEGV**（窗口/surface 有线程亲和性，跨边界传指针不可行）。
+2. ArkTS onTouch → napi pushInput → C++ `std::deque`+`std::mutex` 环形缓冲 → Cangjie `lanlu_poll_input` 轮询 → **SIGSEGV/SIGABRT**（即使不轮询也会崩，怀疑 libmain 里新增的 C++ 静态对象/中途 #include 与引擎加载时序冲突）。
+
+已确认可行的：只把 **surfaceId 数字**写进进程环境，Cangjie 侧自建窗口/surface 并绘制（round 12 真机验证通过）。
+下一轮输入桥建议：C++ 侧用**纯 C 结构**（固定数组 + volatile 索引，不用 std::deque/std::mutex、不中途 #include），先只提供 `lanlu_poll_input` 且 Cangjie 只在**单点**调用一次验证，再逐步加频率。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
@@ -44,7 +53,9 @@
 - [x] P4 抽象层：Canvas 接口 + sdl.Renderer/lgpu.LgpuCanvas 双实现（编译通过）
 - [ ] P4 切换：视图参数改为 Canvas、加 CN_UI_BACKEND=sdl|lgpu 开关、真机对照
 - [ ] P5 删除 `packages/cangjie-gui/sdl`、去掉 `libSDL3*.so`、窗口钩子改直连
-- [ ] P1 `lwindow`：自有事件队列（替换 `SDL_WaitEventTimeout`）、键位表迁移
+- [x] P1 lwindow 自建窗口（surfaceId → OHNativeWindow → lgpu.Surface）真机验证
+- [ ] P1 自有事件队列 + 输入桥（事件模型已就位，桥待重做）
+- [ ] P1 键位表从 sdl/input/keyboard.cj 迁移
 
 ## 工具链事实（容器内）
 

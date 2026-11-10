@@ -156,6 +156,10 @@ func runLwindowProbeIfRequested(): Unit {
     if ((getVariable("LANLU_PROBE_LWINDOW") ?? "0") != "1") {
         return
     }
+    // CN_UI_BACKEND=lgpu 时，窗口/surface 由 UI 后端统一创建（同一窗口不能有两个 surface）
+    if ((getVariable("CN_UI_BACKEND") ?? "sdl") == "lgpu") {
+        return
+    }
     let base = getVariable("HOME") ?? "."
     var sidText = ""
     var waited = 0

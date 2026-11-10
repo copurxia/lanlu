@@ -8,6 +8,7 @@ output-type = "executable"
 [dependencies]
 lgpu = { path = "../packages/lgpu" }
 cui = { path = "../packages/cangjie-gui" }
+sdl = { path = "../packages/cangjie-gui/sdl" }
 lwindow = { path = "../packages/lwindow" }
 portcheck = { path = "../packages/portcheck" }
 vips_ffi = { path = "../packages/vips_ffi" }

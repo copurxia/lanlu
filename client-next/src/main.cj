@@ -201,6 +201,16 @@ public func runApp(): Int64 {
                 systemSansFontPath()
             }), theme: lanluThemeFor(settings.theme))
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    // P4 对照开关：CN_UI_BACKEND=lgpu 时整棵 UI 交给 lgpu 绘制
+    var lgpuBackend = false
+    try {
+        lgpuBackend = installLgpuBackendIfRequested({canvas => app.useCanvasBackend(canvas)})
+    } catch (e: Exception) {
+        println("[boot] lgpu backend install failed: " + e.toString())
+    }
+    if (lgpuBackend) {
+        println("[boot] UI backend = lgpu (wgpu/Vulkan)")
+    }
     // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
     // SDL_WaitEventTimeout 的主循环立即唤醒；醒后那次迭代的 onTick/pump 正常 drain，
     // 图片到货/UI 更新不再等下一个输入事件。

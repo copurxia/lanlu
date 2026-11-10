@@ -23,6 +23,20 @@ public class LgpuCanvas <: Canvas {
         this.font = font
     }
 
+    /// 开始一帧：清屏 + 可选的整体缩放（用于把逻辑尺寸的 UI 画进小窗口预览）。
+    public var scale: Float32 = 1.0
+
+    public func beginFrame(clear: Color): Unit {
+        if (scale != 1.0) {
+            surface.setTransform(scale, scale, 0.0, 0.0)
+        }
+        surface.beginFrame(channel(clear.r), channel(clear.g), channel(clear.b), channel(clear.a))
+    }
+
+    public func present(): Unit {
+        surface.endFrame()
+    }
+
     public func fill(rect: Rect, color: Color): Unit {
         surface.rect(rect.x, rect.y, rect.w, rect.h, 0.0, 0.0,
             channel(color.r), channel(color.g), channel(color.b), channel(color.a))
