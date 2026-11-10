@@ -67,6 +67,29 @@ png id=2 bytes=4268        ← 应用自身的内嵌 logo，走同一条纹理�
   窗口原点由 ArkTS 的 `windowRect.left/top` 经 `startFilter` 传给 native（`lanlu_seed_origin` + 连续自校准）。
 - 这条换算就是"鼠标位置不对"最容易出错的地方，先按此口径实现，待物理鼠标复核。
 
+## 整窗渲染（P5 渲染层，真机达成）
+
+开启：`aa start ... --ps lanlu.env.CN_UI_BACKEND lgpu --ps lanlu.env.LANLU_MAIN_LGPU 1`
+
+链路：ArkTS 全尺寸 XComponent(`LGPU_Main`) → `shell.setMainSurface(sid,w,h)` → 环境变量
+→ Cangjie 用 `Surface.fromSurfaceId` + `configure(2090x1394)` → 整棵 UI 树经 `LgpuCanvas` 绘制。
+
+真机结果（窗口 2090x1394 px，`uitest dumpLayout` 核对过）：
+```
+#3B3B40 2,787,293 px  ← 内容背景（全窗）
+#53535A    71,622 px  ← 标题栏条
+#4D4D53    12,547 px  ← 面板
+#837757     6,662 px  ← 强调色
+present err=[]        ← 首帧无错误
+```
+
+关键坑（记下来避免重犯）：
+- 三个 XComponent 在同一个 **`Column`** 里！`Column` 纵向排列，不重叠 —— 
+  后加的整窗 XComponent 会被排到 SDL 那个**下方**，即使 surface 画对了也永远看不见。
+  解决：加 `.position({x:0,y:0})` + `.zIndex(9)`。
+- 判断"是否被合成"的可靠办法：`LANLU_MAIN_PROBE_FILL=1` 强制红清屏，数窗口内红像素。
+- `lgpu_text_draw` 的 `len==0`（空标签）是合法调用，不能当坏参数。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
