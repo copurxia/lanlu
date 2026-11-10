@@ -120,6 +120,20 @@ rect=515,292,2090,1394  sysTop=0 sysBottom=0  cutTop=0  navBottom=0
 取证方式：ArkTS 在 `onWindowStageCreate` 之后把 `windowRect` 与三个 `AvoidAreaType` 写进
 `$HOME/window_info.txt`（`getWindowAvoidArea`）。这个探针比截图颜色判断可靠。
 
+## 鼠标坐标取证（R50 真机结论）
+
+```
+window_info:   rect=515,292,2090,1394  sysTop=0 sysBottom=0 cutTop=0 navBottom=0
+filter_origin: ox=515.0 oy=292.0 calibrated=1
+```
+
+- 输入过滤器实际使用的原点 `(515,292)` **与窗口矩形原点完全一致** → 屏幕坐标减原点即得窗口局部坐标，
+  没有标题栏高度偏移。
+- 因此 `local = display - windowRect.origin` 是正确的换算，且装饰去掉后无需再减任何 chrome。
+- `lanlu_seed_origin()` 现在直接把种子原点标记为已校准（此前只存值不置标志）。
+
+取证入口：`startFilter(winId, rect.left, rect.top)` 会把原点写进 `$HOME/filter_origin.txt`。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
