@@ -8,6 +8,9 @@ package lgpu
 import std.collection.ArrayList
 
 foreign {
+    func lgpu_capture_request(): Int32
+    func lgpu_capture_size(outW: CPointer<UInt32>, outH: CPointer<UInt32>): Int32
+    func lgpu_capture_write(path: CPointer<UInt8>, len: UIntNative): Int32
     func lgpu_version(): CString
     func lgpu_last_error(): CString
     func lgpu_init(): Int32
@@ -369,4 +372,36 @@ public class Font {
             handle = CPointer<UInt8>()
         }
     }
+}
+
+// ---- 抓帧（Modal 模糊 / 页面转场快照）----------------------------------
+
+/// 请求下一帧结束后抓帧（一次性）。
+public func captureRequest(): Unit {
+    unsafe { lgpu_capture_request() }
+}
+
+/// 最近一次抓帧的尺寸；没有抓帧数据时返回 (0, 0)。
+public func captureSize(): (UInt32, UInt32) {
+    let pw = unsafe { LibC.malloc<UInt32>() }
+    let ph = unsafe { LibC.malloc<UInt32>() }
+    var w: UInt32 = 0
+    var h: UInt32 = 0
+    unsafe { lgpu_capture_size(pw, ph) }
+    unsafe {
+        w = pw.read()
+        h = ph.read()
+        LibC.free(pw)
+        LibC.free(ph)
+    }
+    (w, h)
+}
+
+/// 把最近一次抓帧写为原始 RGBA 文件（无头部）。成功返回 0。
+public func captureWriteTo(path: String): Int32 {
+    let bytes = path.toArray()
+    let handle = unsafe { acquireArrayRawData(bytes) }
+    let rc = unsafe { lgpu_capture_write(handle.pointer, UIntNative(bytes.size)) }
+    unsafe { releaseArrayRawData(handle) }
+    rc
 }

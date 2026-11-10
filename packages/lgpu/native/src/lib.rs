@@ -34,6 +34,46 @@ thread_local! {
 /// 而 ArkTS 线程同时也在调（自检）；两份 &mut SurfaceCtx 并发就是数据竞争（真机上直接 SIGSEGV）。
 static SURF_LOCK: Mutex<()> = Mutex::new(());
 
+// ---- 抓帧（Modal 模糊 / 页面转场快照）------------------------------------
+// 渲染完一帧后把 surface 纹理拷进缓冲区，供 Cangjie 侧读取（CPU 模糊用）。
+static CAPTURE_REQ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CAPTURE_DATA: Mutex<Option<(u32, u32, Vec<u8>)>> = Mutex::new(None);
+
+/// 请求下一帧结束时抓帧（一次性）。
+#[no_mangle]
+pub extern "C" fn lgpu_capture_request() -> i32 {
+    CAPTURE_REQ.store(true, std::sync::atomic::Ordering::SeqCst);
+    0
+}
+
+/// 取最近一次抓帧的尺寸；没有则返回 0。
+#[no_mangle]
+pub extern "C" fn lgpu_capture_size(out_w: *mut u32, out_h: *mut u32) -> i32 {
+    let guard = match CAPTURE_DATA.lock() { Ok(g) => g, Err(_) => return -1 };
+    match guard.as_ref() {
+        Some((w, h, _)) => {
+            unsafe { if !out_w.is_null() { *out_w = *w; } if !out_h.is_null() { *out_h = *h; } }
+            0
+        }
+        None => 1,
+    }
+}
+
+/// 把最近一次抓帧写成原始 RGBA 文件（无头部）。返回 0 成功。
+#[no_mangle]
+pub extern "C" fn lgpu_capture_write(path: *const u8, path_len: usize) -> i32 {
+    let path_s = match unsafe { std::str::from_utf8(std::slice::from_raw_parts(path, path_len)) } {
+        Ok(v) => v,
+        Err(_) => { set_error("capture path not utf8"); return -1; }
+    };
+    let guard = match CAPTURE_DATA.lock() { Ok(g) => g, Err(_) => return -1 };
+    let Some((w, h, px)) = guard.as_ref() else { set_error("no capture data"); return -1 };
+    match std::fs::write(path_s, px.as_slice()) {
+        Ok(_) => 0,
+        Err(e) => { set_error(format!("capture write: {e}")); -1 }
+    }
+}
+
 fn lock_surface() -> std::sync::MutexGuard<'static, ()> {
     SURF_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -467,7 +507,7 @@ pub extern "C" fn lgpu_present_clear(surface: *mut c_void, r: f32, g: f32, b: f3
     }
     queue.submit(Some(encoder.finish()));
     // wgpu 30：present 挪到了 Queue 上（SurfaceTexture 不再自带 present）。
-    queue.present(frame);
+
     let _ = config;
     0
 }
@@ -954,6 +994,51 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     }
     queue.submit(Some(encoder.finish()));
+    // 抓帧：把刚渲染完的 surface 纹理拷进读回缓冲（Modal 模糊/转场快照用）
+    if CAPTURE_REQ.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        let cw = fw.max(1);
+        let ch = fh.max(1);
+        let c_bpr = ((cw * 4 + 255) / 256) * 256;
+        let c_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lgpu-capture"),
+            size: (c_bpr as u64) * (ch as u64),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut c_enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("lgpu-capture-enc"),
+        });
+        c_enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &frame.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &c_buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(c_bpr),
+                    rows_per_image: Some(ch),
+                },
+            },
+            wgpu::Extent3d { width: cw, height: ch, depth_or_array_layers: 1 },
+        );
+        let c_sub = queue.submit(Some(c_enc.finish()));
+        let c_slice = c_buf.slice(..);
+        if map_and_wait(device, &c_slice, c_sub) {
+            let c_data = match c_slice.get_mapped_range() { Ok(v) => v, Err(_) => return E_NO_DEVICE };
+            let mut out = Vec::with_capacity((cw * ch * 4) as usize);
+            for row in 0..ch {
+                let start = (row * c_bpr) as usize;
+                out.extend_from_slice(&c_data[start..start + (cw * 4) as usize]);
+            }
+            drop(c_data);
+            c_buf.unmap();
+            if let Ok(mut g) = CAPTURE_DATA.lock() { *g = Some((cw, ch, out)); }
+        }
+    }
     queue.present(frame);
     0
 }

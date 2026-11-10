@@ -1,6 +1,7 @@
 package lanlu_client_next
 
 import cui.*
+import lgpu.{captureRequest, captureSize, captureWriteTo}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
@@ -204,6 +205,22 @@ public func runApp(): Int64 {
     }
     // P5：headless 窗口的输入源（必须在建窗口之前挂上）
     installHeadlessInputSource()
+    // 联调：LANLU_PROBE_CAPTURE=1 启动后请求一次 lgpu 抓帧并写文件（验证 GPU 回读）
+    if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
+        spawn {
+            sleep(Duration.second * 6)
+            try {
+                captureRequest()
+                sleep(Duration.millisecond * 800)
+                let (w, h) = captureSize()
+                let home = getVariable("HOME") ?? "."
+                let rc = captureWriteTo(home + "/capture.rgba")
+                probeTraceLine("capture " + w.toString() + "x" + h.toString() + " rc=" + rc.toString())
+            } catch (e: Exception) {
+                probeTraceLine("capture failed: " + e.toString())
+            }
+        }
+    }
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
             // 无边框窗口：创建时即无 OS 装饰（替代旧的事后 setBordered(false)），
