@@ -999,6 +999,14 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
 }
 
 
+fn cap_log(home: &str, msg: &str) {
+    use std::io::Write;
+    let p = format!("{home}/cap_step.txt");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "{msg}");
+    }
+}
+
 /// 离屏抓帧：把**当前已录制的这一帧**（矩形 + 纹理图元）重绘到一张离屏纹理，
 /// 读回原始 RGBA 写入文件。不触碰 surface/present 路径，因此不会影响正常渲染。
 /// 用途：替代 SDL 的截图/模糊底图（Modal 模糊、页面转场快照）。
@@ -1014,17 +1022,22 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
             return E_BAD_ARG;
         }
     };
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/data/storage/el2/base/files".to_string());
+    cap_log(&home, "1 enter");
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    cap_log(&home, "2 locked");
     let (Some(device), Some(queue)) = (&ctx.device, &ctx.queue) else {
         set_error("capture: no device");
         return E_NO_DEVICE;
     };
+    cap_log(&home, "3 device ok");
     let Some(config) = ctx.config.clone() else {
         set_error("capture: no config");
         return E_NO_DEVICE;
     };
     let (w, h) = (config.width.max(1), config.height.max(1));
+    cap_log(&home, &format!("4 config {w}x{h} fmt={:?} rects={} texs={}", config.format, ctx.instances.len(), ctx.tex_instances.len()));
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("lgpu-capture-offscreen"),
@@ -1036,7 +1049,9 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
+    cap_log(&home, "4a texture created");
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    cap_log(&home, "4b view created");
     let bpr = ((w * 4 + 255) / 256) * 256;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lgpu-capture-readback"),
@@ -1044,6 +1059,24 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
+
+    // 纹理实例必须用**本帧**数据自建缓冲：ctx.tex_buffer 是上一帧 frame_end 才写入的，
+    // 直接按本帧 tex_instances 去 slice 会越界 panic（R66 实测崩在这里）。
+    let cap_tex_buf = if ctx.tex_instances.is_empty() {
+        None
+    } else {
+        let insts: Vec<gpu::TexInstance> = ctx.tex_instances.iter().map(|(i, _)| *i).collect();
+        let bytes: &[u8] = bytemuck::cast_slice(&insts);
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lgpu-capture-texinst"),
+            size: bytes.len().max(1) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buf, 0, bytes);
+        Some(buf)
+    };
+    cap_log(&home, "4f tex inst buffer ready");
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("lgpu-capture-enc"),
@@ -1071,13 +1104,16 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        cap_log(&home, "4c pass begun");
         if !ctx.instances.is_empty() {
             if let (Some(p), Some(bg), Some(buf)) = (&ctx.pipeline, &ctx.bind_group, &ctx.inst_buffer) {
                 draw_rect_batches(&mut pass, p, bg, buf, &ctx.instances, w, h);
             }
         }
+        cap_log(&home, "4d rects drawn");
+        cap_log(&home, "4e tex draw start");
         if !ctx.tex_instances.is_empty() {
-            if let (Some(tp), Some(tbuf), Some(bg)) = (&ctx.tex_pipeline, &ctx.tex_buffer, &ctx.bind_group) {
+            if let (Some(tp), Some(tbuf), Some(bg)) = (&ctx.tex_pipeline, &cap_tex_buf, &ctx.bind_group) {
                 let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
                 for (i, (inst, tex_ptr)) in ctx.tex_instances.iter().enumerate() {
                     let t = unsafe { &*(*tex_ptr as *const TexCtx) };
@@ -1109,12 +1145,15 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
+    cap_log(&home, "5 pass recorded");
     let sub = queue.submit(Some(encoder.finish()));
+    cap_log(&home, "6 submitted");
     let slice = readback.slice(..);
     if !map_and_wait(device, &slice, sub) {
         set_error("capture: map timeout");
         return E_NO_DEVICE;
     }
+    cap_log(&home, "7 mapped");
     let data = match slice.get_mapped_range() {
         Ok(v) => v,
         Err(_) => {
@@ -1129,6 +1168,7 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
     }
     drop(data);
     readback.unmap();
+    cap_log(&home, &format!("8 collected {} bytes", out.len()));
     match std::fs::write(&path_s, &out) {
         Ok(_) => (w as i32) * 1_000_000 + (h as i32),
         Err(e) => {
