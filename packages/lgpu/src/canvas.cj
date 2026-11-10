@@ -185,8 +185,22 @@ public class LgpuCanvas <: Canvas {
                 }
             case None => ()
         }
-        surface.texture(tex, destination.x * scale, destination.y * scale,
+        // 退化矩形（宽或高 <= 0）直接跳过：lgpu 会返回 E_BAD_ARG(-5) 并抛异常。
+        // 布局尚未稳定时（如 0 高度的占位图）这种情况是正常的，不该报错。
+        if (destination.w <= 0.0 || destination.h <= 0.0) {
+            return
+        }
+        let rc = surface.textureRc(tex, destination.x * scale, destination.y * scale,
             destination.w * scale, destination.h * scale, u0, v0, u1, v1, 1.0, 1.0, 1.0, alpha)
+        if (rc != 0) {
+            // 记录一次，便于定位（不抛异常：单张纹理失败不应中断整帧绘制）
+            let home = getVariable("HOME") ?? "."
+            try {
+                File.writeTo(Path(home + "/draw_skip.txt"),
+                    ("drawTexture rc=" + rc.toString() + " id=" + id.toString() +
+                     " dst=" + destination.w.toString() + "x" + destination.h.toString() + "\n").toArray())
+            } catch (_) {}
+        }
     }
 
     public func fill(rect: Rect, color: Color): Unit {

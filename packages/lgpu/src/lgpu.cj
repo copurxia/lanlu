@@ -192,6 +192,13 @@ public class Surface <: Resource {
             "lgpu_draw_texture")
     }
 
+    /// 同 texture()，但返回 rc 而不是抛异常（供容错路径使用）。
+    public func textureRc(tex: Texture, dx: Float32, dy: Float32, dw: Float32, dh: Float32,
+        u0: Float32, v0: Float32, u1: Float32, v1: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Int32 {
+        unsafe { lgpu_draw_texture(handle, tex.raw(), dx, dy, dw, dh, u0, v0, u1, v1, r, g, b, a) }
+    }
+
     /// 画线段（旋转矩形实现）。
     public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, width: Float32,
         r: Float32, g: Float32, b: Float32, a: Float32): Unit {
