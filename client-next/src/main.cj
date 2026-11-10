@@ -6,6 +6,7 @@ import lgpu.{captureRequest, captureSize, captureWriteTo}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
+import lanlu_client_next.ui.{lastCanvas}
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists as fsExists, Path as FsPath, File as FsFile}
 import std.time.MonoTime
@@ -209,14 +210,14 @@ public func runApp(): Int64 {
     // 联调：LANLU_PROBE_CAPTURE=1 —— 在渲染循环内按帧触发 GPU 抓帧并写文件
     if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
         frameProbeHook = { frame: Int64 =>
-            if (frame == 3) {
-                captureRequest()
-                probeTraceLine("capture requested")
-            } else if (frame == 6) {
-                let (w, h) = captureSize()
+            if (frame == 1) {
                 let home = getVariable("HOME") ?? "."
-                let rc = captureWriteTo(home + "/capture.rgba")
-                probeTraceLine("capture " + w.toString() + "x" + h.toString() + " rc=" + rc.toString())
+                match (lastCanvas) {
+                    case Some(c) =>
+                        let rc = c.captureTo(home + "/cap_off.rgba")
+                        probeTraceLine("capture off rc=" + rc.toString())
+                    case None => probeTraceLine("capture off: no canvas")
+                }
             }
         }
     }

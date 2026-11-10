@@ -998,6 +998,146 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     0
 }
 
+
+/// 离屏抓帧：把**当前已录制的这一帧**（矩形 + 纹理图元）重绘到一张离屏纹理，
+/// 读回原始 RGBA 写入文件。不触碰 surface/present 路径，因此不会影响正常渲染。
+/// 用途：替代 SDL 的截图/模糊底图（Modal 模糊、页面转场快照）。
+#[no_mangle]
+pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, path_len: usize) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let path_s = match unsafe { std::str::from_utf8(std::slice::from_raw_parts(path, path_len)) } {
+        Ok(v) => v.to_string(),
+        Err(_) => {
+            set_error("capture: path not utf8");
+            return E_BAD_ARG;
+        }
+    };
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (Some(device), Some(queue)) = (&ctx.device, &ctx.queue) else {
+        set_error("capture: no device");
+        return E_NO_DEVICE;
+    };
+    let Some(config) = ctx.config.clone() else {
+        set_error("capture: no config");
+        return E_NO_DEVICE;
+    };
+    let (w, h) = (config.width.max(1), config.height.max(1));
+
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("lgpu-capture-offscreen"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let bpr = ((w * 4 + 255) / 256) * 256;
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-capture-readback"),
+        size: (bpr as u64) * (h as u64),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("lgpu-capture-enc"),
+    });
+    {
+        let clear = ctx.clear_color;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-capture-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: clear[0] as f64,
+                        g: clear[1] as f64,
+                        b: clear[2] as f64,
+                        a: clear[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if !ctx.instances.is_empty() {
+            if let (Some(p), Some(bg), Some(buf)) = (&ctx.pipeline, &ctx.bind_group, &ctx.inst_buffer) {
+                draw_rect_batches(&mut pass, p, bg, buf, &ctx.instances, w, h);
+            }
+        }
+        if !ctx.tex_instances.is_empty() {
+            if let (Some(tp), Some(tbuf), Some(bg)) = (&ctx.tex_pipeline, &ctx.tex_buffer, &ctx.bind_group) {
+                let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
+                for (i, (inst, tex_ptr)) in ctx.tex_instances.iter().enumerate() {
+                    let t = unsafe { &*(*tex_ptr as *const TexCtx) };
+                    pass.set_pipeline(tp);
+                    apply_scissor(&mut pass, inst.clip, w, h);
+                    pass.set_bind_group(0, bg, &[]);
+                    pass.set_bind_group(1, &t.bind_group, &[]);
+                    let begin = i as u64 * tstride;
+                    pass.set_vertex_buffer(0, tbuf.slice(begin..begin + tstride));
+                    pass.draw(0..6, 0..1);
+                }
+            }
+        }
+    }
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bpr),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    let sub = queue.submit(Some(encoder.finish()));
+    let slice = readback.slice(..);
+    if !map_and_wait(device, &slice, sub) {
+        set_error("capture: map timeout");
+        return E_NO_DEVICE;
+    }
+    let data = match slice.get_mapped_range() {
+        Ok(v) => v,
+        Err(_) => {
+            set_error("capture: map range failed");
+            return E_NO_DEVICE;
+        }
+    };
+    let mut out: Vec<u8> = Vec::with_capacity((w * h * 4) as usize);
+    for row in 0..h {
+        let start = (row * bpr) as usize;
+        out.extend_from_slice(&data[start..start + (w * 4) as usize]);
+    }
+    drop(data);
+    readback.unmap();
+    match std::fs::write(&path_s, &out) {
+        Ok(_) => (w as i32) * 1_000_000 + (h as i32),
+        Err(e) => {
+            set_error(format!("capture write: {e}"));
+            -1
+        }
+    }
+}
+
 // ---- 纹理路径（图片 / 视频帧共用）------------------------------------------
 
 /// 一张 GPU 纹理 + 它的 bind group。句柄对 Cangjie 不透明。

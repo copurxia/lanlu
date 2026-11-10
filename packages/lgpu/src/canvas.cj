@@ -48,6 +48,12 @@ public class LgpuCanvas <: Canvas {
         this.font = font
     }
 
+    /// 离屏抓帧：把当前已录制的一帧重绘到离屏纹理并写出原始 RGBA（w*h*4）。
+    /// 返回 >0 成功（w*1e6+h），<0 为错误码。
+    public func captureTo(path: String): Int32 {
+        this.surface.captureTo(path)
+    }
+
     /// 开始一帧：清屏 + 可选的整体缩放（用于把逻辑尺寸的 UI 画进小窗口预览）。
     public var scale: Float32 = 1.0
     // 联调：把每帧清屏色强制成不透明红，用于判断"surface 能否上屏"（与 UI 绘制无关）。

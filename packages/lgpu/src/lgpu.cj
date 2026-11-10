@@ -8,6 +8,7 @@ package lgpu
 import std.collection.ArrayList
 
 foreign {
+    func lgpu_capture_offscreen(surface: CPointer<UInt8>, path: CPointer<UInt8>, len: Int64): Int32
     func lgpu_capture_request(): Int32
     func lgpu_capture_size(outW: CPointer<UInt32>, outH: CPointer<UInt32>): Int32
     func lgpu_capture_write(path: CPointer<UInt8>, len: UIntNative): Int32
@@ -190,6 +191,16 @@ public class Surface <: Resource {
         r: Float32, g: Float32, b: Float32, a: Float32): Unit {
         checkRc(unsafe { lgpu_draw_texture(handle, tex.raw(), dx, dy, dw, dh, u0, v0, u1, v1, r, g, b, a) },
             "lgpu_draw_texture")
+    }
+
+    /// 离屏抓帧：把当前已录制的一帧重绘到离屏纹理并写出原始 RGBA。
+    /// 返回值：>0 表示成功（w*1e6+h），<0 为错误码。
+    public func captureTo(path: String): Int32 {
+        let bytes = path.toArray()
+        let handleArr = unsafe { acquireArrayRawData(bytes) }
+        let rc = unsafe { lgpu_capture_offscreen(handle, handleArr.pointer, Int64(bytes.size)) }
+        unsafe { releaseArrayRawData(handleArr) }
+        rc
     }
 
     /// 同 texture()，但返回 rc 而不是抛异常（供容错路径使用）。

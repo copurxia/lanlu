@@ -30,6 +30,9 @@ func probeTrace(line: String): Unit {
     } catch (_) {}
 }
 
+/// 最近一次安装的后端画布（联调/抓帧用）。
+public var lastCanvas: ?LgpuCanvas = None
+
 public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     // P5：引擎现在由壳层在 libmain 加载时自启动，可能早于 ArkTS 设置环境变量。
     // 这里最多等 5 秒让 CN_UI_BACKEND 就绪（onCreate 里设置，通常 <1 秒）。
@@ -102,6 +105,7 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     lgui.texturePngSink = {id, bytes => canvas.uploadTexturePng(id, bytes)}
     lgui.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     apply(canvas)
+                lastCanvas = canvas
     return true
 }
 
