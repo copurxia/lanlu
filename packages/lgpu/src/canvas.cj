@@ -165,6 +165,46 @@ public class LgpuCanvas <: Canvas {
         }
     }
 
+    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32,
+        alpha: Float32): Unit {
+        let tex = match (textures.get(id)) {
+            case Some(t) => t
+            case None => return
+        }
+        if (destination.w <= 0.0 || destination.h <= 0.0) {
+            return
+        }
+        var u0 = 0.0f32
+        var v0 = 0.0f32
+        var u1 = 1.0f32
+        var v1 = 1.0f32
+        match (source) {
+            case Some(src) =>
+                match (textureSizes.get(id)) {
+                    case Some(size) =>
+                        let tw = size[0]
+                        let th = size[1]
+                        if (tw > 0.0 && th > 0.0) {
+                            u0 = src.x / tw
+                            v0 = src.y / th
+                            u1 = (src.x + src.w) / tw
+                            v1 = (src.y + src.h) / th
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
+        let rc = surface.textureRoundedRc(tex, destination.x * scale, destination.y * scale,
+            destination.w * scale, destination.h * scale, u0, v0, u1, v1, radius * scale, alpha)
+        if (rc != 0) {
+            let home = getVariable("HOME") ?? "."
+            try {
+                File.writeTo(Path(home + "/draw_skip.txt"),
+                    ("drawTextureRounded rc=" + rc.toString() + " id=" + id.toString() + "\n").toArray())
+            } catch (_) {}
+        }
+    }
+
     public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {
         let tex = match (textures.get(id)) {
             case Some(t) => t

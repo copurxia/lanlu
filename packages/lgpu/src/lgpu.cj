@@ -32,6 +32,10 @@ foreign {
     func lgpu_frame_end(surface: CPointer<UInt8>): Int32
     func lgpu_draw_line(surface: CPointer<UInt8>, x1: Float32, y1: Float32, x2: Float32, y2: Float32,
         width: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
+    func lgpu_draw_texture_rounded(surface: CPointer<UInt8>, tex: CPointer<UInt8>, dx: Float32, dy: Float32,
+        dw: Float32, dh: Float32, u0: Float32, v0: Float32, u1: Float32, v1: Float32, radius: Float32,
+        a: Float32): Int32
+
     func lgpu_draw_rect_gradient(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, mode: Float32,
         r1: Float32, g1: Float32, b1: Float32, a1: Float32,
@@ -223,6 +227,14 @@ public class Surface <: Resource {
     }
 
     /// 水平/垂直渐变（mode=1 横向，mode=2 纵向）。
+    /// 绘制带圆角裁剪的纹理（radius 为像素半径，0 = 普通绘制）。
+    public func textureRoundedRc(tex: Texture, dx: Float32, dy: Float32, dw: Float32, dh: Float32,
+        u0: Float32, v0: Float32, u1: Float32, v1: Float32, radius: Float32, a: Float32): Int32 {
+        unsafe {
+            lgpu_draw_texture_rounded(handle, tex.raw(), dx, dy, dw, dh, u0, v0, u1, v1, radius, a)
+        }
+    }
+
     public func gradient(x: Float32, y: Float32, w: Float32, h: Float32, mode: Int64,
         r1: Float32, g1: Float32, b1: Float32, a1: Float32,
         r2: Float32, g2: Float32, b2: Float32, a2: Float32): Unit {

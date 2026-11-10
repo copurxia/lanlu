@@ -143,6 +143,8 @@ pub struct TexInstance {
     pub clip: [f32; 4],
     /// 渐变终点色（params.z: 0=纯色 1=横向渐变 2=纵向渐变）
     pub color2: [f32; 4],
+    /// 额外参数：x = 圆角半径（像素），其余保留
+    pub params: [f32; 4],
 }
 
 pub const TEX_SHADER: &str = r#"
@@ -163,6 +165,7 @@ struct Inst {
   @location(1) uv: vec4f,
   @location(2) tint: vec4f,
   @location(3) clip: vec4f,
+  @location(4) params: vec4f,
 };
 
 struct VsOut {
@@ -171,6 +174,9 @@ struct VsOut {
   @location(1) tint: vec4f,
   @location(2) clip: vec4f,
   @location(3) world: vec2f,
+  @location(4) local: vec2f,
+  @location(5) size: vec2f,
+  @location(6) params: vec4f,
 };
 
 @vertex
@@ -193,6 +199,9 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   out.tint = inst.tint;
   out.clip = inst.clip;
   out.world = world;
+  out.local = vec2f((cx * 0.5 + 0.5) * inst.dst.z, (cy * 0.5 + 0.5) * inst.dst.w);
+  out.size = inst.dst.zw;
+  out.params = inst.params;
   // 渐变用的归一化位置（0..1），在矩形内
   return out;
 }
@@ -200,6 +209,18 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4f {
   let c = textureSample(tex, samp, in.uv);
-  return c * in.tint;
+  // 圆角裁剪：params.x = 圆角半径（像素），0 表示不裁剪。
+  // 用圆角矩形 SDF 求覆盖率，边缘 1px 抗锯齿。
+  let radius = in.params.x;
+  if (radius <= 0.0) {
+    return c * in.tint;
+  }
+  let half = in.size * 0.5;
+  let p = in.local - half;
+  let r = clamp(radius, 0.0, min(half.x, half.y));
+  let q = abs(p) - (half - vec2f(r));
+  let d = length(max(q, vec2f(0.0))) - r;
+  let cov = clamp(0.5 - d, 0.0, 1.0);
+  return vec4f(c.rgb * in.tint.rgb, c.a * in.tint.a * cov);
 }
 "#;

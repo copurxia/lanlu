@@ -685,6 +685,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 1 },
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 2 },
         wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 3 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 80, shader_location: 4 },
     ];
     let tex_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("lgpu-tex-pipeline"),
@@ -1328,6 +1329,40 @@ pub extern "C" fn lgpu_draw_texture(
         tint: [r, g, b, a],
         clip: ctx.clip,
         color2: [r, g, b, a],
+        params: [0.0, 0.0, 0.0, 0.0],
+    }, tex));
+    0
+}
+
+/// 绘制带圆角裁剪的纹理：radius 为圆角半径（像素），0 等价于普通绘制。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_texture_rounded(
+    surface: *mut c_void,
+    tex: *mut c_void,
+    dx: f32,
+    dy: f32,
+    dw: f32,
+    dh: f32,
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+    radius: f32,
+    a: f32,
+) -> i32 {
+    if surface.is_null() || tex.is_null() || dw <= 0.0 || dh <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.tex_instances.push((gpu::TexInstance {
+        dst: [dx, dy, dw, dh],
+        uv: [u0, v0, u1, v1],
+        tint: [1.0, 1.0, 1.0, a],
+        clip: ctx.clip,
+        color2: [1.0, 1.0, 1.0, a],
+        params: [radius, 0.0, 0.0, 0.0],
     }, tex));
     0
 }
@@ -1781,6 +1816,7 @@ pub extern "C" fn lgpu_text_draw(
                 tint: [r, g, b, a],
                 clip: ctx.clip,
                 color2: [r, g, b, a],
+                params: [0.0, 0.0, 0.0, 0.0],
             },
             atlas_tex,
         ));
@@ -1863,6 +1899,7 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
                     tint: [1.0, 1.0, 1.0, 1.0],
                     clip: [0.0, 0.0, 0.0, 0.0],
                     color2: [1.0, 1.0, 1.0, 1.0],
+                    params: [0.0, 0.0, 0.0, 0.0],
                 },
                 tex,
             ));
