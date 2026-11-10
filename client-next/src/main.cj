@@ -10,6 +10,7 @@ import std.time.MonoTime
 import webview.warmup
 import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
     prepareRendererHints, systemSansFontPath}
+import qwest.ClientBuilder
 import portcheck.runIfEnabled
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
@@ -210,6 +211,28 @@ public func runApp(): Int64 {
     }
     if (lgpuBackend) {
         println("[boot] UI backend = lgpu (wgpu/Vulkan)")
+        // 纹理路径自检：LANLU_PROBE_TEX=1 时从 /data/local/tmp/probe.png 加载一张纹理，
+        // 验证 PNG → 后端纹理上传这条链路（结果写在 lgpu_textures.txt）。
+        // 纹理路径自检（HTTP 版）：LANLU_PROBE_TEX_URL=<png url> 时抓取并创建纹理。
+        let texUrl = getVariable("LANLU_PROBE_TEX_URL") ?? ""
+        if (texUrl.size > 0) {
+            try {
+                let client = ClientBuilder().build()
+                let resp = client.get(texUrl).send()
+                if (resp.status == 200) {
+                    let bytes = resp.bytes()
+                    let id = app.probeLoadPngBytes(bytes)
+                    println("[boot] probe texture (http) id=" + id.toString() + " bytes=" + bytes.size.toString())
+                }
+            } catch (e: Exception) {
+                println("[boot] probe texture http failed: " + e.toString())
+            }
+        }
+        if ((getVariable("LANLU_PROBE_TEX") ?? "0") == "1") {
+            let home = getVariable("HOME") ?? "."
+            let id = app.probeLoadPngTexture(home + "/probe.png")
+            println("[boot] probe texture id=" + id.toString())
+        }
     }
     // worker 结果/SSE 到货唤醒：结果一进信箱即推 SDL 用户事件，把可能正阻塞在
     // SDL_WaitEventTimeout 的主循环立即唤醒；醒后那次迭代的 onTick/pump 正常 drain，
