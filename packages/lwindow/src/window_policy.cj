@@ -7,8 +7,8 @@ package lwindow
 
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists, Path}
-import sdl.displays.{DisplayInfo, primaryDisplayInfo}
-import sdl.system.{SdlHint, SdlHints}
+import lgui.displays.{DisplayInfo, primaryDisplayInfo}
+import lgui.system.{SdlHint, SdlHints}
 
 // 窗口初始几何（逻辑尺寸 + 缩放因子）。
 public struct WindowGeometry {

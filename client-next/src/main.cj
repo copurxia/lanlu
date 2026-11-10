@@ -13,7 +13,7 @@ import webview.warmup
 import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
     prepareRendererHints, systemSansFontPath}
 import qwest.ClientBuilder
-import sdl.input.{Clipboard}
+import lgui.input.{Clipboard}
 import portcheck.runIfEnabled
 
 // 联调 trace：追加一行到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。

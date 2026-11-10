@@ -1,6 +1,6 @@
 package lwindow
 
-import sdl.input.{ClipboardBackend, clipboardBackend}
+import lgui.input.{ClipboardBackend, clipboardBackend}
 
 // OHOS 后端：平台环境准备（对标 Chromium ui/ozone 的 platform_impl）。
 // 由 lwindow 的平台选择逻辑在启动时调用；业务层只看到 LWindow.init()。

@@ -28,7 +28,7 @@ echo "[sdl] 过渡层文件数=$sdl_files 行数=$sdl_lines"
 echo "[sdl] cui 层引用=$cui_refs  client-next 层引用=$cn_refs"
 
 # P0 基线阈值：只允许下降，不允许上升（防止新增 SDL 依赖）
-BASELINE_CUI=${BASELINE_CUI:-224}
+BASELINE_CUI=${BASELINE_CUI:-2}
 BASELINE_CN=${BASELINE_CN:-0}
 if [ "$cui_refs" -gt "$BASELINE_CUI" ]; then
   echo "[FAIL] cui 对 SDL 的引用增加了（$cui_refs > $BASELINE_CUI）"

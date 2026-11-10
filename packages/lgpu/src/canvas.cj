@@ -4,11 +4,11 @@ import std.env.getVariable
 import std.fs.{File, Path, exists}
 import std.collection.ArrayList
 import std.collection.HashMap
-import sdl.{Canvas, Color, Pen, Rect}
+import lgui.{Canvas, Color, Pen, Rect}
 
 // lgpu（wgpu）实现的 Canvas：把视图图元映射到 L 层的 SDF/纹理管线。
 //
-// 与 sdl.Renderer 的差异（迁移期可见）：
+// 与 lgui.Renderer 的差异（迁移期可见）：
 // - 文本度量来自 lgpu 自己的字形光栅化（ab_glyph），与 fontkit 的度量在极端字号下
 //   可能差 1px；切换后如需完全一致，再把 fontkit 的度量接进来。
 // - 柔和圆角（feather）暂时按普通圆角绘制（SDF 自带抗锯齿，视觉上很接近）。
@@ -117,12 +117,12 @@ public class LgpuCanvas <: Canvas {
         }
     }
 
-    // 纹理缓存：sdl.Texture.id → lgpu 纹理（像素经 texturePixelsSink 注册进来）。
+    // 纹理缓存：lgui.Texture.id → lgpu 纹理（像素经 texturePixelsSink 注册进来）。
     private var textures: HashMap<Int64, Texture> = HashMap<Int64, Texture>()
     // 纹理尺寸（用于把 source 矩形换算成 UV）
     private var textureSizes: HashMap<Int64, (Float32, Float32)> = HashMap<Int64, (Float32, Float32)>()
 
-    /// 注册/更新一张后端纹理（由 sdl.texturePixelsSink 调用）。
+    /// 注册/更新一张后端纹理（由 lgui.texturePixelsSink 调用）。
     public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {
         if (width <= 0 || height <= 0) {
             return

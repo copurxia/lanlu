@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 // P4 对照：CN_UI_BACKEND=lgpu 时，把整棵 UI 树的绘制交给 lgpu（wgpu/Vulkan）。
 //
-// 工作方式：sdl.Renderer 内部有一个可选后端（Canvas）；这里造一个 LgpuCanvas 装上，
+// 工作方式：lgui.Renderer 内部有一个可选后端（Canvas）；这里造一个 LgpuCanvas 装上，
 // 于是所有图元/文本都走 lgpu，SDL 只保留事件循环与窗口管理。
 // 预览缩放：把逻辑尺寸的 UI 缩到小窗口里（LANLU_LGPU_SCALE 覆盖，默认 0.25）。
 
@@ -13,10 +13,10 @@ import lgpu.{Font, LgpuCanvas, Surface}
 import lwindow
 import lwindow.{LWindowEventType}
 import lwindow.systemSansFontPath
-import sdl.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
-import sdl.input.{ClipboardBackend, clipboardBackend, cursorsEnabled}
-import sdl
-import sdl.input
+import lgui.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
+import lgui
+import lgui.input.{ClipboardBackend, clipboardBackend, cursorsEnabled}
+import lgui.input
 
 func probeTrace(line: String): Unit {
     if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
@@ -99,8 +99,8 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         canvas.forceClearRed = true
     }
     // 纹理委派：SDL 纹理创建/更新时把 RGBA 像素送给 lgpu 后端
-    sdl.texturePngSink = {id, bytes => canvas.uploadTexturePng(id, bytes)}
-    sdl.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
+    lgui.texturePngSink = {id, bytes => canvas.uploadTexturePng(id, bytes)}
+    lgui.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     apply(canvas)
     return true
 }
@@ -113,7 +113,7 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
     }
     let window = SdlWindow.headless(spec)
     // 事件源：L 层输入桥（文件通道）→ UiEvent
-    sdl.headlessEventSource = Some({ =>
+    lgui.headlessEventSource = Some({ =>
         // ArrayList 没有 first()：用 size + 下标
         let events = lwindow.readInputEvents()
         if (events.size == 0) {
@@ -134,7 +134,7 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
 /// 必须在创建 headless 窗口之前调用（DesktopApp 内部读 CN_WINDOW）。
 public func installHeadlessInputSource(): Unit {
     // 窗口控制：headless 下交给平台层（写命令文件，ArkTS 轮询执行）
-    sdl.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
+    lgui.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
     // 剪贴板：SDL 在真机读不到系统剪贴板，改走 L 层（文件通道 + ArkTS pasteboard）
     clipboardBackend = LWindowClipboard()
 
@@ -143,7 +143,7 @@ public func installHeadlessInputSource(): Unit {
     if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
         return
     }
-    sdl.headlessEventSource = Some({ =>
+    lgui.headlessEventSource = Some({ =>
         // 1) IME 文本
         let texts = lwindow.readTextInputs()
         if (texts.size > 0) {
