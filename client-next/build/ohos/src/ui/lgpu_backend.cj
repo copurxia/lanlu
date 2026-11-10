@@ -10,8 +10,8 @@ import std.convert.*
 import std.env.getVariable
 import std.fs.{exists as fsExists, Path as FsPath, File as FsFile}
 import lgpu.{Font, LgpuCanvas, Surface}
-import lwindow.{readInputEvents, LWindowEventType}
 import lwindow
+import lwindow.{LWindowEventType}
 import lwindow.systemSansFontPath
 import sdl.{Canvas, MouseButton, SdlWindow, UiEvent, WindowSpec}
 import sdl
@@ -100,15 +100,17 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
     let window = SdlWindow.headless(spec)
     // 事件源：L 层输入桥（文件通道）→ UiEvent
     sdl.headlessEventSource = Some({ =>
-        match (readInputEvents().first()) {
-            case Some(ev) =>
-                match (ev.kind) {
-                    case LWindowEventType.PointerDown => Some(UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y))
-                    case LWindowEventType.PointerMove => Some(UiEvent.MouseMove(ev.x, ev.y))
-                    case LWindowEventType.PointerUp => Some(UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y))
-                    case _ => Some(UiEvent.Unknown(0))
-                }
-            case None => None
+        // ArrayList 没有 first()：用 size + 下标
+        let events = lwindow.readInputEvents()
+        if (events.size == 0) {
+            return None
+        }
+        let ev = events[0]
+        return match (ev.kind) {
+            case lwindow.LWindowEventType.PointerDown => Some(UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y))
+            case lwindow.LWindowEventType.PointerMove => Some(UiEvent.MouseMove(ev.x, ev.y))
+            case lwindow.LWindowEventType.PointerUp => Some(UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y))
+            case _ => Some(UiEvent.Unknown(0))
         }
     })
     return window
