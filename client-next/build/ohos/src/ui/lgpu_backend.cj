@@ -14,6 +14,7 @@ import lwindow
 import lwindow.{LWindowEventType}
 import lwindow.systemSansFontPath
 import sdl.{Canvas, MouseButton, SdlWindow, UiEvent, WindowSpec}
+import sdl.input.{cursorsEnabled}
 import sdl
 
 func probeTrace(line: String): Unit {
@@ -121,6 +122,8 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
 public func installHeadlessInputSource(): Unit {
     // 窗口控制：headless 下交给平台层（写命令文件，ArkTS 轮询执行）
     sdl.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
+    // 无 SDL 窗口：鼠标样式由 L 层负责
+    cursorsEnabled = false
     if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
         return
     }
