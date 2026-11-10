@@ -13,7 +13,7 @@ libass_ffi = { path = "../libass_ffi" }
 libvlc_ffi = { path = "../libvlc_ffi" }
 webview = { path = "../webview" }
 fontkit_ffi = { path = "../fontkit_ffi" }
-lgui = { path = "../cangjie-gui/sdl" }
+lgui = { path = "../cangjie-gui/lgui" }
 lgpu = { path = "../lgpu" }
 lwindow = { path = "../lwindow" }
 

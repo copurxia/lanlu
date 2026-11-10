@@ -12,7 +12,7 @@ VERBOSE="${1:-}"
 DIRS=(
   "$ROOT/client-next/src"
   "$ROOT/packages/cangjie-gui/src"
-  "$ROOT/packages/cangjie-gui/sdl/src"
+  "$ROOT/packages/cangjie-gui/lgui/src"
 )
 
 PATTERNS='ohos_[a-z]|OHOS_|/system/lib64|/data/storage/el2|/system/fonts|XDG_SESSION_TYPE|HarmonyOS|libdecor|LIBDECOR_PLUGIN_DIR|SDL_OpenHarmony'

@@ -4,11 +4,11 @@
 # 目标形态：cui / client-next 只依赖 L 层接口，SDL 只可能出现在过渡期的 backend 里。
 # 阶段说明：
 #   P0 基线（当前）: sdl 包存在，cui/client-next 允许少量 SDL_ 引用（待 P4 清除）
-#   P5 完成后    : packages/cangjie-gui/sdl 必须不存在，全仓 SDL_ 引用为 0
+#   P5 完成后    : packages/cangjie-gui/lgui 必须不存在，全仓 SDL_ 引用为 0
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-SDL_PKG="packages/cangjie-gui/sdl"
+LGUI_PKG="packages/cangjie-gui/lgui"
 fail=0
 
 # 只统计**代码**里的引用：注释里提到 SDL 不算依赖（分层守卫也豁免注释）。
@@ -19,13 +19,13 @@ count_refs() {
     | grep -o -E 'SDL_[A-Za-z0-9_]*|import sdl|sdl\.[a-z]' | wc -l
 }
 
-sdl_files=$(find "$SDL_PKG" -name '*.cj' 2>/dev/null | wc -l)
-sdl_lines=$(find "$SDL_PKG" -name '*.cj' -exec cat {} + 2>/dev/null | wc -l)
+sdl_files=$(find "$LGUI_PKG" -name '*.cj' 2>/dev/null | wc -l)
+sdl_lines=$(find "$LGUI_PKG" -name '*.cj' -exec cat {} + 2>/dev/null | wc -l)
 cui_refs=$(count_refs packages/cangjie-gui/src 2>/dev/null)
 cn_refs=$(count_refs client-next/src 2>/dev/null)
 
-echo "[sdl] 过渡层文件数=$sdl_files 行数=$sdl_lines"
-echo "[sdl] cui 层引用=$cui_refs  client-next 层引用=$cn_refs"
+echo "[lgui] 过渡层文件数=$sdl_files 行数=$sdl_lines"
+echo "[lgui] cui 层引用=$cui_refs  client-next 层引用=$cn_refs"
 
 # P0 基线阈值：只允许下降，不允许上升（防止新增 SDL 依赖）
 BASELINE_CUI=${BASELINE_CUI:-2}
