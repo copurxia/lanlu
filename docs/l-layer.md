@@ -104,6 +104,22 @@ system_info/displays/clipboard/surface…）。这些代码在 lgpu 模式下**�
 2. 再移除 `-lSDL3 -lSDL3_ttf` 与 `OHOS_EXTRA_LIBS` 里的 SDL 前缀
 3. 验证 HAP 内无 `libSDL3*.so`、`readelf -d` 无 SDL NEEDED
 
+## 窗口几何取证（R49 真机结论）
+
+`setWindowDecorVisible(false)` 生效，已用避让区量化确认：
+
+```
+rect=515,292,2090,1394  sysTop=0 sysBottom=0  cutTop=0  navBottom=0
+```
+
+- `sysTop = 0` → **没有系统标题栏**（不是沉浸式全屏，是真正去掉了窗口装饰）
+- `cutTop = 0` / `navBottom = 0` → 无刘海与导航条避让
+- 窗口矩形 2090×1394 与我们拿到的 XComponent surface 尺寸完全一致 → **内容区 = 窗口区**，
+  所以鼠标局部坐标就是 `raw - (rect.left, rect.top)`，不存在标题栏高度偏移
+
+取证方式：ArkTS 在 `onWindowStageCreate` 之后把 `windowRect` 与三个 `AvoidAreaType` 写进
+`$HOME/window_info.txt`（`getWindowAvoidArea`）。这个探针比截图颜色判断可靠。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
