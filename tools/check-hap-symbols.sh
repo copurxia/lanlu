@@ -9,7 +9,8 @@ WORK=$(mktemp -d)
 unzip -o -q "$HAP" 'libs/arm64-v8a/*' -d "$WORK"
 LIBS="$WORK/libs/arm64-v8a"
 
-SYMS="cj_app_main InitCJRuntime LoadCJLibraryWithInit SDL_OpenHarmonySetWindowActionHook SDL_OpenHarmonySetFileDialogHook SDL_main"
+# P5：壳层已不依赖 SDL（窗口/输入/渲染都走 L 层），SDL_* 不再要求导出。
+SYMS="cj_app_main InitCJRuntime LoadCJLibraryWithInit"
 
 missing=0
 count=0
