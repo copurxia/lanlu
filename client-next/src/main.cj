@@ -218,7 +218,6 @@ public func runApp(): Int64 {
                 systemSansFontPath()
             }), theme: lanluThemeFor(settings.theme),
     )
-    println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 联调：LANLU_PROBE_SNAPSHOT=1 启动后请求一次页面抓帧（验证抓帧桥）
     if ((getVariable("LANLU_PROBE_SNAPSHOT") ?? "0") == "1") {
         spawn {
@@ -232,6 +231,7 @@ public func runApp(): Int64 {
             }
         }
     }
+    println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 联调：LANLU_PROBE_CLIP=1 启动后写一次剪贴板并读回（验证 L 层剪贴板通路）
     if ((getVariable("LANLU_PROBE_CLIP") ?? "0") == "1") {
         spawn {
