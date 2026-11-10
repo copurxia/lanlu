@@ -60,6 +60,13 @@ png id=2 bytes=4268        ← 应用自身的内嵌 logo，走同一条纹理�
 结论：PNG 字节 → lgpu 纹理 → UI 绘制 的委派链路在真机可用；
 排查经验：**应用进程读不到 /data/local/tmp**，探针资源走 HTTP（mock `/probe.png`）最省事。
 
+## 输入坐标口径（P1）
+
+- 触摸事件：系统给的就是**窗口局部坐标**（`OH_Input_GetTouchEventWindowX/Y`），直接用。
+- 鼠标事件：只有**显示坐标**（没有 window 局部 getter），必须 `display - 窗口原点` 换算；
+  窗口原点由 ArkTS 的 `windowRect.left/top` 经 `startFilter` 传给 native（`lanlu_seed_origin` + 连续自校准）。
+- 这条换算就是"鼠标位置不对"最容易出错的地方，先按此口径实现，待物理鼠标复核。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
