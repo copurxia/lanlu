@@ -106,6 +106,7 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
             return None
         }
         let ev = events[0]
+        probeTrace("input ev kind=" + ev.x.toString() + "," + ev.y.toString())
         return match (ev.kind) {
             case lwindow.LWindowEventType.PointerDown => Some(UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y))
             case lwindow.LWindowEventType.PointerMove => Some(UiEvent.MouseMove(ev.x, ev.y))
@@ -114,4 +115,25 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
         }
     })
     return window
+}
+/// P5：headless 窗口的输入源——把 L 层事件桥映射成 UiEvent。
+/// 必须在创建 headless 窗口之前调用（DesktopApp 内部读 CN_WINDOW）。
+public func installHeadlessInputSource(): Unit {
+    if ((getVariable("CN_WINDOW") ?? "sdl") != "lgpu") {
+        return
+    }
+    sdl.headlessEventSource = Some({ =>
+        let events = lwindow.readInputEvents()
+        if (events.size == 0) {
+            return None
+        }
+        let ev = events[0]
+        probeTrace("input ev " + ev.x.toString() + "," + ev.y.toString() + " key=" + ev.key.toString())
+        return match (ev.kind) {
+            case lwindow.LWindowEventType.PointerDown => Some(UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y))
+            case lwindow.LWindowEventType.PointerMove => Some(UiEvent.MouseMove(ev.x, ev.y))
+            case lwindow.LWindowEventType.PointerUp => Some(UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y))
+            case _ => Some(UiEvent.Unknown(0))
+        }
+    })
 }

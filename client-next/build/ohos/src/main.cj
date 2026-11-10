@@ -201,6 +201,8 @@ public func runApp(): Int64 {
     } else {
         AUTO_SUPERSAMPLE
     }
+    // P5：headless 窗口的输入源（必须在建窗口之前挂上）
+    installHeadlessInputSource()
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
             // 无边框窗口：创建时即无 OS 装饰（替代旧的事后 setBordered(false)），
