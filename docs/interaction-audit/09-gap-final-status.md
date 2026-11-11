@@ -26,21 +26,25 @@
 | 17 | 只读字段语义矛盾 | ✅ | `1db7709` 只读不进焦点环、不抢焦；`editableTextAreaJoinsFocusRingButReadOnlyDoesNot` 等 2 例 |
 | 18 | 中文双击选词退化 | 🔶 | `9fdc0b4` 按 Unicode 脚本分组（8 类字符分类）；**Ctrl+Backspace/按词移动未做**（需要光标模型扩展） |
 | 19 | RichText 完全无交互 | ✅ | `3dfae21` `RichSpan.link`（accent+下划线+手型+点击）；2 例。应用暂无使用点，API 已备 |
-| 20 | 禁用态等打磨 | 🔶 | `8b1c3c6` 禁用蒙版随圆角；**Drawer 焦点陷阱、ComboBox 展开亮边、Picker Home/End、表头键盘排序**未做（低频，建议随手做或独立小任务） |
+| 20 | 禁用态等打磨 | ✅ | `8b1c3c6` 禁用蒙版随圆角；`7e7de10` Picker/Stepper Home/End + Table 键盘排序；ComboBox 展开亮边经核对**已由** `closedSurface(active=open)` 覆盖；Drawer 焦点陷阱经核对与文档化设计相悖（非模态、刻意无陷阱）**不应实现** |
 
 ## 汇总
 
-- ✅ 完成并测试：**13**
+- ✅ 完成并测试：**14**
 - 🟡 框架完成、应用补丁已备：**3**（#2 #3 #4）
-- 🔶 部分：**3**（#9 的 Shift 区间选择、#18 的按词编辑、#20 的四项打磨）
+- 🔶 部分：**2**（#9 的 Shift 区间选择、#18 的按词编辑）
 - 未动：0
 
-### 🔶 三项的移交说明
+### 🔶 两项的移交说明
 
 1. **#9 Shift 区间选择**：ListView/Table/TreeView 目前是单选模型；做区间选择要把选中项从
    `Bindable<Int64>` 扩成可选集（影响序列化与批量操作入口）。建议合并后单独立任务。
 2. **#18 按词编辑**：双击选词已按脚本分组；Ctrl+Backspace/按词移动需要光标模型增加
    "词边界跳转"原语，可复用 `text_edit_utf8.cj` 的 `classOfCodePoint`（已按脚本分类）。
-3. **#20 打磨**：Drawer 焦点陷阱（可仿 Modal 的 `contentFocusables`）、ComboBox 展开亮边
-   （`closedSurface` 已有 hover 分支，展开态补一个 active 变体）、Picker/Stepper Home/End、
-   表头键盘排序——每项都 ≤S 成本，合并后顺手即可。
+
+### #20 中两项"核对后不应做"的说明
+
+- **ComboBox 展开态不亮边**：审计时看漏了——`dropdown.cj` 的 `closedSurface` 本就把
+  `open.value` 当 active 传入（:78），展开即 accent 边，无需改。
+- **Drawer 焦点陷阱**：与 Drawer 的文档化设计直接相悖（"非模态、无焦点陷阱、阅读器
+  翻页键需要穿透"是刻意行为，见 `drawer.cj` 头注）。加陷阱会破坏阅读器侧栏场景。

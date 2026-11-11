@@ -33,6 +33,7 @@
 | `c62b524` | P1 开放 `registerFocusStop` / `reregisterFocusStop`（#2 第二个入口） |
 | `e5ee7f9` | P1 公开 `drawFocusRing`（应用自绘件画同一焦点环） |
 | `ebf79bd` | P1 框架级按键长按连发 `KeyRepeat`（#11/D2，无需改 L 层协议） |
+| `7e7de10` | P1 缺口 #20 收尾：Picker/Stepper Home/End + Table 键盘排序 |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -142,7 +143,11 @@ lerp 0.18，滑块旋钮悬停放大；带悬停视觉的控件文件从 4 个�
 60ms 间隔；后端自带 repeat 时顺延不双发），**无需改 L 层协议**。D2 从"未实现"变为"框架就绪、
 真机复验节奏"。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 454，PASSED 413（累计新增 67 例 + 改写 1 例全过），
+**第十九批（`7e7de10`）**：#20 收尾——Stepper/Picker Home/End 跳两端、Table 聚焦后
+Shift+方向键换排序列 / Enter 翻升降序；核对出 ComboBox 展开亮边**已有**、Drawer 焦点陷阱
+**与设计相悖不应做**（详见 09 状态表）。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 457，PASSED 416（累计新增 70 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用

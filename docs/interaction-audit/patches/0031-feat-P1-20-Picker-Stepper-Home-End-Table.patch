@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 17:49:29 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E7=BC=BA=E5=8F=A3=20#20=20?=
+ =?UTF-8?q?=E6=94=B6=E5=B0=BE=E2=80=94=E2=80=94Picker/Stepper=20Home/End?=
+ =?UTF-8?q?=20+=20Table=20=E9=94=AE=E7=9B=98=E6=8E=92=E5=BA=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Stepper（数值）Home/End 跳到 lower/upper；Picker（枚举）Home/End 选首项/末项——
+  此前这两个控件只有单步方向键，键盘到两端要按 N 次。
+- Table 表头排序获得键盘入口：聚焦后 Shift+Left/Right 换排序列，Enter/Space 翻转
+  升降序——此前只有指针能点表头排序。
+- 澄清：#20 里的"ComboBox 展开态不亮边"经核对已由既有 closedSurface(active=open)
+  覆盖（dropdown.cj:78 把 open.value 当 active 传入）；"Drawer 焦点陷阱"与 Drawer
+  的文档化设计相悖（非模态、刻意无陷阱、阅读器按键需要穿透），不应实现。
+
+测试：3 用例（Stepper Home/End、Picker Home/End、Table Shift+方向+Home 后的
+显示序映射）。cjpm test：TOTAL 457 / PASSED 416，失败名册与基线一致，零回归。
+---
+ src/controls/common_controls.cj  | 20 ++++++++++++
+ src/controls/polish_keys_test.cj | 53 ++++++++++++++++++++++++++++++++
+ src/controls/table.cj            | 24 +++++++++++++++
+ 3 files changed, 97 insertions(+)
+ create mode 100644 src/controls/polish_keys_test.cj
+
+diff --git a/src/controls/common_controls.cj b/src/controls/common_controls.cj
+index 2d224c4..a7d8ee0 100644
+--- a/src/controls/common_controls.cj
++++ b/src/controls/common_controls.cj
+@@ -287,6 +287,16 @@ public class Picker <: Widget {
+                     move(1)
+                     return true
+                 }
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (ctx.hasFocus(id) && !items.isEmpty()) {
++                    selected.value = 0
++                    return true
++                }
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (ctx.hasFocus(id) && !items.isEmpty()) {
++                    selected.value = items.size - 1
++                    return true
++                }
+             case _ => ()
+         }
+         false
+@@ -417,6 +427,16 @@ public class Stepper <: Widget {
+                     increment()
+                     return true
+                 }
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (ctx.hasFocus(id)) {
++                    value.value = lowerBound
++                    return true
++                }
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (ctx.hasFocus(id)) {
++                    value.value = upperBound
++                    return true
++                }
+             case UiEvent.KeyDown(Key.Up, _) =>
+                 if (ctx.hasFocus(id)) {
+                     increment()
+diff --git a/src/controls/polish_keys_test.cj b/src/controls/polish_keys_test.cj
+new file mode 100644
+index 0000000..1f760ba
+--- /dev/null
++++ b/src/controls/polish_keys_test.cj
+@@ -0,0 +1,53 @@
++package cui.controls
++
++import lgui.{Key, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func polishContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* 缺口 #20 打磨：Picker/Stepper 的 Home/End 与 Table 的键盘排序。 */
++@Test
++func stepperHomeEndJumpToRangeBounds(): Unit {
++    let ctx = polishContext()
++    let value = State<Int64>(5)
++    let stepper = Stepper(value, key: "st.he", lower: 0, upper: 10, step: 1)
++    stepper.layout(ctx, Rect(0.0, 0.0, 100.0, 32.0))
++    ctx.focus("st.he", viaKeyboard: true)
++
++    @Expect(stepper.handle(ctx, UiEvent.KeyDown(Key.Home, false)))
++    @Expect(value.value, Int64(0))
++    @Expect(stepper.handle(ctx, UiEvent.KeyDown(Key.End, false)))
++    @Expect(value.value, Int64(10))
++}
++
++@Test
++func pickerHomeEndSelectFirstLast(): Unit {
++    let ctx = polishContext()
++    let selected = State<Int64>(1)
++    let picker = Picker(["甲", "乙", "丙"], selected, key: "pk.he")
++    picker.layout(ctx, Rect(0.0, 0.0, 100.0, 32.0))
++    ctx.focus("pk.he", viaKeyboard: true)
++
++    @Expect(picker.handle(ctx, UiEvent.KeyDown(Key.End, false)))
++    @Expect(selected.value, Int64(2))
++    @Expect(picker.handle(ctx, UiEvent.KeyDown(Key.Home, false)))
++    @Expect(selected.value, Int64(0))
++}
++
++@Test
++func tableKeyboardSortTogglesDirectionVisibleInSelection(): Unit {
++    let ctx = polishContext()
++    let columns = [TableColumn("名", 80.0), TableColumn("数", 80.0, numeric: true)]
++    let rows = [["b", "2"], ["a", "1"]]
++    let selected = State<Int64>(0)
++    let table = Table(columns, rows, selected, key: "tb.kb")
++    table.layout(ctx, Rect(0.0, 0.0, 200.0, 120.0))
++    ctx.focus("tb.kb", viaKeyboard: true)
++
++    // Shift+Right 换到数值列（升序显示序 = [a(1), b(2)]）；Home 把选中移到显示序第 0 行 = 原索引 1。
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Right, true)))
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Home, false)))
++    @Expect(selected.value, Int64(1))
++}
+diff --git a/src/controls/table.cj b/src/controls/table.cj
+index 8b459ae..9e94d05 100644
+--- a/src/controls/table.cj
++++ b/src/controls/table.cj
+@@ -227,6 +227,12 @@ public class Table <: Widget {
+                 if (body.contains(pointerX, pointerY)) {
+                     return scrollMotion.wheel(ctx, scrollOffset, wheelY, contentH, body.h)
+                 }
++            // 表头排序的键盘入口（缺口 #20：此前只有指针能排序）——聚焦后 Shift+方向换列、
++            // Enter/Space 切换升降序。
++            case UiEvent.KeyDown(Key.Left, true) => return shiftSortColumn(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, true) => return shiftSortColumn(ctx, 1)
++            case UiEvent.KeyDown(Key.Enter, _) => return toggleSortIfFocused(ctx)
++            case UiEvent.KeyDown(Key.Space, _) => return toggleSortIfFocused(ctx)
+             case UiEvent.KeyDown(Key.Up, _) => return moveSelection(ctx, -1)
+             case UiEvent.KeyDown(Key.Down, _) => return moveSelection(ctx, 1)
+             case UiEvent.KeyDown(Key.Home, _) => return setSelectionToDisplay(ctx, 0)
+@@ -375,6 +381,24 @@ public class Table <: Widget {
+         }
+     }
+ 
++    // 键盘排序入口：聚焦时 Shift+方向键把排序列左右移动，Enter/Space 翻转升降序。
++    private func shiftSortColumn(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(id) || columns.size == 0) {
++            return false
++        }
++        let next = (sortCol.value + delta + Int64(columns.size)) % Int64(columns.size)
++        sortCol.value = next
++        return true
++    }
++
++    private func toggleSortIfFocused(ctx: UiContext): Bool {
++        if (!ctx.hasFocus(id)) {
++            return false
++        }
++        toggleSort(sortCol.value)
++        return true
++    }
++
+     private func moveSelection(ctx: UiContext, delta: Int64): Bool {
+         if (!ctx.hasFocus(id) || rows.isEmpty()) {
+             return false
+-- 
+2.47.3
+
