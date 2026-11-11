@@ -115,7 +115,31 @@ grep -rl "isHovered(" src | grep -v _test     # 11 个文件有悬停视觉
 grep -rn "hasFocus(" src | grep -v _test      # 均为行为门控，无绘制用途
 ```
 
-## 七、回滚策略
+
+## 七、用户可感知的变化清单（验收用）
+
+| # | 用户看到的变化 | 提交 | 测试/证据 | 需真机回归 |
+|---|---|---|---|---|
+| 1 | 点进输入框，边框/底色立刻变化（不再"点了没反应"） | `9fe49b3` | `text_focus_chrome_test.cj`（181 行） | 观感：accent 边在浅色主题下的对比度 |
+| 2 | Tab 能到达分页/面包屑/步骤条/标签云/自绘卡片/图标钮 | `9fe49b3`、`1db7709`、`c62b524`、`e5ee7f9` + 应用补丁 0002 | `focus_stop_test.cj`、`focus_target_test.cj`、`focus_ring_api_test.cj` | 40+ 处 `ClickArea` 包裹后的布局与焦点环位置 |
+| 3 | Tab 到视口外的控件时，列表自动滚到能看见它 | `d509011`、`7b20493`、`8671b44` | `focus_reveal_test.cj`、`lazy_reveal_test.cj`、`lazy_row_keyboard_test.cj` | 长列表/书架行滚动手感 |
+| 4 | 输完密码按回车就登录；新建合集/搜索框回车即提交 | 应用补丁 0001 | `git apply --check` + API 签名核对 | 登录、建合集、加合集三处流程 |
+| 5 | 打开登录页/弹窗即可直接打字（无需先点输入框） | `3426fb5` + 应用补丁 0001 | `modal_test.cj` 等 | 弹窗打开动画期间焦点是否抢滚动 |
+| 6 | 关闭弹窗后焦点回到打开它的控件 | `3426fb5` | `modal`/`drawer` 焦点回归用例 | Esc 关闭与点遮罩关闭两条路径 |
+| 7 | 菜单键 / F10 直接唤起菜单栏与右键菜单 | `808332e`、`3a143fd` | `menu_bar_shortcut_test.cj`、`context_menu_keyboard_test.cj` | 真机 F10 是否被系统占用 |
+| 8 | 长列表/横排可用 PgUp/PgDn/方向键滚动；阅读器 dock 可用键盘翻页 | `37573de`、`54c5092`、`8671b44` + 应用补丁 0003 | 对应测试文件 | dock 焦点环位置、Home/End 在虚拟结束页的语义 |
+| 9 | Toast 可点击关闭、不穿透点击、鼠标悬停时不消失 | `670d77f` | `toast` 用例组 | 连续多条 Toast 的堆叠 |
+| 10 | 键盘聚焦到带提示的控件时 Tooltip 立即出现 | `38299bd` | Tooltip 用例 | 与弹窗/抽屉叠层的遮挡 |
+| 11 | 中文/日文双击选词按脚本切分（全角标点不再粘进词里） | `9fdc0b4` | `text_edit_utf8` 用例 | 中日混排段落的选择手感 |
+| 12 | 实心按钮（Primary/Danger）按下变深、悬停变亮 | `8f44d11` | `button_state_test.cj` | 深色主题下的色差 |
+| 13 | 开关/单选/复选/滑块鼠标划过有反馈 | `bba0ef6` | `toggle_hover_test.cj` | 关态轨道对比度 |
+| 14 | 富文本里的链接可以点（手型+下划线） | `3dfae21` | `rich_text_link_test.cj` | 应用内目前无使用点，供后续接入 |
+| 15 | 只读字段点击不再抢走焦点 | `1db7709` | 字段族用例 | — |
+
+> 验收建议顺序：先按 §三 跑一次 `tools/verify-cui-interactions.sh`（应有 450/409 与基线匹配），
+> 再按 §六 应用层补丁顺序落地，最后真机逐条对照本表。
+
+## 八、回滚策略
 
 改动集中在独立提交、互不依赖构建配置；如需回退某个方向，可单独 revert 对应分组（A/B/C/D 互不冲突）。
 `FocusTarget`、`RichSpan.link`、`groupRange` 都是纯新增 API，revert 不会影响未使用它们的代码。

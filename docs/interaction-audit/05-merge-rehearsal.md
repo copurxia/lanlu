@@ -90,7 +90,50 @@ Summary: TOTAL: 444
 
 **结论**：本分支合并/落地在代码层面已完全就绪；等对方把 lcodec 迁移与链接配置提交完即可合并。
 
-## 六、演练副本
+
+## 七、第三轮演练（2026-11-11 深夜）：对齐最新 WIP，并定位对方迁移的**链接配置缺口**
+
+主仓这期间又前进了（对方 lcodec 迁移继续），所以重跑了一次完整演练：29 个 gui 补丁全部
+`git am --3way` 干净应用（零冲突）。但合并后的树一开始**链接不过**——顺着查下去发现两条都可复现、
+且与本分支无关的问题：
+
+### 1. 干净副本没有 `target/` 时，桩库缺少 SDL 符号
+
+`tools/verify-cui-interactions.sh` 原先靠扫描 `target/*.a` 的未解析符号来补 SDL/`TTF_` 桩；
+在全新副本（没有 target/）上会漏掉全部 SDL 符号。已修：脚本内置一份 31 个 SDL 符号的已知清单，
+再叠加扫描结果去重——现在任何干净副本都能直接跑起来。
+
+### 2. 对方 WIP 删掉了宿主机 link-option（真实缺口）
+
+合并后的 `cjpm.toml` / `lgui/cjpm.toml` 里已没有 `[target.x86_64-unknown-linux-gnu]` 的
+`link-option`（迁移 lcodec 时删掉了 vips 那行），于是宿主机 `cjpm test` 链接期缺 `SDL_*` 符号。
+
+**实测结论**：给两个 cjpm.toml 加回
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+link-option = "-lSDL3 -lSDL3_ttf"
+```
+
+后，合并树（对方最新 WIP + 本分支 29 补丁）跑出：
+
+```
+Summary: TOTAL: 450
+    PASSED: 409, SKIPPED: 0, ERROR: 40
+    FAILED: 1
+== 基线匹配：失败名册与 headless 基线完全一致
+```
+
+即：**vips 已经不需要出现在宿主机链接行里（lcodec 运行期 dlopen），但 SDL3 仍然需要**。
+这条建议同时适用于对方迁移完成后的主仓。
+
+### 演练副本
+
+- `packages/cangjie-gui-mergecheck2`：对方最新 WIP + 29 补丁（本轮全绿证据，含上述 link-option 修补）
+- `packages/lcodec-rehearsal`：lcodec 的隔离副本（避免动对方正在改的目录）
+- 复跑：`PKG_DIR=packages/cangjie-gui-mergecheck2 CANGJIE_STDX_PATH=/workspace/.cjv/stdx/lts/static/stdx tools/verify-cui-interactions.sh`
+
+## 八、演练副本（历次）
 
 - `packages/cangjie-gui-mergecheck`：主仓 WIP + 本分支 25 补丁（用于继续排查对方 lcodec 问题）
 - `packages/cangjie-gui-wipcheck`：纯主仓 WIP 对照（**不含**本分支）

@@ -73,12 +73,13 @@ void g_free(void *m) { (void)m; }
 void vips_concurrency_set(int n) { (void)n; }
 EOF
 
-# SDL3/TTF 符号按当前 target 里未解析的符号自动生成（分支演进后仍适用）。
-SYMS="$(cd "$PKG" && { find target -name '*.a' -print0 2>/dev/null | xargs -0 nm -uA 2>/dev/null || true; } \
-  | awk '{print $NF}' | grep -E '^(SDL_|TTF_)' | sort -u || true)"
-if [ -n "$SYMS" ]; then
-  { echo '#include <stdint.h>'; echo "$SYMS" | sed 's/.*/void &(void) {}/'; } >> "$STUB/stub.c"
-fi
+# SDL3/TTF 符号：先给一份固定的已知清单（干净工作树/全新副本没有 target/ 可扫描时也能链接），
+# 再叠加当前 target 里实际未解析的符号（分支演进新增调用时自动兜住）。
+KNOWN_SDL="SDL_CaptureMouse SDL_ConvertSurface SDL_CreateSurfaceFrom SDL_CreateTexture SDL_CreateTextureFromSurface SDL_DestroyRenderer SDL_DestroySurface SDL_DestroyWindow SDL_GetModState SDL_GetMouseState SDL_GetPathInfo SDL_GetTextureSize SDL_GetTicks SDL_GlobDirectory SDL_Quit SDL_RenderClear SDL_RenderGeometry SDL_RenderReadPixels SDL_SetHintWithPriority SDL_SetRenderClipRect SDL_SetRenderDrawBlendMode SDL_SetRenderScale SDL_SetRenderTarget SDL_SetRenderVSync SDL_ShowMessageBox SDL_ShowOpenFileDialog SDL_ShowOpenFolderDialog SDL_ShowSaveFileDialog SDL_ShowSimpleMessageBox SDL_UpdateTexture SDL_free"
+DISCOVERED="$(cd "$PKG" && { find target -name '*.a' -print0 2>/dev/null | xargs -0 nm -uA 2>/dev/null || true; } \
+  | awk '{print $NF}' | grep -E '^(SDL_|TTF_)' || true)"
+SYMS="$( { printf '%s\n' $KNOWN_SDL; printf '%s\n' "$DISCOVERED"; } | grep -E '^(SDL_|TTF_)' | sort -u)"
+{ echo '#include <stdint.h>'; printf '%s\n' "$SYMS" | sed 's/.*/void &(void) {}/'; } >> "$STUB/stub.c"
 
 gcc -shared -fPIC -o "$STUB/libvips.so" "$STUB/stub.c"
 
