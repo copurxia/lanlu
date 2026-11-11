@@ -50,6 +50,19 @@
 **方案 C（待做）**：渲染到**离屏 Unorm 纹理**（gamma 空间混合）→ blit 到 sRGB 交换链，
 blit shader 里做 sRGB→linear。等价于 B，且不要求交换链非 sRGB。
 
+## 4.1 方案 C 的实现（本轮）
+
+- 新增离屏目标 `SCREEN_FORMAT = Rgba8Unorm`（`ensure_offscreen`，尺寸变化时重建）；
+  **所有 UI 画进它**（gamma 空间混合，与设计稿一致），包含阴影/遮罩/文字抗锯齿。
+- 新增 blit 管线（全屏三角形 + WGSL `srgb_to_linear`）：把离屏 gamma 值转成线性写进
+  sRGB 交换链，硬件再编码 → 输出等于原值，且**不产生二次编码**。
+- 图像纹理改为 `Rgba8Unorm`（不再 sRGB 解码），字节原样进管线。
+- 离屏抓帧（弹窗模糊用）同样用 Unorm，回读即 gamma 值。
+- `canvas.cj::channel` 回到 `v/255`（直传）—— 预解码与 blit 只能留一个，同时存在会变暗。
+
+> 注意：`canvas.cj` 的直传与 `lib.rs` 的离屏 blit 是**一个原子改动**，必须一起合入；
+> 只合一半会出现"整体过曝"或"整体发暗"。
+
 ## 5. 现状
 
 - 已修：不透明颜色逐字节正确（见上表）。

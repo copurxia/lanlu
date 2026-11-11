@@ -183,6 +183,16 @@ pub extern "C" fn lgpu_adapter_summary(out: *mut c_char, out_len: usize) -> i32 
 }
 
 /// 一个 surface 的全部运行期状态：surface + 选中的 device/queue + 配置。
+/// 离屏「截图目标」：所有 UI 先画进这张 **Rgba8Unorm** 纹理（gamma 空间混合），
+/// 再用 blit 管线转换成线性写到 sRGB 交换链 —— 交换链的硬件编码把它还原成原值。
+/// 这样半透明阴影/遮罩的混合结果与设计稿一致（horizon 用非 sRGB 交换链达成同一效果，
+/// 但 OHOS 上配非 sRGB 会原生崩溃，见 docs/lgpu-color-pipeline.md）。
+struct Offscreen {
+    tex: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind: wgpu::BindGroup,
+}
+
 pub struct SurfaceCtx {
     surface: wgpu::Surface<'static>,
     device: Option<wgpu::Device>,
@@ -205,9 +215,167 @@ pub struct SurfaceCtx {
     tex_buffer: Option<wgpu::Buffer>,
     tex_capacity: usize,
     tex_order: Vec<*mut c_void>,
+    /// 离屏 gamma 目标与上屏 blit 管线
+    offscreen: Option<Offscreen>,
+    blit_pipeline: Option<wgpu::RenderPipeline>,
+    blit_bgl: Option<wgpu::BindGroupLayout>,
+    blit_sampler: Option<wgpu::Sampler>,
     /// 字形图集（RGBA8，A 通道存覆盖率），惰性创建
     atlas: Option<*mut c_void>,
     atlas_packer: Option<text::Atlas>,
+}
+
+
+/// 离屏目标格式：Unorm —— 存的是 **gamma 空间**的值，混合也在该空间完成。
+const SCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// 上屏 blit：把离屏目标（gamma 值）转成线性写进 sRGB 交换链。
+/// 硬件随后做 linear→sRGB 编码，输出即等于原始 sRGB 值，不产生二次编码。
+const BLIT_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    let xy = pts[i];
+    var o: VsOut;
+    o.pos = vec4<f32>(xy, 0.0, 1.0);
+    o.uv = vec2<f32>((xy.x + 1.0) * 0.5, 1.0 - (xy.y + 1.0) * 0.5);
+    return o;
+}
+
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let c = textureSample(src, samp, in.uv);
+    return vec4<f32>(srgb_to_linear(c.rgb), 1.0);
+}
+"#;
+
+/// 惰性创建/更新离屏目标与 blit 管线（尺寸变化时重建纹理与 bind group）。
+fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: wgpu::TextureFormat) {
+    let Some(cfg) = ctx.config.as_ref() else { return };
+    let (w, h) = (cfg.width.max(1), cfg.height.max(1));
+    let need_new_tex = match &ctx.offscreen {
+        Some(o) => o.tex.width() != w || o.tex.height() != h,
+        None => true,
+    };
+
+    if ctx.blit_bgl.is_none() {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("lgpu-blit"),
+            source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),
+        });
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("lgpu-blit-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lgpu-blit-layout"),
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lgpu-blit-pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        ctx.blit_pipeline = Some(pipeline);
+        ctx.blit_bgl = Some(bgl);
+        ctx.blit_sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("lgpu-blit-sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        }));
+    }
+
+    if need_new_tex {
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("lgpu-offscreen"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SCREEN_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lgpu-blit-bind"),
+            layout: ctx.blit_bgl.as_ref().expect("blit bgl"),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(ctx.blit_sampler.as_ref().expect("blit sampler")),
+                },
+            ],
+        });
+        ctx.offscreen = Some(Offscreen { tex, view, bind });
+    }
+}
+
+/// 把离屏目标 blit 到交换链视图（一个 draw，全屏三角形）。
+fn draw_blit(pass: &mut wgpu::RenderPass<'_>, ctx: &SurfaceCtx) {
+    if let (Some(p), Some(off)) = (&ctx.blit_pipeline, &ctx.offscreen) {
+        pass.set_pipeline(p);
+        pass.set_bind_group(0, &off.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
 }
 
 /// 用 XComponent 的 OHNativeWindow* 建 wgpu surface。
@@ -265,6 +433,10 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             tex_buffer: None,
             tex_capacity: 0,
             tex_order: Vec::new(),
+            offscreen: None,
+            blit_pipeline: None,
+            blit_bgl: None,
+            blit_sampler: None,
             atlas: None,
             atlas_packer: None,
         })) as *mut c_void,
@@ -289,7 +461,7 @@ pub extern "C" fn lgpu_surface_destroy(surface: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn lgpu_self_check() -> i32 {
     let mut buf = [0u8; 4096];
-    let n = lgpu_adapter_summary(buf.as_mut_ptr(), buf.len());
+    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut core::ffi::c_char, buf.len());
     if n < 0 { n } else { 0 }
 }
 
@@ -358,8 +530,8 @@ fn write_c_str(out: *mut c_char, out_len: usize, text: &str) {
 #[no_mangle]
 pub extern "C" fn lgpu_debug_dump(out: *mut c_char, out_len: usize) -> i32 {
     let mut buf = [0u8; 4096];
-    let n = lgpu_adapter_summary(buf.as_mut_ptr(), buf.len());
-    let adapters = unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().to_string();
+    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut core::ffi::c_char, buf.len());
+    let adapters = unsafe { CStr::from_ptr(buf.as_ptr() as *const core::ffi::c_char) }.to_string_lossy().to_string();
     let text = format!(
         "{}\n-- adapters ({}) --\n{}\n-- last_error: {} --\n",
         VERSION,
@@ -888,11 +1060,20 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     }
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(cfg)) =
-        (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group, &ctx.config)
-    else {
-        set_error("pipeline not initialised");
-        return E_BAD_ARG;
+    // 克隆句柄/配置（wgpu 句柄是 Arc，clone 很轻）：下面要 &mut ctx 建离屏目标，
+    // 不能同时持有 &ctx 的借用。
+    let (device, queue, pipeline, bind_group, cfg) = match (
+        ctx.device.clone(),
+        ctx.queue.clone(),
+        ctx.pipeline.clone(),
+        ctx.bind_group.clone(),
+        ctx.config.clone(),
+    ) {
+        (Some(d), Some(q), Some(p), Some(bg), Some(c)) => (d, q, p, bg, c),
+        _ => {
+            set_error("pipeline not initialised");
+            return E_BAD_ARG;
+        }
     };
     let (fw, fh) = (cfg.width, cfg.height);
 
@@ -945,6 +1126,12 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     };
     let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    // UI 先画到离屏 gamma 目标，再 blit 上屏（避免 sRGB 二次编码，见 SCREEN_FORMAT 注释）
+    ensure_offscreen(ctx, &device, cfg.format);
+    let Some(off_view) = ctx.offscreen.as_ref().map(|o| o.view.clone()) else {
+        set_error("offscreen target missing");
+        return E_NO_DEVICE;
+    };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("lgpu-frame"),
     });
@@ -952,7 +1139,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("lgpu-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
+                view: &off_view,
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
@@ -972,7 +1159,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         });
         if need > 0 {
             if let Some(buf) = &ctx.inst_buffer {
-                draw_rect_batches(&mut pass, pipeline, bind_group, buf, &ctx.instances, fw, fh);
+                draw_rect_batches(&mut pass, &pipeline, &bind_group, buf, &ctx.instances, fw, fh);
             }
         }
         // 纹理：每张纹理一次 draw（bind group 不同，无法合批）。
@@ -985,7 +1172,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                     let t = unsafe { &*(*tex_ptr as *const TexCtx) };
                     pass.set_pipeline(tp);
                     apply_scissor(&mut pass, inst.clip, fw, fh);
-                    pass.set_bind_group(0, bind_group, &[]);
+                    pass.set_bind_group(0, &bind_group, &[]);
                     pass.set_bind_group(1, &t.bind_group, &[]);
                     let begin = i as u64 * tstride;
                     pass.set_vertex_buffer(0, tbuf.slice(begin..begin + tstride));
@@ -993,6 +1180,26 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                 }
             }
         }
+    }
+    // blit：离屏 gamma 目标 → 交换链（片元里做 sRGB→linear，硬件再编码回原值）
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-blit-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        draw_blit(&mut pass, ctx);
     }
     queue.submit(Some(encoder.finish()));
     queue.present(frame);
@@ -1046,7 +1253,7 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: config.format,
+        format: SCREEN_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
@@ -1220,7 +1427,7 @@ pub extern "C" fn lgpu_texture_create(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -1553,8 +1760,8 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
     let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(screen_buffer)) = (
         ctx.device.as_ref(),
         ctx.queue.as_ref(),
-        ctx.pipeline.as_ref(),
-        ctx.bind_group.as_ref(),
+        ctx.pipeline.clone(),
+        ctx.bind_group.clone(),
         ctx.screen_buffer.as_ref(),
     ) else {
         return 1 << 2;
@@ -1579,7 +1786,7 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         color2: [1.0, 1.0, 1.0, 1.0],
     };
     let Some(buf) = render_to_texture(
-        device, queue, pipeline, bind_group, screen_buffer,
+        device, queue, &pipeline, &bind_group, screen_buffer,
         [1.0, 1.0], [0.0, 0.0], w, h, fmt, &[inst, inst2],
     ) else {
         return 1 << 2;
