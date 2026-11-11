@@ -1,0 +1,129 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:19:50 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E7=BB=84=E4=BB=B6=E6=96=87=E6=A1=A3?=
+ =?UTF-8?q?=E8=A1=A5=20=C2=A712=20=E7=84=A6=E7=82=B9=E4=B8=8E=E9=94=AE?=
+ =?UTF-8?q?=E7=9B=98=E6=8E=A5=E5=85=A5=EF=BC=9B=E6=9E=B6=E6=9E=84=E6=96=87?=
+ =?UTF-8?q?=E6=A1=A3=E8=A1=A5=E5=BA=94=E7=94=A8=E5=B1=82=E6=8E=A5=E5=85=A5?=
+ =?UTF-8?q?=E4=B8=8E=20KeyRepeat?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+components.md 新增第十二章：FocusTarget 用法（含可运行的 GhostIconButton 示例）、
+registerFocusStop 自登记路径、两层焦点视觉区分（激活 chrome vs 键盘外环）、
+以及为什么必须用 showFocusRing 而不是 hasFocus。
+
+architecture.md 在焦点遍历一节补：应用层为何需要 FocusTarget/registerFocusStop 两个入口
+（框架内部 registerFocusable 是 protected）、drawFocusRing 为何要公开、以及 KeyRepeat
+为何放在外壳层（所有控件自动获得一致的连发行为）。
+---
+ docs/architecture.md | 12 ++++++++
+ docs/components.md   | 68 +++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index da148c6..9227a01 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -99,6 +99,18 @@ View modifier、Jetpack Compose 的 Modifier tree 采用相同的核心思想。
+ 字段族在激活 chrome 之上经 `drawFocusRing` 再叠一圈外环，与按钮族同一套视觉语言。`:focus-visible`
+ 约定由此收窄为“只管外环”——选区、光标、方向键导航等行为仍以 `hasFocus` 为准，与来源无关。
+ 
++**应用层如何接入同一条链**：框架内部登记焦点停靠点用的是 `protected registerFocusable`，应用
++拿不到；因此对外提供两个入口——`FocusTarget`（包裹一段 builder 子树，适合“整块区域可点”）
++与 `registerFocusStop(id)`（在控件 `init` 里自登记，适合“控件本身即 Widget”）。两者都走同一
++条构建期焦点环通路，因此 Tab 顺序、禁用摘除、弹窗焦点陷阱等机制对应用控件一视同仁。
++焦点环的**绘制**函数 `drawFocusRing` 也一并公开，否则应用只能自画一圈、视觉语言立刻分叉。
++
++**长按连发（`KeyRepeat`）**：键盘自动重复原本完全依赖后端——SDL 会在 `KeyEvent.repeat` 里
++标记，而 OHOS 的 LWP 输入桥只带 key+pressed，桥接后 `repeat` 恒为 false。框架因此在外壳层
++合成：`DesktopApp` 把派发过的 `KeyDown/KeyUp` 喂给 `KeyRepeat`，超过 400ms 后每 60ms 补发一个
++`repeat=true` 的 `KeyDown`；若后端自己就在发 repeat，则收到时顺延计时，避免一个周期发两次。
++把它放在外壳而非各控件里，意味着所有控件（滚动、翻页、滑块、列表导航）自动获得一致的连发行为。
++
+ **焦点滚入视野（reveal-on-focus）**：Tab 把焦点移到视口外时，容器自动滚到能看见它。落地方式是
+ 一次「矩形上报」：`UiContext.reportFocusRect(id, rect)` 由可聚焦控件在自己的 `layout` 里调用，
+ 外壳每帧 `layout` 前 `clearFocusRects()` 清空，容器在 `layout` 末尾读 `focusedRect()` 做**最小滚动**
+diff --git a/docs/components.md b/docs/components.md
+index 7704053..d8355ce 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -1033,7 +1033,73 @@ Modal(presented: Bindable<Bool>, onDismiss!: ?() -> Unit = None) { ... }
+ 
+ ---
+ 
+-## 十一、事件、帧与动画
++
++## 十二、焦点与键盘接入
++
++框架的键盘可达性按控件实现；应用自绘内容要获得同样能力，用下面三个入口之一。判断标准很简单：
++**这段内容的点击语义是不是"整块区域一下"？** 是就用 `FocusTarget`，否则用 `registerFocusStop`。
++
++### `FocusTarget`（推荐：整块区域可点）
++
++```cangjie
++FocusTarget(onClick: {=> openDetail(id)}, key: "card.${id}") {
++    自绘卡片内容()
++}
++```
++
++一条链全包：构建期登记焦点停靠点、点击聚焦、`Enter`/`Space` 激活 `onClick`、键盘焦点时在子树
++外侧画统一焦点环、悬停认领手型光标。布局与绘制全部透传子树——它不加任何视觉，因此可以
++直接替换原来"ZStack + 透明点击传感器"的写法。`focusableIds()` 把自身停靠点排在子树之前，
++子树里本来就可聚焦的控件依然可达。
++
++### `registerFocusStop`（控件本身就是 Widget）
++
++```cangjie
++public class GhostIconButton <: Widget {
++    public init(icon: IconName, id: String, onClick: () -> Unit) {
++        this.id = id
++        this.onClick = onClick
++        registerFocusStop(id)   // 只登记一次；buildRoot 之外是 no-op
++        emit(this)
++    }
++    public func focusableId(): ?String { Some(id) }
++    public func handle(ctx: UiContext, event: UiEvent): Bool {
++        match (event) {
++            case UiEvent.MouseDown(MouseButton.Left, x, y) => if (frame.contains(x, y)) { ctx.focus(id) }
++            case UiEvent.KeyDown(Key.Enter, _) | UiEvent.KeyDown(Key.Space, _) =>
++                if (ctx.hasFocus(id)) { onClick(); return true }
++            case _ => ()
++        }
++        false
++    }
++    public func draw(ctx: UiContext): Unit {
++        自绘图标()
++        if (ctx.showFocusRing(id)) { drawFocusRing(ctx, frame, 9.0) }
++    }
++}
++```
++
++注意最后一行用的是 **`ctx.showFocusRing(id)`** 而不是 `ctx.hasFocus(id)`：前者只在"焦点在此 **且** 由
++键盘到达"时为 true，后者只表示持有焦点。用 `hasFocus` 画描边会让鼠标点击也留下键盘样式的环——
++这正是"点击输入框该不该有描边"这个问题的分水岭。
++
++### 焦点视觉的两层区分
++
++| 层 | 何时出现 | 画法 |
++|---|---|---|
++| 激活态 chrome | 控件持有焦点（鼠标或键盘） | 控件自己按 `hasFocus` 选边色/底色（如输入框的 accent 边）|
++| 键盘焦点环 | 焦点在此 **且** 由键盘到达 | `ctx.showFocusRing(id)` 为真时 `drawFocusRing(...)`（外扩 2px 光晕）|
++
++两者可以叠加：键盘到达输入框时既有激活边、又有外环（可区分度更高）。主题对比度有下限测试兜底
++（`theme_contrast_test`：accent 与 field/panel 的亮度差 ≥0.18，双主题）。
++
++### 长按连发 `KeyRepeat`
++
++无原生 repeat 的后端（OHOS 的 LWP 输入桥）由框架合成：按住 400ms 后每 60ms 补发一次
++`repeat=true` 的 `KeyDown`；后端自带 repeat 时自动顺延，不会双发。控件无需感知——按普通
++`KeyDown` 处理即可（若要区分首按与连发，读 `KeyDown` 的第二个参数）。
++
++## 十三、事件、帧与动画
+ 
+ ### EventHandler
+ 
+-- 
+2.47.3
+
