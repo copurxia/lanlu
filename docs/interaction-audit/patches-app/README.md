@@ -52,6 +52,23 @@ fontkit 原生库），`--skip-script` 又会因依赖树里同时存在 `lcodec
 （`FocusTarget` 透传 measure/layout，理论上无差异，但覆盖 40+ 处调用点，建议真机扫一遍）。
 **未验证**：整包编译（同 0001，本机缺 cargo/依赖条件）。
 
+## 0003 阅读器 dock 键盘翻页 + Key 枚举清理
+
+依赖框架 gui 补丁 `c62b524`（`registerFocusStop`）、`e5ee7f9`（公开 `drawFocusRing`）、
+`37573de`（`Key.PageUp/PageDown`）。
+
+| 位置 | 改动 |
+|---|---|
+| `reader_dock.cj` | dock 作为一个复合控件登记焦点停靠点 `reader:dock`；聚焦时 Left/Right 翻一页、PageUp/PageDown 翻十页、Home/End 到首末页（等效鼠标拖 Book 滑条，只是步进）；焦点态在页码滑条外圈画统一外环；`focusableId()` 返回停靠点 id |
+| `reader_view.cj` | `Key.RawScancode(78/75)` → `Key.PageDown/PageUp`（框架分支已收进枚举，去掉 SDL scancode 魔数与过时注释） |
+
+这是审计缺口 #5/#7 在阅读器的落点：此前纯键盘用户无法操作底部胶囊，只能靠鼠标拖滑条。
+
+**已验证**：`git apply --check` 通过（2 文件 5 hunk）。
+**需真机回归**：dock 焦点环画在页码滑条外圈（`bookSeekRect.inset(-4)`）是否压住相邻 lane tab；
+Home/End 在虚拟结束页下的页码语义（沿用 `gotoDisplayPage` 的夹取）。
+**未验证**：整包编译（同前，本机缺 cargo/依赖条件）。
+
 ## 后续（本目录尚未包含）
 
 - #2：17 类自绘点击件迁 `FocusTarget`（改动面大，需逐个视觉回归）；

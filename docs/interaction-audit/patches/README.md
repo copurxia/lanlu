@@ -1,6 +1,6 @@
 # p0-focus-visible 补丁序列（可直接 git am 落地）
 
-> 由 `git format-patch --zero-commit c39458f..HEAD` 生成，**28 个补丁 = 分支全部 28 个提交**。
+> 由 `git format-patch --zero-commit c39458f..HEAD` 生成，**29 个补丁 = 分支全部 29 个提交**。
 > 已校验：在 `c39458f` 的干净克隆上 `git am --3way patches/*.patch` 全部干净应用，
 > 重建出的 tree hash 与分支 tip **完全一致**（`b902e1a3dfe413252109cafd4d52f31e1c481c27`）。
 > 补丁文件名为 ASCII 截断（git 生成），提交标题在补丁内是标准 UTF-8 编码，`git am` 会正确还原。
@@ -45,6 +45,7 @@ git am --3way /path/to/lanlu/docs/interaction-audit/patches/000{1,2}-*.patch  # 
 | 0026 | 测试探针预置 `Canvas.releaseTexture`（合并零适配） |
 | 0027 | LazyRow 键盘横向滚动 + 焦点滚入视野 |
 | 0028 | 开放 `registerFocusStop`：应用层自绘件可自行登记焦点停靠点（缺口 #2 第二个入口） |
+| 0029 | 公开 `drawFocusRing`：应用自绘件画同一种焦点环 |
 
 ## 已知冲突面
 
