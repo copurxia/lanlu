@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:22:18 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20TextField=20=E5=A2=9E=E5=8A=A0=20on?=
+ =?UTF-8?q?Submit=20=E5=9B=9E=E8=BD=A6=E6=8F=90=E4=BA=A4=E9=92=A9=E5=AD=90?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #4（高，全应用表单 Enter 不提交）的框架侧原语：单行 TextField 新增可选
+onSubmit 回调——聚焦且可编辑时按 Enter 调用并消费事件；不传回调时保持旧行为
+（Enter 既不插入换行也不消费，继续下传）。应用层（登录/服务器编辑等十余处表单）
+接上该参数即可获得回车提交，无需各页面自己拦 KeyDown。
+
+测试：2 用例（聚焦时 Enter 触发、无回调时保持原语义透传）。cjpm test：TOTAL 423，
+PASSED 382（新增 2 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/text/text_field.cj             | 16 +++++++++++++++-
+ src/text/text_field_submit_test.cj | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 44 insertions(+), 1 deletion(-)
+ create mode 100644 src/text/text_field_submit_test.cj
+
+diff --git a/src/text/text_field.cj b/src/text/text_field.cj
+index 0f9d04d..a6f805b 100644
+--- a/src/text/text_field.cj
++++ b/src/text/text_field.cj
+@@ -38,6 +38,8 @@ public class TextField <: Widget {
+     // 点击该区域触发 onTrailingClick（不进焦、不移动光标）。
+     private let trailing: ?IconName
+     private let onTrailing: ?() -> Unit
++    // 单行表单回车提交（登录/服务器编辑等）；None 时不处理 Enter，兼容旧行为。
++    private let onSubmit: ?() -> Unit
+     private var frame = Rect.zero()
+ 
+     public init(
+@@ -50,7 +52,8 @@ public class TextField <: Widget {
+         chrome!: Bool = true,
+         leadingIcon!: ?IconName = None,
+         trailingIcon!: ?IconName = None,
+-        onTrailingClick!: ?() -> Unit = None
++        onTrailingClick!: ?() -> Unit = None,
++        onSubmit!: ?() -> Unit = None
+     ) {
+         let ident = resolveControlKey(key, "TextField")
+         this.id = ident
+@@ -61,6 +64,7 @@ public class TextField <: Widget {
+         this.leading = leadingIcon
+         this.trailing = trailingIcon
+         this.onTrailing = onTrailingClick
++        this.onSubmit = onSubmit
+         this.cursorStateValue = match (cursor) {
+             case Some(value) => value
+             case None => localState<Int64>("TextField:${ident}:cursor") {text.value.size}
+@@ -235,6 +239,16 @@ public class TextField <: Widget {
+             case UiEvent.KeyDown(Key.Right, _) => return navigate(ctx, {=> edit.moveRight()}, {=> edit.extendRight()})
+             case UiEvent.KeyDown(Key.Home, _) => return navigate(ctx, {=> edit.moveToStart()}, {=> edit.extendToStart()})
+             case UiEvent.KeyDown(Key.End, _) => return navigate(ctx, {=> edit.moveToEnd()}, {=> edit.extendToEnd()})
++            // 单行表单 Enter：有 onSubmit 时消费并提交；无回调时不插入换行、继续下传。
++            case UiEvent.KeyDown(Key.Enter, _) =>
++                if (ctx.hasFocus(id) && isEditable) {
++                    match (onSubmit) {
++                        case Some(submit) =>
++                            submit()
++                            return true
++                        case None => ()
++                    }
++                }
+             case UiEvent.KeyDown(Key.Letter(code), _) => return shortcut(ctx, edit, code)
+             case UiEvent.Frame(_) =>
+                 // One-time initial focus, applied after the frame's pointer events so a stray
+diff --git a/src/text/text_field_submit_test.cj b/src/text/text_field_submit_test.cj
+new file mode 100644
+index 0000000..3a1b36d
+--- /dev/null
++++ b/src/text/text_field_submit_test.cj
+@@ -0,0 +1,29 @@
++package cui.text
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++@Test
++func textFieldEnterCallsSubmitWhenFocused(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let value = State<String>("value")
++    let calls = State<Int64>(0)
++    let field = TextField(value, key: "submit.field", onSubmit: {=> calls.value += 1})
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++
++    @Expect(!field.handle(ctx, UiEvent.KeyDown(Key.Enter, false))) // 未聚焦透传
++    @Expect(calls.value, Int64(0))
++
++    let _ = field.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 20.0, 16.0))
++    @Expect(field.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(calls.value, Int64(1))
++}
++
++@Test
++func textFieldEnterWithoutSubmitPreservesNoop(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let field = TextField(State<String>("v"), key: "submit.none")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++    let _ = field.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 20.0, 16.0))
++    @Expect(!field.handle(ctx, UiEvent.KeyDown(Key.Enter, false))) // 兼容旧行为：无回调不消费
++}
+-- 
+2.47.3
+

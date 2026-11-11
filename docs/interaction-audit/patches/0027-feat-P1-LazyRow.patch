@@ -1,0 +1,207 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 16:46:28 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20LazyRow=20=E9=94=AE=E7=9B=98?=
+ =?UTF-8?q?=E6=A8=AA=E5=90=91=E6=BB=9A=E5=8A=A8=20+=20=E7=84=A6=E7=82=B9?=
+ =?UTF-8?q?=E6=BB=9A=E5=85=A5=E8=A7=86=E9=87=8E?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+缺口 #7/#8 的横排补齐：此前 LazyRow 只认滚轮与滚动条，纯键盘用户无法横向浏览
+（应用的书架行、缩略图条都是 LazyRow）。现在：Left/Right 步进 48px、PageUp/PageDown
+翻 0.9 视口、Home/End 到两端，均走与滚轮相同的 scrollBy 缓动通路；先给已构建项机会
+（可聚焦项不消费方向键时才滚动）。layout 末尾按焦点矩形做最小滚动（与 LazyColumn 同策略，
+未构建项无矩形上报，不会误触发）。
+
+测试：3 用例（方向键/Home 回起点、焦点项在右侧外时滚入、已可见不动）。
+cjpm test：TOTAL 447，PASSED 406（新增 3 例全过），失败名册与基线一致，零回归。
+---
+ src/core/lazy_row.cj               | 76 +++++++++++++++++++++++++++++-
+ src/core/lazy_row_keyboard_test.cj | 73 ++++++++++++++++++++++++++++
+ 2 files changed, 148 insertions(+), 1 deletion(-)
+ create mode 100644 src/core/lazy_row_keyboard_test.cj
+
+diff --git a/src/core/lazy_row.cj b/src/core/lazy_row.cj
+index 371d127..98d0350 100644
+--- a/src/core/lazy_row.cj
++++ b/src/core/lazy_row.cj
+@@ -1,7 +1,7 @@
+ package cui.core
+ 
+ import std.collection.ArrayList
+-import lgui.{Rect, Size, UiEvent}
++import lgui.{Key, Rect, Size, UiEvent}
+ 
+ private let LAZY_ROW_SCROLLBAR_FADE_MS: Int64 = 180
+ 
+@@ -135,6 +135,43 @@ public class LazyRow <: Widget {
+             let x = rect.x - frameScroll + Float32(index) * stride
+             widget.layout(ctx, Rect(x, rect.y, itemWidth, contentHeight))
+         }
++        revealFocusedInRow(ctx, rect, content)
++    }
++
++    /*
++     * 焦点滚入视野（缺口 #8 的横排版本）：本排已构建的项里有焦点控件跑出视口时，把偏移拉到
++     * 刚好露出它——与 LazyColumn 同策略（未构建项无矩形上报，不会误触发）。
++     */
++    // 键盘键先给已构建的项（右→左，与点击路由同序），任一项消费即视为已处理。
++    private func childConsumes(ctx: UiContext, event: UiEvent): Bool {
++        var i = visibleItems.size - 1
++        while (i >= 0) {
++            let (_, widget) = visibleItems[i]
++            if (widget.handle(ctx, event)) {
++                return true
++            }
++            i -= 1
++        }
++        false
++    }
++
++    private func revealFocusedInRow(ctx: UiContext, rect: Rect, content: Float32): Unit {
++        match (ctx.focusedRect()) {
++            case Some(focus) =>
++                let left = focus.x - rect.x
++                let right = left + focus.w
++                if (left >= 0.0 && right <= rect.w) {
++                    return
++                }
++                let target = scrollStateValue.value + left
++                let clamped = clampScrollOffset(target, content, rect.w)
++                if (clamped != scrollStateValue.value) {
++                    scrollStateValue.value = clamped
++                    scrollMotion.reset(clamped)
++                    ctx.requestFrame()
++                }
++            case None => ()
++        }
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+@@ -188,6 +225,43 @@ public class LazyRow <: Widget {
+                     }
+                     return scrollMotion.wheel(ctx, scrollStateValue, delta, content, viewportW)
+                 }
++            // 键盘横向滚动（缺口 #7 的横排版本）：Left/Right 步进、PageUp/PageDown 翻页、
++            // Home/End 到两端；先给孩子机会（可聚焦项不消费方向键时才滚动）。
++            case UiEvent.KeyDown(Key.Left, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollStateValue, -48.0, content, viewportW)
++            case UiEvent.KeyDown(Key.Right, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollStateValue, 48.0, content, viewportW)
++            case UiEvent.KeyDown(Key.PageUp, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollStateValue, -viewportW * 0.9, content, viewportW)
++            case UiEvent.KeyDown(Key.PageDown, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollStateValue, viewportW * 0.9, content, viewportW)
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                scrollStateValue.value = 0.0
++                scrollMotion.reset(0.0)
++                return true
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (childConsumes(ctx, event)) {
++                    return true
++                }
++                let bottom = max(0.0, content - viewportW)
++                scrollStateValue.value = bottom
++                scrollMotion.reset(bottom)
++                return true
+             case UiEvent.MouseDown(_, x, y) =>
+                 if (scrollBar.press(ctx, frame, scrollStateValue, content, viewportW, x, y)) {
+                     return true
+diff --git a/src/core/lazy_row_keyboard_test.cj b/src/core/lazy_row_keyboard_test.cj
+new file mode 100644
+index 0000000..a6e8b63
+--- /dev/null
++++ b/src/core/lazy_row_keyboard_test.cj
+@@ -0,0 +1,73 @@
++package cui.core
++
++import lgui.{FrameInfo, Key, Rect, Size, UiEvent}
++
++/* LazyRow 键盘横向滚动 + 焦点滚入视野（缺口 #7/#8 的横排版本）。 */
++private class RowFocusProbe <: Widget {
++    private let report: Rect
++
++    public init(report: Rect) {
++        this.report = report
++        emit(this)
++    }
++
++    public func measure(_: UiContext, _: Size): Size {
++        Size(80.0, 40.0)
++    }
++
++    public func layout(ctx: UiContext, _: Rect): Unit {
++        ctx.reportFocusRect("row.target", report)
++    }
++
++    public func draw(_: UiContext): Unit {}
++
++    public func handle(_: UiContext, _: UiEvent): Bool {
++        false
++    }
++}
++
++@Test
++func lazyRowArrowKeysScrollHorizontally(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let row = LazyRow(10, 80.0, scroll: offset, id: "row.kbd") {
++        _ => emit(RowFocusProbe(Rect(0.0, 0.0, 80.0, 40.0)))
++    }
++    row.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++
++    @Expect(row.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    ctx.frame = FrameInfo(UInt64(200), UInt64(16))
++    row.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++    @Expect(offset.value, Float32(48.0))
++
++    // Home 回起点。
++    @Expect(row.handle(ctx, UiEvent.KeyDown(Key.Home, false)))
++    ctx.frame = FrameInfo(UInt64(500), UInt64(300))
++    row.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++    @Expect(offset.value, Float32(0.0))
++}
++
++@Test
++func lazyRowRevealsFocusedItem(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    // 焦点项在视口右侧外（x=300，视口 200 宽）。
++    let row = LazyRow(10, 80.0, scroll: offset, id: "row.reveal") {
++        _ => emit(RowFocusProbe(Rect(300.0, 0.0, 80.0, 40.0)))
++    }
++    ctx.focus("row.target", viaKeyboard: true)
++    row.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++    @Expect(offset.value > Float32(0.0)) // 已滚动露出焦点项
++}
++
++@Test
++func lazyRowLeavesVisibleFocusAlone(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let row = LazyRow(10, 80.0, scroll: offset, id: "row.stay") {
++        _ => emit(RowFocusProbe(Rect(10.0, 0.0, 80.0, 40.0)))
++    }
++    ctx.focus("row.target", viaKeyboard: true)
++    row.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++    @Expect(offset.value, Float32(0.0))
++}
+-- 
+2.47.3
+

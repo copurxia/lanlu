@@ -1,0 +1,98 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:42:21 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20MenuBar=20=E6=94=AF=E6=8C=81=20Menu?=
+ =?UTF-8?q?=20=E9=94=AE=20/=20F10=20=E5=BF=AB=E6=8D=B7=E9=94=AE=E5=94=A4?=
+ =?UTF-8?q?=E8=B5=B7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #13 的菜单栏部分（低/M）：菜单栏此前必须先用 Tab 聚焦再按 Down/Enter 才能
+打开，没有窗口级加速键。现在 Menu 键（Key.Menu，前几批新增）或 F10（RawScancode 68）
+在任何情况下都能唤起：聚焦菜单栏并打开当前/第一个标题，语义同 Windows 菜单栏。
+无菜单项时不拦截。
+
+测试：1 用例（无焦点时 Menu 与 F10 均可唤起并聚焦）。cjpm test：TOTAL 432，
+PASSED 391（新增 1 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/controls/menu_bar.cj               | 16 ++++++++++++++++
+ src/controls/menu_bar_shortcut_test.cj | 25 +++++++++++++++++++++++++
+ 2 files changed, 41 insertions(+)
+ create mode 100644 src/controls/menu_bar_shortcut_test.cj
+
+diff --git a/src/controls/menu_bar.cj b/src/controls/menu_bar.cj
+index 5f24554..e072399 100644
+--- a/src/controls/menu_bar.cj
++++ b/src/controls/menu_bar.cj
+@@ -6,6 +6,8 @@ import cui.core.{CursorShape, Overlay, State, UiContext, Widget, claimHoverIfIns
+     emit, focusableControlIdentity, localState, requireControlId}
+ 
+ private let MENU_BAR_HEIGHT: Float32 = 34.0
++// USB HID scancode of F10：Windows 的菜单栏激活键（与 Shift+F10 的上下文菜单区分）。
++private let F10_SCANCODE: Int32 = 68
+ private let MENU_BAR_INSET: Float32 = 4.0
+ private let MENU_BAR_TITLE_PAD: Float32 = 12.0
+ private let MENU_BAR_MARGIN: Float32 = 4.0
+@@ -95,6 +97,10 @@ public class MenuBar <: Widget {
+             case UiEvent.KeyDown(Key.Down, _) => return openFocused(ctx)
+             case UiEvent.KeyDown(Key.Enter, _) => return openFocused(ctx)
+             case UiEvent.KeyDown(Key.Space, _) => return openFocused(ctx)
++            // Menu 键（或 F10，RawScancode 68）：像 Windows 菜单栏一样唤起菜单——
++            // 聚焦菜单栏并打开上次/第一个标题（审计缺口 #13 的菜单栏部分）。
++            case UiEvent.KeyDown(Key.Menu, _) => return openFromShortcut(ctx)
++            case UiEvent.KeyDown(Key.RawScancode(F10_SCANCODE), _) => return openFromShortcut(ctx)
+             case _ => ()
+         }
+         false
+@@ -139,6 +145,16 @@ public class MenuBar <: Widget {
+         true
+     }
+ 
++    // 快捷键唤起：无焦点也接受（菜单栏是窗口级加速器），聚焦并打开标题。
++    private func openFromShortcut(ctx: UiContext): Bool {
++        if (menus.isEmpty()) {
++            return false
++        }
++        ctx.focus(id, viaKeyboard: true)
++        openMenu(wrapIndex(focusedTitle.value, menus.size))
++        true
++    }
++
+     private func openFocused(ctx: UiContext): Bool {
+         if (!ctx.hasFocus(id) || menus.isEmpty()) {
+             return false
+diff --git a/src/controls/menu_bar_shortcut_test.cj b/src/controls/menu_bar_shortcut_test.cj
+new file mode 100644
+index 0000000..0e699ba
+--- /dev/null
++++ b/src/controls/menu_bar_shortcut_test.cj
+@@ -0,0 +1,25 @@
++package cui.controls
++
++import lgui.{Key, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/* MenuBar 快捷键唤起（缺口 #13 菜单栏部分）：Menu 键 / F10 在无焦点时也能打开菜单。 */
++@Test
++func menuBarOpensWithMenuKeyShortcut(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    ctx.viewportWidth = 400.0
++    ctx.viewportHeight = 300.0
++    let picked = State<Int64>(0)
++    let bar = MenuBar([
++        Menu("文件", [MenuItem("新建", {=> picked.value = 1 })]),
++        Menu("编辑", [MenuItem("撤销", {=> picked.value = 2 })])
++    ], key: "mb.shortcut")
++    bar.layout(ctx, Rect(0.0, 0.0, 400.0, 34.0))
++
++    ctx.clearFocus()
++    @Expect(bar.handle(ctx, UiEvent.KeyDown(Key.Menu, false))) // 无需先 Tab 到菜单栏
++    @Expect(ctx.hasFocus("mb.shortcut"))
++
++    ctx.clearFocus()
++    @Expect(bar.handle(ctx, UiEvent.KeyDown(Key.RawScancode(68), false))) // F10 同效
++}
+-- 
+2.47.3
+

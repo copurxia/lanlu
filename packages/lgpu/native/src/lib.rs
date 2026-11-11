@@ -1346,9 +1346,18 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     };
     let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
     ensure_offscreen(ctx, &device, cfg.format);
-    let Some(off_view) = ctx.offscreen.as_ref().map(|o| o.view.clone()) else {
-        set_error("offscreen target missing");
-        return E_NO_DEVICE;
+    let off_view_owned = ctx.offscreen.as_ref().map(|o| o.view.clone());
+    let no_blit = std::env::var("LANLU_LGPU_NOBLIT").map(|v| v == "1").unwrap_or(false);
+    let off_view = if no_blit {
+        view.clone()
+    } else {
+        match off_view_owned {
+            Some(v) => v,
+            None => {
+                set_error("offscreen target missing");
+                return E_NO_DEVICE;
+            }
+        }
     };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("lgpu-frame"),

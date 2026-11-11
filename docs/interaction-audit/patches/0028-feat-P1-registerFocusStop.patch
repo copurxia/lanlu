@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 17:01:38 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=BC=80=E6=94=BE=20registerFocusS?=
+ =?UTF-8?q?top=20=E2=80=94=E2=80=94=20=E5=BA=94=E7=94=A8=E5=B1=82=E8=87=AA?=
+ =?UTF-8?q?=E7=BB=98=E4=BB=B6=E5=8F=AF=E8=87=AA=E8=A1=8C=E7=99=BB=E8=AE=B0?=
+ =?UTF-8?q?=E7=84=A6=E7=82=B9=E5=81=9C=E9=9D=A0=E7=82=B9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #2 的第二个入口：FocusTarget 只能包一段 builder 子树，而应用层还有一类控件
+本身就是 Widget（GhostIconButton、封面卡、NavItem），无法用包裹器写法；框架内部的
+registerFocusable 是 protected，应用拿不到，于是这些控件永远进不了 Tab 环——这正是
+应用层 17 类自绘点击件全部 registerFocusable 为 0 的结构性原因。
+
+新增公开 API（cui 伞包导出）：
+- registerFocusStop(id)：构建期登记，buildRoot 之外调用是 no-op；
+- reregisterFocusStop(previousId, id)：树形状变化时改写 id，焦点不丢。
+
+顺带修掉 cui.cj 里 public import cui.core.FocusTarget 连写三遍的问题。
+
+测试：2 用例（自绘钮进 Tab 环并被 Tab 到达、buildRoot 外调用 no-op）。
+cjpm test：TOTAL 449 / PASSED 408，失败名册与基线一致，零回归。
+---
+ src/core/focus_stop_test.cj | 76 +++++++++++++++++++++++++++++++++++++
+ src/core/focus_target.cj    | 18 +++++++++
+ src/cui.cj                  |  4 +-
+ 3 files changed, 96 insertions(+), 2 deletions(-)
+ create mode 100644 src/core/focus_stop_test.cj
+
+diff --git a/src/core/focus_stop_test.cj b/src/core/focus_stop_test.cj
+new file mode 100644
+index 0000000..c42b06f
+--- /dev/null
++++ b/src/core/focus_stop_test.cj
+@@ -0,0 +1,76 @@
++package cui.core
++
++import lgui.{Key, MouseButton, Rect, Size, UiEvent}
++
++/*
++ * registerFocusStop：给"自身即控件"的自绘件开放焦点登记（缺口 #2 的第二个入口）。
++ * 这里用一个仿应用层 GhostIconButton 的最小控件验证：构建期登记 → 进 Tab 环 → Enter 激活。
++ */
++private class SelfRegisteringBox <: Widget {
++    private let onClick: () -> Unit
++    private var frame = Rect.zero()
++
++    public init(id: String, onClick: () -> Unit) {
++        this.onClick = onClick
++        registerFocusStop(id)
++        emit(this)
++    }
++
++    public func measure(_: UiContext, _: Size): Size {
++        Size(34.0, 34.0)
++    }
++
++    public func layout(_: UiContext, rect: Rect): Unit {
++        frame = rect
++    }
++
++    public func draw(_: UiContext): Unit {}
++
++    public func focusableId(): ?String {
++        Some("self.box")
++    }
++
++    public func handle(ctx: UiContext, event: UiEvent): Bool {
++        match (event) {
++            case UiEvent.KeyDown(Key.Enter, _) =>
++                if (ctx.hasFocus("self.box")) {
++                    onClick()
++                    return true
++                }
++            case _ => ()
++        }
++        false
++    }
++}
++
++@Test
++func registerFocusStopPutsSelfDrawnWidgetInTabRing(): Unit {
++    let ctx = testContext()
++    let store = StateStore()
++    let fired = State<Bool>(false)
++    let _ = buildRoot({
++        => VStack {
++            Button("A", {=>}).key("rs.button")
++            SelfRegisteringBox("self.box", {=> fired.value = true})
++        }
++    }, store)
++
++    let ring = store.focusRing()
++    @Expect(ring.size, Int64(2))
++    @Expect(ring[1], "self.box")
++
++    ctx.adoptFocusRing(ring)
++    ctx.focusNext()
++    @Expect(ctx.focusId, "rs.button")
++    ctx.focusNext()
++    @Expect(ctx.focusId, "self.box")
++}
++
++@Test
++func registerFocusStopIsNoOpOutsideBuildRoot(): Unit {
++    // buildRoot 之外登记是 no-op：不抛异常、不进任何环。
++    registerFocusStop("loose.box")
++    let store = StateStore()
++    let _ = buildRoot({=> Button("A", {=>}).key("rs.only")}, store)
++    @Expect(store.focusRing().size, Int64(1))
++}
+diff --git a/src/core/focus_target.cj b/src/core/focus_target.cj
+index 3fd191b..2d17b98 100644
+--- a/src/core/focus_target.cj
++++ b/src/core/focus_target.cj
+@@ -15,6 +15,24 @@ import std.collection.ArrayList
+  * 认领 Interactive 光标。布局/绘制全部透传子树——它是一个行为壳，不加任何视觉。
+  * 应用侧用法：FocusTarget(onClick: {...}, key: "card") { 自绘内容 }。
+  */
++/*
++ * 让"自身就是控件"的自绘件在构建期登记焦点停靠点（缺口 #2 的第二个入口）。
++ *
++ * FocusTarget 适合包裹一段 builder 子树；但应用层还有一类控件（GhostIconButton、封面卡）
++ * 本身就是 Widget，无法用包裹器的写法。框架内部的 registerFocusable 是 protected，
++ * 应用拿不到，于是这些控件永远进不了 Tab 环——这里把它开放成公开 API：
++ * 在 init 里调用一次，之后控件自己实现 focusableId()/handle()/draw() 即可被 Tab 到达。
++ * 在 buildRoot 之外调用是 no-op（与框架内部一致）。
++ */
++public func registerFocusStop(id: String): Unit {
++    registerFocusable(id)
++}
++
++/** 树形状变化时改写已登记的焦点停靠点（id 变化时焦点不丢）。 */
++public func reregisterFocusStop(previousId: String, id: String): Unit {
++    reregisterFocusable(previousId, id)
++}
++
+ public class FocusTarget <: Widget {
+     private let id: String
+     private let child: Widget
+diff --git a/src/cui.cj b/src/cui.cj
+index 9103d65..0d3c54a 100644
+--- a/src/cui.cj
++++ b/src/cui.cj
+@@ -59,8 +59,8 @@ public import cui.core.Divider
+ public import cui.core.EventHandler
+ public import cui.core.Flexible
+ public import cui.core.FocusTarget
+-public import cui.core.FocusTarget
+-public import cui.core.FocusTarget
++public import cui.core.registerFocusStop
++public import cui.core.reregisterFocusStop
+ public import cui.core.FlowRow
+ public import cui.core.ForEach
+ public import cui.core.ForEachIndexed
+-- 
+2.47.3
+

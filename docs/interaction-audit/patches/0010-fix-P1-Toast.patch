@@ -1,0 +1,316 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:01:29 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20Toast=20=E5=8F=AF=E7=82=B9=E5=87=BB?=
+ =?UTF-8?q?=E5=85=B3=E9=97=AD=E3=80=81=E4=BA=8B=E4=BB=B6=E4=B8=8D=E7=A9=BF?=
+ =?UTF-8?q?=E9=80=8F=E3=80=81=E6=82=AC=E5=81=9C=E6=9A=82=E5=81=9C=E8=AE=A1?=
+ =?UTF-8?q?=E6=97=B6?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #14（高）：ToastLayer.handle 此前除 Frame 外恒 return false——错误提示挡住
+按钮时点击穿透点到底层控件，且无法主动关闭。现在：
+
+- 点击 toast 关闭该条（dismiss 立即移除，幂等：重复点击返回 false）；
+- toast 区域内的按下/抬起都被消费，不再穿透到底层控件；空白区事件照常下传；
+- 悬停暂停：指针所在的那条计时冻结（阅读长文案不被打断），移开恢复；
+- ToastLayer.draw 记录本帧矩形（含入场滑动期间的位置）供命中测试。
+
+测试：4 用例（点击关闭+消费、不穿透、悬停冻结/解冻、dismiss 幂等），NoopCanvas
+后端让 headless draw 可跑，用例先推进入场动画（age≥150ms）再命中最终位置。
+
+cjpm test：TOTAL 416，PASSED 375（新增 4 例全过），ERROR 40 + FAILED 1 与基线
+一致，零回归。
+---
+ src/controls/toast.cj                  |  85 ++++++++++++++++--
+ src/controls/toast_interaction_test.cj | 119 +++++++++++++++++++++++++
+ 2 files changed, 199 insertions(+), 5 deletions(-)
+ create mode 100644 src/controls/toast_interaction_test.cj
+
+diff --git a/src/controls/toast.cj b/src/controls/toast.cj
+index a65119e..f774fe5 100644
+--- a/src/controls/toast.cj
++++ b/src/controls/toast.cj
+@@ -1,7 +1,7 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{Color, FontSizes, Rect, Size, UiEvent, clampF32}
++import lgui.{Color, FontSizes, MouseButton, Rect, Size, UiEvent, clampF32}
+ import cui.core.{UiContext, Widget, emit}
+ 
+ private let TOAST_MARGIN: Float32 = 16.0
+@@ -27,6 +27,8 @@ class ActiveToast {
+     let kind: ToastKind
+     var ageMs: UInt64
+     var remainingMs: UInt64
++    // 指针悬停在本条上时计时冻结（阅读长文案不被打断）。
++    var frozen = false
+ 
+     init(id: Int64, message: String, kind: ToastKind, remainingMs: UInt64) {
+         this.id = id
+@@ -59,15 +61,49 @@ public class Toaster {
+         items.size
+     }
+ 
++    /*
++     * 立即关闭一条 toast（直接移除——退出淡出由下一次 draw 的快照缺席自然完成）。
++     * 返回是否确有关闭发生：重复点击同一通知的第二次返回 false。
++     */
++    public func dismiss(id: Int64): Bool {
++        var i = items.size - 1
++        while (i >= 0) {
++            if (items[i].id == id) {
++                items.remove(at: i)
++                return true
++            }
++            i -= 1
++        }
++        false
++    }
++
++    // 悬停暂停：仅指针所在的那条冻结，其余照常计时。
++    func freeze(id: Int64): Unit {
++        var i = items.size - 1
++        while (i >= 0) {
++            items[i].frozen = items[i].id == id
++            i -= 1
++        }
++    }
++
++    func unfreezeAll(): Unit {
++        for (toast in items) {
++            toast.frozen = false
++        }
++    }
++
+     // Ages every toast by `deltaMs` and drops any whose time is up. Called by the ToastLayer per frame.
+     func tick(deltaMs: UInt64): Unit {
+         var i = items.size - 1
+         while (i >= 0) {
+             let toast = items[i]
+-            toast.ageMs += deltaMs
+-            if (toast.remainingMs <= deltaMs) {
++            if (toast.frozen) {
++                // 冻结：ageMs 仍推进（入场动画继续），寿命不减。
++                toast.ageMs += deltaMs
++            } else if (toast.remainingMs <= deltaMs) {
+                 items.remove(at: i)
+             } else {
++                toast.ageMs += deltaMs
+                 toast.remainingMs -= deltaMs
+             }
+             i -= 1
+@@ -86,10 +122,14 @@ public class Toaster {
+ /**
+  * Renders a `Toaster`'s toasts stacked at the bottom-right of the viewport and drives their clock. Add
+  * it once near the root of the tree (e.g. as the last layer of a root `ZStack`) so it draws above the
+- * content; it takes no layout space and never consumes events, so it does not disturb the app beneath.
++ * content; it takes no layout space. Pointer events over a toast are consumed by the layer (no
++ * click-through to the app beneath): a click dismisses that toast, hovering pauses its countdown;
++ * events outside the toasts pass through untouched.
+  */
+ public class ToastLayer <: Widget {
+     private let toaster: Toaster
++    // 本帧实际绘制的各 toast 矩形（id, rect），命中测试用。
++    private var drawnRects: Array<(Int64, Rect)> = []
+ 
+     public init(toaster: Toaster) {
+         this.toaster = toaster
+@@ -109,8 +149,10 @@ public class ToastLayer <: Widget {
+     public func draw(ctx: UiContext): Unit {
+         let toasts = toaster.snapshot()
+         if (toasts.isEmpty()) {
++            drawnRects = []
+             return
+         }
++        let rects = ArrayList<(Int64, Rect)>()
+         let width = min(TOAST_WIDTH, max(0.0, ctx.viewportWidth - TOAST_MARGIN * 2.0))
+         let x = ctx.viewportWidth - TOAST_MARGIN - width
+         var bottom = ctx.viewportHeight - TOAST_MARGIN
+@@ -126,10 +168,13 @@ public class ToastLayer <: Widget {
+             let alpha = min(enter, exit)
+             // Starts one slot lower and slides up into place as it enters.
+             let slide = (1.0 - enter) * (TOAST_HEIGHT + TOAST_GAP)
+-            drawToast(ctx, Rect(x, bottom - TOAST_HEIGHT + slide, width, TOAST_HEIGHT), toast, alpha)
++            let rect = Rect(x, bottom - TOAST_HEIGHT + slide, width, TOAST_HEIGHT)
++            drawToast(ctx, rect, toast, alpha)
++            rects.add((toast.id, rect))
+             bottom = bottom - TOAST_HEIGHT - TOAST_GAP
+             i -= 1
+         }
++        drawnRects = rects.toArray()
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
+@@ -140,11 +185,41 @@ public class ToastLayer <: Widget {
+                 if (!toaster.isEmpty()) {
+                     ctx.requestFrame()
+                 }
++            case UiEvent.MouseMove(x, y) =>
++                // 悬停暂停：指针所在的那条冻结（阅读长文案不被计时打断），离开全部恢复。
++                match (toastAt(x, y)) {
++                    case Some(id) => toaster.freeze(id)
++                    case None => toaster.unfreezeAll()
++                }
++            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
++                // 点击关闭（缺口 #14），并消费事件——此前恒 return false，toast 挡住按钮
++                // 时点击会穿透点到底层控件。
++                match (toastAt(x, y)) {
++                    case Some(id) =>
++                        let _ = toaster.dismiss(id)
++                        return true
++                    case None => ()
++                }
++            case UiEvent.MouseUp(MouseButton.Left, x, y) =>
++                // 抬起同样消费：toast 区域不再是透明的事件洞。
++                if (toastAt(x, y).isSome()) {
++                    return true
++                }
+             case _ => ()
+         }
+         false
+     }
+ 
++    // 命中测试：指针落在哪条已绘制的 toast 上（含入场滑动期间的位置）。
++    private func toastAt(x: Float32, y: Float32): ?Int64 {
++        for ((id, rect) in drawnRects) {
++            if (rect.contains(x, y)) {
++                return Some(id)
++            }
++        }
++        None
++    }
++
+     private func drawToast(ctx: UiContext, rect: Rect, toast: ActiveToast, alpha: Float32): Unit {
+         let a = Int64(clampF32(alpha, 0.0, 1.0) * 255.0)
+         let accent = toastColor(ctx, toast.kind)
+diff --git a/src/controls/toast_interaction_test.cj b/src/controls/toast_interaction_test.cj
+new file mode 100644
+index 0000000..76c1b97
+--- /dev/null
++++ b/src/controls/toast_interaction_test.cj
+@@ -0,0 +1,119 @@
++package cui.controls
++
++import lgui.{Canvas, Color, FrameInfo, MouseButton, Pen, Rect, Renderer, UiEvent}
++import cui.core.{Theme, UiContext}
++
++/* Toast 交互（缺口 #14）：点击关闭、事件不穿透、悬停暂停。 */
++/* 空画布后端：让 draw 不因无渲染设备抛异常（否则 rects 记录不到）。 */
++private class ToastNoopCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func toastIctx(): UiContext {
++    let renderer = Renderer.headless()
++    renderer.useBackend(ToastNoopCanvas())
++    let ctx = UiContext(renderer, Theme.light())
++    ctx.viewportWidth = 800.0
++    ctx.viewportHeight = 600.0
++    ctx
++}
++
++/*
++ * toast 常驻位置：右下角，宽 320、高 46、边距 16 → rect(464, 538, 320, 46)。
++ * 需先 draw 一次让 layer 记录本帧矩形（命中测试依赖绘制结果）。
++ */
++@Test
++func toastClickDismissesAndConsumesEvent(): Unit {
++    let ctx = toastIctx()
++    let toaster = Toaster()
++    toaster.show("boom", kind: ToastKind.Error, durationMs: 60000)
++    let layer = ToastLayer(toaster)
++    layer.draw(ctx)
++
++    @Expect(toaster.count(), 1)
++    // 入场滑动完成后（age ≥ 150ms）toast 落在最终位置 rect(464, 538, 320, 46)。
++    let _ = layer.handle(ctx, UiEvent.Frame(FrameInfo(UInt64(200), UInt64(200))))
++    layer.draw(ctx)
++    // 点击 toast 中心：事件被消费、该条关闭。
++    @Expect(layer.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 600.0, 560.0)))
++    @Expect(toaster.count(), 0)
++
++    // 点击空白区（无 toast）：不消费、事件下传。
++    @Expect(!layer.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, 100.0)))
++}
++
++@Test
++func toastPointerEventsDoNotFallThrough(): Unit {
++    let ctx = toastIctx()
++    let toaster = Toaster()
++    toaster.show("hold", durationMs: 60000)
++    let layer = ToastLayer(toaster)
++    layer.draw(ctx)
++
++    // 入场完成后按下在 toast 上被消费——底层控件不会再收到这次点击。
++    let _ = layer.handle(ctx, UiEvent.Frame(FrameInfo(UInt64(200), UInt64(200))))
++    layer.draw(ctx)
++    @Expect(layer.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 600.0, 560.0)))
++    layer.draw(ctx) // 关闭后矩形清空：抬起在原位置的空白区不再消费
++    @Expect(!layer.handle(ctx, UiEvent.MouseUp(MouseButton.Left, 600.0, 560.0)))
++}
++
++@Test
++func toastHoverPausesCountdown(): Unit {
++    let ctx = toastIctx()
++    let toaster = Toaster()
++    toaster.show("read me", durationMs: 1000)
++    let layer = ToastLayer(toaster)
++    layer.draw(ctx)
++
++    // 入场完成后悬停在 toast 上 → 冻结：寿命不再减少。
++    let _ = layer.handle(ctx, UiEvent.Frame(FrameInfo(UInt64(200), UInt64(200))))
++    layer.draw(ctx)
++    @Expect(!layer.handle(ctx, UiEvent.MouseMove(600.0, 560.0))) // move 不消费
++    toaster.tick(800)
++    @Expect(toaster.count(), 1) // 冻结中，寿命没扣
++
++    // 移开 → 解冻：继续计时直至到期。
++    let _ = layer.handle(ctx, UiEvent.MouseMove(100.0, 100.0))
++    toaster.tick(800)
++    @Expect(toaster.count(), 0)
++}
++
++@Test
++func toasterDismissIsIdempotent(): Unit {
++    let toaster = Toaster()
++    toaster.show("once", durationMs: 60000)
++    let first = toaster.snapshot()[0]
++    @Expect(toaster.dismiss(first.id)) // 第一次关闭成功
++    @Expect(!toaster.dismiss(first.id)) // 第二次：已不在，返回 false
++    @Expect(toaster.count(), 0)
++}
+-- 
+2.47.3
+

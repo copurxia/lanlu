@@ -1,0 +1,227 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:41:15 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E4=B8=AD=E6=96=87/=E6=97=A5?=
+ =?UTF-8?q?=E6=96=87=E5=8F=8C=E5=87=BB=E9=80=89=E8=AF=8D=E6=8C=89=E8=84=9A?=
+ =?UTF-8?q?=E6=9C=AC=E5=88=86=E7=BB=84?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #18（中）：charClassAt 只分 0/1/2，把 CJK 与标点同归“词”——双击「汉字，汉字」
+把逗号一起选进来，双击中文等于选中整段连续汉字。
+
+现在按 Unicode 脚本分 8 类：ASCII 词 / 空白 / 汉字（含扩展 A 与兼容区）/ 平假名 / 片假名 /
+谚文 / 标点（含全角与通用标点）/ 其他字母。UTF-8 码点由本文件解码（越界续字节读作 0，
+截断序列落到标点类而不崩溃）。效果：汉字串与标点分离、日文「漢字かなカナ」三脚本各自成组。
+
+标点保持“同串选中”的既有语义（浏览器/既有测试的约定），不改为单字符选择。
+
+测试：5 用例（中文遇标点收住、日文三脚本分离、全角标点串、ASCII 词不变、空白串）。
+既有 doubleClickSelects* 全部保持通过。cjpm test：TOTAL 431，PASSED 390（新增 5 例全过），
+ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/text/text_cjk_selection_test.cj |  53 +++++++++++++
+ src/text/text_edit_utf8.cj          | 119 +++++++++++++++++++++++++---
+ 2 files changed, 163 insertions(+), 9 deletions(-)
+ create mode 100644 src/text/text_cjk_selection_test.cj
+
+diff --git a/src/text/text_cjk_selection_test.cj b/src/text/text_cjk_selection_test.cj
+new file mode 100644
+index 0000000..cac3c05
+--- /dev/null
++++ b/src/text/text_cjk_selection_test.cj
+@@ -0,0 +1,53 @@
++package cui.text
++
++import cui.core.State
++
++/* 中文双击选词（缺口 #18）：按脚本分组，标点不再粘进词里。 */
++private func editFor(value: String): (TextEditState, State<String>, State<Int64>, State<Int64>) {
++    let text = State<String>(value)
++    let cursor = State<Int64>(0)
++    let anchor = State<Int64>(0)
++    (TextEditState(text, cursor: Some(cursor), anchor: Some(anchor)), text, cursor, anchor)
++}
++
++private func sliceOf(text: String, start: Int64, end: Int64): String {
++    text[start..end]
++}
++
++@Test
++func doubleClickCjkStopsAtPunctuation(): Unit {
++    // 「你好，生活」= 你(0..3) 好(3..6) ，(6..9) 生(9..12) 活(12..15)
++    let (edit, text, cursor, anchor) = editFor("你好，生活")
++    edit.selectWordAt(10) // 落在「生」中间
++    @Expect(sliceOf(text.value, anchor.value, cursor.value), "生活")
++}
++
++@Test
++func doubleClickMixedScriptsStaySeparate(): Unit {
++    // 日文「漢字かなカナ」：汉字/平假名/片假名三组互不粘连。
++    let (edit, text, cursor, anchor) = editFor("漢字かなカナ")
++    edit.selectWordAt(1) // 「漢」
++    @Expect(sliceOf(text.value, anchor.value, cursor.value), "漢字")
++}
++
++@Test
++func doubleClickFullwidthPunctuationSelectsItsRun(): Unit {
++    // 「a，。b」：全角标点自成一类（不再是"和汉字同类"），双击选中的是标点串而非整句。
++    let (edit, text, cursor, anchor) = editFor("a，。b")
++    edit.selectWordAt(2) // 落在「，」中间
++    @Expect(sliceOf(text.value, anchor.value, cursor.value), "，。")
++}
++
++@Test
++func doubleClickAsciiWordUnchanged(): Unit {
++    let (edit, text, cursor, anchor) = editFor("foo_bar baz")
++    edit.selectWordAt(2)
++    @Expect(sliceOf(text.value, anchor.value, cursor.value), "foo_bar")
++}
++
++@Test
++func doubleClickWhitespaceSelectsSpaceRun(): Unit {
++    let (edit, text, cursor, anchor) = editFor("ab   cd")
++    edit.selectWordAt(3) // 落在空格串里
++    @Expect(sliceOf(text.value, anchor.value, cursor.value), "   ")
++}
+diff --git a/src/text/text_edit_utf8.cj b/src/text/text_edit_utf8.cj
+index 79f2db5..4ffffd5 100644
+--- a/src/text/text_edit_utf8.cj
++++ b/src/text/text_edit_utf8.cj
+@@ -8,22 +8,123 @@ private let CR_BYTE: UInt8 = UInt8(13)
+ private let SPACE_BYTE: UInt8 = UInt8(32)
+ private let UNDERSCORE_BYTE: UInt8 = UInt8(95)
+ 
+-// Character class of the rune beginning at `index`, used to grow a double-click selection:
+-// 0 word (ASCII alphanumeric, underscore, or any non-ASCII rune such as CJK), 1 whitespace,
+-// 2 other (ASCII punctuation and symbols). Reading the leading byte is enough — a multi-byte
+-// rune is always a non-ASCII "word" character here, and ASCII bytes classify directly.
++/*
++ * 字符类（双击扩选的分组依据）：
++ *   0 ASCII 词字符（字母/数字/下划线）
++ *   1 空白
++ *   2 汉字（CJK 统一表意文字 + 扩展 A）
++ *   3 平假名
++ *   4 片假名
++ *   5 谚文（Hangul 音节 + 字母）
++ *   6 标点/符号（含全角标点；双击只选中标点自身）
++ *   7 其他字母（拉丁扩展、希腊、西里尔……按字母处理，与 ASCII 词字符同类但不同组）
++ *
++ * 此前只分 0/1/2，把 CJK 与标点都算“词”——双击「汉字，汉字」会把逗号一起选进来、
++ * 双击中文等于选中整段连续汉字（审计缺口 #18）。按脚本细分后：汉字串与标点分离、
++ * 汉字/假名/谚文混排各自成组，日文双击「漢字かな」不会跨脚本粘在一起。
++ */
++internal let CHAR_CLASS_WORD: Int64 = 0
++internal let CHAR_CLASS_SPACE: Int64 = 1
++internal let CHAR_CLASS_HAN: Int64 = 2
++internal let CHAR_CLASS_HIRAGANA: Int64 = 3
++internal let CHAR_CLASS_KATAKANA: Int64 = 4
++internal let CHAR_CLASS_HANGUL: Int64 = 5
++internal let CHAR_CLASS_PUNCT: Int64 = 6
++internal let CHAR_CLASS_LETTER: Int64 = 7
++
+ internal func charClassAt(text: String, index: Int64): Int64 {
+     let byte = text[index]
+-    if (byte >= UTF8_CONTINUATION_LOW) {
++    if (byte < UTF8_CONTINUATION_LOW) {
++        if (isAsciiWordByte(byte)) {
++            return CHAR_CLASS_WORD
++        }
++        if (byte == SPACE_BYTE || byte == TAB_BYTE || byte == NEWLINE_BYTE || byte == CR_BYTE) {
++            return CHAR_CLASS_SPACE
++        }
++        return CHAR_CLASS_PUNCT
++    }
++    classifyRune(text, index)
++}
++
++// 解码 index 处的 UTF-8 码点并按脚本归类；非法/截断序列归入标点（自成一组，不会扩散）。
++private func classifyRune(text: String, index: Int64): Int64 {
++    let b0 = text[index]
++    var cp: Int64 = 0
++    if (b0 < UInt8(224)) {
++        // 2 字节：110xxxxx 10xxxxxx
++        cp = (Int64(b0) - 192) * 64
++        cp += Int64(continuationAt(text, index + 1))
++    } else if (b0 < UInt8(240)) {
++        // 3 字节：1110xxxx 10xxxxxx 10xxxxxx
++        cp = (Int64(b0) - 224) * 4096
++        cp += Int64(continuationAt(text, index + 1)) * 64
++        cp += Int64(continuationAt(text, index + 2))
++    } else {
++        // 4 字节：11110xxx ...
++        cp = (Int64(b0) - 240) * 262144
++        cp += Int64(continuationAt(text, index + 1)) * 4096
++        cp += Int64(continuationAt(text, index + 2)) * 64
++        cp += Int64(continuationAt(text, index + 3))
++    }
++    classOfCodePoint(cp)
++}
++
++// 越界的续字节读作 0：截断序列因此得到一个偏低的码点，落到标点类而不是崩溃。
++private func continuationAt(text: String, index: Int64): UInt8 {
++    if (index < 0 || index >= text.size) {
+         return 0
+     }
+-    if (isAsciiWordByte(byte)) {
++    let b = text[index]
++    if (b < UTF8_CONTINUATION_LOW || b >= UTF8_CONTINUATION_HIGH) {
+         return 0
+     }
+-    if (byte == SPACE_BYTE || byte == TAB_BYTE || byte == NEWLINE_BYTE || byte == CR_BYTE) {
+-        return 1
++    b - UTF8_CONTINUATION_LOW
++}
++
++// 码点 → 脚本类。区间取自 Unicode 常用块（不做完整 Unicode 表，只覆盖排版常见范围）。
++private func classOfCodePoint(cp: Int64): Int64 {
++    if (cp >= 0x3040 && cp <= 0x309F) {
++        return CHAR_CLASS_HIRAGANA
++    }
++    if (cp >= 0x30A0 && cp <= 0x30FF) {
++        return CHAR_CLASS_KATAKANA
++    }
++    if (cp >= 0xAC00 && cp <= 0xD7AF) {
++        return CHAR_CLASS_HANGUL
++    }
++    if (cp >= 0x1100 && cp <= 0x11FF) {
++        return CHAR_CLASS_HANGUL
++    }
++    if (cp >= 0x3130 && cp <= 0x318F) {
++        return CHAR_CLASS_HANGUL
++    }
++    if (cp >= 0x4E00 && cp <= 0x9FFF) {
++        return CHAR_CLASS_HAN
++    }
++    if (cp >= 0x3400 && cp <= 0x4DBF) {
++        return CHAR_CLASS_HAN
++    }
++    if (cp >= 0xF900 && cp <= 0xFAFF) {
++        return CHAR_CLASS_HAN
++    }
++    if (cp >= 0x20000 && cp <= 0x2A6DF) {
++        return CHAR_CLASS_HAN
++    }
++    // 全角标点：CJK 符号与标点、全角 ASCII 变体、通用标点。
++    if (cp >= 0x3000 && cp <= 0x303F) {
++        return CHAR_CLASS_PUNCT
++    }
++    if (cp >= 0xFF00 && cp <= 0xFFEF) {
++        return CHAR_CLASS_PUNCT
++    }
++    if (cp >= 0x2000 && cp <= 0x206F) {
++        return CHAR_CLASS_PUNCT
++    }
++    if (cp >= 0x300 && cp <= 0x36F) {
++        return CHAR_CLASS_PUNCT
+     }
+-    2
++    // 其余非 ASCII 字母（拉丁扩展、希腊、西里尔、越南语…）按字母成组。
++    CHAR_CLASS_LETTER
+ }
+ 
+ private func isAsciiWordByte(byte: UInt8): Bool {
+-- 
+2.47.3
+

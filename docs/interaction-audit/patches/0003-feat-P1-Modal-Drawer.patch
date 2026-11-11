@@ -1,0 +1,262 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:35:56 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Modal=20=E6=89=93=E5=BC=80=E5=8D=B3?=
+ =?UTF-8?q?=E8=81=9A=E7=84=A6=E9=A6=96=E4=B8=AA=E5=81=9C=E9=9D=A0=E7=82=B9?=
+ =?UTF-8?q?=20+=20=E5=85=B3=E9=97=AD=E6=81=A2=E5=A4=8D=E7=84=A6=E7=82=B9?=
+ =?UTF-8?q?=EF=BC=9BDrawer=20=E5=85=B3=E9=97=AD=E6=81=A2=E5=A4=8D=E7=84=A6?=
+ =?UTF-8?q?=E7=82=B9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #3（高，全应用 12 个表单/弹窗无一做初始聚焦）：Modal 现在在首次 layout 时
+(a) 记住当时的窗口焦点，dismiss 关闭过渡完成后恢复——关闭弹窗后焦点不再凭空丢失；
+(b) 聚焦弹窗内第一个焦点停靠点（viaKeyboard: true，开弹窗即待键入/Tab），桌面惯例。
+
+Drawer（非模态侧栏）刻意只做 (a) 不做 (b)：抢走焦点会打断正在进行的交互（如阅读器
+翻页）；且仅当关闭时焦点仍停留在面板内才恢复，用户已点走则不动。
+
+modalTabCyclesDialogFocusOnly 的语义随之更新：打开即聚焦 m1，Tab 在 m1→m2→m1 环内
+移动（此前从无焦点进入）。新增 2 用例覆盖初始聚焦与恢复。
+
+本机桩库 cjpm test：TOTAL 402，PASSED 361（新增 2 例全过，改写 1 例），
+ERROR 40 + FAILED 1（pushWakeEvent，需真实 SDL wake 事件）与基线逐例一致，零回归。
+---
+ src/controls/drawer.cj             | 45 +++++++++++++++++++++++--
+ src/controls/modal.cj              | 32 ++++++++++++++++++
+ src/controls/modal_test.cj         |  5 ++-
+ src/controls/overlay_focus_test.cj | 53 ++++++++++++++++++++++++++++++
+ 4 files changed, 130 insertions(+), 5 deletions(-)
+ create mode 100644 src/controls/overlay_focus_test.cj
+
+diff --git a/src/controls/drawer.cj b/src/controls/drawer.cj
+index da27a7d..d14ce34 100644
+--- a/src/controls/drawer.cj
++++ b/src/controls/drawer.cj
+@@ -1,8 +1,8 @@
+ package cui.controls
+ 
+ import lgui.{Color, Key, Rect, Size, SurfaceStyle, UiEvent}
+-import cui.core.{Bindable, Overlay, Spring, UiContext, Widget, buildChild, controlIdentity, drawSurface, emit,
+-    localState}
++import cui.core.{Bindable, Overlay, Spring, State, UiContext, Widget, buildChild, controlIdentity, drawSurface,
++    emit, focusableCountNow, focusablesSince, localState}
+ 
+ private let DRAWER_SCRIM_ALPHA: Float32 = 130.0
+ 
+@@ -43,6 +43,11 @@ public class Drawer <: Widget {
+     // removes exactly this drawer from the overlay stack (never a popup opened above it).
+     private let overlayOwner: String
+     private let slideSpring: Spring
++    // 面板内声明的焦点停靠点（构建序），初始聚焦用；隐藏时为空。
++    private let contentFocusables: Array<String>
++    // 打开时是否已做初始聚焦；关闭时据此恢复打开前的焦点。
++    private let focusClaimed: State<Bool>
++    private let restoreFocusId: State<String>
+     private var panelRect = Rect.zero()
+     private var panelT: Float32 = 0.0
+ 
+@@ -66,10 +71,15 @@ public class Drawer <: Widget {
+         // The body is built while presented and kept through the closing slide; a hidden,
+         // settled drawer builds nothing and registers no focusables.
+         if (presented.value || slideSpring.value > 0.0 || !slideSpring.settled()) {
++            let focusStart = focusableCountNow()
+             this.content = Some(buildChild(body))
++            this.contentFocusables = focusablesSince(focusStart)
+         } else {
+             this.content = None
++            this.contentFocusables = []
+         }
++        this.focusClaimed = localState<Bool>("Drawer:${this.overlayOwner}:focusClaimed") {false}
++        this.restoreFocusId = localState<String>("Drawer:${this.overlayOwner}:restoreFocus") {""}
+         emit(this)
+     }
+ 
+@@ -118,6 +128,7 @@ public class Drawer <: Widget {
+                 }
+                 panelRect = Rect(x, 0.0, w, ctx.viewportHeight)
+                 body.layout(ctx, panelRect)
++                claimInitialFocus(ctx)
+             case None => ()
+         }
+     }
+@@ -147,6 +158,36 @@ public class Drawer <: Widget {
+         false
+     }
+ 
++    /*
++     * 打开时记住当时的窗口焦点并在关闭时恢复（非模态面板同样不应让焦点凭空丢失）。
++     * 初始聚焦这里**不做**：Drawer 是非模态面板（导航/侧栏），抢走焦点会打断
++     * 正在进行的交互（例如阅读器翻页）；Tab/autofocus 由内容自行声明。与 Modal 的
++     * 差异是刻意的——模态对话框打开即待键入，侧栏不是。
++     */
++    private func claimInitialFocus(ctx: UiContext): Unit {
++        if (presented.value && !focusClaimed.value) {
++            focusClaimed.value = true
++            restoreFocusId.value = ctx.focusId
++        } else if (!presented.value && focusClaimed.value) {
++            focusClaimed.value = false
++            let target = restoreFocusId.value
++            // 关闭时若焦点已落在面板外（用户点走了）则不动；否则恢复打开前的焦点。
++            if (target.size > 0 && ctx.focusId.size > 0 && !focusInContent(ctx.focusId)) {
++                ctx.focus(target)
++            }
++        }
++    }
++
++    // 焦点是否落在面板内的某个停靠点上。
++    private func focusInContent(id: String): Bool {
++        for (stop in contentFocusables) {
++            if (stop == id) {
++                return true
++            }
++        }
++        false
++    }
++
+     private func handleDrawer(ctx: UiContext, event: UiEvent): Bool {
+         match (event) {
+             case UiEvent.KeyDown(Key.Escape, _) =>
+diff --git a/src/controls/modal.cj b/src/controls/modal.cj
+index 82e4b88..b7eadbe 100644
+--- a/src/controls/modal.cj
++++ b/src/controls/modal.cj
+@@ -45,6 +45,10 @@ public class Modal <: Widget {
+     private let maxHeightRatio: Float32
+     private let transition: Tween
+     private let blurTexture: State<?Texture>
++    // 打开时是否已做过「初始聚焦」；关闭时用它判断要不要恢复打开前的焦点。
++    private let focusClaimed: State<Bool>
++    // 打开瞬间窗口里的焦点（dismiss 时恢复；空串 = 当时无焦点）。
++    private let restoreFocusId: State<String>
+     private var dialogRect = Rect.zero()
+     private var transitionT: Float32 = 0.0
+ 
+@@ -62,6 +66,8 @@ public class Modal <: Widget {
+             Tween(MODAL_ANIMATION_MS, {t => Easing.easeOutCubic(t)})
+         }.value
+         this.blurTexture = localState<?Texture>("Modal:${this.overlayOwner}:blur") {None}
++        this.focusClaimed = localState<Bool>("Modal:${this.overlayOwner}:focusClaimed") {false}
++        this.restoreFocusId = localState<String>("Modal:${this.overlayOwner}:restoreFocus") {""}
+         this.transitionT = transition.value
+         if (presented.value || transition.value > 0.0 || !transition.settled()) {
+             let focusStart = focusableCountNow()
+@@ -101,6 +107,7 @@ public class Modal <: Widget {
+                 let offsetY = MODAL_ENTER_OFFSET_Y * (1.0 - transitionT)
+                 dialogRect = Rect((ctx.viewportWidth - w) / 2.0, (ctx.viewportHeight - h) / 2.0 + offsetY, w, h)
+                 body.layout(ctx, dialogRect.inset(contentPadding))
++                claimInitialFocus(ctx)
+                 if (!presented.value && transitionT <= 0.0) {
+                     releaseBlurTexture()
+                     // The current tree still contains the closing body. Rebuild once more so it
+@@ -227,6 +234,31 @@ public class Modal <: Widget {
+         }
+     }
+ 
++    /*
++     * 打开瞬间的两个焦点动作（一次呈现只做一次）：
++     * 1) 记住当时窗口焦点，dismiss 时恢复——关闭弹窗后焦点不再凭空丢失；
++     * 2) 若弹窗带焦点停靠点，聚焦第一个（viaKeyboard: true，开弹窗即待键入/Tab）。
++     *    打开即聚焦是桌面惯例；此前首个 Tab 才进入环，键盘用户第一步总是落空。
++     */
++    private func claimInitialFocus(ctx: UiContext): Unit {
++        if (presented.value && !focusClaimed.value) {
++            focusClaimed.value = true
++            restoreFocusId.value = ctx.focusId
++            if (!contentFocusables.isEmpty()) {
++                ctx.focus(contentFocusables[0], viaKeyboard: true)
++            }
++        } else if (!presented.value && focusClaimed.value) {
++            // 关闭完成：恢复打开前的焦点（若那个控件还在环里则如实恢复，否则等效清焦）。
++            focusClaimed.value = false
++            let target = restoreFocusId.value
++            if (target.size > 0) {
++                ctx.focus(target)
++            } else {
++                ctx.clearFocus()
++            }
++        }
++    }
++
+     private func dismiss(ctx: UiContext): Unit {
+         if (!presented.value) {
+             return
+diff --git a/src/controls/modal_test.cj b/src/controls/modal_test.cj
+index 0068d4f..539bb5b 100644
+--- a/src/controls/modal_test.cj
++++ b/src/controls/modal_test.cj
+@@ -148,9 +148,8 @@ func modalTabCyclesDialogFocusOnly(): Unit {
+     modal.draw(ctx)
+     @Expect(ctx.hasOverlay())
+ 
+-    // From no focus Tab enters at the dialog's first stop, then wraps m1 -> m2 -> m1.
+-    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Tab, false)))
+-    @Expect(ctx.hasFocus("m1"))
++    // 打开即聚焦首个停靠点（初始聚焦）；Tab 随后在环内 m1 -> m2 -> m1 移动。
++    @Expect(ctx.hasFocus("m1")) // 初始聚焦（打开即待键入）
+     @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Tab, false)))
+     @Expect(ctx.hasFocus("m2"))
+     @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Tab, false)))
+diff --git a/src/controls/overlay_focus_test.cj b/src/controls/overlay_focus_test.cj
+new file mode 100644
+index 0000000..c1321ba
+--- /dev/null
++++ b/src/controls/overlay_focus_test.cj
+@@ -0,0 +1,53 @@
++package cui.controls
++
++import lgui.{FrameInfo, Key, Rect, Renderer, UiEvent}
++import cui.core.{Button, State, StateStore, Theme, UiContext, buildRoot}
++
++private func overlayFocusTestContext(): UiContext {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    ctx.viewportWidth = 400.0
++    ctx.viewportHeight = 300.0
++    ctx
++}
++
++// Modal 打开时聚焦第一个停靠点（viaKeyboard，开弹窗即待键入/Tab）。
++@Test
++func modalOpenFocusesFirstStop(): Unit {
++    let ctx = overlayFocusTestContext()
++    let open = State<Bool>(true)
++    let store = StateStore()
++    let modal = buildRoot({=> Modal(open) {
++        Button("甲", {=> ()}).key("m.a")
++        Button("乙", {=> ()}).key("m.b")
++    } }, store)
++    ctx.frame = FrameInfo(UInt64(0), UInt64(0))
++    modal.layout(ctx, Rect.zero())
++    @Expect(ctx.hasFocus("m.a")) // 首个停靠点
++    @Expect(ctx.showFocusRing("m.a")) // 键盘意图：外环可见
++    @Expect(!ctx.hasFocus("m.b"))
++}
++
++// Modal 关闭后恢复打开前的焦点。
++@Test
++func modalDismissRestoresPriorFocus(): Unit {
++    let ctx = overlayFocusTestContext()
++    ctx.focus("outside.field") // 打开前的窗口焦点
++    let open = State<Bool>(true)
++    let store = StateStore()
++    let modal = buildRoot({=> Modal(open) {
++        Button("好", {=> ()}).key("r.ok")
++    } }, store)
++    ctx.frame = FrameInfo(UInt64(0), UInt64(0))
++    modal.layout(ctx, Rect.zero())
++    modal.draw(ctx)
++    @Expect(ctx.hasFocus("r.ok")) // 打开即聚焦弹窗内容
++
++    // Escape 经 overlay 路由（模态吞掉一切事件）。
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Escape, false)))
++    @Expect(!open.value)
++    ctx.frame = FrameInfo(UInt64(400), UInt64(400))
++    modal.layout(ctx, Rect.zero()) // 关闭过渡推进
++    ctx.frame = FrameInfo(UInt64(900), UInt64(500))
++    modal.layout(ctx, Rect.zero()) // 关闭完成后恢复
++    @Expect(ctx.hasFocus("outside.field"))
++}
+-- 
+2.47.3
+

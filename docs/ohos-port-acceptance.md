@@ -93,7 +93,7 @@ HAP：`entry-default-signed.hap` ≈ **92.4 MB**（原 124.4 MB，经依赖库 S
 根因：SDL3 的 SONAME 是 `libSDL3.so.0`，而 `libSDL3_ttf.so` 等按 `libSDL3.so` 文件名依赖；
 两个名字各自对应一个文件 → 进程里加载**两份 SDL3**：引擎初始化其中一份，壳（libmain）拿到另一份未初始化的。
 
-修复：`tools/make-sdl3-noversion.sh` 生成 `prefix-nov`（同一份库，SONAME 原地改短为 `libSDL3.so`），
+修复：`packages/lpack-ohos/tools/make-sdl3-noversion.sh` 生成 `prefix-nov`（同一份库，SONAME 原地改短为 `libSDL3.so`），
 壳与引擎都用它链接 → 三方 DT_NEEDED 全部为 `libSDL3.so` → 只加载一份。
 
 修复后真机证据：
@@ -113,7 +113,7 @@ push=1 text=hello-ohos
 | C | 书库封面 | 金色像素 4143（窗口内截图统计） |
 | D | 音视频播放 | `video stats frames=240→300`、`audio write cb calls=400/600/800, frames=94080→478080` |
 | E | IME 文本桥 | `[input] TEXT_INPUT text="final-check" (user event)` |
-| F | 静态门禁 | `tools/verify-ohos.sh`：分层/依赖闭包/符号 全 PASS |
+| F | 静态门禁 | `packages/lpack-ohos/tools/verify-ohos.sh`：分层/依赖闭包/符号 全 PASS |
 
 ### 仍未闭环（外部条件，非实现缺口）
 

@@ -59,6 +59,13 @@ foreign {
         u0: Float32, v0: Float32, u1: Float32, v1: Float32,
         r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_texture_destroy(tex: CPointer<UInt8>): Unit
+    func lgpu_snapshot_texture(surface: CPointer<UInt8>, outW: CPointer<UInt32>, outH: CPointer<UInt32>): CPointer<UInt8>
+    func lgpu_layer_mark(surface: CPointer<UInt8>): Int32
+    func lgpu_discard_recorded(surface: CPointer<UInt8>): Int32
+    func lgpu_draw_glow_ring(surface: CPointer<UInt8>, cx: Float32, cy: Float32, ringR: Float32, stroke: Float32,
+        outer: Float32, inner: Float32, glow: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
+    func lgpu_stats_line(out: CPointer<UInt8>, outLen: Int64): Int32
+    func lgpu_stats_reset(): Unit
 }
 
 public class LgpuException <: Exception {
@@ -87,6 +94,31 @@ public func initialize(): Unit {
 /// 自检：实例可建、能枚举适配器时返回 true。
 public func selfCheck(): Bool {
     unsafe { lgpu_self_check() == 0 }
+}
+
+// ---- 帧统计（M0 度量）------------------------------------------------------
+
+/// 读取自上次 reset 以来的累计统计行："draws=… rects=… texs=… runs=… uploads=…"
+/// "up_bytes=… measures=… tex_create=… tex_destroy=… tex_alive=… frames=…"。
+public func statsLine(): String {
+    let buf = Array<UInt8>(512, repeat: 0)
+    let h = unsafe { acquireArrayRawData(buf) }
+    try {
+        unsafe { lgpu_stats_line(h.pointer, Int64(buf.size)) }
+    } finally {
+        unsafe { releaseArrayRawData(h) }
+    }
+    // NUL 结尾的 C 字符串 → 取到第一个 0 为止
+    var len = 0
+    while (len < buf.size && buf[len] != 0) {
+        len += 1
+    }
+    return String.fromUtf8(buf[0..len].toArray())
+}
+
+/// 清零全部计数（配合窗口采样：reset → 渲染 N 帧 → statsLine）。
+public func statsReset(): Unit {
+    unsafe { lgpu_stats_reset() }
 }
 
 /// 枚举到的适配器摘要（每行 name|backend|type），用于真机诊断。
@@ -283,6 +315,39 @@ public class Surface <: Resource {
             return None
         }
         return Texture(this, tex)
+    }
+
+    /// GPU 快照：把本帧已录制的图元渲染进一张可采样纹理（不读回 CPU、不阻塞）。
+    /// 返回 (纹理, 物理宽, 物理高)；失败返回 None。
+    public func snapshotTexture(): ?(Texture, UInt32, UInt32) {
+        let pw = unsafe { LibC.malloc<UInt32>() }
+        let ph = unsafe { LibC.malloc<UInt32>() }
+        let tex = unsafe { lgpu_snapshot_texture(handle, pw, ph) }
+        let (w, h) = unsafe { (pw.read(), ph.read()) }
+        unsafe {
+            LibC.free(pw)
+            LibC.free(ph)
+        }
+        if (tex.isNull()) {
+            return None
+        }
+        Some((Texture(this, tex), w, h))
+    }
+
+    /// 层断点：此后录制的图元整体画在此前所有图元（含纹理）之上。
+    public func layerMark(): Unit {
+        unsafe { lgpu_layer_mark(handle) }
+    }
+
+    /// 丢弃本帧已录制的全部图元（全屏不透明遮罩覆盖下层时用）。
+    public func discardRecorded(): Unit {
+        unsafe { lgpu_discard_recorded(handle) }
+    }
+
+    /// 单实例 SDF 辉光环（实线 + 内外二次衰减辉光）。
+    public func glowRing(cx: Float32, cy: Float32, ringR: Float32, stroke: Float32, outer: Float32,
+            inner: Float32, glow: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        unsafe { lgpu_draw_glow_ring(handle, cx, cy, ringR, stroke, outer, inner, glow, r, g, b, a) }
     }
 
     /// 创建一张 RGBA8 纹理。

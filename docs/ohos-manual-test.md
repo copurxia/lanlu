@@ -8,9 +8,9 @@
 ```bash
 bash /workspace/lanlu/.research-ohos/check-soname-closure.sh   # 依赖闭包 + 架构
 bash /workspace/lanlu/.research-ohos/check-symbol-consistency.sh
-bash /workspace/lanlu/packages/vips_ffi/native-ohos/run-host-test.sh <png>
-bash /workspace/lanlu/packages/rocksdb_ffi/native-ohos/run-host-test.sh
-bash /workspace/lanlu/packages/fontkit_ffi/native-ohos/run-host-test.sh
+bash packages/lplatform-ohos/deps/vips/run-host-test.sh <png>
+bash packages/lplatform-ohos/deps/rocksdb/run-host-test.sh
+bash packages/lplatform-ohos/deps/fontkit/run-host-test.sh
 ```
 
 ## 1. 启动与基础渲染

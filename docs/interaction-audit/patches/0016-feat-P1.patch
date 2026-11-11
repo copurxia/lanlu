@@ -1,0 +1,144 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:37:56 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=88=97=E8=A1=A8/=E8=A1=A8?=
+ =?UTF-8?q?=E6=A0=BC=E8=A1=8C=E6=82=AC=E5=81=9C=E9=AB=98=E4=BA=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #9（中）：ListView 与 Table 的行此前只有选中态有反馈，鼠标划过毫无变化。
+现在指针所在行画 fieldActive 圆角底（盖过斑马纹），选中态优先；纯绘制改动，命中
+测试沿用绘制的行矩形与 ctx.mouseX/Y。
+
+测试：1 用例（ListView 非选中行悬停出 fieldActive 底）。cjpm test：TOTAL 426，
+PASSED 385（新增 1 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/controls/row_hover_test.cj    | 84 +++++++++++++++++++++++++++++++
+ src/controls/selection_widgets.cj |  4 ++
+ src/controls/table.cj             |  3 ++
+ 3 files changed, 91 insertions(+)
+ create mode 100644 src/controls/row_hover_test.cj
+
+diff --git a/src/controls/row_hover_test.cj b/src/controls/row_hover_test.cj
+new file mode 100644
+index 0000000..e7992e6
+--- /dev/null
++++ b/src/controls/row_hover_test.cj
+@@ -0,0 +1,84 @@
++package cui.controls
++
++import std.collection.ArrayList
++import lgui.{Canvas, Color, MouseButton, Pen, Rect, Renderer, Size, UiEvent}
++import cui.core.{Bindable, State, Theme, UiContext}
++
++/* 只记录圆角填充色的探针（行悬停断言用）。 */
++class RowProbe <: Canvas {
++    let fills = ArrayList<Color>()
++
++    public func reset(): Unit {
++        fills.clear()
++    }
++
++    public func hasFill(color: Color): Bool {
++        for (c in fills) {
++            if (c == color) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func rowContext(): (UiContext, RowProbe) {
++    let probe = RowProbe()
++    let renderer = Renderer.headless()
++    renderer.useBackend(probe)
++    let ctx = UiContext(renderer, Theme.dark())
++    ctx.viewportWidth = 400.0
++    ctx.viewportHeight = 300.0
++    (ctx, probe)
++}
++
++/* ListView 行悬停（缺口 #9）：指针所在行画 fieldActive 底。 */
++@Test
++func listViewHighlightsHoveredRow(): Unit {
++    let (ctx, probe) = rowContext()
++    let selected = State<Int64>(-1)
++    let list = ListView(["a", "b", "c"], selected, key: "row.list")
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 90.0))
++
++    // 指针在第 2 行（y≈44），非选中行。
++    ctx.mouseX = 50.0
++    ctx.mouseY = 44.0
++    probe.reset()
++    list.draw(ctx)
++    @Expect(probe.hasFill(ctx.theme.fieldActive))
++}
+diff --git a/src/controls/selection_widgets.cj b/src/controls/selection_widgets.cj
+index b3305fc..ea87b0e 100644
+--- a/src/controls/selection_widgets.cj
++++ b/src/controls/selection_widgets.cj
+@@ -301,6 +301,10 @@ public class ListView <: Widget {
+         if (i == selected.value) {
+             ctx.renderer.fillRoundedRect(row.inset(2.0), ctx.theme.smallRadius, ctx.theme.accent)
+             drawRowText(ctx, items[i], row, ctx.theme.accentText)
++        } else if (row.contains(ctx.mouseX, ctx.mouseY)) {
++            // 行悬停高亮（审计缺口 #9）：此前只有选中行有反馈，鼠标划过毫无变化。
++            ctx.renderer.fillRoundedRect(row.inset(2.0), ctx.theme.smallRadius, ctx.theme.fieldActive)
++            drawRowText(ctx, items[i], row, ctx.theme.text)
+         } else {
+             drawRowText(ctx, items[i], row, ctx.theme.text)
+         }
+diff --git a/src/controls/table.cj b/src/controls/table.cj
+index 5e848d6..8b459ae 100644
+--- a/src/controls/table.cj
++++ b/src/controls/table.cj
+@@ -330,6 +330,9 @@ public class Table <: Widget {
+     private func drawRow(ctx: UiContext, rowIndex: Int64, displayPos: Int64, rowRect: Rect): Unit {
+         if (rowIndex == selected.value) {
+             ctx.renderer.fillRoundedRect(rowRect.inset(1.0), ctx.theme.smallRadius, ctx.theme.accentSoft)
++        } else if (rowRect.contains(ctx.mouseX, ctx.mouseY)) {
++            // 行悬停高亮（缺口 #9）：盖过斑马纹，让“指针在哪一行”一目了然。
++            ctx.renderer.fillRoundedRect(rowRect.inset(1.0), ctx.theme.smallRadius, ctx.theme.fieldActive)
+         } else if (displayPos % 2 == 1) {
+             ctx.renderer.fill(rowRect, ctx.theme.panelEdge.withAlpha(24))
+         }
+-- 
+2.47.3
+

@@ -1,0 +1,102 @@
+diff --git a/client-next/src/ui/reader_dock.cj b/client-next/src/ui/reader_dock.cj
+index 3f685f7..4458a0f 100755
+--- a/client-next/src/ui/reader_dock.cj
++++ b/client-next/src/ui/reader_dock.cj
+@@ -144,6 +144,9 @@ class ReaderDock <: Widget {
+             }
+         }
+         displayed = st.displayedLane
++        // dock 整体是一个复合控件：登记一个焦点停靠点，Tab 到它后用键盘翻页/跳转
++        // （读屏与无鼠标场景此前完全无法操作底部胶囊）。
++        registerFocusStop("reader:dock")
+         emit(this)
+     }
+ 
+@@ -310,6 +313,10 @@ class ReaderDock <: Widget {
+                 }
+             }, render: {c => drawVolumePopup(c, popup)}))
+         }
++        // 键盘焦点外环：画在 Book 页码滑条外圈（Tab 到达 dock 时用户能看到自己在哪里）。
++        if (ctx.showFocusRing("reader:dock") && active.equals(LaneId.Book) && bookSeekRect.w > 0.0) {
++            drawFocusRing(ctx, bookSeekRect.inset(-4.0), 4.0)
++        }
+     }
+ 
+     private func dimColor(ctx: UiContext, a: Int64): Color {
+@@ -1040,10 +1047,27 @@ class ReaderDock <: Widget {
+         ctx.renderer.strokeLine(cx - 1.0, cy + 3.5, cx + 5.0, cy - 3.5, pen)
+     }
+ 
++    public func focusableId(): ?String {
++        Some("reader:dock")
++    }
++
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
+         if (slideT < 0.5) {
+             return false
+         } // 滑出中/隐藏：点击穿透回翻页区
++        // 键盘操作（焦点在本胶囊上时）：Left/Right 翻一页，PageUp/PageDown 翻十页，
++        // Home/End 到首末页——与鼠标拖 Book 滑条等效，只是步进式。
++        if (ctx.hasFocus("reader:dock")) {
++            match (event) {
++                case UiEvent.KeyDown(Key.Left, false) => return seekPageBy(-1)
++                case UiEvent.KeyDown(Key.Right, false) => return seekPageBy(1)
++                case UiEvent.KeyDown(Key.PageUp, false) => return seekPageBy(-10)
++                case UiEvent.KeyDown(Key.PageDown, false) => return seekPageBy(10)
++                case UiEvent.KeyDown(Key.Home, false) => return seekPageTo(1)
++                case UiEvent.KeyDown(Key.End, false) => return seekPageTo(model.reader.displayTotal)
++                case _ => ()
++            }
++        }
+         match (event) {
+             case UiEvent.MouseMove(x, y) =>
+                 if (!frame.contains(x, y)) {
+@@ -1235,6 +1259,27 @@ class ReaderDock <: Widget {
+         model.gotoPage(1 + Int64(amount * Float64(total - 1) + 0.5))
+     }
+ 
++    // 键盘翻页：以当前显示页为基准步进，夹在 1..total 之间。
++    private func seekPageBy(delta: Int64): Bool {
++        let total = model.reader.displayTotal
++        if (total <= 1) {
++            return false
++        }
++        model.noteReaderActivity()
++        model.gotoPage(max(1, min(total, model.reader.displayPage + 1 + delta)))
++        true
++    }
++
++    private func seekPageTo(page: Int64): Bool {
++        let total = model.reader.displayTotal
++        if (total <= 0) {
++            return false
++        }
++        model.noteReaderActivity()
++        model.gotoPage(max(1, min(total, page)))
++        true
++    }
++
+     private func audioSeekFromX(x: Float32): Unit {
+         let dur = model.playback.durationSec
+         if (dur <= 0.0 || audioSeekRect.w <= 0.0) {
+diff --git a/client-next/src/ui/reader_view.cj b/client-next/src/ui/reader_view.cj
+index 9250e0a..0b71e6c 100755
+--- a/client-next/src/ui/reader_view.cj
++++ b/client-next/src/ui/reader_view.cj
+@@ -39,12 +39,12 @@ public func readerView(model: AppModel): Unit {
+                 model.noteReaderActivity()
+                 model.readerKeyTurn(KeyCode.KeyDown)
+                 true
+-            // PgDn/PgUp（SDL scancode 78/75，Key 枚举未收录走 RawScancode）与空格：
+-            // html 页页内翻滚；非 html 页不消费（方向键翻页不受影响）。
+-            case UiEvent.KeyDown(Key.RawScancode(78), false) =>
++            // PgDn/PgUp 与空格：html 页页内翻滚；非 html 页不消费（方向键翻页不受影响）。
++            // Key.PageUp/PageDown 是框架分支新收进枚举的成员，不再写 scancode 魔数。
++            case UiEvent.KeyDown(Key.PageDown, false) =>
+                 model.noteReaderActivity()
+                 model.readerHtmlPageTurn(down: true)
+-            case UiEvent.KeyDown(Key.RawScancode(75), false) =>
++            case UiEvent.KeyDown(Key.PageUp, false) =>
+                 model.noteReaderActivity()
+                 model.readerHtmlPageTurn(down: false)
+             case UiEvent.KeyDown(Key.Space, false) =>

@@ -12,7 +12,7 @@ CN_OHOS_SEED_FILE=/workspace/tmp/lanlu_kv_seed.bin \
   bash client-next/ohos/build-ohos.sh
 
 # 2) 签名（复用本机已有调试材料，绕开 AGC 配额）
-bash tools/sign-hap.sh
+bash packages/lpack-ohos/tools/sign-hap.sh
 
 # 3) 安装启动
 hdc -t 192.168.0.26:42113 install \
@@ -20,8 +20,8 @@ hdc -t 192.168.0.26:42113 install \
 hdc -t 192.168.0.26:42113 shell aa start -b com.example.cmakehap -a EntryAbility
 ```
 
-前置脚本（改动后需重跑）：`tools/build-hapgen.sh`（改了 `packages/ohos/src/main.cj`）、
-`tools/make-sdl3-noversion.sh`（升级 SDL3 后）、`tools/build-ffmpeg-ohos.sh`（换编解码器时）。
+前置脚本（改动后需重跑）：`packages/lpack-ohos/tools/build-hapgen.sh`（改了 `packages/ohos/src/main.cj`）、
+`packages/lpack-ohos/tools/make-sdl3-noversion.sh`（升级 SDL3 后）、`packages/lpack-ohos/tools/build-ffmpeg-ohos.sh`（换编解码器时）。
 
 ## 2. 剩余四项及其操作步骤
 
@@ -66,10 +66,11 @@ hdc -t 192.168.0.26:42113 shell aa start -b com.example.cmakehap -a EntryAbility
 |---|---|
 | 业务/UI（跨平台） | `client-next/src/`（禁止出现平台标识，`tools/check-layering.sh` 会把关） |
 | 平台适配层（对标 Chromium ozone） | `packages/lwindow/`：进程环境/路径/字体/首启种子、窗口几何、渲染驱动、桌面集成 |
+| **解码统合层** | `packages/lcodec/`：图片解码/缩放/圆角/模糊的跨平台 API；OHOS 实现在 `lplatform-ohos/deps/vips`（同符号 shim），见 [lcodec.md](lcodec.md) |
 | 视图/控件框架 | `packages/cangjie-gui/`（cui + sdl 绑定，含事件解码、文本输入分发） |
 | OHOS 系统层 | `packages/ohos/`：ArkTS 壳（XComponent/IME/窗口控制/picker）+ C++ 桥（`shell_napi.cpp`、`input_filter.cpp`、`sdl_main.c`）+ hapgen 打包器 |
-| 媒体 | `packages/libvlc_ffi/native-ohos/vlc_shim.c`（单 demuxer、OH_AudioRenderer、自研重采样） |
-| 自检 | `packages/portcheck/`；静态门禁 `tools/verify-ohos.sh` |
+| 媒体 | `packages/lplatform-ohos/deps/libvlc/vlc_shim.c`（单 demuxer、OH_AudioRenderer、自研重采样） |
+| 自检 | `packages/portcheck/`；静态门禁 `packages/lpack-ohos/tools/verify-ohos.sh` |
 
 ## 4. 已知问题（非阻塞）
 

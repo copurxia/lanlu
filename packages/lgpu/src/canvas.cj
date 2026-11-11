@@ -13,12 +13,18 @@ import lgui.{Canvas, Color, Pen, Rect}
 //   可能差 1px；切换后如需完全一致，再把 fontkit 的度量接进来。
 // - 柔和圆角（feather）暂时按普通圆角绘制（SDF 自带抗锯齿，视觉上很接近）。
 
-// 颜色空间：整条 UI 画进 **Rgba8Unorm 离屏目标**（gamma 空间混合），
+// 颜色空间：整条 UI 画进 **Rgba8Unorm 离屏目标**（gamma 空间混合，与设计稿一致），
 // 再由 lgpu 的 blit 管线转成线性写到 sRGB 交换链；硬件编码把它还原成原值。
-// 因此这里直接按 v/255 输出即可 —— 既不要预解码（会变暗），也不会被二次编码。
+// 因此这里直接按 v/255 输出 —— 预解码与 blit 只能留一个（见 docs/lgpu-color-pipeline.md）。
 
-/// alpha 是线性量，不做 sRGB 解码。
+/// alpha 是线性量，不走 sRGB 解码。
 func alphaChannel(v: UInt8): Float32 {
+    Float32(v) / 255.0
+}
+
+/// 颜色通道：直传（gamma 空间）。离屏目标是 Unorm，混合与设计稿同空间；
+/// 上屏时由 blit 转线性、硬件编码还原（见文件头注释）。
+func channel(v: UInt8): Float32 {
     Float32(v) / 255.0
 }
 
@@ -44,6 +50,25 @@ func nline(): String {
 }
 
 public class LgpuCanvas <: Canvas {
+    // R5.1：文本测量缓存——宽度只取决于 (text, pointSize)，跨帧安全复用。
+    // 之前每次 textWidth 都是一次 FFI（含 UTF-8 转换与逐字符 advance 求和），
+    // 即时模式下每帧每个 Label 至少测一次；缓存命中率目标是 >95%。
+    // 超过容量时整体清空（简单且足够：文本集合在稳态下远小于上限）。
+    private static let MEASURE_CAP: Int64 = 8192
+    private var measureCache: HashMap<String, Float32> = HashMap<String, Float32>()
+    private var measureHits: Int64 = 0
+    private var measureMisses: Int64 = 0
+
+    /// 测量缓存统计 (hits, misses, entries)，供 M0 打点。
+    public func measureStats(): (Int64, Int64, Int64) {
+        (measureHits, measureMisses, measureCache.size)
+    }
+
+    /// 清空测量缓存（字体更换/内存压力时调用）。
+    public func clearMeasureCache(): Unit {
+        measureCache.clear()
+    }
+
     private let surface: Surface
     private let font: Font
 
@@ -57,6 +82,12 @@ public class LgpuCanvas <: Canvas {
     /// 返回 >0 成功（w*1e6+h），<0 为错误码。
     public func captureTo(path: String): Int32 {
         this.surface.captureTo(path)
+    }
+
+    /// 供上层在尺寸变化时 reconfigure（**复用 swapchain，不要重建**，见计划 §7.1）。
+    /// 用法：`surfaceRef().resize(w, h)`；**不要**调用 `configure`（那会重建 device/pipeline）。
+    public func surfaceRef(): Surface {
+        this.surface
     }
 
     /// 开始一帧：清屏 + 可选的整体缩放（用于把逻辑尺寸的 UI 画进小窗口预览）。
@@ -170,6 +201,22 @@ public class LgpuCanvas <: Canvas {
         }
     }
 
+    /// 释放一张后端纹理（R4：Texture.close → Canvas.releaseTexture）。
+    /// 幂等：id 不存在时为空操作；释放后同 id 重新 uploadTexture 会创建新纹理。
+    /// 注意：lgpu 侧纹理在本帧 draw 之后才会真正 drop（tex_instances 持有裸指针，
+    /// Rust 侧 lgpu_texture_destroy 直接 free——同一帧内先画后关的顺序由 cui 的
+    /// "close 发生在帧间"保证；帧内 close+draw 混用的场景由 LgpuCanvas 的 map
+    /// 移除兜底：draw 找不到纹理直接跳过）。
+    public func releaseTexture(id: Int64): Unit {
+        match (textures.remove(id)) {
+            case Some(tex) =>
+                textureSizes.remove(id)
+                tex.close()
+                probeTrace("release tex id=" + id.toString())
+            case None => ()
+        }
+    }
+
     public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32,
         alpha: Float32): Unit {
         let tex = match (textures.get(id)) {
@@ -254,6 +301,40 @@ public class LgpuCanvas <: Canvas {
         }
     }
 
+    /// GPU 快照注册为 lgui 纹理 id（替代 captureTo 的读回 + 写文件 + 再上传）。
+    public func snapshotTexture(id: Int64, logicalW: Float32, logicalH: Float32): ?(Int32, Int32) {
+        let (tex, w, h) = match (surface.snapshotTexture()) {
+            case Some(v) => v
+            case None => return None
+        }
+        match (textures.remove(id)) {
+            case Some(old) => old.close()
+            case None => ()
+        }
+        textures[id] = tex
+        // UV 按逻辑尺寸换算：调用方的 source 矩形用屏幕逻辑坐标即可精确裁剪。
+        let lw = if (logicalW > 0.0) { logicalW } else { Float32(w) }
+        let lh = if (logicalH > 0.0) { logicalH } else { Float32(h) }
+        textureSizes[id] = (lw, lh)
+        Some((Int32(w), Int32(h)))
+    }
+
+    public func layerMark(): Unit {
+        surface.layerMark()
+    }
+
+    public func discardRecorded(): Unit {
+        surface.discardRecorded()
+    }
+
+    public func glowRing(cx: Float32, cy: Float32, radius: Float32, stroke: Float32, outer: Float32,
+            inner: Float32, color: Color, glow: Float32): Bool {
+        // 矩形管线在着色器里统一乘全局变换（同 fillCircle），这里传逻辑坐标。
+        surface.glowRing(cx, cy, radius, stroke, outer, inner, glow, channel(color.r), channel(color.g),
+            channel(color.b), alphaChannel(color.a))
+        true
+    }
+
     public func fill(rect: Rect, color: Color): Unit {
         surface.rect(rect.x, rect.y, rect.w, rect.h, 0.0, 0.0,
             channel(color.r), channel(color.g), channel(color.b), alphaChannel(color.a))
@@ -313,7 +394,21 @@ public class LgpuCanvas <: Canvas {
     }
 
     public func textWidth(text: String, pointSize!: Float32 = 15.0): Float32 {
-        font.measure(text, pointSize)
+        // 缓存键带字号（q4 量化与 Rust 侧一致），命中即免 FFI。
+        let key = text + "\u{0}" + Int64(pointSize * 4.0).toString()
+        match (measureCache.get(key)) {
+            case Some(w) =>
+                measureHits += 1
+                w
+            case None =>
+                measureMisses += 1
+                if (measureCache.size >= MEASURE_CAP) {
+                    measureCache.clear()
+                }
+                let w = font.measure(text, pointSize)
+                measureCache[key] = w
+                w
+        }
     }
 
     public func textHeight(pointSize!: Float32 = 15.0): Float32 {

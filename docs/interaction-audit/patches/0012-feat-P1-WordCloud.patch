@@ -1,0 +1,264 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:09:21 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=8F=AA=E8=AF=BB=E5=AD=97?=
+ =?UTF-8?q?=E6=AE=B5=E7=82=B9=E5=87=BB=E4=B8=8D=E5=86=8D=E8=BF=9B=E7=84=A6?=
+ =?UTF-8?q?=EF=BC=9BWordCloud=20=E9=94=AE=E7=9B=98=E8=B5=B0=E8=AF=8D?=
+ =?UTF-8?q?=E4=B8=8E=E6=BF=80=E6=B4=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #17（中）：只读 TextField/TextArea 点击仍 ctx.focus 画光标、可拖选，却不在
+Tab 焦点环——语义自相矛盾。现在点击只读字段仅用于选择文本（拖选不变），不再进焦：
+无光标闪烁、Tab 不到（可编辑路径完全不变）。
+
+审计缺口 #6 收尾：WordCloud 补 key 参数 + registerFocusable（空词云不进环）、点击
+聚焦、Left/Right 在词间移动（未定落到第一个，范围收住）、Enter/Space 激活选中词、
+键盘选中词画 accent 下划线 + 整框焦点环。至此前一轮审计中『四个漏登记控件』
+（Pagination/StepIndicator/Breadcrumb/WordCloud）全部键盘化完成。
+
+测试：2 用例（词云键盘走词/激活、空词云不进环）。cjpm test：TOTAL 419，PASSED 378
+（新增 2 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/controls/word_cloud.cj               | 78 +++++++++++++++++++++++-
+ src/controls/word_cloud_keyboard_test.cj | 52 ++++++++++++++++
+ src/text/text_area.cj                    |  5 +-
+ src/text/text_field.cj                   |  6 +-
+ 4 files changed, 136 insertions(+), 5 deletions(-)
+ create mode 100644 src/controls/word_cloud_keyboard_test.cj
+
+diff --git a/src/controls/word_cloud.cj b/src/controls/word_cloud.cj
+index 930fddf..b38517a 100644
+--- a/src/controls/word_cloud.cj
++++ b/src/controls/word_cloud.cj
+@@ -3,8 +3,9 @@ package cui.controls
+ import std.collection.ArrayList
+ import std.math.{cos, sin, sqrt}
+ import std.sort.sort
+-import lgui.{Color, MouseButton, Rect, Size, UiEvent}
+-import cui.core.{CursorShape, UiContext, Widget, claimHoverIfInside, emit}
++import lgui.{Color, Key, MouseButton, Rect, Size, UiEvent}
++import cui.core.{CursorShape, State, UiContext, Widget, claimHoverIfInside, drawFocusRing, emit, localState,
++    registerFocusable, resolveControlKey}
+ 
+ private let WORD_CLOUD_TAU: Float64 = 6.283185307179586
+ private let WORD_CLOUD_PADDING: Float32 = 3.0
+@@ -98,6 +99,7 @@ private class WordCloudGrid {
+  */
+ public class WordCloud <: Widget {
+     private let items: Array<WordCloudItem>
++    private let id: String
+     private let onClick: (WordCloudItem) -> Unit
+     private let minPointSize: Float32
+     private let maxPointSize: Float32
+@@ -106,19 +108,28 @@ public class WordCloud <: Widget {
+     private var placed = ArrayList<PlacedWord>()
+     private var layoutWidth: Float32 = -1.0
+     private var layoutHeight: Float32 = -1.0
++    // 键盘选中的词序号（ placed 顺序，即权重降序）；-1 = 未定（首次 Left/Right 落到第一个）。
++    private let keyboardIdx: State<Int64>
+ 
+     public init(
+         items: Array<WordCloudItem>,
+         minPointSize!: Float32 = 12.0,
+         maxPointSize!: Float32 = 38.0,
+         preferredHeight!: Float32 = 420.0,
+-        onClick!: (WordCloudItem) -> Unit = {_ => ()}
++        onClick!: (WordCloudItem) -> Unit = {_ => ()},
++        key!: ?String = None
+     ) {
+         this.items = items
++        this.id = resolveControlKey(key, "WordCloud")
+         this.minPointSize = max(1.0, minPointSize)
+         this.maxPointSize = max(this.minPointSize, maxPointSize)
+         this.preferredHeight = max(1.0, preferredHeight)
+         this.onClick = onClick
++        // 有词可选时才是一个 Tab 停靠点（纯空数据无意义）。
++        if (!items.isEmpty()) {
++            registerFocusable(this.id)
++        }
++        this.keyboardIdx = localState<Int64>("WordCloud:${this.id}:kbd") {-1}
+         emit(this)
+     }
+ 
+@@ -139,9 +150,19 @@ public class WordCloud <: Widget {
+         ctx.renderer.pushClip(frame)
+         for (word in placed) {
+             let color = wordColor(ctx, word.colorIndex)
++            // 键盘选中词：accent 下划线 + 焦点环（仅键盘焦点，:focus-visible）。
++            let keyed = ctx.showFocusRing(id) && wordKeyIndex(word.item.key) >= 0
++                && wordKeyIndex(word.item.key) == keyboardIdx.value
++            if (keyed) {
++                let underline = Rect(word.frame.x, word.frame.bottom(), word.frame.w, 1.6)
++                ctx.renderer.fillRoundedRect(underline, 0.8, ctx.theme.accent)
++            }
+             ctx.renderer.text(word.item.text, word.frame.x, word.frame.y, color, pointSize: word.pointSize)
+         }
+         ctx.renderer.popClip()
++        if (ctx.showFocusRing(id)) {
++            drawFocusRing(ctx, frame, ctx.theme.controlRadius)
++        }
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
+@@ -153,14 +174,65 @@ public class WordCloud <: Widget {
+         match (event) {
+             case UiEvent.MouseDown(MouseButton.Left, x, y) => match (wordAt(x, y)) {
+                 case Some(word) =>
++                    ctx.focus(id)
+                     onClick(word.item);
+                     true
+                 case None => false
+             }
++            // 键盘（缺口 #6 收尾）：Left/Right 在词间移动，Enter/Space 激活选中词。
++            case UiEvent.KeyDown(Key.Left, _) => return wordStep(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, _) => return wordStep(ctx, 1)
++            case UiEvent.KeyDown(Key.Enter, _) => return wordActivate(ctx)
++            case UiEvent.KeyDown(Key.Space, _) => return wordActivate(ctx)
+             case _ => false
+         }
+     }
+ 
++    // 键盘移动：未定（-1）落到第一个词；随后在词数范围内左右收住。
++    private func wordStep(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(id) || placed.isEmpty()) {
++            return false
++        }
++        let now = keyboardIdx.value
++        if (now < 0) {
++            keyboardIdx.value = 0
++            return true
++        }
++        keyboardIdx.value = max(0, min(placed.size - 1, now + delta))
++        true
++    }
++
++    private func wordActivate(ctx: UiContext): Bool {
++        if (!ctx.hasFocus(id)) {
++            return false
++        }
++        let idx = keyboardIdx.value
++        if (idx < 0 || idx >= placed.size) {
++            keyboardIdx.value = 0
++            return true
++        }
++        onClick(placed[idx].item)
++        true
++    }
++
++    // 词的 key 在 placed 中的序号；不在则为 -1。
++    private func wordKeyIndex(key: String): Int64 {
++        for (i in 0..placed.size) {
++            if (placed[i].item.key == key) {
++                return Int64(i)
++            }
++        }
++        -1
++    }
++
++    public func focusableId(): ?String {
++        if (items.isEmpty()) {
++            None
++        } else {
++            Some(id)
++        }
++    }
++
+     public func isFlexible(): Bool {
+         false
+     }
+diff --git a/src/controls/word_cloud_keyboard_test.cj b/src/controls/word_cloud_keyboard_test.cj
+new file mode 100644
+index 0000000..5a2c981
+--- /dev/null
++++ b/src/controls/word_cloud_keyboard_test.cj
+@@ -0,0 +1,52 @@
++package cui.controls
++
++import lgui.{FrameInfo, Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/* WordCloud 键盘（缺口 #6 收尾）：聚焦、Left/Right 走词、Enter/Space 激活。 */
++@Test
++func wordCloudKeyboardWalksAndActivates(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    ctx.viewportWidth = 400.0
++    ctx.viewportHeight = 300.0
++    let picked = State<String>("")
++    let cloud = WordCloud(
++        [
++            WordCloudItem("a", "仓颉", 100.0),
++            WordCloudItem("b", "图形界面", 50.0),
++            WordCloudItem("c", "词云", 20.0)
++        ],
++        onClick: {item => picked.value = item.key},
++        key: "wc.kbd"
++    )
++    cloud.layout(ctx, Rect(0.0, 0.0, 400.0, 300.0))
++    @Expect(cloud.focusableId().isSome()) // 有词即进焦点环
++
++    // 未聚焦不消费。
++    @Expect(!cloud.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++
++    // 点击聚焦（第一词中心因布局而异——点控件中心即可，命中任一词都行；
++    // 若中心是空隙则只聚焦不激活，仍可走键盘）。
++    let _ = cloud.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 200.0, 150.0))
++    @Expect(ctx.hasFocus("wc.kbd"))
++
++    // Right 从未定 → 词 0；再 Right → 词 1；Enter 激活。
++    @Expect(cloud.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(cloud.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(cloud.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(picked.value, "b")
++
++    // Left 回到词 0，Space 激活。
++    @Expect(cloud.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(cloud.handle(ctx, UiEvent.KeyDown(Key.Space, false)))
++    @Expect(picked.value, "a")
++}
++
++@Test
++func wordCloudEmptyStaysOutOfFocusRing(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let cloud = WordCloud([], key: "wc.empty")
++    cloud.layout(ctx, Rect(0.0, 0.0, 400.0, 300.0))
++    @Expect(cloud.focusableId().isNone()) // 空词云不是 Tab 停靠点
++    @Expect(!cloud.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++}
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index 0de41d3..729b886 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -284,7 +284,10 @@ public class TextArea <: Widget {
+ 
+     private func pressAt(ctx: UiContext, edit: TextEditState, x: Float32, y: Float32): Bool {
+         if (frame.contains(x, y)) {
+-            ctx.focus(id)
++            // 只读区点击仅用于选择文本：不进焦（无光标、不在 Tab 环），与 TextField 同策略。
++            if (isEditable) {
++                ctx.focus(id)
++            }
+             let offset = pointOffset(ctx, x, y)
+             if (ctx.clickCount == 2) {
+                 edit.selectWordAt(offset)
+diff --git a/src/text/text_field.cj b/src/text/text_field.cj
+index 53d0282..0f9d04d 100644
+--- a/src/text/text_field.cj
++++ b/src/text/text_field.cj
+@@ -272,7 +272,11 @@ public class TextField <: Widget {
+                 }
+                 return true
+             }
+-            ctx.focus(id)
++            // 只读字段点击仅用于拖选文本：不进焦（无光标闪烁、不在 Tab 环）——
++            // 可编辑才聚焦（缺口 #17 的“点击可得焦点却不在 Tab 环”矛盾就此消除）。
++            if (isEditable) {
++                ctx.focus(id)
++            }
+             let offset = hitTestOffset(ctx, x)
+             if (ctx.clickCount == 2) {
+                 edit.selectWordAt(offset)
+-- 
+2.47.3
+
