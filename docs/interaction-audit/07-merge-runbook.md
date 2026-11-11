@@ -51,6 +51,8 @@ link-option = "-lSDL3 -lSDL3_ttf"
 
 ```bash
 cd /path/to/lanlu
+# 若合并后的树里 lgui 依赖 lcodec（对方迁移），需要 stdx 二进制依赖路径：
+export CANGJIE_STDX_PATH=/workspace/.cjv/stdx/lts/static/stdx
 tools/verify-cui-interactions.sh
 ```
 
@@ -63,7 +65,9 @@ Summary: TOTAL: 468
 == 基线匹配：失败名册与 headless 基线完全一致
 ```
 
-看到「基线匹配」才算通过。若打出 diff：对比 [test-baseline-names.txt](test-baseline-names.txt)，
+本节已按原文**逐字实跑验证**（2026-11-11，含对方 WIP 快照的演练副本）：步骤 0/1B/2/4 全部
+按文档产出预期结果；步骤 3 在补上 `CANGJIE_STDX_PATH` 后输出 468/427 与基线匹配。
+若打出 diff：对比 [test-baseline-names.txt](test-baseline-names.txt)，
 新增失败即回归；消失的失败通常是环境变化（例如某个 headless 用例碰巧通过），也要留意。
 
 ## 4. 应用层补丁（顺序不能反）
