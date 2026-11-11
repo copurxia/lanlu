@@ -40,6 +40,7 @@
 | `5e308c7` | P1 Table 区间选择（#9 表格版，锚点模式复用） |
 | `70d5be3` | test 焦点环契约（只在键盘到达时绘制） |
 | `daeef09` | P1 ReorderableList 键盘重排（Alt+Up/Down，审计外补充） |
+| `92680c2` | P1 RichText 链接键盘可达（审计外补充） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -183,7 +184,11 @@ feature 分支（`e100c33e`），随后发现这会**破坏 feature 分支的构
 Alt+Up/Down 键盘重排（走同一条 onMove 通路）；同批核对 Accordion/Rating/TreeView/SplitView
 键盘覆盖，无缺口。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 476，PASSED 435（累计新增 89 例 + 改写 1 例全过），
+**第二十七批（`92680c2`）**：RichText 链接键盘可达（Left/Right 切换、Enter/Space 触发、
+焦点环画在选中链接）。同批修正了扫描方法（`grep 'KeyDown'` 而非 `KeyDown(Key.`），避免把
+SplitView 这类先解构键的写法误判为无键盘支持。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 479，PASSED 438（累计新增 92 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用

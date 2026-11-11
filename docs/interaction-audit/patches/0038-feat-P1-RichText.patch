@@ -1,0 +1,236 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:12:38 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20RichText=20=E9=93=BE=E6=8E=A5?=
+ =?UTF-8?q?=E9=94=AE=E7=9B=98=E5=8F=AF=E8=BE=BE=EF=BC=88=E5=AE=A1=E8=AE=A1?=
+ =?UTF-8?q?=E5=A4=96=E8=A1=A5=E5=85=85=EF=BC=9A=E4=B8=8A=E4=B8=80=E6=89=B9?=
+ =?UTF-8?q?=E5=8F=AA=E5=81=9A=E4=BA=86=E9=BC=A0=E6=A0=87=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+自查发现上一批的 RichSpan.link **只能用鼠标点**——链接是"可点但焦点不可达"，对键盘用户
+等于不存在。现在：
+- 含链接的 RichText 登记一个焦点停靠点（无链接则不登记，不进 Tab 环）；
+- 聚焦后 Left/Right 在链接间循环、Enter/Space 触发当前链接；
+- 键盘焦点时在**当前选中链接**外画统一焦点环（与按钮族同一视觉语言）。
+
+同时修正上一轮的扫描方法：先前用 grep 'KeyDown(Key.' 漏掉了 SplitView 那种
+'case UiEvent.KeyDown(key, _)' 的写法，误判它没有键盘支持并做了重复实现（已回退，
+既有测试证明它本来就有键盘调整）。改用 grep 'KeyDown' 重扫后，真正"只有鼠标"的
+只剩 RichText 与 Toast（Toast 的 Esc 关闭会与全局 Esc 语义冲突，暂不做，已在状态表说明）。
+
+测试：3 用例（含链接才可聚焦、键盘激活/切换、未聚焦不响应）。
+cjpm test：TOTAL 479 / PASSED 438，失败名册与基线一致，零回归。
+---
+ src/controls/rich_text.cj               | 100 +++++++++++++++++++++++-
+ src/controls/rich_text_keyboard_test.cj |  55 +++++++++++++
+ 2 files changed, 152 insertions(+), 3 deletions(-)
+ create mode 100644 src/controls/rich_text_keyboard_test.cj
+
+diff --git a/src/controls/rich_text.cj b/src/controls/rich_text.cj
+index 51f39d8..db98633 100644
+--- a/src/controls/rich_text.cj
++++ b/src/controls/rich_text.cj
+@@ -1,8 +1,9 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{Color, FontSizes, IconName, MouseButton, Rect, Size, UiEvent, drawIcon}
+-import cui.core.{CUI_SMALL_H, CursorShape, Length, LengthUnit, UiContext, Widget, emit}
++import lgui.{Color, FontSizes, IconName, Key, MouseButton, Rect, Size, UiEvent, drawIcon}
++import cui.core.{CUI_SMALL_H, CursorShape, Length, LengthUnit, State, UiContext, Widget, drawFocusRing, emit,
++    focusableControlIdentity, localState, registerFocusable, resolveControlKey}
+ 
+ // Gap after an inline icon before the next span.
+ private let RICH_SPAN_GAP: Float32 = 3.0
+@@ -125,9 +126,33 @@ public class RichText <: Widget {
+     private var cachedWidthKey: Float32 = -1.0
+     private var cachedPointSize: Float32 = -1.0
+ 
+-    public init(spans: Array<RichSpan>, fontSize!: Length = Length(FontSizes.BODY, LengthUnit.Fp)) {
++    private let linkId: String
++    // 当前键盘选中的链接序号（-1 = 未聚焦/无链接）。
++    private let activeLink: State<Int64>
++
++    public init(spans: Array<RichSpan>, fontSize!: Length = Length(FontSizes.BODY, LengthUnit.Fp), key!: ?String = None) {
+         this.spans = spans
+         this.pointSize = fontSize
++        // 有链接片段时登记一个焦点停靠点（整段文本算一个停靠点，内部用 Left/Right 在链接间移动）：
++        // 否则点击可用的链接对键盘用户完全不可达。
++        let base = match (key) {
++            case Some(value) => resolveControlKey(Some(value), "RichText")
++            case None => resolveControlKey(None, "RichText")
++        }
++        var hasLink = false
++        for (span in spans) {
++            if (span.action.isSome()) {
++                hasLink = true
++            }
++        }
++        this.linkId = if (hasLink) {
++            let cid = focusableControlIdentity(base)
++            registerFocusable(cid)
++            cid
++        } else {
++            ""
++        }
++        this.activeLink = localState<Int64>("${this.linkId}:activeLink") {0}
+         emit(this)
+     }
+ 
+@@ -188,6 +213,15 @@ public class RichText <: Widget {
+                     drawIcon(ctx.renderer, icon, Rect(px, iconY, iconSize, iconSize), color)
+             }
+         }
++        // 键盘焦点环：画在当前选中链接的外圈（与按钮族同一视觉语言）。
++        if (linkId.size > 0 && ctx.showFocusRing(linkId)) {
++            let links = linkItems(layout)
++            if (!links.isEmpty()) {
++                let index = max(0, min(Int64(links.size - 1), activeLink.value))
++                let target = itemFrame(links[index], offsetY, lineHeight)
++                drawFocusRing(ctx, target, 3.0)
++            }
++        }
+     }
+ 
+     /*
+@@ -195,7 +229,25 @@ public class RichText <: Widget {
+      * 命中区是该片段的实际矩形（文本片段按渲染宽度，跨行时按片段所在行），不做整块 RichText 命中，
+      * 因此同一段文字里多个链接互不干扰。
+      */
++    public func focusableId(): ?String {
++        if (linkId.size == 0) {
++            None
++        } else {
++            Some(linkId)
++        }
++    }
++
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
++        // 键盘操作链接（此前链接只能点）：Left/Right 在链接间切换，Enter/Space 触发当前链接。
++        if (linkId.size > 0 && ctx.hasFocus(linkId)) {
++            match (event) {
++                case UiEvent.KeyDown(Key.Left, _) => return cycleLink(ctx, -1)
++                case UiEvent.KeyDown(Key.Right, _) => return cycleLink(ctx, 1)
++                case UiEvent.KeyDown(Key.Enter, _) => return activateLink(ctx)
++                case UiEvent.KeyDown(Key.Space, _) => return activateLink(ctx)
++                case _ => ()
++            }
++        }
+         let ps = resolvedPointSize(ctx)
+         let lineHeight = ctx.renderer.textHeight(pointSize: ps)
+         let layout = layoutFor(ctx, frame.w, ps, lineHeight)
+@@ -218,6 +270,48 @@ public class RichText <: Widget {
+         false
+     }
+ 
++    // 当前布局里的链接片段（按出现顺序）。
++    private func linkItems(layout: RichLayout): ArrayList<PlacedItem> {
++        let items = ArrayList<PlacedItem>()
++        for (item in layout.items) {
++            if (item.action.isSome()) {
++                items.add(item)
++            }
++        }
++        items
++    }
++
++    private func cycleLink(ctx: UiContext, delta: Int64): Bool {
++        let ps = resolvedPointSize(ctx)
++        let lineHeight = ctx.renderer.textHeight(pointSize: ps)
++        let layout = layoutFor(ctx, frame.w, ps, lineHeight)
++        let count = Int64(linkItems(layout).size)
++        if (count == 0) {
++            return false
++        }
++        let next = ((activeLink.value + delta) % count + count) % count
++        activeLink.value = next
++        return true
++    }
++
++    private func activateLink(ctx: UiContext): Bool {
++        let ps = resolvedPointSize(ctx)
++        let lineHeight = ctx.renderer.textHeight(pointSize: ps)
++        let layout = layoutFor(ctx, frame.w, ps, lineHeight)
++        let items = linkItems(layout)
++        if (items.isEmpty()) {
++            return false
++        }
++        let index = max(0, min(Int64(items.size - 1), activeLink.value))
++        match (items[index].action) {
++            case Some(action) =>
++                action()
++                return true
++            case None => ()
++        }
++        false
++    }
++
+     // 命中测试：返回指针所在链接的动作。
+     private func linkAt(
+         ctx: UiContext,
+diff --git a/src/controls/rich_text_keyboard_test.cj b/src/controls/rich_text_keyboard_test.cj
+new file mode 100644
+index 0000000..a412059
+--- /dev/null
++++ b/src/controls/rich_text_keyboard_test.cj
+@@ -0,0 +1,55 @@
++package cui.controls
++
++import lgui.{Key, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func rtLinkCtx(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* RichText 链接的键盘可达性（此前只能点）：整段文本一个停靠点，Left/Right 切换链接、Enter 触发。 */
++@Test
++func richTextWithLinksIsFocusable(): Unit {
++    let withLink = RichText([RichSpan.link("详情", {=> ()})], key: "rt.kb")
++    let noLink = RichText([RichSpan.text("纯文本")], key: "rt.plain")
++    @Expect(withLink.focusableId().isSome())
++    @Expect(noLink.focusableId().isNone()) // 无链接不进 Tab 环
++}
++
++@Test
++func richTextKeyboardActivatesFirstLink(): Unit {
++    let ctx = rtLinkCtx()
++    let hits = State<Int64>(0)
++    let view = RichText([
++        RichSpan.link("甲", {=> hits.value += 1 }),
++        RichSpan.text(" "),
++        RichSpan.link("乙", {=> hits.value += 10 })
++    ], key: "rt.act")
++    view.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++    let fid = view.focusableId().getOrThrow()
++    ctx.focus(fid, viaKeyboard: true)
++
++    // 默认选中第一个链接：Enter 触发「甲」。
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(hits.value, Int64(1))
++
++    // Right 切到第二个链接：Enter 触发「乙」（+10）。
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(hits.value, Int64(11))
++
++    // Left 回到第一个。
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Space, false)))
++    @Expect(hits.value, Int64(12))
++}
++
++@Test
++func richTextWithoutFocusIgnoresKeys(): Unit {
++    let ctx = rtLinkCtx()
++    let hits = State<Int64>(0)
++    let view = RichText([RichSpan.link("甲", {=> hits.value += 1 })], key: "rt.nofocus")
++    view.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++    @Expect(!view.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(hits.value, Int64(0))
++}
+-- 
+2.47.3
+

@@ -41,7 +41,15 @@
 
 ### 设计取舍说明（#9）
 
-### 审计之外的补充发现（第 47 轮）
+### 审计之外的补充发现（第 47–48 轮）
+
+- **RichText 链接只有鼠标可用**（第 48 轮）：上一批做的 `RichSpan.link` 可点但焦点不可达。已补
+  `92680c2`：含链接时登记停靠点，Left/Right 切换链接、Enter/Space 触发、焦点环画在选中链接上。
+- **扫描方法修正**：第 47 轮用 `grep 'KeyDown(Key.'` 判断键盘支持，漏掉了
+  `case UiEvent.KeyDown(key, _)` 这种先解构键的写法，误判 SplitView 无键盘并做了重复实现
+  （已回退——既有测试 `splitViewKeyboardNudgesFocusedDivider` 证明它对）。改用 `grep 'KeyDown'`
+  重扫后，真正"只有鼠标"的只剩 RichText（本轮已补）与 Toast（Esc 关闭会与全局 Esc 语义冲突，
+  刻意不做）。
 
 - **ReorderableList 只能拖拽重排**：handle 里只有鼠标事件，键盘用户完全无法调整顺序——
   审计时未覆盖到此控件。已补 `daeef09`：Alt+Up/Down 移动持焦行，走与拖拽同一条 `onMove`。
