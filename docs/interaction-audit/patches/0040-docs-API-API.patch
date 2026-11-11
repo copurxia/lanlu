@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:17:02 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20API=20=E5=8F=82=E8=80=83=E8=A1=A5?=
+ =?UTF-8?q?=E5=85=A8=E6=96=B0=E5=85=AC=E5=BC=80=E7=9A=84=E7=84=A6=E7=82=B9?=
+ =?UTF-8?q?/=E9=94=AE=E7=9B=98/=E4=BA=A4=E4=BA=92=20API?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 新增 §12：FocusTarget、registerFocusStop/reregisterFocusStop、drawFocusRing、KeyRepeat、
+  焦点语义速查表（showFocusRing vs hasFocus 的区别——正是用户最初那个问题的根因）、
+  Key 枚举新增 PageUp/PageDown/Menu 与 RawScancode 兜底。
+- TextField 行补 onSubmit 与按词编辑（Ctrl+方向/Backspace）；ListView/Table 行补 selectionRange
+  与键盘排序；RadioButton 行补 groupRange。
+
+此前这些 API 只在实现与 PR 描述里，框架使用者翻 API 参考找不到——文档缺口补齐。
+---
+ docs/api-reference.md | 64 ++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 60 insertions(+), 4 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index b5f8f00..aafb2a9 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -201,13 +201,13 @@ Enter/Space，悬停与按压有主题化的视觉反馈。
+ |---|---|---|
+ | `Checkbox` | `Checkbox(label, Bindable<Bool>)` | `key`；鼠标释放或 Enter/Space 切换 |
+ | `Switch` | `Switch(label, Bindable<Bool>)` | `key`；二态开关 |
+-| `RadioButton` | `RadioButton(label, selected, value)` | `key`；多个实例共享同一 `Bindable<Int64>` |
++| `RadioButton` | `RadioButton(label, selected, value)` | `key`；多个实例共享同一 `Bindable<Int64>`；**`groupRange(lower, upper)`（opt-in）让组内方向键在区间内移动选中**（未设置时方向键不拦截，交给外层） |
+ | `Picker` | `Picker(items, selected, key!)` | 点击前后区域或 Left/Right 循环选择；宽度按最长选项自适应（切换选项不抖动） |
+ | `Stepper` | `Stepper(Bindable<Int64>, key!, lower!, upper!, step!)` | 范围/步长可经构造参或链式 `range(lower, upper)`、`step(value)` 设置（构造参对齐 Slider/ProgressBar）；宽度按数值内容自适应（一至两位数稳定） |
+ | `SegmentedControl` | `SegmentedControl(items, selected, key!: ?String = None)` | 分段单选；选中指示器弹簧滑动到新段；`Tab` 聚焦后 Left/Right 切换（端点钳制）；`key` 可选，缺省按构建序自动派生 |
+ | `TabView` | `TabView(labels, selected, key!: ?String = None) { pages }` | 页面按标签顺序声明；活动标签指示器弹簧滑动；页签条为焦点停靠点（先于页内控件），聚焦后 Left/Right 切换页签；`key` 可选 |
+-| `ListView` | `ListView(items, selected, scroll!: ?State<Float32> = None, key!: ?String = None)` | `scrollState`；点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区（含应用层改选），无外部滚动态时偏移按身份保留；滑块可拖动；`key` 可选，给定则身份稳定可寻址 |
+-| `Table` | `Table(columns, rows, selected, key!)` / `Table.of(data, columns, selected, key!)` | 多列数据表：固定表头、窗口化滚动；点击列头排序（再次反向、数值列按数值），行选择存原始行索引故排序后跟随，`Tab` + 方向键/Home/End 导航；悬停保持默认箭头光标 |
++| `ListView` | `ListView(items, selected, scroll!: ?State<Float32> = None, key!: ?String = None)` | `scrollState`；点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区（含应用层改选），无外部滚动态时偏移按身份保留；滑块可拖动；`key` 可选，给定则身份稳定可寻址；**`selectionRange(): (Int64, Int64)`：Shift+点击/方向键的区间选择（锚点 + 当前选中项，普通点击/方向键把区间收敛为单点）** |
++| `Table` | `Table(columns, rows, selected, key!)` / `Table.of(data, columns, selected, key!)` | 多列数据表：固定表头、窗口化滚动；点击列头排序（再次反向、数值列按数值），行选择存原始行索引故排序后跟随，`Tab` + 方向键/Home/End 导航；**`selectionRange(): Array<Int64>`：Shift 区间选择，按当前显示序展开为原始行索引（排序后区间仍连续）**；**键盘排序：聚焦后 Shift+Left/Right 换排序列、Enter/Space 翻转升降序**；悬停保持默认箭头光标 |
+ | `LazyColumn` | `LazyColumn(count, itemHeight, id!) { i => 行 }` / `LazyColumn.of(data, itemHeight, key!, id!) { item => 行 }` | 定高行、按索引或数据惰性构建的纵向列表：只物化视口附近的行，成本恒为一屏；数据形免去 `count` 与 `data[i]` 回查，`key` 令行局部状态随项走 |
+ | `LazyRow` | `LazyRow(count, itemWidth, spacing!, scroll!, key!, id!) { i => 列 }` / `LazyRow.of(data, itemWidth, ...)` | `LazyColumn` 的横向 counterpart：定宽列、只物化视口附近；滚轮（dy 重映射/触控板 dx 直驱）横向滚动，溢出时底部出滚动条（滑块可拖、轨道翻页），`scroll` 可外部接管偏移 |
+ | `LazyGrid` | `LazyGrid(data, columns, itemHeight, spacing!, columnSpacing!, id!) { item => 单元格 }` | 数据驱动、按行窗口化的等宽网格；一行是一个 `Grid` 骑在 `LazyColumn` 上，单元格可为任意控件 |
+@@ -234,7 +234,7 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+ 
+ | 类型 | 构造函数 | 链式 API/行为 |
+ |---|---|---|
+-| `TextField` | `TextField(text, key!: ?String = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true, masked!: Bool = false)` | `autofocus`；单行 UTF-8 编辑；Shift 扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；只读（`editable: false`）忽略编辑、不参与 Tab 遍历，仍可选择/复制；`masked: true` 时每个字素显示为 "•"（真实值不变，复制仍为真实文本） |
++| `TextField` | `TextField(text, key!: ?String = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true, masked!: Bool = false, onSubmit!: ?() -> Unit = None)` | `autofocus`；单行 UTF-8 编辑；Shift 扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；**`onSubmit`：聚焦且可编辑时按 Enter 触发（表单回车的标准入口）**；**按词编辑：Ctrl+Left/Right 跳词边界（Shift 扩展选区）、Ctrl+Backspace/Delete 删除整词**（词边界与双击选词同一套 Unicode 脚本分类）；只读（`editable: false`）忽略编辑、不参与 Tab 遍历，仍可选择/复制；`masked: true` 时每个字素显示为 "•"（真实值不变，复制仍为真实文本） |
+ | `TextArea` | `TextArea(text, key!: ?String = None, scroll!: ?State<Float32> = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true)` | `autofocus`；多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；只读区（`editable: false`）不参与 Tab 遍历 |
+ | `ComboBox` | `ComboBox(text: Bindable<String>, options, key!: ?String = None)` | 可编辑下拉：内嵌 `TextField`（完整编辑）+ 建议列表浮层；键入过滤（无匹配显示“—”占位）、点击/回车填入，自由文本亦保留。长建议列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮 |
+ 
+@@ -291,4 +291,60 @@ DesktopApp(spec, theme: Theme.light(), frameDelay: UInt32(16), fontScale: 1.0, m
+ 
+ `fontScale` 作用于全部 `fp` 尺寸；`WindowSpec.scale` 决定 `px` 与 `vp` 的换算。
+ 
++
++## 12. 焦点、键盘与交互 API
++
++这套 API 让**应用层自绘控件**也能获得与框架控件一致的键盘可达性、焦点环与长按行为。
++
++### `FocusTarget`（包裹一段 builder 子树）
++
++```cangjie
++FocusTarget(onClick!: () -> Unit, key!: ?String = None, body!: () -> Unit)
++```
++
++行为壳：构建期登记焦点停靠点、点击聚焦、Enter/Space 激活 `onClick`、键盘焦点时在子树外侧
++画统一焦点环、悬停认领手型光标。布局/绘制全部透传子树，不加任何视觉。适合"整块区域可点"
++的自绘内容（卡片、封面、列表行）。`focusableIds()` 返回自身停靠点在前、子树停靠点在后。
++
++### `registerFocusStop` / `reregisterFocusStop`（自身即控件的自绘件）
++
++```cangjie
++public func registerFocusStop(id: String): Unit
++public func reregisterFocusStop(previousId: String, id: String): Unit
++```
++
++在控件 `init` 里调用一次即可把该 id 登记为 Tab 可达的焦点停靠点（`buildRoot` 之外是 no-op）。
++之后控件只需实现 `focusableId()`（返回该 id）、`handle()`（Enter/Space 自行激活）、
++`draw()`（用 `showFocusRing(id)` + `drawFocusRing` 画环）——`FocusTarget` 无法包裹的场景
++（控件本身就是 Widget）用它。
++
++### `drawFocusRing`（公开）
++
++```cangjie
++public func drawFocusRing(ctx: UiContext, rect: Rect, radius: Float32): Unit
++```
++
++画统一键盘焦点环：外扩 2px、1.6px accent 圆角描边。应用自绘件与框架控件共用它，
++焦点视觉语言才不会分叉（配色对比度由 `theme_contrast_test` 双主题守卫）。
++
++### `KeyRepeat`（长按连发）
++
++```cangjie
++KeyRepeat(delayMs!: Int64 = 400, intervalMs!: Int64 = 60)
++```
++
++`DesktopApp` 内置一份：派发完每批事件后由外壳喂 `observe(event, nowMs)`，到点 `poll(nowMs)`
++补发一个 `repeat=true` 的 `KeyDown`。用途是**没有原生 repeat 的后端**（OHOS 的 LWP 输入桥只带
++key+pressed）；后端自带 repeat（SDL）时会顺延计时，两者不双发。`enable(false)` 可整体关闭。
++
++### 焦点语义速查
++
++| 概念 | 入口 | 说明 |
++|---|---|---|
++| 焦点环是否绘制 | `ctx.showFocusRing(id)` | 只有**焦点 id 匹配 + 键盘到达**才为 true（`:focus-visible` 语义）；指针点击不画环 |
++| 是否有焦点 | `ctx.hasFocus(id)` | 仅表示"持有焦点"，**不要**用它决定是否画描边 |
++| 焦点矩形上报 | `ctx.reportFocusRect(id, rect)` | 控件在 `layout` 里上报，`ScrollView`/`Lazy*` 据此把焦点滚入视野 |
++| 键位枚举 | `Key` | 除字母/数字/方向/Enter/Escape 等，含 **`PageUp` / `PageDown` / `Menu`**（由 `keyFromScancode` 按 HID 使用页映射）；未收录的键走 `RawScancode(Int32)` |
++| 焦点流程 | `Modal`/`Drawer` | 打开即聚焦首个停靠点、关闭恢复原焦点 |
++
+ 底层重新导出类型与方法的完整定义见 [SDL API 参考](../sdl/docs/api-reference.md)。
+-- 
+2.47.3
+

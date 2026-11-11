@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:17:25 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E4=BF=AE=E6=AD=A3=E6=8C=87=E5=90=91?=
+ =?UTF-8?q?=E6=97=A7=20sdl/=20=E7=9B=AE=E5=BD=95=E7=9A=84=E5=A4=B1?=
+ =?UTF-8?q?=E6=95=88=E9=93=BE=E6=8E=A5=EF=BC=88=E6=A1=86=E6=9E=B6=E5=B7=B2?=
+ =?UTF-8?q?=E6=94=B9=E5=90=8D=20lgui/=EF=BC=89=EF=BC=8C=E6=96=87=E6=A1=A3?=
+ =?UTF-8?q?=E5=86=85=E9=93=BE=E5=85=A8=E9=83=A8=E5=8F=AF=E8=BE=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/README.md          | 2 +-
+ docs/api-reference.md   | 4 ++--
+ docs/components.md      | 2 +-
+ docs/getting-started.md | 2 +-
+ 4 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/docs/README.md b/docs/README.md
+index 1340207..af58633 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -8,7 +8,7 @@
+ 4. [架构与设计说明](architecture.md)：理解包边界、帧调度与脏帧跳过、渲染管线和线程模型。
+ 
+ 底层窗口、渲染、输入和系统 API 由独立 `sdl` 模块提供，参见
+-[SDL 文档中心](../sdl/docs/README.md)。
++[SDL 文档中心](../lgui/docs/README.md)。
+ 
+ ## 适用范围
+ 
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index aafb2a9..89d0341 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -1,7 +1,7 @@
+ # CUI API 参考
+ 
+ 本文记录 `cui` 根包重新导出的 GUI API。几何、渲染、窗口、事件、对话框、输入和系统能力见
+-[SDL API 参考](../sdl/docs/api-reference.md)。
++[SDL API 参考](../lgui/docs/api-reference.md)。
+ 
+ ## 1. 尺寸单位
+ 
+@@ -347,4 +347,4 @@ key+pressed）；后端自带 repeat（SDL）时会顺延计时，两者不双
+ | 键位枚举 | `Key` | 除字母/数字/方向/Enter/Escape 等，含 **`PageUp` / `PageDown` / `Menu`**（由 `keyFromScancode` 按 HID 使用页映射）；未收录的键走 `RawScancode(Int32)` |
+ | 焦点流程 | `Modal`/`Drawer` | 打开即聚焦首个停靠点、关闭恢复原焦点 |
+ 
+-底层重新导出类型与方法的完整定义见 [SDL API 参考](../sdl/docs/api-reference.md)。
++底层重新导出类型与方法的完整定义见 [SDL API 参考](../lgui/docs/api-reference.md)。
+diff --git a/docs/components.md b/docs/components.md
+index 89bfe75..7704053 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -2,7 +2,7 @@
+ 
+ 本手册逐条列出 CUI 的全部 UI 组件（含布局容器），给出构造签名、参数说明、可用修饰符与用法示例。
+ 所有组件经 `import cui.*` 即可获得。底层几何、颜色、窗口、输入等类型见
+-[SDL API 参考](../sdl/docs/api-reference.md)，框架整体 API 见 [API 参考](api-reference.md)。
++[SDL API 参考](../lgui/docs/api-reference.md)，框架整体 API 见 [API 参考](api-reference.md)。
+ 
+ ## 一、通用约定
+ 
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 2bf1621..8b94f6c 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -123,4 +123,4 @@ app.setMinimumSize(640, 480)
+ 
+ - 学习状态、布局和控件组合：[CUI 使用指南](user-guide.md)。
+ - 查阅构造参数和方法：[CUI API 参考](api-reference.md)。
+-- 学习画布、窗口和系统底层能力：[SDL 文档](../sdl/docs/README.md)。
++- 学习画布、窗口和系统底层能力：[SDL 文档](../lgui/docs/README.md)。
+-- 
+2.47.3
+
