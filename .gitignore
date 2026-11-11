@@ -40,3 +40,4 @@ client-next/build/
 
 # LWP 共享库构建产物（packages/lwp/native/build.sh）
 packages/lwp/lib/
+packages/cangjie-gui-p0/
