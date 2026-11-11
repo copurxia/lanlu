@@ -143,11 +143,19 @@ lerp 0.18，滑块旋钮悬停放大；带悬停视觉的控件文件从 4 个�
 > `git commit --only -- <paths>`（或用 `git commit -- <paths>`），否则会把这批无关改动一并提交。
 > 本批次曾误提交 156 个路径，已用 `git reset --soft HEAD~1` + `commit --only` 复原，对方暂存区未受影响。
 
+**第十七批（工具化，无代码提交）**：合并演练固化成 `tools/rehearse-merge.sh`——一条命令复制主仓
+工作树快照、应用 29 个补丁、跑桩库测试并与基线名册比对；实测「29 补丁零冲突 + 合并后
+TOTAL 450 / PASSED 409 / 基线匹配」。同时发现并定位对方 lcodec 迁移缺失的宿主机
+`link-option`（补 `-lSDL3 -lSDL3_ttf` 即通，vips 已不需要）。详见
+[05-merge-rehearsal.md](05-merge-rehearsal.md)。
+
 ## 待办（下一批）
 
-**框架侧已完成，应用层待接线**：完整接线清单（A 表单回车 12 处 / B 弹窗初始聚焦 8 处 /
-C 自绘件迁移 / D 阅读器与列表键盘化 + 验收方式）见 [03-app-wiring-plan.md](03-app-wiring-plan.md)。
+**框架侧已完成，应用层 3 个补丁已备好**（[patches-app/](patches-app/README.md)：表单回车+初始聚焦 /
+ClickArea 与图标钮焦点化 / 阅读器 dock 键盘翻页），验收清单见
+[04-pr-description.md](04-pr-description.md) §七。
 
-1. 分支合并：主仓 `packages/cangjie-gui` 有他人未提交改动（9 文件，对方仍在活跃改），
-   合并前需协调；真机验证需 OHOS 目标重编。
-2. 合并后按 03-app-wiring-plan.md 接线 client-next（回车提交 / 初始聚焦 / FocusTarget 迁移）。
+1. 分支合并：主仓 `packages/cangjie-gui` 仍有他人未提交改动（11 文件，对方 lcodec 迁移进行中），
+   合并前需协调；合并后补宿主机 `link-option`；真机验证需 OHOS 目标重编。
+2. 合并后 `git apply` 三个应用层补丁；其余接线（`library_view` 封面卡、列表 hover、L 层 repeat）
+   见 [03-app-wiring-plan.md](03-app-wiring-plan.md)。

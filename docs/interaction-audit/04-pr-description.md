@@ -58,6 +58,9 @@ tools/verify-cui-interactions.sh p0
   名单固化在 [`test-baseline-names.txt`](test-baseline-names.txt)，脚本会对整份名单做 diff。
 - 新增 54 个测试用例覆盖每条行为（焦点/键盘/悬停/Toast/Tooltip/选词/reveal/链接）。
 - 真机（OHOS）需用 `sts-1.2.0-linux-x64-ohos` 工具链重编并复验焦点环与实际观感。
+- **一条命令复现合并演练**：`tools/rehearse-merge.sh`（复制工作树快照 → 应用补丁 → 跑测试 → 比基线）。
+  实测：29 个补丁零冲突，合并后 **TOTAL 450 / PASSED 409 / 基线匹配**。详见
+  [05-merge-rehearsal.md](05-merge-rehearsal.md)。
 - **合并演练已完成且全绿**（见 [05-merge-rehearsal.md](05-merge-rehearsal.md)）：把主仓工作树（含对方
   未提交改动）复制成同级副本、对方改动先落成提交、应用 25 个补丁——**零冲突**；随后在副本里跑
   桩库测试得到 **TOTAL 444 / PASSED 403 / 失败名册与基线完全一致**（与分支单独跑完全相同）。

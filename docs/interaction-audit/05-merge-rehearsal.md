@@ -133,7 +133,36 @@ Summary: TOTAL: 450
 - `packages/lcodec-rehearsal`：lcodec 的隔离副本（避免动对方正在改的目录）
 - 复跑：`PKG_DIR=packages/cangjie-gui-mergecheck2 CANGJIE_STDX_PATH=/workspace/.cjv/stdx/lts/static/stdx tools/verify-cui-interactions.sh`
 
-## 八、演练副本（历次）
+
+## 九、一键演练脚本（`tools/rehearse-merge.sh`）
+
+前面三轮演练是手工做的，容易走样。现已固化成脚本，一条命令完成「复制快照 → 落快照提交 → 隔离 lcodec
+→ `git am` 应用补丁 → 跑测试并与基线名册比对」，全程不碰主仓工作树：
+
+```bash
+tools/rehearse-merge.sh            # 演练 + 测试，成功后清理副本
+tools/rehearse-merge.sh --keep     # 保留副本排查
+tools/rehearse-merge.sh --no-test  # 只验证补丁能否干净应用
+```
+
+实测输出（2026-11-11，对方 WIP 最新快照 + 29 个补丁）：
+
+```
+== 4/5 应用 gui 补丁（git am --3way）
+   已应用 29 个补丁
+== 5/5 跑桩库测试并与基线名册比对
+Summary: TOTAL: 450
+    PASSED: 409, SKIPPED: 0, ERROR: 40
+    FAILED: 1
+== 基线匹配：失败名册与 headless 基线完全一致
+```
+
+脚本还会自动给副本补上宿主机 `link-option`（迁移中的工作树可能缺这一行，见 §七），并在输出里
+注明这是"演练脚手架"，不改主仓。
+
+> 演练副本已清理（每个约 165M，脚本可随时重建）。
+
+## 十、演练副本（历次）
 
 - `packages/cangjie-gui-mergecheck`：主仓 WIP + 本分支 25 补丁（用于继续排查对方 lcodec 问题）
 - `packages/cangjie-gui-wipcheck`：纯主仓 WIP 对照（**不含**本分支）
