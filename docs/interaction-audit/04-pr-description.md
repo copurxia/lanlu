@@ -80,7 +80,30 @@ tools/verify-cui-interactions.sh p0
 - D 阅读器 dock 滑条换 `Slider`、列表行 hover、Radio 组用 `groupRange`
 - E 长按连发：需 L 层 `LWindowEvent` 增加 repeat 字段（已在接线清单里记录）
 
-## 六、回滚策略
+
+## 六、调用点一致性核对（合并前已做，2026-11-11）
+
+合并前对"新签名 / 新枚举 / 新语义"做了全仓核对，结论如下（附证据命令）：
+
+| 项 | 核对结果 |
+|---|---|
+| `fieldSurface(active, hovered!)` 调用点 | 全仓 26 处：13 处字段族已接 `hovered`，其余 13 处是纯展示/容器（ProgressBar、ListView 外框、CanvasWidget、Tab 头、时间步进弹层等），悬停无语义，**故意不接**；参数带默认值，未改的调用点零影响 |
+| `Key` 新增 `PageUp/PageDown/Menu` 的穷举 `match` | 框架内全部已处理；**应用层 client-next 没有对 `Key` 的穷举 match**（`grep "case Key\."` 只命中 reader/dto 里对 String key 的 match），合并后无需改应用代码 |
+| `drawTextBoxChrome` 调用点 | 仅 3 处（TextArea 自身、TextArea 盒子、TextField），全部走新的激活/外环策略，无旁路 |
+| 悬停视觉覆盖 | 带视觉悬停的控件文件从合并前 4 个增至 11 个（`grep -rl isHovered`）；其余 `claimHover` 只提供光标形状，属有意 |
+| 剩余 `hasFocus(...)` 的绘制路径 | 全部是行为门控（导航、键盘激活、拖选），**没有**任何控件再用 `hasFocus` 画描边——焦点视觉统一走 `showFocusRing` |
+| `Pagination/Table/TreeView/Accordion/Checkbox/RadioButton/TabView/Rating/Chip/SplitView/StepIndicator/ProgressRing/ReorderableList/WordCloud` | client-next 目前 **0 处使用**（审计时统计），这些控件的键盘化改动对应用零风险 |
+
+命令（在工作树 `packages/cangjie-gui-p0` 下）：
+
+```bash
+grep -rn "fieldSurface(" src | wc -l          # 26
+grep -rn "case Key\." ../../client-next/src   # 不命中 Key 枚举的穷举
+grep -rl "isHovered(" src | grep -v _test     # 11 个文件有悬停视觉
+grep -rn "hasFocus(" src | grep -v _test      # 均为行为门控，无绘制用途
+```
+
+## 七、回滚策略
 
 改动集中在独立提交、互不依赖构建配置；如需回退某个方向，可单独 revert 对应分组（A/B/C/D 互不冲突）。
 `FocusTarget`、`RichSpan.link`、`groupRange` 都是纯新增 API，revert 不会影响未使用它们的代码。
