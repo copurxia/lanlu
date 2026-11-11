@@ -92,6 +92,7 @@
 > 每条是否有自动化兜底见 [08-coverage-matrix.md](08-coverage-matrix.md)（31 条 / 20 条有测试）；
 > **20 类缺口的最终状态**：[09-gap-final-status.md](09-gap-final-status.md)
 > （✅13 完成并测试 / 🟡3 应用补丁已备 / 🔶3 部分移交 / 未动 0）；
+> 交接包自检（链接/补丁/树一致性/基线）：[10-delivery-selfcheck.md](10-delivery-selfcheck.md) 全部通过；
 > 合并评审看 [04-pr-description.md](04-pr-description.md)，合并演练结果见
 > [05-merge-rehearsal.md](05-merge-rehearsal.md)（25 补丁零冲突；合并后副本跑测试 **444/403 全绿**，
 > 唯一适配项已提前预置 → 落地零手工改动）。
