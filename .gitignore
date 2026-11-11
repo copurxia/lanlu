@@ -31,3 +31,12 @@ packages/postgresql-driver/native/*.o
 packages/postgresql-driver/native/lib*.a
 **/native/*.o
 **/native/lib*.a
+
+# Python 缓存（tools/*.py）
+__pycache__/
+
+# OHOS 构建产物（由 packages/lpack-ohos 生成，不入库；计划 §4.3）
+client-next/build/
+
+# LWP 共享库构建产物（packages/lwp/native/build.sh）
+packages/lwp/lib/

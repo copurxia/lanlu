@@ -1,0 +1,206 @@
+# LWP 协议 IDL —— 系统服务（计划 §8）
+#
+# 这些接口把原先散落的"文件桥/轮询/N-秒等待"收成显式消息：
+#   seat      = 键盘/指针能力与光标（对应 wl_seat）
+#   text_input= IME（对应 text-input-v3，含 preedit 与 surrounding text）
+#   clipboard = 异步读写 + MIME（对应 wl_data_device）
+#   dialog    = 文件选择/保存/文件夹（对应 portal）
+#   system    = 时区、语言、电量、字体路径等系统信息
+#   test      = 测试专用（回放、注入、抓帧），仅 debug 构建注册
+
+[interface.lw_seat]
+id = 8
+version = 1
+doc = "输入设备能力与光标。能力位见 capabilities 位域。"
+
+[[interface.lw_seat.event]]
+name = "capabilities"
+since = 1
+doc = "壳 -> 引擎：设备能力（键盘/指针/触摸/软键盘），位定义见 core_capabilities。"
+args = [{ name = "bits", type = "u64" }]
+
+[[interface.lw_seat.request]]
+name = "set_cursor"
+since = 1
+doc = "引擎 -> 壳：设置光标形状（对应 wl_pointer.set_cursor 的形状子集）。"
+args = [{ name = "shape", type = "u32" }]
+
+[[interface.lw_seat.request]]
+name = "lock_cursor"
+since = 1
+doc = "引擎 -> 壳：锁定光标到窗口内（游戏/拖拽用）。"
+args = [{ name = "locked", type = "bool" }]
+
+[interface.lw_text_input]
+id = 9
+version = 1
+doc = "IME：preedit 与 surrounding text（text-input-v3 的子集）。"
+
+[[interface.lw_text_input.request]]
+name = "enable"
+since = 1
+doc = "引擎 -> 壳：开启输入法（获得焦点时）。"
+args = []
+
+[[interface.lw_text_input.request]]
+name = "disable"
+since = 1
+doc = "引擎 -> 壳：关闭输入法。"
+args = []
+
+[[interface.lw_text_input.event]]
+name = "preedit"
+since = 1
+doc = "壳 -> 引擎：候选/preedit 文本与光标位置（用于在窗口内自绘候选条）。"
+args = [
+  { name = "text", type = "string" },
+  { name = "cursor", type = "u32" },
+]
+
+[[interface.lw_text_input.request]]
+name = "set_surrounding"
+since = 1
+doc = "引擎 -> 壳：告知光标周围文本，便于输入法做联想（text-input-v3 set_surrounding_text）。"
+args = [
+  { name = "text", type = "string" },
+  { name = "cursor", type = "u32" },
+  { name = "anchor", type = "u32" },
+]
+
+[[interface.lw_text_input.request]]
+name = "set_cursor_rect"
+since = 1
+doc = "引擎 -> 壳：光标矩形（窗口坐标），输入法据此定位候选框。"
+args = [
+  { name = "x", type = "i32" },
+  { name = "y", type = "i32" },
+  { name = "w", type = "i32" },
+  { name = "h", type = "i32" },
+]
+
+[interface.lw_clipboard]
+id = 10
+version = 1
+doc = "剪贴板：异步读写，带 MIME。取代原来的 clip_*.txt 文件桥。"
+
+[[interface.lw_clipboard.request]]
+name = "get"
+since = 1
+doc = "引擎 -> 壳：读剪贴板（异步，结果走 event text）。"
+args = [{ name = "serial", type = "u32" }]
+
+[[interface.lw_clipboard.event]]
+name = "text"
+since = 1
+doc = "壳 -> 引擎：剪贴板文本（对应 get 的 serial）。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "mime", type = "string" },
+  { name = "text", type = "string" },
+]
+
+[[interface.lw_clipboard.request]]
+name = "set"
+since = 1
+doc = "引擎 -> 壳：写剪贴板。"
+args = [
+  { name = "mime", type = "string" },
+  { name = "text", type = "string" },
+]
+
+[interface.lw_dialog]
+id = 11
+version = 1
+doc = "文件对话框（对应 portal：避免引擎直接碰沙箱路径）。"
+
+[[interface.lw_dialog.request]]
+name = "open_file"
+since = 1
+doc = "引擎 -> 壳：打开文件选择器。结果走 event result。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "filters", type = "string" },   # 逗号分隔扩展名
+]
+
+[[interface.lw_dialog.request]]
+name = "save_file"
+since = 1
+doc = "引擎 -> 壳：保存对话框。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "suggested", type = "string" },
+]
+
+[[interface.lw_dialog.event]]
+name = "result"
+since = 1
+doc = "壳 -> 引擎：选择结果；path 为空表示取消。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "path", type = "string" },
+]
+
+[interface.lw_system]
+id = 12
+version = 1
+doc = "系统信息：时区、语言、字体目录等（取代散落的环境变量探测）。"
+
+[[interface.lw_system.event]]
+name = "info"
+since = 1
+doc = "壳 -> 引擎：启动时同步一次的系统信息。"
+args = [
+  { name = "timezone", type = "string" },
+  { name = "language", type = "string" },
+  { name = "font_dir", type = "string" },
+  { name = "home_dir", type = "string" },
+  { name = "api_level", type = "u32" },
+]
+
+[[interface.lw_system.request]]
+name = "log"
+since = 1
+doc = "引擎 -> 壳：把日志交给壳输出（hilog），不再各写各的文件。"
+args = [
+  { name = "level", type = "u8" },
+  { name = "text", type = "string" },
+]
+
+[interface.lw_test]
+id = 13
+version = 1
+doc = "测试专用接口（计划 §16）：只在 debug 构建注册，release 不导出。"
+
+[[interface.lw_test.request]]
+name = "ready"
+since = 1
+doc = "引擎 -> 壳：引擎启动完成，可以注入测试动作。"
+args = [{ name = "engine_version", type = "u32" }]
+
+[[interface.lw_test.event]]
+name = "inject"
+since = 1
+doc = "壳 -> 引擎：注入一条输入（通道句柄见 test.capture 的前置配置）。"
+args = [
+  { name = "kind", type = "u32" },
+  { name = "a", type = "i32" },
+  { name = "b", type = "i32" },
+]
+
+[[interface.lw_test.request]]
+name = "request_capture"
+since = 1
+doc = "引擎 -> 壳：请壳抓一帧（ArkTS componentSnapshot）并写到 path。与 event 方向的 capture 相反。"
+args = [{ name = "path", type = "string" }]
+
+[[interface.lw_test.event]]
+name = "replay"
+since = 1
+doc = "壳 -> 引擎：把一份 .lwtrace 录制重放进通道（复现真机问题用，计划 §16.3）。path 在设备沙箱内。"
+args = [{ name = "path", type = "string" }]
+
+[[interface.lw_test.event]]
+name = "capture"
+since = 1
+doc = "壳 -> 引擎：抓一帧并存到 path（真机无 ADB 时用）。"
+args = [{ name = "path", type = "string" }]

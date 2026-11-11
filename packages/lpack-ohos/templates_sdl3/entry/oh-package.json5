@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Please describe the basic information.",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {
+    // P5：壳层不再依赖 SDL，libSDL3.so 不再是 napi 模块依赖
+  }
+}

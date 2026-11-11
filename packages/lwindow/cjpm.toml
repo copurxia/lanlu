@@ -7,3 +7,10 @@ description = "Lanlu 平台适配层（对标 Chromium ui/ozone）：进程环�
 
 [dependencies]
 lgui = { path = "../cangjie-gui/lgui" }
+lwp = { path = "../lwp" }
+
+# 宿主单测链接：静态依赖包的 link-option 不向上传递（同 lgui/cjpm.toml 的做法）。
+# LWP_LIB_DIR 指向 liblwp_native.so；LGUI_SDL_LIB_DIR 指向宿主 SDL3（CI 用
+# packages/cangjie-gui/sdl/.sdl3，本机可用 stub 目录）。
+[target.x86_64-unknown-linux-gnu]
+link-option = "-L ${LWP_LIB_DIR} -L ${LGUI_SDL_LIB_DIR} -llwp_native -lSDL3 -lSDL3_ttf -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread"

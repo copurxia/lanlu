@@ -1,0 +1,6 @@
+# 文件桥基线（计划 §11 / M6 删除进度）——由 tools/check-no-file-bridge.sh 生成，勿手改。
+# 记录每一处命中（文件:行:内容），数量只允许下降；删除后运行 --update-baseline 刷新。
+keys = [
+  "packages/lwindow/src/ohos_entry.cj:            envText = String.fromUtf8(File.readFrom(Path(base + \"/lanlu_env.txt\")))",
+  "packages/lwindow/src/ohos_entry.cj:        envText = String.fromUtf8(File.readFrom(Path(\"/data/local/tmp/lanlu_env.txt\")))",
+]

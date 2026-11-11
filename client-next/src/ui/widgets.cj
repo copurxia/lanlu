@@ -43,7 +43,10 @@ class Spinner <: Widget {
     }
 
     public func draw(ctx: UiContext): Unit {
-        ctx.requestFrame()
+        // R7：Spinner 只需 ~30fps（人眼对旋转弧的平滑度要求远低于文本交互），
+        // 且用定时续帧而不是无条件 requestFrame——动画结束（不可见）后自动停帧。
+        // 之前是每帧 requestFrame：只要有一个 Spinner 可见，整个 UI 就锁死 60fps 全树重建。
+        ctx.requestFrameAfter(33)
         let tau = 6.283185307179586
         let start = Float64(ctx.frame.elapsedMs % 900) / 900.0 * tau
         let cx = frame.centerX()

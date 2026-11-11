@@ -4,6 +4,7 @@ package portcheck
 // 便于 `hdc file recv` 取回核对。桌面构建默认关闭，行为与之前一致。
 import std.env.getVariable
 import std.fs.{File, Path}
+import std.collection.ArrayList
 import std.convert.*
 import libavformat_ffi.probeSubtitleStreams
 import lgui.input.Clipboard
@@ -184,7 +185,10 @@ func runLwindowProbeIfRequested(): Unit {
         try {
             let surface = lgpu.Surface.fromSurfaceId(sid)
             surface.configure(240, 160)
-            let font = lgpu.Font.load("/system/fonts/HarmonyOS_Sans.ttf")
+            // 字体路径属于平台事实：由平台层通过 LANLU_FONT_FILE 注入，
+            // 不在中立包里写死某个系统的目录（计划 §2「平台代码只在平台包里」）。
+            let fontPath = getVariable("LANLU_FONT_FILE") ?? "HarmonyOS_Sans.ttf"
+            let font = lgpu.Font.load(fontPath)
             let canvas = lgpu.LgpuCanvas(surface, font)
             surface.beginFrame(0.05, 0.07, 0.14, 1.0)
             canvas.fillRoundedRect(lgui.Rect(8.0, 8.0, 120.0, 30.0), 8.0, lgui.Color(0xE8, 0xB0, 0x4B, 0xFF))
@@ -197,12 +201,23 @@ func runLwindowProbeIfRequested(): Unit {
             out = "lwindow probe: drawn ok sid=" + sidText + " waited=" + waited.toString()
             out = out + " | fontMetrics ascent=" + asc.toString() + " descent=" + desc.toString() + " gap=" + gap.toString() + " upem=" + upem.toString() + " lineH=" + lineH.toString()
             // collect 5s（文件通道，读一次即可；这里短循环给 ArkTS 触摸留时间）
-            var evs = lwindow.readInputEvents()
+            // M6 第 1 步：输入只走协议 —— 这里轮询协议事件（原先读 input_events.txt）
+            var evs = ArrayList<lwindow.LWindowEvent>()
+            if (lwindow.lwpInputEnabled()) {
+                let _ = lwindow.initLwpInput()
+                match (lwindow.nextLwpEvent()) {
+                    case Some(e) => evs.add(e)
+                    case None => ()
+                }
+            }
             var rounds = 0
             while (rounds < 150 && evs.size == 0) {
                 sleep(Duration.millisecond * 100)
                 rounds++
-                evs = lwindow.readInputEvents()
+                match (lwindow.nextLwpEvent()) {
+                    case Some(e) => evs.add(e)
+                    case None => ()
+                }
             }
             out = out + " | events=" + evs.size.toString()
             for (ev in evs) {

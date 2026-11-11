@@ -6,7 +6,7 @@ output-type = "static"
 description = "移植自检（图片/网络/媒体/字幕）：跨平台代码，按 OHOS_SELFTEST=1 触发，结果写文件便于 hdc 取回。"
 
 [dependencies]
-vips_ffi = { path = "../vips_ffi" }
+lcodec = { path = "../lcodec" }
 qwest = { path = "../qwest" }
 libavformat_ffi = { path = "../libavformat_ffi" }
 libass_ffi = { path = "../libass_ffi" }

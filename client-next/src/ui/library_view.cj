@@ -102,7 +102,7 @@ public func libraryView(model: AppModel): Unit {
 // 品牌块与「设置」项已上移顶栏（#topbar 的品牌区与 ⚙ 钮），侧栏只留浏览/分类两组。
 
 private func sidebar(model: AppModel): Unit {
-    let bg = if (model.isLight()) { LANLU_L_BG } else { LANLU_BG }
+    let bg = if (model.isLight()) { LANLU_L_BG } else { LANLU_BG }  // EF F1 F5
     VStack {
         // 「浏览」分组：互斥单选，点击即生效。
         // 计数只展示有真实数据源的项：后端对「全部/仅收藏/仅未读/仅无标签」均无独立

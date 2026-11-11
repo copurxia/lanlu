@@ -23,18 +23,18 @@ CN_OHOS_SEED_FILE=/workspace/tmp/lanlu_kv_seed.bin bash client-next/ohos/build-o
 
 | 脚本 | 作用 | 何时需要 |
 |---|---|---|
-| `tools/build-hapgen.sh` | 构建 HAP 打包器 **hapgen** | 改了 `packages/ohos/src/main.cj` |
-| `tools/make-sdl3-noversion.sh` | 生成 `prefix-nov`（SONAME 改短为 `libSDL3.so`） | 重编 / 升级 SDL3 后 |
-| `tools/build-ffmpeg-ohos.sh` | 交叉编译 ffmpeg 7.1.1（含 PCM 解码） | 需要新编解码器时 |
+| `packages/lpack-ohos/tools/build-hapgen.sh` | 构建 HAP 打包器 **hapgen** | 改了 `packages/ohos/src/main.cj` |
+| `packages/lpack-ohos/tools/make-sdl3-noversion.sh` | 生成 `prefix-nov`（SONAME 改短为 `libSDL3.so`） | 重编 / 升级 SDL3 后 |
+| `packages/lpack-ohos/tools/build-ffmpeg-ohos.sh` | 交叉编译 ffmpeg 7.1.1（含 PCM 解码） | 需要新编解码器时 |
 
 > ⚠️ hapgen 必须用 **host 工具链** `/workspace/.cjv/toolchains/sts-1.2.0` 构建；
 > 用交叉工具链构建出的二进制运行时会 `SIGABRT`（`itfVExtensionDataStart is nullptr`）。
-> `tools/build-hapgen.sh` 已封装正确做法。
+> `packages/lpack-ohos/tools/build-hapgen.sh` 已封装正确做法。
 
 > ⚠️ SDL3 只允许**一份**进 HAP。SDL3 的 SONAME 是 `libSDL3.so.0`，而 `libSDL3_ttf.so`
 > 等按 `libSDL3.so` 依赖；两者同时存在会让进程加载两份 SDL3，导致窗口动作/文件对话框钩子
 > 注册到错误实例、`SDL_PushEvent` 恒失败（IME 文本投递不了）。
-> `tools/make-sdl3-noversion.sh` + `build-ohos.sh` 的 `OHOS_SDL3_PREFIX` 已统一为一份。
+> `packages/lpack-ohos/tools/make-sdl3-noversion.sh` + `build-ohos.sh` 的 `OHOS_SDL3_PREFIX` 已统一为一份。
 
 ## 端到端联调（mock 后端）
 
@@ -63,7 +63,7 @@ bash .research-ohos/verify-cn.sh                   # 构建→安装→启动→
 ## 回归测试（主机侧，无需设备）
 
 ```bash
-bash packages/vips_ffi/native-ohos/run-host-test.sh <image>
+bash packages/lplatform-ohos/deps/vips/run-host-test.sh <image>
 # ASAN: decodeFileToRgba 的 handle/unref 序列 + resize/extract/gaussblur 链
 ```
 

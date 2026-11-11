@@ -1,0 +1,39 @@
+# Lanlu 的鸿蒙应用配置（lpack-ohos 读取；计划 §4.3、§9.2）
+#
+# 这里是"这个应用是什么"的唯一来源：包名、版本、API 级别、设备、权限、壳形态。
+# 主仓不存放生成后的鸿蒙工程，只存放这份配置 + 模板 + 平台包里的壳源码。
+#
+# 迁移来源：client-next/ohos/cjpm.toml.ohos 的 [package.metadata.ohos]、
+#           client-next/cjpm.toml 的同名段、模板 module.json5 的权限列表。
+# 状态：已建（M0），尚未接入 hapgen —— hapgen 目前仍从 cjpm.toml 读 metadata。
+
+[app]
+name = "Lanlu"
+bundle-name = "com.example.cmakehap"   # TODO：签名配额恢复后改回 com.lanlu.clientnext
+version-code = 1000000
+version-name = "0.1.0"
+api-level = 26
+
+# 壳形态：lplatform-ohos/shell 提供 C/C++ 与 ArkTS；模板覆盖层由 lpack-ohos 拼装
+ui = "sdl3"            # M6 后改为 "lwp"
+module-name = "entry"
+shim-module = "lanlu_client_next"
+entry-ability = "EntryAbility"
+page = "pages/Index"
+engine-lib = "liblanlu_client_next.so"
+shell-lib = "libmain.so"
+
+# 计划 §8 / §9.1：只声明真正需要的权限
+# - INTERNET：业务必需
+# - LOCK_WINDOW_CURSOR：2in1 指针锁定（API 22+，oh_window.h LockCursor）
+# 注意：不要声明 ohos.permission.READ_PASTEBOARD（受限 ACL，实测装不上；
+#       剪贴板读取按系统规则只在 Ctrl+V 后 2 秒内读一次）
+permissions = ["ohos.permission.INTERNET", "ohos.permission.LOCK_WINDOW_CURSOR"]
+
+# openLink 拉起外部应用需要声明的 scheme（否则报 17700055）
+query-schemes = ["https", "http", "filemanager"]
+
+device-types = ["2in1", "phone"]
+
+# 首启种子（联调用预置会话 KV）：由 lpack-ohos 在构建期注入，生产不设
+# seed-kv-file = "path/to/lanlu_kv.bin"

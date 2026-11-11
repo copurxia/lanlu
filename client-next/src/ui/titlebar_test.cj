@@ -58,3 +58,41 @@ func titleBarDragRectsDropSlivers(): Unit {
     let rects = titleBarDragRects(1000, [mid])
     @Expect(rects.size, 0)
 }
+
+
+// ── 三键平台化（docs/lwindow-title-buttons-plan.md）───────────────────────
+// platformTitleButtonsWidth 的决策表：能力位未宣告 → 0（自绘回退）；
+// 宣告 + rect 到达 → 物理宽 / 密度；宣告 + rect 未到 → 文档默认 140vp + 8。
+
+@Test
+func platformTitleButtonsWidthZeroWithoutCapability(): Unit {
+    // 宿主（无 LWP 通道）：能力位必然未宣告 → 业务层应自绘三键
+    @Expect(platformTitleButtonsWidth(), 0.0)
+}
+
+@Test
+func platformTitleButtonsWidthFallbackUsesDocumentedDefault(): Unit {
+    // 能力位已宣告但 rect 未到时给文档默认值（140vp + 8 间距），
+    // 避免启动期闪现自绘三键再消失。
+    g_title_btn_visible = true
+    g_title_btn_width_px = 0
+    @Expect(platformTitleButtonsWidth(), 148.0)
+    g_title_btn_visible = false
+    g_title_btn_width_px = 0
+}
+
+@Test
+func platformTitleButtonsWidthScalesReportedPixels(): Unit {
+    // 真机实测：266px / 1.9 密度 = 140vp（官方文档三键区 140x37vp）
+    g_title_btn_visible = true
+    g_title_btn_width_px = 266
+    let w = platformTitleButtonsWidth()
+    @Expect(w > 139.0 && w < 141.0, true)
+    // 壳应用配置后回报 256px → 134.7vp（避让随真实 rect 收紧）
+    g_title_btn_width_px = 256
+    let w2 = platformTitleButtonsWidth()
+    @Expect(w2 > 134.0 && w2 < 135.5, true)
+    g_title_btn_visible = false
+    g_title_btn_width_px = 0
+}
+

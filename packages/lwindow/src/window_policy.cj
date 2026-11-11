@@ -33,6 +33,23 @@ public func preferredWindowGeometry(defaultW: Int32, defaultH: Int32, pinScale!:
     if (pinScale) {
         return WindowGeometry(defaultW, defaultH, 1.0)
     }
+    // LANLU_LWP=1：窗口尺寸由壳的 window.configure 决定（计划 §7：configure 是唯一尺寸来源）。
+    // 有界等待（300ms）：壳还没起来时保持旧行为，绝不无限等——这是 M0-4 教训的直接应用。
+    let cfg = lwpAwaitInitialConfigure(300)
+    match (cfg) {
+        case Some((w, h)) =>
+            if (w > 0 && h > 0) {
+                // 壳给的尺寸是**物理像素**；逻辑尺寸 = 物理 / scale。
+                // 不做这个除法时，PC 模式 150%/200% 缩放下内容只铺满左上角（第 116 轮真机症状）。
+                let sc = lwpReportedScale()
+                let lw = Int32(Float64(w) / Float64(sc))
+                let lh = Int32(Float64(h) / Float64(sc))
+                return WindowGeometry(if (lw > 0) { lw } else { Int32(w) },
+                    if (lh > 0) { lh } else { Int32(h) }, sc)
+            }
+            ()   // 收到但无效：继续走本地策略
+        case None => ()
+    }
     try {
         let geo = primaryDisplayInfo().geometry
         let scale = geo.contentScale
@@ -84,6 +101,20 @@ public func prepareDesktopIntegration(): Unit {
 
 // 系统无 fontconfig 平台（OHOS）的默认无衬线字体；找不到返回 None，由 cui 走字体库回退。
 public func systemSansFontPath(): Option<String> {
+    // 1) 壳通过 lw_system.info 下发的字体目录（计划 §8：系统事实由平台层提供，引擎不猜路径）
+    match (lwpSystemInfo()) {
+        case Some((_, _, fontDir, _, _)) =>
+            if (fontDir.size > 0) {
+                for (name in ["HarmonyOS_Sans_SC.ttf", "HarmonyOS_Sans.ttf", "NotoSansCJK-Regular.ttc"]) {
+                    let p = fontDir + "/" + name
+                    if (exists(Path(p))) {
+                        return Some(p)
+                    }
+                }
+            }
+        case None => ()
+    }
+    // 2) 回落：已知候选路径
     let candidates = ["/system/fonts/HarmonyOS_Sans_SC.ttf"]
     for (p in candidates) {
         if (exists(Path(p))) {

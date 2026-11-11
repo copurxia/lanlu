@@ -2,11 +2,16 @@ package lanlu_client_next
 
 import cui.*
 import cui.desktop.{frameProbeHook}
-import lgpu.{captureRequest, captureSize, captureWriteTo}
+import cui.{FileDialogResult, FileDialogs}
+import lgpu.{captureRequest, captureSize, captureWriteTo, statsLine}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
-import lanlu_client_next.ui.{lastCanvas}
+import lanlu_client_next.ui.{lastCanvas, probeTrace}
+import lwindow.{clipboardSetText, clipboardGetText, lwpInputEnabled}
+import lgui.{debugFocusId, lastTextInputRect}
+import lwindow.{lwpAwaitSystemInfo, lwpCursorShapeForPoint, lwpCursorShapeSent, lwpFrameTick, lwpImeEnable, lwpLastPointer, lwpLog, lwpRequestCapture, lwpSetCursorShape, lwpSetWindowMinMax, lwpReportedScale, lwpSetWindowTitle, lwpViolations, requestWindowCommand}
+import std.convert.*
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists as fsExists, Path as FsPath, File as FsFile}
 import std.time.MonoTime
@@ -17,17 +22,28 @@ import qwest.ClientBuilder
 import lgui.input.{Clipboard}
 import portcheck.runIfEnabled
 
+/// 上一次的焦点控件 id（用于"文本输入开始/结束"的通知去抖）
+var g_lastFocusId: String = ""
+
+/// M0 性能打点开关（只读一次环境变量）：LANLU_PERF=1 或 LANLU_PROBE_LGPU=1。
+/// 之前每帧都会被反复 getVariable，这里缓存成一次性判定。
+private var g_perfStatsOn: ?Bool = None
+
+func perfStatsEnabled(): Bool {
+    match (g_perfStatsOn) {
+        case Some(v) => v
+        case None =>
+            let on = (getVariable("LANLU_PERF") ?? "0") == "1" ||
+                (getVariable("LANLU_PROBE_LGPU") ?? "0") == "1"
+            g_perfStatsOn = Some(on)
+            on
+    }
+}
+
 // 联调 trace：追加一行到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
 func probeTraceLine(line: String): Unit {
-    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
-        return
-    }
-    let home = getVariable("HOME") ?? "."
-    let path = FsPath(home + "/probe_trace.txt")
-    try {
-        let old = if (fsExists(path)) { String.fromUtf8(FsFile.readFrom(path)) } else { "" }
-        FsFile.writeTo(path, (old + line + String.fromUtf8(Array<UInt8>(1, repeat: 10))).toArray())
-    } catch (_) {}
+    // 与 ui.probeTrace 是同一份逻辑（第 26 轮欠的合并）：委托过去，避免两处漂移。
+    probeTrace(line)
 }
 
 // 根路由：按 model.page 切页（无路由框架，状态驱动）。
@@ -193,6 +209,15 @@ public func runApp(): Int64 {
     // 钳制结果低于 960×640 最小窗口时不再收缩（宁可超界也保住最小可用布局）。
     // 窗口几何/缩放策略在 lwindow（平台层）；seedMode 钉死 1.0 以保 CI 快照像素确定性。
     let geom = preferredWindowGeometry(harnessWindowWidth(), harnessWindowHeight(), pinScale: seedMode.size > 0)
+    probeTraceLine("geometry ${geom.width}x${geom.height} scale=${geom.scale} reportedScale=${lwpReportedScale()}")
+    // 协议开启（默认）时：系统事实（时区/语言/字体目录）由壳下发，不再靠环境变量猜。
+    // 有界等待：壳没起来就保持旧行为。
+    // 注意：这里必须用 lwpInputEnabled()，不能写死 LANLU_LWP=="1" ——
+    // 默认开启后 env 是空的，写死会让整段逻辑静默失效（第 70 轮踩过）。
+    if (lwpInputEnabled()) {
+        let gotInfo = lwpAwaitSystemInfo(300)
+        probeTraceLine("lwp system.info ready=" + gotInfo.toString())
+    }
     let uiScale: Float32 = geom.scale
     let winW: Int32 = geom.width
     let winH: Int32 = geom.height
@@ -221,6 +246,68 @@ public func runApp(): Int64 {
             }
         }
     }
+    // 运行期窗口标题与尺寸约束（验证 set_title / set_min_max 两条协议真的在发）
+    if (lwpInputEnabled()) {
+        let _ = lwpSetWindowTitle("Lanlu")
+        let _ = lwpSetWindowMinMax(960, 640, 0, 0)
+        probeTraceLine("lwp title/limits sent")
+    }
+
+    // 协议开启（默认）时：每帧走一次 tick（frame.request + 生命周期 + 超时检查）。
+    // 与已有的抓帧钩子**串联**，不覆盖它。同样必须用 lwpInputEnabled()。
+    if (lwpInputEnabled()) {
+        let prevHook = frameProbeHook
+        frameProbeHook = { frame: Int64 =>
+            match (prevHook) {
+                case Some(h) => h(frame)
+                case None => ()
+            }
+            let _ = lwpFrameTick()
+            // 光标形状：每 8 帧按「指针是否在文本框内」决定，变了才发。
+            // 放在 frame tick 而不是事件源里：事件源只在有输入时被调用，
+            // 焦点刚变化那一拍未必有指针事件（第 89 轮踩过）。
+            if (frame % 8 == 0) {
+                let (px, py) = lwpLastPointer()
+                if (frame % 16 == 0) {   // 只在 frame%8==0 的帧里，所以取 16 的倍数才能命中
+                    probeTraceLine("cursor frame=" + frame.toString() + " ptr=" +
+                        Int64(px).toString() + "," + Int64(py).toString() +
+                        " sent=" + lwpCursorShapeSent().toString() +
+                        " hasRect=" + (match (lastTextInputRect) { case Some(_) => "1"; case None => "0" }))
+                }
+                if (px >= 0.0) {
+                    let (tx, ty, tw, th, hasRect) = match (lastTextInputRect) {
+                        case Some(r) => (r.x, r.y, r.w, r.h, true)
+                        case None => (0.0f32, 0.0f32, 0.0f32, 0.0f32, false)
+                    }
+                    let want = lwpCursorShapeForPoint(tx, ty, tw, th, px, py, hasRect)
+                    if (want != lwpCursorShapeSent()) {
+                        let _ = lwpSetCursorShape(want)
+                    }
+                }
+            }
+            // 文本输入焦点变化 -> 通知壳（显示/隐藏软键盘）
+            let focusId = debugFocusId
+            if (focusId != g_lastFocusId) {
+                g_lastFocusId = focusId
+                let hasText = focusId.size > 0
+                let _ = lwpImeEnable(hasText)
+            }
+            if (frame % 30 == 0) {
+                probeTraceLine("lwp violations " + lwpViolations())
+            }
+            // M0 渲染统计：每 120 帧（约 2s）打一行 lgpu 计数与文字测量命中率。
+            // 只在探针/性能开关打开时输出，release 默认不产生任何字符串。
+            if (frame % 120 == 0 && perfStatsEnabled()) {
+                probeTraceLine("lgpu stats " + statsLine() + " measure=" +
+                    (match (lastCanvas) {
+                        case Some(c) =>
+                            let (hits, misses, entries) = c.measureStats()
+                            "hits=${hits} miss=${misses} entries=${entries}"
+                        case None => "n/a"
+                    }))
+            }
+        }
+    }
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
             // 无边框窗口：创建时即无 OS 装饰；标题栏由 ui/titlebar.cj 自绘。
@@ -231,17 +318,65 @@ public func runApp(): Int64 {
                 systemSansFontPath()
             }), theme: lanluThemeFor(settings.theme),
     )
+    // 联调：LANLU_PROBE_CLIP=1 各发一次 clipboard.set / get（验 M6 第 2 步双向通路）
+    if ((getVariable("LANLU_PROBE_CLIP") ?? "0") == "1") {
+        spawn {
+            sleep(Duration.second * 5)
+            clipboardSetText("m6-clip-probe")
+            // 剪贴板读是异步的（get -> 壳读系统剪贴板 -> clipboard.text 事件 -> 缓存）
+            sleep(Duration.millisecond * 500)
+            var v = ""
+            var tries = 0
+            while (tries < 20) {
+                v = clipboardGetText()
+                if (v.size > 0) {
+                    break
+                }
+                sleep(Duration.millisecond * 100)
+                tries++
+            }
+            probeTraceLine("clip probe get='" + v + "' tries=" + tries.toString())
+        }
+    }
+
+    // 联调：LANLU_PROBE_RESIZE=N 反复「最大化/还原」N 轮，压测窗口尺寸变化路径
+    // （§7.1：Maleoon swapchain 反复重建是已知崩溃风险；这里走 window.set_state 让壳真的改窗口尺寸）
+    match (getVariable("LANLU_PROBE_RESIZE")) {
+        case Some(v) =>
+            var parsed: Int64 = 0
+            try { parsed = Int64.parse(v) } catch (_) { parsed = 0 }
+            let rounds = parsed
+            if (rounds > 0) {
+                spawn {
+                    sleep(Duration.second * 6)
+                    var i = 0
+                    while (i < rounds) {
+                        let st = if (i % 2 == 0) { "maximize" } else { "restore" }
+                        requestWindowCommand(st)
+                        probeTraceLine("resize round " + (i + 1).toString() + " -> " + st)
+                        sleep(Duration.millisecond * 900)
+                        i++
+                    }
+                    probeTraceLine("resize rounds done " + rounds.toString())
+                }
+            }
+        case None => ()
+    }
+
     // 联调：LANLU_PROBE_SNAPSHOT=1 启动后请求一次页面抓帧（验证抓帧桥）
     if ((getVariable("LANLU_PROBE_SNAPSHOT") ?? "0") == "1") {
         spawn {
             sleep(Duration.second * 4)
-            let home = getVariable("HOME") ?? "."
-            try {
-                FsFile.writeTo(FsPath(home + "/snapshot_req.txt"), "1".toArray())
-                probeTraceLine("snapshot requested")
-            } catch (e: Exception) {
-                probeTraceLine("snapshot req failed: " + e.toString())
+            // LANLU_LWP=1：抓帧请求走 lw_test.capture（壳收到后调 componentSnapshot）；
+            // 否则回落文件桥（LANLU_LWP=0 的调试路径）。
+            // 注意运算符优先级：`a ?? "." + "/x"` 会被解析成 `a ?? ("." + "/x")`，
+            // 传进去的就成了目录本身（真机上表现为「抓帧路径=目录」）。
+            let snapPath = (getVariable("HOME") ?? ".") + "/snap_shell.rgba"
+            if (lwpRequestCapture(snapPath)) {
+                probeTraceLine("snapshot requested via lwp test.capture")
+                return
             }
+            probeTraceLine("snapshot request dropped: LWP 不可用（文件桥已删除）")
         }
     }
     println("[boot] 4 DesktopApp created (window+renderer ok) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
@@ -257,6 +392,36 @@ public func runApp(): Int64 {
                 probeTraceLine("clip read=[" + back + "]")
             } catch (e: Exception) {
                 probeTraceLine("clip failed: " + e.toString())
+            }
+        }
+    }
+    // 联调：LANLU_PROBE_DIALOG=1 —— 验证文件对话框文件桥（引擎 → 壳层 picker → 结果 → 回调）
+    if ((getVariable("LANLU_PROBE_DIALOG") ?? "0") == "1") {
+        spawn {
+            sleep(Duration.second * 3)
+            try {
+                let request = FileDialogs.openFile()
+                probeTraceLine("dialog req submitted")
+                var waited = 0
+                while (waited < 200) {
+                    sleep(Duration.millisecond * 500)
+                    waited += 1
+                    if (request.isDone()) {
+                        match (request.result()) {
+                            case FileDialogResult.FileDialogSelected(paths, _) =>
+                                probeTraceLine("dialog result selected count=" + paths.size.toString() + " first=" + (if (paths.size > 0) { paths[0] } else { "" }))
+                            case FileDialogResult.FileDialogCanceled =>
+                                probeTraceLine("dialog result canceled")
+                            case FileDialogResult.FileDialogFailed(msg) =>
+                                probeTraceLine("dialog result failed=" + msg)
+                            case FileDialogResult.FileDialogPending =>
+                                probeTraceLine("dialog result still pending")
+                        }
+                        break
+                    }
+                }
+            } catch (e: Exception) {
+                probeTraceLine("dialog probe failed: " + e.toString())
             }
         }
     }

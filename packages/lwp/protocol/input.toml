@@ -1,0 +1,56 @@
+# LWP 协议 IDL —— input 接口族（计划 §6：指针/滚轮/键盘/文本输入）
+#
+# 设计对齐 winit/wayland：指针事件带"处于哪个 surface"的语义由 shell 保证；
+# 高频 motion 标记 DROPPABLE，由发送端（壳）限流，接收端可丢。
+
+[interface.lw_input]
+id = 2
+version = 1
+doc = "输入事件：指针、滚轮、键盘、文本输入。全部由壳 -> 引擎（event 方向）。"
+
+[[interface.lw_input.event]]
+name = "pointer_motion"
+since = 1
+doc = "指针移动。x/y 为 surface 逻辑坐标（物理像素 / 缩放比）。"
+args = [
+  { name = "x", type = "f32" },
+  { name = "y", type = "f32" },
+]
+# flags 由发送方加 LWP_F_DROPPABLE
+
+[[interface.lw_input.event]]
+name = "pointer_button"
+since = 1
+doc = "按键按下/释放。button 取值对齐 winit：0=左 1=右 2=中。"
+args = [
+  { name = "x", type = "f32" },
+  { name = "y", type = "f32" },
+  { name = "button", type = "u8" },
+  { name = "down", type = "bool" },
+]
+
+[[interface.lw_input.event]]
+name = "pointer_axis"
+since = 1
+doc = "滚轮/触摸板滚动。dx/dy 为逻辑行数；wayland 轴向取反后传入（计划 §6.3）。"
+args = [
+  { name = "dx", type = "f32" },
+  { name = "dy", type = "f32" },
+]
+
+[[interface.lw_input.event]]
+name = "key"
+since = 1
+doc = "键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：Linux xkb+OHOS 统一映射）；down 区分按下/释放。"
+args = [
+  { name = "keycode", type = "u32" },
+  { name = "down", type = "bool" },
+]
+
+[[interface.lw_input.event]]
+name = "text_input"
+since = 1
+doc = "IME 提交的文本（对应 wayland text-input-v3 commit）。"
+args = [
+  { name = "text", type = "string" },
+]

@@ -1,0 +1,105 @@
+# LWP 协议 IDL —— core 接口族（计划 §5.1、§5.5）
+#
+# 约定（生成器 tools/lwp-gen.py 实现）：
+#   * 每条消息体以 uint32 size 开头（含头，不含 lwp_header），接收方按 size 跳过未知消息；
+#   * 字段按声明顺序紧密排列（packed，小端），C 侧用 __attribute__((packed))，
+#     仓颉侧按偏移逐字段解码，不依赖 @C struct 的 ABI；
+#   * string = { uint16 off; uint16 len; }，off 相对消息体起点，UTF-8；
+#   * opcode = 同接口内、同方向（request/event）的声明序号，从 0 开始；
+#   * 字段只允许追加；删除/改类型 = protocol_major + 1。
+
+[interface.lw_core]
+id = 1
+version = 1
+doc = "握手、错误与日志。所有连接的第一条消息必须是 hello_ack / hello 之一。"
+
+[[interface.lw_core.event]]
+name = "hello"
+since = 1
+doc = "壳 -> 引擎：协议版本、壳身份、OS API 级别、能力位。"
+args = [
+  { name = "protocol_major", type = "u16" },
+  { name = "protocol_minor", type = "u16" },
+  { name = "shell_name", type = "string" },
+  { name = "os_name", type = "string" },
+  { name = "os_api_level", type = "u32" },
+  { name = "capabilities", type = "u64" },
+]
+
+[[interface.lw_core.request]]
+name = "hello_ack"
+since = 1
+doc = "引擎 -> 壳：确认握手。收到它之前壳不得发送其他消息；它是链路可用的唯一判据（见 docs/l-layer.md M0-4）。"
+args = [
+  { name = "protocol_major", type = "u16" },
+  { name = "protocol_minor", type = "u16" },
+  { name = "engine_version", type = "u32" },
+  { name = "engine_name", type = "string" },
+]
+
+[[interface.lw_core.event]]
+name = "error"
+since = 1
+doc = "壳 -> 引擎：协议层错误（解码失败、未知 opcode、版本不兼容等）。"
+args = [
+  { name = "code", type = "i32" },
+  { name = "message", type = "string" },
+]
+
+[[interface.lw_core.event]]
+name = "log"
+since = 1
+doc = "壳 -> 引擎：统一日志（取代 hilog 丢失与散落的探针文件）。"
+args = [
+  { name = "level", type = "u8" },   # 0=debug 1=info 2=warn 3=error
+  { name = "module", type = "string" },
+  { name = "text", type = "string" },
+]
+
+[[interface.lw_core.request]]
+name = "ping"
+since = 1
+doc = "引擎 -> 壳：存活探测，壳回 pong（同一 seq）。"
+args = [{ name = "seq", type = "u32" }]
+
+[[interface.lw_core.event]]
+name = "pong"
+since = 1
+doc = "壳 -> 引擎：ping 的回复。"
+args = [{ name = "seq", type = "u32" }]
+
+[enum.core_error]
+extensible = true
+doc = "error.code 取值；未列出的值一律按 Unknown 处理。"
+entries = [
+  ["none", 0],
+  ["bad_message", 1],
+  ["unknown_opcode", 2],
+  ["version_mismatch", 3],
+  ["not_handshaked", 4],
+  ["dropped", 5],
+]
+
+[bitfield.core_capabilities]
+extensible = true
+doc = "hello.capabilities：壳宣告的能力位（计划 §5.3）。缺省全 0 = 什么都不支持。"
+entries = [
+  ["server_side_decorations", 1],
+  ["window_move", 2],
+  ["window_resize_edges", 4],
+  ["min_max_size", 8],
+  ["cursor_shapes", 16],
+  ["cursor_lock", 32],
+  ["ime_preedit", 64],
+  ["ime_surrounding_text", 128],
+  ["clipboard_read_async", 256],
+  ["clipboard_mime", 512],
+  ["drag_drop", 1024],
+  ["file_dialog_save", 2048],
+  ["file_dialog_folder", 4096],
+  ["vsync", 8192],
+  ["fractional_scale", 16384],
+  ["multi_window", 32768],
+  ["soft_keyboard", 65536],
+  ["title_buttons", 131072],
+]

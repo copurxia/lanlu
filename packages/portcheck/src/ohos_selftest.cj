@@ -2,9 +2,9 @@ package portcheck
 
 // OHOS 移植自检实现（仅在 OHOS_SELFTEST=1 时由 ohos_entry 调用）。
 import std.env.getVariable
-import std.fs.{File, Path}
+import std.fs.{File, Path, exists}
 import std.time.MonoTime
-import vips_ffi.*
+import lcodec.{VipsApi, sniffImageFormat, sniffedImageFormatName, decodeFileToRgba}
 import qwest.*
 import libavformat_ffi.*
 import libass_ffi.*
@@ -37,8 +37,78 @@ func ohosImageSelftest(base: String): Unit {
         File.writeTo(Path(base + "/vt.webp"), WEBP_SAMPLE)
         let m1 = decodeMsg(base + "/vt.png")
         let m2 = decodeMsg(base + "/vt.webp")
-        File.writeTo(Path(base + "/vipstest.txt"), "rc=${rc}\npng: ${m1}\nwebp: ${m2}\n".toArray())
+        // lcodec 存在性 + 诊断能力：嗅探结果写盘（不依赖解码成败）；再用 lcodec 管线解一张 PNG，
+        // 失败时异常信息应带 format= 前缀（这是本次统合的核心验收点）。
+        var m3 = "n/a"
+        try {
+            let d = decodeFileToRgba(base + "/vt.png")
+            m3 = "lcodec w=${d.width} h=${d.height} sz=${d.size}"
+            d.close()
+        } catch (e: Exception) {
+            m3 = "lcodec " + e.message
+        }
+        let sniffs = "png=" + sniffedImageFormatName(sniffImageFormat(base + "/vt.png")) +
+            " webp=" + sniffedImageFormatName(sniffImageFormat(base + "/vt.webp"))
+        // 远端格式探测（可选，样本不入库）：从环境变量取 URL → 下载 → lcodec 解码。
+        //   LANLU_CODEC_PROBE_URL  → probe1（例如真实 AVIF）
+        //   LANLU_CODEC_PROBE2_URL → probe2（例如 JPEG/PNG 封面）
+        // 真机命令示例：
+        //   aa start ... --ps lanlu.env.OHOS_SELFTEST 1
+        //               --ps lanlu.env.LANLU_CODEC_PROBE_URL  http://192.168.0.131:18080/test.avif
+        //               --ps lanlu.env.LANLU_CODEC_PROBE2_URL http://192.168.0.131:18080/cover.jpg
+        let p1 = probeImageFromEnv(base, "1", "LANLU_CODEC_PROBE_URL")
+        let p2 = probeImageFromEnv(base, "2", "LANLU_CODEC_PROBE2_URL")
+        // 运行时装载诊断：图片后端是 dlopen 进来的（不参与链接），真机缺库时这里能直接看到原因。
+        let backend = if (VipsApi.available()) { "loaded" } else { "unavailable: " + VipsApi.unavailableReason() }
+        File.writeTo(Path(base + "/vipstest.txt"),
+            "rc=${rc}\npng: ${m1}\nwebp: ${m2}\nlcodec: ${m3}\nprobe1: ${p1}\nprobe2: ${p2}\nsniff: ${sniffs}\nbackend: ${backend}\n".toArray())
     } catch (_) {
+    }
+}
+
+// 从环境变量取 URL（可选）→ 下载到 $HOME/probe_<tag>.img → 用 lcodec 解码并报告。
+private func probeImageFromEnv(base: String, tag: String, envName: String): String {
+    match (getVariable(envName)) {
+        case Some(url) =>
+            let dest = base + "/probe_" + tag + ".img"
+            let dl = try {
+                let (origin, reqPath) = splitUrl(url)
+                let c = ClientBuilder().baseUrl(origin).build()
+                let r = c.get(reqPath).send()
+                let bytes = r.bytes()
+                let st = r.status
+                c.close()
+                if (st != 200) {
+                    return "download status=${st}"
+                }
+                File.writeTo(Path(dest), bytes)
+                "downloaded ${bytes.size}B"
+            } catch (e: Exception) {
+                return "download FAIL: " + e.message
+            }
+            try {
+                let d = decodeFileToRgba(dest)
+                let s = "w=${d.width} h=${d.height} sz=${d.size} fmt=" +
+                    sniffedImageFormatName(sniffImageFormat(dest)) + " (" + dl + ")"
+                d.close()
+                s
+            } catch (e: Exception) {
+                "FAIL: " + e.message + " [" + dl + "]"
+            }
+        case None => "absent"
+    }
+}
+
+// URL → (origin, path)：qwest 的 baseUrl 只接受 origin（scheme://host:port）。
+private func splitUrl(url: String): (String, String) {
+    let start = match (url.indexOf("://")) {
+        case Some(i) => i + 3
+        case None => 0
+    }
+    let rest = url[start..]
+    match (rest.indexOf("/")) {
+        case Some(i) => (url[0..(start + i)], rest[i..])
+        case None => (url, "/")
     }
 }
 

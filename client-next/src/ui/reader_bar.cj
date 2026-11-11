@@ -250,6 +250,8 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
         }
         case None => ""
     }
+    // 平台三键宽度（vp；0 = 平台不提供 → 自绘三键回退）
+    let platformBtnW = platformTitleButtonsWidth()
     ZStack {
         // 底：bg 95%→75% 纵向渐隐（原型 linear-gradient；亮色 .96→.80）。
         if (light) {
@@ -275,11 +277,16 @@ public func readerTitleBar(window: SdlWindow, model: AppModel): Unit {
                 model.toggleReaderFavorite()
             }
             GhostIconButton(GhostGlyph.Gear, "readerbar:settings") {=> model.toggleReaderSettings() }
-            WinSep()
-            WinControlButton(WinGlyph.Min, "readerbar:min") { _ => window.minimize() }
-            WinControlButton(WinGlyph.Max, "readerbar:max") { _ => toggleWindowMaximize(window) }
-            WinControlButton(WinGlyph.Close, "readerbar:close") { ctx => ctx.requestClose() }
-        }.spacing(6.0).crossAxisAlignment(CrossAxisAlignment.Center).padding(12.0, 0.0, 12.0, 0.0)
+            // 三键平台化（docs/lwindow-title-buttons-plan.md）：同主标题栏，
+            // 平台提供三键时不再自绘，右侧留出系统三键宽度。
+            if (platformBtnW <= 0.0) {
+                WinSep()
+                WinControlButton(WinGlyph.Min, "readerbar:min") { _ => window.minimize() }
+                WinControlButton(WinGlyph.Max, "readerbar:max") { _ => toggleWindowMaximize(window) }
+                WinControlButton(WinGlyph.Close, "readerbar:close") { ctx => ctx.requestClose() }
+            }
+        }.spacing(6.0).crossAxisAlignment(CrossAxisAlignment.Center)
+            .padding(12.0, 0.0, 12.0 + (if (platformBtnW > 0.0) { platformBtnW + 8.0 } else { 0.0 }), 0.0)
     // alignment 是 ZStack 专有链式，须排在通用修饰器 height 之前（同 titleBar 写法）。
     }.alignment(Alignment.TopLeading).height(Float32(READER_BAR_HEIGHT))
 }

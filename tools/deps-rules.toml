@@ -1,0 +1,119 @@
+# 依赖白名单规则（计划 docs/lwindow-platform-separation-plan.md §4.5）
+#
+# 每个包声明它允许依赖的包（cjpm.toml [dependencies]）与允许 import 的顶层包。
+# 不在白名单里的一律算违规。违规数记在 tools/quality-baseline.toml，只允许下降。
+#
+# 用法：
+#   python3 tools/check-deps.py                  # 对照基线检查（CI 用）
+#   python3 tools/check-deps.py --report         # 按规则聚合列出所有待清理项
+#   python3 tools/check-deps.py --update-baseline # 重写基线（只在清理了违规后执行）
+
+[meta]
+# 计划：docs/lwindow-platform-separation-plan.md
+# 目标态（M6 之后）的包划分见 §4.1：
+#   client-next  -> cui, lwindow, portcheck, 业务 FFI 包
+#   cui          -> lbase, lwindow
+#   lwindow      -> lbase, lwp, lgpu(仅 backend.lwp)
+#   lgpu         -> lbase
+#   lwp, lbase   -> 无（中立）
+#   lplatform-*  -> 平台 SDK + lwp
+#   lpack-*      -> 构建工具
+
+# 所有包通用的豁免：Cangjie 标准库与 stdx 永远允许
+[global]
+allowed_import_roots = ["std", "stdx", "core", "ohos"]
+
+# 未在上面登记的中立 FFI 包：只允许标准库
+[default]
+allowed_deps = []
+note = "FFI 绑定包，只允许依赖标准库；如需依赖请在本文件显式登记"
+
+[package.lanlu_client_next]
+path = "client-next"
+allowed_deps = [
+  "cui",           # → M6 之后仍需
+  "lwindow",       # → 平台抽象
+  "portcheck",     # → 移植自检
+  "lcodec",        # → 解码统合层（图片解码经此，不再直接依赖 vips_ffi）
+  "libvlc_ffi", "webview", "rocksdb_ffi",
+  "fontkit_ffi", "qwest", "libavformat_ffi", "libass_ffi",
+]
+# §4.5：业务层不得直接依赖 SDL 绑定、渲染器、协议本体
+forbidden = ["lgui", "lgpu", "lwp"]
+note = "违规项应在 M1/M6 迁入 lwindow.backend.lwp 后消失"
+
+[package.cui]
+path = "packages/cangjie-gui"
+allowed_deps = ["lbase", "lwindow"]
+forbidden = ["lgui", "lgpu", "lwp"]
+note = "M6 拆出 lbase 后，lgui 应替换为 lbase"
+
+# 解码统合层：允许依赖 vips_ffi（FFI 绑定）；业务层经 lcodec 间接使用，不再直连
+[package.lcodec]
+path = "packages/lcodec"
+allowed_deps = []
+note = "解码统合层：图片解码跨平台 API；OHOS 后端由 lplatform-ohos 的同符号 shim 顶替 libvips"
+
+[package.lgpu]
+path = "packages/lgpu"
+allowed_deps = ["lbase"]
+forbidden = ["lgui"]
+note = "渲染器与平台无关：只接收原始窗口句柄（M1W）"
+
+[package.lwindow]
+path = "packages/lwindow"
+allowed_deps = ["lbase", "lwp", "lgpu"]
+forbidden = ["lgui"]
+note = "平台抽象层不得依赖 SDL 绑定包（M6）"
+
+[package.lgui]
+path = "packages/cangjie-gui/lgui"
+allowed_deps = ["lcodec"]
+note = "过渡期 SDL 绑定包：M6 整体删除，期间不得新增依赖"
+
+[package.portcheck]
+path = "packages/portcheck"
+allowed_deps = [
+  "lwindow", "lgpu", "lgui", "lwp", "lbase", "lcodec",
+  "qwest", "libavformat_ffi", "libass_ffi", "libvlc_ffi",
+  "webview", "fontkit_ffi",
+]
+note = "移植自检：允许触达所有后端；M5 起改为经 lwp test 接口驱动"
+
+[package.lgpu_native]
+path = "packages/lgpu/native"
+kind = "cargo"
+allowed_deps = [
+  "wgpu", "naga", "ab_glyph", "png", "pollster", "bytemuck", "raw-window-handle",
+  "log", "rustybuzz",
+]
+# 渲染器不得引入窗口/输入栈：窗口句柄由壳经 surface.available 给出（§4.1、§8A）
+forbidden = ["winit", "winit-ohos", "winit-wayland", "smithay-client-toolkit", "wayland-client"]
+note = "wgpu 渲染器：零平台代码（M1W）"
+
+# 与本计划无关的中立包：显式登记各自的真实依赖，避免噪声淹没计划相关违规
+[package.csorm]
+path = "packages/csorm"
+allowed_deps = ["csorm_macros"]
+
+[package.epub]
+path = "packages/epub"
+allowed_deps = ["archive_ffi"]
+
+[package.postgresql-driver]
+path = "packages/postgresql-driver"
+allowed_deps = ["csorm", "csorm_macros"]
+
+# 未来平台包（M0 建立；先登记规则，包存在后自动生效）
+[package.lplatform-ohos]
+path = "packages/lplatform-ohos"
+allowed_deps = ["lwp"]
+note = "鸿蒙壳：可自由使用 OHOS NDK；不得依赖引擎内部包"
+
+[package.lplatform-wayland]
+path = "packages/lplatform-wayland"
+kind = "cargo"
+# 平台包可以自由依赖平台/系统库（wayland-client 直接对 wl_display/xdg-shell/wl_shm 说话，
+# 不引入 winit，减少一层抽象）；不得依赖引擎内部包。
+allowed_deps = ["wayland-client", "wayland-protocols", "wayland-server", "libc"]
+note = "Wayland 壳：可自由使用 wayland-client/winit；wayland-server 与 libc 仅 dev-dependency（本机 mock 合成器做端到端验证：前者起假合成器，后者 recvmsg 收 SCM_RIGHTS 的 fd）；不得依赖引擎内部包"

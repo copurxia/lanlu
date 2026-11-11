@@ -120,6 +120,12 @@ rect=515,292,2090,1394  sysTop=0 sysBottom=0  cutTop=0  navBottom=0
 取证方式：ArkTS 在 `onWindowStageCreate` 之后把 `windowRect` 与三个 `AvoidAreaType` 写进
 `$HOME/window_info.txt`（`getWindowAvoidArea`）。这个探针比截图颜色判断可靠。
 
+**三键平台化后（2026-11-11）**：`decor=false` 的结论不变——三键仍由系统绘制在窗口右上角、
+悬浮不占布局（`sysTop` 仍 0）。新增协议链路 `lw_window.title_buttons_rect` 上报
+**窗口局部 px**（壳从 vp 换算），引擎侧 `ui title buttons width=140vp selfDrawn=false`
+打点可证；业务层标题栏据此右侧避让，不再自绘三键。详见
+[lwindow-title-buttons-plan.md](lwindow-title-buttons-plan.md)。
+
 ## 鼠标坐标取证（R50 真机结论）
 
 ```
@@ -157,6 +163,39 @@ magick win.png -format %c -depth 8 histogram:info: | sort -rn | head -5
 
 → 调色板与设计一致、文字像素存在、无大面积纯黑/纯白，说明**整窗渲染 + 纹理 + 文字都在正常工作**。
 
+## M0-4 最小用例结论：引擎调壳导出符号（2026-11-10，host 实测）
+
+探针：[tools/probes/ffi-call](../tools/probes/ffi-call/README.md)（`bash tools/probes/ffi-call/run.sh`）。
+最小化“引擎（仓颉 dylib）调用壳（C）导出函数”，把历史两次失败（`d722178c`、`03461092`）
+拆成 5 个可控变体。**全部可复现**，结果如下：
+
+| 变体 | 壳对引擎可见的时机 | 结果 |
+|---|---|---|
+| `shell-first-g` | `dlopen(shell, RTLD_GLOBAL)` 在加载引擎之前 | ✅ `LoadCJLibraryWithInit rc=0`；`lwp_probe(6)=43`；外部线程回调 `cj_foreign_entry(21)=63`；`cj_app_main` 返回 43 |
+| `engine-first` | 先加载引擎，之后才 `dlopen(shell, RTLD_GLOBAL)` | ⚠️ `LoadCJLibraryWithInit rc=-1`，但随后 `dlopen(engine, RTLD_LAZY)` **返回 ok**，`cj_app_main` 也有“返回值”（垃圾值 6399146），引擎 `println` 丢失，**退出码 0** |
+| `shell-local` | `dlopen(shell, RTLD_LOCAL)` | ❌ 引擎始终解析不到符号：`LoadCJLibraryWithInit rc=-1`，`dlopen(engine)` 报 `undefined symbol`，退出码 1 |
+| `ctor-autostart` | 在壳的**构造函数里同步**启动引擎 | ❌ `undefined symbol`。构造函数执行期间壳自身的符号尚未进入全局作用域 |
+| `ctor-deferred` | 构造函数只起线程，稍后再启动（≈ 现在 `lanlu_autostart_engine`） | ✅ 能跑通，但成立前提是“壳的 dlopen 已完成”，靠线程调度碰运气 |
+
+### 结论（M1 传输层必须遵守）
+
+1. **壳必须以 `RTLD_GLOBAL` 加载，且早于引擎**。`RTLD_LOCAL` 下引擎永远看不到壳符号
+   （与 horizon-ohos 在 `sdl_main.c` 里记录的同一条教训一致：libSDL3 被 RTLD_LOCAL 加载后
+   `dlsym(RTLD_DEFAULT)` 查不到）。
+2. **不要在壳的构造函数里启动引擎**。同步启动必失败；异步启动虽然能过，但时序不确定——
+   这就是引擎里到处“最多等 N 秒拿环境变量”的根源。
+3. **失败是静默的**：`engine-first` 变体里 `dlopen` 返回 ok、`cj_app_main` 有返回值、进程退出码 0，
+   只有引擎输出丢失。**不能用“链接成功 / 退出码”判断链路是否可用**。
+4. 因此 M1 的启动顺序定为：壳 `dlopen` 完成后（ArkTS 显式调 `lshell.start()`，或壳内明确同步点）
+   → `lwp_open` → 发 `core.hello` → 再 `InitCJRuntime` + `LoadCJLibraryWithInit` → 引擎回
+   `core.hello_ack`。**以 hello_ack 作为链路可用的唯一判据**，并在 `lpack-ohos verify` 里加
+   符号门禁（壳声明的 `lwp_*` 必须由 `liblwp.so` 导出）。
+5. 外部线程（pthread）调用仓颉 `@C` 函数在 host 上工作正常（63 正确、无崩溃、无死锁），
+   与运行时 `CJ_MCC_N2CStub`/`MRT_NewForeignCJThread` 的实现一致；但按计划 §2 原则 6，
+   LWP 仍不依赖它（外部线程只写队列 + 唤醒）。
+6. **尚未覆盖**：历史现象里的“lgpu 静态库被链两份”与设备侧 SIGSEGV（Maleoon 驱动、musl 栈）
+   在 host 上无法复现，需要在 M4 真机阶段用本探针同样的最小化思路继续二分（计划 R1/R11）。
+
 ## 待办
 
 - [ ] P2 收尾：圆形/描边圆（SDF 已支持矩形，圆用 radius=half 近似即可）、水平/垂直渐变、SSAA（`DEFAULT_SUPERSAMPLE=2`）
@@ -172,5 +211,5 @@ magick win.png -format %c -depth 8 histogram:info: | sort -rn | head -5
 
 - Rust 只在 `/workspace/horizon-ohos/.tooling/rust190`（已装 `aarch64-unknown-linux-ohos` std）
 - crates.io 不可达，但 `/workspace/.cargo/registry`（1.1G）有离线缓存：`wgpu-30.0.1`、`rustybuzz-0.20.1`、`pollster`、`bytemuck`、`raw-window-handle`
-- 构建：`bash packages/lgpu/native-ohos/build-ohos.sh`（自动 staging 到 `native/target/release/liblgpu_native.a`）
+- 构建：`bash packages/lplatform-ohos/deps/lgpu/build-ohos.sh`（自动 staging 到 `native/target/release/liblgpu_native.a`）
 - wgpu-hal 补丁同步：`bash tools/sync-wgpu-hal.sh`

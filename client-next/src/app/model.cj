@@ -4,6 +4,7 @@ import cui.{FileDialogRequest, FileDialogResult, PixelReleaser, State, Toaster, 
     clearPixelImages, onPixelImageEvicted, pixelUploadPerfReset, pixelUploadPerfStats, stageNativePixelImage}
 import lanlu_client_next.i18n.*
 import lanlu_client_next.img.*
+import lcodec.NativeDecodedImage
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.convert.Parsable
@@ -4082,13 +4083,24 @@ public class AppModel {
         themeRipplePending = true
     }
 
-    // 涟漪动画完成后调用：更新内存设置、落盘、经注入回调应用到 DesktopApp。
+    private var themePersistPending: Bool = false
+
+    // 主题切换的设置落盘：动画结束时调用；无待落盘时为空操作。
+    public func flushPendingThemePersist(): Unit {
+        if (themePersistPending) {
+            themePersistPending = false
+            persistSettings(settings)
+        }
+    }
+
+    // 主题切换首帧调用：更新内存设置、经注入回调应用到 DesktopApp（落盘推迟到动画结束）。
     public func applyPendingTheme(): Unit {
         if (themeRippleTarget.size == 0) {
             return
         }
         settings.theme = themeRippleTarget
-        persistSettings(settings)
+        // 落盘由 ThemeRipple 在动画结束时调用 flushPendingThemePersist（避开切换首帧）。
+        themePersistPending = true
         // html 阅读纸面同步新主题（活动会话立即重渲染，下一帧取新帧）。
         htmlPage.setThemeCss(
             htmlThemeCss(themeRippleTarget == "light", fontSize: reader.htmlFontSize, margin: reader.htmlMargin,
@@ -5455,6 +5467,9 @@ public class AppModel {
                     }
                 case None =>
                     imageState(key).value = "error"
+                    // 解码失败此前完全静默（真机只能看到占位图，无法区分坏缓存/后端不支持该格式）。
+                    // 打一行带 key 与原因的日志：低频事件，直接进 hilog/控制台，便于真机定位。
+                    println("[img] decode failed key=${key}: ${r.error}")
                     // LANLU_PERF 打点：失败也要清起点，避免残留影响后续重试的 e2e。
                     if (SubtitlePerf.enabled()) {
                         imgPerfT0.remove(key)

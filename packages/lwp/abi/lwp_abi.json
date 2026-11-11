@@ -1,0 +1,1287 @@
+{
+  "interfaces": {
+    "lw_app": {
+      "id": 3,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "code",
+              "i32",
+              4
+            ]
+          ],
+          "name": "quit",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "code",
+              "i32",
+              4
+            ]
+          ],
+          "name": "exit",
+          "opcode": 1,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "app_id",
+              "u32",
+              4
+            ]
+          ],
+          "name": "started",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "resumed",
+          "opcode": 1,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "paused",
+          "opcode": 2,
+          "since": 1,
+          "size": 4
+        }
+      ],
+      "version": 1
+    },
+    "lw_clipboard": {
+      "id": 10,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ]
+          ],
+          "name": "get",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "mime",
+              "string",
+              4
+            ],
+            [
+              "text",
+              "string",
+              8
+            ]
+          ],
+          "name": "set",
+          "opcode": 1,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "mime",
+              "string",
+              8
+            ],
+            [
+              "text",
+              "string",
+              12
+            ]
+          ],
+          "name": "text",
+          "opcode": 0,
+          "since": 1,
+          "size": 16
+        }
+      ],
+      "version": 1
+    },
+    "lw_core": {
+      "id": 1,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "protocol_major",
+              "u16",
+              4
+            ],
+            [
+              "protocol_minor",
+              "u16",
+              6
+            ],
+            [
+              "engine_version",
+              "u32",
+              8
+            ],
+            [
+              "engine_name",
+              "string",
+              12
+            ]
+          ],
+          "name": "hello_ack",
+          "opcode": 0,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "seq",
+              "u32",
+              4
+            ]
+          ],
+          "name": "ping",
+          "opcode": 1,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "protocol_major",
+              "u16",
+              4
+            ],
+            [
+              "protocol_minor",
+              "u16",
+              6
+            ],
+            [
+              "shell_name",
+              "string",
+              8
+            ],
+            [
+              "os_name",
+              "string",
+              12
+            ],
+            [
+              "os_api_level",
+              "u32",
+              16
+            ],
+            [
+              "capabilities",
+              "u64",
+              20
+            ]
+          ],
+          "name": "hello",
+          "opcode": 0,
+          "since": 1,
+          "size": 28
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "code",
+              "i32",
+              4
+            ],
+            [
+              "message",
+              "string",
+              8
+            ]
+          ],
+          "name": "error",
+          "opcode": 1,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "level",
+              "u8",
+              4
+            ],
+            [
+              "module",
+              "string",
+              5
+            ],
+            [
+              "text",
+              "string",
+              9
+            ]
+          ],
+          "name": "log",
+          "opcode": 2,
+          "since": 1,
+          "size": 13
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "seq",
+              "u32",
+              4
+            ]
+          ],
+          "name": "pong",
+          "opcode": 3,
+          "since": 1,
+          "size": 8
+        }
+      ],
+      "version": 1
+    },
+    "lw_dialog": {
+      "id": 11,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "filters",
+              "string",
+              8
+            ]
+          ],
+          "name": "open_file",
+          "opcode": 0,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "suggested",
+              "string",
+              8
+            ]
+          ],
+          "name": "save_file",
+          "opcode": 1,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "path",
+              "string",
+              8
+            ]
+          ],
+          "name": "result",
+          "opcode": 0,
+          "since": 1,
+          "size": 12
+        }
+      ],
+      "version": 1
+    },
+    "lw_display": {
+      "id": 7,
+      "messages": [
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "width",
+              "u32",
+              4
+            ],
+            [
+              "height",
+              "u32",
+              8
+            ],
+            [
+              "scale",
+              "f32",
+              12
+            ],
+            [
+              "refresh_mhz",
+              "u32",
+              16
+            ],
+            [
+              "inset_top",
+              "u32",
+              20
+            ],
+            [
+              "inset_bottom",
+              "u32",
+              24
+            ]
+          ],
+          "name": "info",
+          "opcode": 0,
+          "since": 1,
+          "size": 28
+        }
+      ],
+      "version": 1
+    },
+    "lw_frame": {
+      "id": 6,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ]
+          ],
+          "name": "request",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "time_ns",
+              "u64",
+              8
+            ]
+          ],
+          "name": "done",
+          "opcode": 0,
+          "since": 1,
+          "size": 16
+        }
+      ],
+      "version": 1
+    },
+    "lw_input": {
+      "id": 2,
+      "messages": [
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "x",
+              "f32",
+              4
+            ],
+            [
+              "y",
+              "f32",
+              8
+            ]
+          ],
+          "name": "pointer_motion",
+          "opcode": 0,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "x",
+              "f32",
+              4
+            ],
+            [
+              "y",
+              "f32",
+              8
+            ],
+            [
+              "button",
+              "u8",
+              12
+            ],
+            [
+              "down",
+              "bool",
+              13
+            ]
+          ],
+          "name": "pointer_button",
+          "opcode": 1,
+          "since": 1,
+          "size": 14
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "dx",
+              "f32",
+              4
+            ],
+            [
+              "dy",
+              "f32",
+              8
+            ]
+          ],
+          "name": "pointer_axis",
+          "opcode": 2,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "keycode",
+              "u32",
+              4
+            ],
+            [
+              "down",
+              "bool",
+              8
+            ]
+          ],
+          "name": "key",
+          "opcode": 3,
+          "since": 1,
+          "size": 9
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "text",
+              "string",
+              4
+            ]
+          ],
+          "name": "text_input",
+          "opcode": 4,
+          "since": 1,
+          "size": 8
+        }
+      ],
+      "version": 1
+    },
+    "lw_seat": {
+      "id": 8,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "shape",
+              "u32",
+              4
+            ]
+          ],
+          "name": "set_cursor",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "locked",
+              "bool",
+              4
+            ]
+          ],
+          "name": "lock_cursor",
+          "opcode": 1,
+          "since": 1,
+          "size": 5
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "bits",
+              "u64",
+              4
+            ]
+          ],
+          "name": "capabilities",
+          "opcode": 0,
+          "since": 1,
+          "size": 12
+        }
+      ],
+      "version": 1
+    },
+    "lw_surface": {
+      "id": 5,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "buffer",
+              "u64",
+              4
+            ],
+            [
+              "width",
+              "u32",
+              12
+            ],
+            [
+              "height",
+              "u32",
+              16
+            ],
+            [
+              "serial",
+              "u32",
+              20
+            ]
+          ],
+          "name": "attach",
+          "opcode": 0,
+          "since": 1,
+          "size": 24
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ],
+            [
+              "time_ns",
+              "u64",
+              8
+            ]
+          ],
+          "name": "frame_done",
+          "opcode": 0,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "handle",
+              "u64",
+              4
+            ],
+            [
+              "width",
+              "u32",
+              12
+            ],
+            [
+              "height",
+              "u32",
+              16
+            ]
+          ],
+          "name": "available",
+          "opcode": 1,
+          "since": 1,
+          "size": 20
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "width",
+              "u32",
+              4
+            ],
+            [
+              "height",
+              "u32",
+              8
+            ]
+          ],
+          "name": "changed",
+          "opcode": 2,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "will_destroy",
+          "opcode": 3,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "hidden",
+          "opcode": 4,
+          "since": 1,
+          "size": 4
+        }
+      ],
+      "version": 1
+    },
+    "lw_system": {
+      "id": 12,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "level",
+              "u8",
+              4
+            ],
+            [
+              "text",
+              "string",
+              5
+            ]
+          ],
+          "name": "log",
+          "opcode": 0,
+          "since": 1,
+          "size": 9
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "timezone",
+              "string",
+              4
+            ],
+            [
+              "language",
+              "string",
+              8
+            ],
+            [
+              "font_dir",
+              "string",
+              12
+            ],
+            [
+              "home_dir",
+              "string",
+              16
+            ],
+            [
+              "api_level",
+              "u32",
+              20
+            ]
+          ],
+          "name": "info",
+          "opcode": 0,
+          "since": 1,
+          "size": 24
+        }
+      ],
+      "version": 1
+    },
+    "lw_test": {
+      "id": 13,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "engine_version",
+              "u32",
+              4
+            ]
+          ],
+          "name": "ready",
+          "opcode": 0,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "path",
+              "string",
+              4
+            ]
+          ],
+          "name": "request_capture",
+          "opcode": 1,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "kind",
+              "u32",
+              4
+            ],
+            [
+              "a",
+              "i32",
+              8
+            ],
+            [
+              "b",
+              "i32",
+              12
+            ]
+          ],
+          "name": "inject",
+          "opcode": 0,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "path",
+              "string",
+              4
+            ]
+          ],
+          "name": "replay",
+          "opcode": 1,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "path",
+              "string",
+              4
+            ]
+          ],
+          "name": "capture",
+          "opcode": 2,
+          "since": 1,
+          "size": 8
+        }
+      ],
+      "version": 1
+    },
+    "lw_text_input": {
+      "id": 9,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [],
+          "name": "enable",
+          "opcode": 0,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "request",
+          "fields": [],
+          "name": "disable",
+          "opcode": 1,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "text",
+              "string",
+              4
+            ],
+            [
+              "cursor",
+              "u32",
+              8
+            ],
+            [
+              "anchor",
+              "u32",
+              12
+            ]
+          ],
+          "name": "set_surrounding",
+          "opcode": 2,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "x",
+              "i32",
+              4
+            ],
+            [
+              "y",
+              "i32",
+              8
+            ],
+            [
+              "w",
+              "i32",
+              12
+            ],
+            [
+              "h",
+              "i32",
+              16
+            ]
+          ],
+          "name": "set_cursor_rect",
+          "opcode": 3,
+          "since": 1,
+          "size": 20
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "text",
+              "string",
+              4
+            ],
+            [
+              "cursor",
+              "u32",
+              8
+            ]
+          ],
+          "name": "preedit",
+          "opcode": 0,
+          "since": 1,
+          "size": 12
+        }
+      ],
+      "version": 1
+    },
+    "lw_window": {
+      "id": 4,
+      "messages": [
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "title",
+              "string",
+              4
+            ],
+            [
+              "width",
+              "u32",
+              8
+            ],
+            [
+              "height",
+              "u32",
+              12
+            ],
+            [
+              "flags",
+              "u32",
+              16
+            ]
+          ],
+          "name": "create",
+          "opcode": 0,
+          "since": 1,
+          "size": 20
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "serial",
+              "u32",
+              4
+            ]
+          ],
+          "name": "ack_configure",
+          "opcode": 1,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "title",
+              "string",
+              4
+            ]
+          ],
+          "name": "set_title",
+          "opcode": 2,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "min_w",
+              "u32",
+              4
+            ],
+            [
+              "min_h",
+              "u32",
+              8
+            ],
+            [
+              "max_w",
+              "u32",
+              12
+            ],
+            [
+              "max_h",
+              "u32",
+              16
+            ]
+          ],
+          "name": "set_min_max",
+          "opcode": 3,
+          "since": 1,
+          "size": 20
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "state",
+              "u32",
+              4
+            ]
+          ],
+          "name": "set_state",
+          "opcode": 4,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [],
+          "name": "close",
+          "opcode": 5,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "request",
+          "fields": [],
+          "name": "begin_move",
+          "opcode": 6,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "edges",
+              "u32",
+              4
+            ]
+          ],
+          "name": "begin_resize",
+          "opcode": 7,
+          "since": 1,
+          "size": 8
+        },
+        {
+          "dir": "request",
+          "fields": [
+            [
+              "visible",
+              "u32",
+              4
+            ],
+            [
+              "side",
+              "u32",
+              8
+            ],
+            [
+              "close_margin",
+              "u32",
+              12
+            ],
+            [
+              "spacing",
+              "u32",
+              16
+            ],
+            [
+              "button_size",
+              "u32",
+              20
+            ],
+            [
+              "color_mode",
+              "u32",
+              24
+            ]
+          ],
+          "name": "set_title_buttons",
+          "opcode": 8,
+          "since": 1,
+          "size": 28
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "window_id",
+              "u32",
+              4
+            ],
+            [
+              "scale",
+              "f32",
+              8
+            ],
+            [
+              "server_side_decorations",
+              "bool",
+              12
+            ]
+          ],
+          "name": "created",
+          "opcode": 0,
+          "since": 1,
+          "size": 13
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "width",
+              "u32",
+              4
+            ],
+            [
+              "height",
+              "u32",
+              8
+            ],
+            [
+              "state",
+              "u32",
+              12
+            ]
+          ],
+          "name": "configure",
+          "opcode": 1,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "close_request",
+          "opcode": 2,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "focused",
+              "bool",
+              4
+            ]
+          ],
+          "name": "focus",
+          "opcode": 3,
+          "since": 1,
+          "size": 5
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "x",
+              "u32",
+              4
+            ],
+            [
+              "y",
+              "u32",
+              8
+            ],
+            [
+              "uris",
+              "string",
+              12
+            ]
+          ],
+          "name": "drag_enter",
+          "opcode": 4,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "x",
+              "u32",
+              4
+            ],
+            [
+              "y",
+              "u32",
+              8
+            ]
+          ],
+          "name": "drag_motion",
+          "opcode": 5,
+          "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [],
+          "name": "drag_leave",
+          "opcode": 6,
+          "since": 1,
+          "size": 4
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "x",
+              "u32",
+              4
+            ],
+            [
+              "y",
+              "u32",
+              8
+            ],
+            [
+              "uris",
+              "string",
+              12
+            ]
+          ],
+          "name": "drop",
+          "opcode": 7,
+          "since": 1,
+          "size": 16
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "right",
+              "i32",
+              4
+            ],
+            [
+              "top",
+              "i32",
+              8
+            ],
+            [
+              "width",
+              "u32",
+              12
+            ],
+            [
+              "height",
+              "u32",
+              16
+            ],
+            [
+              "visible",
+              "bool",
+              20
+            ]
+          ],
+          "name": "title_buttons_rect",
+          "opcode": 8,
+          "since": 1,
+          "size": 21
+        }
+      ],
+      "version": 1
+    }
+  },
+  "protocol": {
+    "major": 1,
+    "minor": 0
+  }
+}

@@ -1,31 +1,35 @@
-# client-next on HarmonyOS (OHOS)
+# client-next 的鸿蒙（OHOS）构建入口
 
-OHOS 是 client-next 的一个构建目标，**不存在独立拆分的源码工程**：业务源码只有
-`client-next/src` 一份，OHOS 特有逻辑全部在 `packages/ohos`（系统层）与
-本目录的构建配置里。
+> 本目录现在只是一个**兼容入口**。计划
+> [docs/lwindow-platform-separation-plan.md](../docs/lwindow-platform-separation-plan.md) §4.3：
+> 主仓不存放鸿蒙工程与鸿蒙构建配置，它们属于 `packages/lpack-ohos`。
 
-## 系统层职责（packages/ohos）
-- ArkTS 壳：XComponent(SDL3)、窗口 id/rect、`startFilter` 注入；
-- `input_filter.cpp`：窗口级鼠标/滚轮过滤器 + 原点校准 → SDL_PushEvent（对齐
-  horizon-ohos 在这台设备上的已验证方案）；
-- `shell_napi.cpp`：libmain.so 双角色（SDL_main + napi 模块）；
-- hapgen：模板/资源/权限(INTERNET)/原生库打包、签名。
+- 业务源码只有 `client-next/src` 一份，不含任何平台分支。
+- 鸿蒙壳（ArkTS + C/C++）：[packages/lplatform-ohos](../packages/lplatform-ohos)
+- 鸿蒙工程生成、打包、签名、静态门禁：[packages/lpack-ohos](../packages/lpack-ohos)
+- 应用元数据（包名/版本/权限/设备）：[packages/lpack-ohos/app-profiles/lanlu/app.toml](../packages/lpack-ohos/app-profiles/lanlu/app.toml)
 
 ## 构建
+
+```bash
+# 旧入口（转发，保持兼容）
+bash client-next/ohos/build-ohos.sh
+
+# 新入口（推荐）
+bash packages/lpack-ohos/tools/build-ohos.sh
 ```
-client-next/ohos/build-ohos.sh
-```
-流程：重建结构性 shim（packages/*/native-ohos/）→ 复制 src 到 `build/ohos`
-（临时产物）→ 生成 build.cj 内嵌 logo → cjpm 交叉编译 `--target
-aarch64-linux-ohos` → hapgen `ui=sdl3` 签名打包。
-产物：`client-next/build/ohos/target/ohos/hap/.../entry-default-signed.hap`
+
+流程：`lplatform-ohos/deps/*` 重建原生 shim → 复制 `client-next/src` 到 `client-next/build/ohos`
+（临时产物，不入库）→ 生成内嵌 logo / 自检视频 → `cjpm build --target aarch64-linux-ohos`
+→ 拼装模板（base + 覆盖层 + 壳源码暂存）→ hapgen 生成工程并打包 → 签名
+→ 静态门禁（分层 / 依赖闭包 / 符号）。
+
+产物：`client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default/entry-default-*.hap`
 
 ## 依赖
-- `cjv component add stdx --toolchain sts-1.2.0-linux-x64-ohos`
-- sdl3-ohos/prefix-single、ohos-stubs（含 ffmpeg/libass/freetype 链）
-- CLT 7.0 SDK / JDK17 / devecocli
 
-## 已真机验证
-启动/渲染/交互、settings KV（列族+持久）、PNG/JPEG/WebP 图片、HTTP/HTTPS、
-系统字体枚举、字幕探测(ffmpeg)与渲染(libass)、窗口级鼠标过滤器注册 rc=0。
-未完成：真实鼠标位置实测、vlc 播放、Blitz HTML 阅读。
+- 仓颉工具链（`CJV_TOOLCHAINS` 或 `CJV_OHOS_TOOLCHAIN`/`CJV_HOST_TOOLCHAIN`）
+- OHOS 命令行工具（`OHOS_CLT`，或已知默认位置；见
+  [packages/lplatform-ohos/deps/common-ohos.sh](../packages/lplatform-ohos/deps/common-ohos.sh)）
+- hapgen：`bash packages/lpack-ohos/tools/build-hapgen.sh`
+- 预编译材料（ohos-stubs、sdl3 prefix）仍在外置目录（`CN_OHOS_RES`），M0 收尾时决定去向

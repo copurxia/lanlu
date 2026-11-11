@@ -1,0 +1,25 @@
+/* liblwp 导出符号白名单：只导出公开 API（+ 测试挂钩仅在测试构建里存在）。
+ * 计划 §5.2：避免把内部符号暴露到壳/引擎的全局命名空间。 */
+{
+  global:
+    lwp_open;
+    lwp_close;
+    lwp_send;
+    lwp_recv;
+    lwp_send_parts;
+    lwp_recv_parts;
+    lwp_wait;
+    lwp_wake;
+    lwp_blob_put;
+    lwp_blob_get;
+    lwp_blob_release;
+    lwp_get_stats;
+    lwp_stats_summary;
+    lwp_now_ns;
+    lwp_checker_enable;
+    lwp_trace_open;
+    lwp_trace_close;
+    lwp_trace_replay;
+  local:
+    *;
+};

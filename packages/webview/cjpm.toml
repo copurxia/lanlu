@@ -16,4 +16,4 @@ webview_native = { path = "./native/target/release" }
 link-option = "-lfontconfig -lfreetype -ldl -lpthread -lgcc_s"
 
 [target.aarch64-linux-ohos]
-link-option = "-L /workspace/lanlu/.research-ohos/ohos-stubs -lfontconfig -lfreetype -lexpat -lz -ldl -lpthread -lm -L/workspace/lanlu/.research-ohos/tools/clt-7.0/command-line-tools/sdk/default/openharmony/native/llvm/lib/aarch64-linux-ohos -lunwind"
+link-option = "-L ${OHOS_STUBS} -lfontconfig -lfreetype -lexpat -lz -ldl -lpthread -lm -L${OHOS_LLVM_BIN}/../lib/aarch64-linux-ohos -lunwind"

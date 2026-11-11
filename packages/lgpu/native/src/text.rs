@@ -62,9 +62,15 @@ impl Atlas {
         }
     }
 
-    /// 为新字形分配位置；返回 None 表示图集已满（调用方应重建图集）。
+    /// 为新字形分配位置；返回 None 表示当前页放不下（调用方应新开一页，R5.3）。
     pub fn alloc(&mut self, w: u32, h: u32) -> Option<(u32, u32)> {
         let pad = 1;
+        // 单个字形比整页还宽/还高：直接报告放不下。否则会返回越界坐标，
+        // 后续 write_texture 触发 wgpu 校验错误（测试 atlas_alloc_reports_full
+        // 曾在此暴露：w=33 > size=32 仍返回 Some）。
+        if w + pad > self.size || h + pad > self.size {
+            return None;
+        }
         if self.cursor_x + w + pad > self.size {
             self.shelf_y += self.shelf_h + pad;
             self.shelf_h = 0;
@@ -148,4 +154,42 @@ pub fn metrics(font: &FontHandle, px_size: f32) -> (f32, f32, f32, f32) {
     let gap = scaled.line_gap();
     let upem = font.font.units_per_em().unwrap_or(1000.0);
     (ascent, descent, gap, upem)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 满页必须返回 None（由 lib.rs 的多页逻辑新开一页，而不是丢字形）。
+    #[test]
+    fn atlas_alloc_reports_full_instead_of_overlapping() {
+        let mut a = Atlas::new(64);
+        // 填满第一条货架
+        for _ in 0..8 {
+            assert!(a.alloc(7, 10).is_some());
+        }
+        // 继续填满剩余货架
+        let mut full = 0;
+        while let Some(_) = a.alloc(7, 10) {
+            full += 1;
+            assert!(full < 10000, "alloc must eventually report full");
+        }
+        assert!(full > 0);
+        // 满了之后：必须报告 None，而不是返回重叠位置（静默叠字）。
+        assert!(a.alloc(7, 10).is_none());
+        // 超大字形（比整页还大）也必须 None。
+        let mut b = Atlas::new(32);
+        assert!(b.alloc(33, 8).is_none());
+    }
+
+    /// 字形槽缓存键 = (字体id, 字形id, 字号档)：不同字号不串位。
+    #[test]
+    fn atlas_cache_key_distinguishes_sizes() {
+        let mut a = Atlas::new(128);
+        let k1 = (1u32, 65u16, 60u32);
+        let k2 = (1u32, 65u16, 80u32);
+        a.cache.insert(k1, GlyphSlot { x: 0, y: 0, w: 10, h: 10, bearing_x: 0.0, bearing_y: 0.0, advance: 8.0 });
+        a.cache.insert(k2, GlyphSlot { x: 20, y: 0, w: 12, h: 12, bearing_x: 0.0, bearing_y: 0.0, advance: 9.5 });
+        assert_ne!(a.cache.get(&k1).unwrap().w, a.cache.get(&k2).unwrap().w);
+    }
 }

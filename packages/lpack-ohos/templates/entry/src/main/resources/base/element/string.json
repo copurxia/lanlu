@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "__APP__"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "__APP__"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "__APP__"
+    },
+    {
+      "name": "pasteboard_reason",
+      "value": "粘贴时读取剪贴板内容"
+    }
+  ]
+}

@@ -1,20 +1,13 @@
 package lwindow
 
-// L 层窗口控制通道（P5）：引擎侧把"最小化/最大化/恢复/关闭"写成命令文件，
-// ArkTS 侧轮询执行（引擎进程与 ArkTS 之间没有可用的同步 FFI 通道）。
+// L 层窗口控制通道（M6 第 4 步后）：**只有协议**，没有命令文件。
+// 引擎发 `lw_window.set_state` / `lw_window.close` / `lw_app.exit`，壳执行。
 
-import std.env.getVariable
-import std.fs.{File, Path}
-
-/// 命令文件路径（应用沙箱内，ArkTS 与引擎两侧都可访问）。
-private func commandPath(): String {
-    let home = getVariable("HOME") ?? "."
-    home + "/window_cmd.txt"
-}
-
-/// 请求一个窗口命令：minimize / maximize / restore / close。
+/// 请求一个窗口命令：minimize / maximize / restore / close / exit。
+/// 协议不可用时静默丢弃（没有退路：命令文件已删除）。
 public func requestWindowCommand(command: String): Unit {
-    try {
-        File.writeTo(Path(commandPath()), command.toArray())
-    } catch (_) {}
+    match (lwpWindowCommand(command)) {
+        case Some(_) => ()
+        case None => ()
+    }
 }

@@ -1,0 +1,13 @@
+[package]
+cjc-version = "1.0.5"
+name = "lwp"
+version = "0.1.0"
+output-type = "static"
+description = "LWP（Lanlu Window Protocol）：壳 ↔ 引擎协议本体。零平台代码；C 头与仓颉绑定由 tools/lwp-gen.py 从 packages/lwp/protocol/*.toml 生成。"
+# 单元测试与依赖本包的可执行文件要链接 C 侧通道库（packages/lwp/native/build.sh 产出）。
+# 库名带 _native 后缀：包自身产物是 liblwp.a，C 库若也叫 liblwp 会在 -llwp 上撞名。
+link-option = "-L ${LWP_LIB_DIR} -llwp_native -rpath ${LWP_LIB_DIR}"
+
+[dependencies]
+
+[ffi.c]

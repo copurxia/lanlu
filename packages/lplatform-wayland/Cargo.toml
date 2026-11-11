@@ -1,0 +1,21 @@
+[package]
+name = "lanlu-platform-wayland"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+publish = false
+description = "Lanlu Wayland 壳：LWP 协议的桌面端实现（计划 §9.3）"
+
+[[bin]]
+name = "lanlu"
+path = "src/main.rs"
+
+[dependencies]
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32", features = ["client"] }
+
+[dev-dependencies]
+libc = "0.2"
+wayland-protocols = { version = "0.32", features = ["server"] }
+wayland-server = "0.31"
+# M1W 起：winit（horizon vendored）、wayland-client、xkbcommon-dl、calloop、arboard

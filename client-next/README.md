@@ -24,7 +24,7 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 | 依赖 | 说明 |
 |------|------|
 | 仓颉工具链 (cjc) | 1.1+（本机验证 1.1.3，含 cjpm） |
-| libvips | 图片转码（`vips_ffi` 本地包依赖，链接 `-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0`） |
+| libvips | 图片解码/模糊（**运行时**由 lcodec `dlopen` 装载，不再链接；桌面需系统 libvips，OHOS 由 HAP 内同符号 shim 提供） |
 | libVLC 3+ | 应用内视频解码（`libvlc_ffi` 本地包依赖，Linux 包通常为 `libvlc-dev` + `vlc-plugin-base`） |
 | FFmpeg 开发库 | 内嵌字幕探测与抽取（`libavformat-dev libavcodec-dev libavutil-dev`；不调用 ffmpeg/ffprobe 命令） |
 | libass | ASS/SSA/SRT/WebVTT/mov_text 多轨字幕排版与透明 RGBA 渲染（Linux `libass-dev`，Windows MSYS2 `mingw-w64-x86_64-libass`） |
@@ -147,7 +147,7 @@ client-next/
 │   ├── theme.cj           # 主题
 │   ├── app/               # AppModel（状态/会话/任务泵）、设置持久化、路由
 │   ├── net/               # HTTP API 封装、DTO/JSON 解析、工作线程
-│   ├── img/               # 图片磁盘缓存、vips 转码
+│   ├── img/               # 图片磁盘缓存（解码已迁 packages/lcodec）
 │   └── ui/                # 登录/书库/详情/阅读器/设置 五个页面 + 公共控件
 ├── cjpm.toml
 └── README.md

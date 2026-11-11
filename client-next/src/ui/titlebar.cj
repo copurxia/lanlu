@@ -1240,6 +1240,8 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
         => Tween(SEARCH_EXPAND_MS, Easing.easeOutCubic)
     }).value
     let searchProgress = searchTween.value
+    // 平台三键宽度（vp；0 = 平台不提供 → 自绘三键回退）
+    let platformBtnW = platformTitleButtonsWidth()
     ZStack {
         TitleBarBackground()
         HStack {
@@ -1284,11 +1286,16 @@ public func titleBar(window: SdlWindow, model: AppModel): Unit {
             if (!onLogin && model.settings.username.size > 0) {
                 UserMenuChip(model, logoutOpen)
             }
-            WinSep()
-            WinControlButton(WinGlyph.Min, "titlebar:min") {_ => window.minimize()}
-            WinControlButton(WinGlyph.Max, "titlebar:max") {_ => toggleWindowMaximize(window)}
-            WinControlButton(WinGlyph.Close, "titlebar:close") {ctx => ctx.requestClose()}
-        }.spacing(10.0).crossAxisAlignment(CrossAxisAlignment.Center).padding(16.0, 0.0, 16.0, 0.0)
+            // 三键平台化（docs/lwindow-title-buttons-plan.md）：壳宣告 title_buttons 能力后，
+            // 三键由系统绘制在窗口右上角，业务层不再自绘，只在右侧留出它的宽度。
+            if (platformBtnW <= 0.0) {
+                WinSep()
+                WinControlButton(WinGlyph.Min, "titlebar:min") {_ => window.minimize()}
+                WinControlButton(WinGlyph.Max, "titlebar:max") {_ => toggleWindowMaximize(window)}
+                WinControlButton(WinGlyph.Close, "titlebar:close") {ctx => ctx.requestClose()}
+            }
+        }.spacing(10.0).crossAxisAlignment(CrossAxisAlignment.Center)
+            .padding(16.0, 0.0, 16.0 + (if (platformBtnW > 0.0) { platformBtnW + 8.0 } else { 0.0 }), 0.0)
         // 顶层键盘接线件：最后声明 = 事件分发最优先（只吃不相关鼠标事件之外的键）。
         SearchKeys(model)
     // alignment 是 ZStack 专有链式，须排在返回 Widget 的通用修饰器 height 之前。

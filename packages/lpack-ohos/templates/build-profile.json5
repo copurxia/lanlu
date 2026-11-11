@@ -1,0 +1,51 @@
+{
+  app: {
+    signingConfigs: [],
+    products: [
+      {
+        name: 'default',
+        signingConfig: 'default',
+        targetSdkVersion: '__API_VER__',
+        compatibleSdkVersion: '__API_VER__',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
+          },
+          // SDL3 同时来自 CMake 构建产物与随包依赖库；两者同名同内容，
+          // 指定 pickFirsts 让 hvigor 取其一（否则 ProcessLibs 报重复文件）。
+          nativeLib: {
+            filter: {
+              pickFirsts: ['**/libSDL3.so'],
+              // 只保留 SONAME 名（libSDL3.so.0）。若同时打两份，进程里会出现两个 SDL3
+              // 实例：钩子/事件队列属于未初始化的那份（真机表现：SDL_PushEvent 恒失败）。
+            },
+          },
+        },
+      },
+    ],
+    buildModeSet: [
+      {
+        name: 'debug',
+      },
+      {
+        name: 'release',
+      },
+    ],
+  },
+  modules: [
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
+        {
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+      ],
+    },
+  ],
+}

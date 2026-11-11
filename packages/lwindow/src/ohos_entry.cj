@@ -10,8 +10,8 @@ import std.fs.{Directory, File, Path}
 func initPlatformOhos(): Unit {
     let base = "/data/storage/el2/base/files"
     setVariable("HOME", base)
-    // 平台剪贴板后端（SDL 自带在真机读写都取不到系统剪贴板，改走文件桥）
-    installClipboardBackend()
+    // 剪贴板后端由引擎侧注册（LWindowClipboard -> lw_clipboard.*，M6 第 2 步）。
+    // 这里不再安装文件桥后端。
     setVariable("XDG_CONFIG_HOME", base + "/.config")
     setVariable("XDG_DATA_HOME", base + "/.local/share")
     setVariable("XDG_CACHE_HOME", "/data/storage/el2/base/cache")
@@ -45,6 +45,11 @@ func initPlatformOhos(): Unit {
             }
         } catch (_) {}
     }
+    // 调试后门：只在可调试构建（ArkTS 注入 LANLU_DEBUGGABLE=1，来源 bundleInfo.appInfo.debug）
+    // 且显式放行时启用，release 包不再受 lanlu_env.txt 影响（计划 §11 风险记录）。
+    if ((getVariable("LANLU_DEBUGGABLE") ?? "0") != "1") {
+        return
+    }
     // 测试钩子：$HOME/lanlu_env.txt（每行 KEY=VALUE，# 注释）注入进程环境变量。
     // ArkTS 侧无法给应用进程设置环境变量，联调/自动化（如 LANLU_BENCH_*）需要这条通道。
     // 文件不存在即空操作，对正常使用无影响。
@@ -73,46 +78,4 @@ func initPlatformOhos(): Unit {
             }
         }
     }
-}
-
-/**
- * HarmonyOS 剪贴板后端（文件桥）。
- *
- * 为什么不用 SDL 自带的：真机实测 `SDL_SetClipboardText` 报告成功、`SDL_HasClipboardText` 为真，
- * 但系统 pasteboard 里什么都没有（ArkTS 侧读到 len=0），`SDL_GetClipboardText` 也永远取不到内容。
- * 因此由系统层（ArkTS）负责与系统 pasteboard 通信，引擎侧只读写两个沙箱文件：
- *   - `$HOME/clip_in.txt`  ：ArkTS 定期把系统剪贴板内容写进来（粘贴时读）
- *   - `$HOME/clip_out.txt` ：引擎把要复制的内容写出去，ArkTS 轮询后写入系统剪贴板
- */
-class ClipboardFileBackend <: ClipboardBackend {
-    private let dir: String
-
-    init(dir: String) {
-        this.dir = dir
-    }
-
-    public func setText(text: String): Unit {
-        try {
-            File.writeTo(Path(dir + "/clip_out.txt"), text.toArray())
-        } catch (_) {}
-    }
-
-    public func getText(): String {
-        try {
-            let bytes = File.readFrom(Path(dir + "/clip_in.txt"))
-            return String.fromUtf8(bytes)
-        } catch (_) {
-            return ""
-        }
-    }
-
-    public func hasText(): Bool {
-        return getText().size > 0
-    }
-}
-
-/// 在 OHOS 上安装平台剪贴板后端（覆盖 SDL 自带实现）。
-func installClipboardBackend(): Unit {
-    let home = getVariable("HOME") ?? "/data/storage/el2/base/files"
-    clipboardBackend = ClipboardFileBackend(home)
 }

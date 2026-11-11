@@ -103,6 +103,20 @@ fn sd_round_box(p: vec2f, b: vec2f, r: f32) -> f32 {
 fn fs(in: VsOut) -> @location(0) vec4f {
   // 裁剪由 render pass 的 scissor 负责（见 lib.rs 的批次分组），这里不再逐像素判断。
   // 渐变：mode 1 = 横向，mode 2 = 纵向，其余按纯色
+  // mode 3 = 辉光环（主题涟漪）：params.x = 环半径，params.y = 实线宽度，
+  // color2 = (外辉光宽, 内辉光宽, 辉光强度, -)。一个实例替代十余层同心描边。
+  if (in.params.z > 2.5) {
+    let dist = length(in.local) - in.params.x;
+    let aa_r = max(fwidth(dist), 0.75);
+    let half_w = in.params.y * 0.5;
+    let line = 1.0 - smoothstep(half_w - aa_r, half_w + aa_r, abs(dist));
+    let extent = select(in.color2.y, in.color2.x, dist > 0.0);
+    let k = clamp(1.0 - abs(dist) / max(extent, 1.0), 0.0, 1.0);
+    let glow = k * k * in.color2.z;
+    let cover_r = max(line, glow);
+    if (cover_r <= 0.002) { discard; }
+    return vec4f(in.color.rgb, in.color.a * cover_r);
+  }
   var base = in.color;
   if (in.params.z > 0.5) {
     let t = clamp(select(in.pixel_local.y, in.pixel_local.x, in.params.z < 1.5), 0.0, 1.0);

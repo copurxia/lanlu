@@ -127,16 +127,25 @@ public class ThemeRipple <: Widget {
         let maxR = sqrt(farX * farX + farY * farY)
         let r = maxR * t
 
+        // 下层控件本帧录制的图元会被下面的全屏快照完全覆盖：直接丢弃，省掉每帧整屏
+        // UI 的 GPU 填充（动画期间只剩 3 张纹理 + 1 个辉光环 + 图标）。
+        ctx.renderer.discardRecorded()
+        // 目标主题快照垫底：等价于之前"下层就是目标主题 UI"，旧快照淡出时透出它。
+        ctx.renderer.texture(targetSnapshot, Rect(0.0, 0.0, ctx.viewportWidth, ctx.viewportHeight))
+
         // 旧主题快照铺满窗口，圆内绘制目标主题快照；圆外保持旧主题。
         // HTML 的 ::view-transition-old(root)：500ms 内缩至 .985、淡至 .6，制造被新主题
-        // 推开的纵深。纹理销毁前无需恢复 alpha。
+        // 推开的纵深。
         let oldScale = 1.0 - 0.015 * depthT
         let oldWidth = ctx.viewportWidth * oldScale
         let oldHeight = ctx.viewportHeight * oldScale
         oldSnapshot.setAlpha(Int64(255.0 - 102.0 * depthT))
         ctx.renderer.texture(oldSnapshot,
             Rect((ctx.viewportWidth - oldWidth) / 2.0, (ctx.viewportHeight - oldHeight) / 2.0, oldWidth, oldHeight))
+        oldSnapshot.setAlpha(255)
         ctx.renderer.textureClippedCircle(cx, cy, r, targetSnapshot)
+        // 层断点：辉光环与图标是矩形图元，没有断点会被整帧"先矩形后纹理"排到快照下面。
+        ctx.renderer.layerMark()
 
         // 参考页 .glow-ring：3px 边线 + 30px 外发光 + 20px 内发光；颜色取目标主题
         // 的 --toggle-ring，而不是应用 accent（金色）。
@@ -156,6 +165,8 @@ public class ThemeRipple <: Widget {
     }
 
     private func finishRipple(): Unit {
+        // 设置落盘推迟到动画结束：别让文件 I/O 挤在切换首帧里。
+        model.flushPendingThemePersist()
         closeSnapshot(st.oldSnapshot)
         closeSnapshot(st.targetSnapshot)
         st.oldSnapshot = None
@@ -235,6 +246,12 @@ public class ThemeRipple <: Widget {
         }
         // 多层同心描边模拟 box-shadow。外层覆盖约 30px，内层覆盖约 20px，
         // 越远离 3px 实线透明度越低。
+        // 首选单实例 SDF 辉光环：3px 实线 + 外 30px / 内 20px 二次衰减辉光，一次绘制。
+        // 原多层同心描边每层都是 2r×2r 的 SDF 方块，r 接近对角线时 11 层整屏填充。
+        let ringColor = Color.rgba(red, green, blue, Int64(Float32(peakAlpha) * fade))
+        if (ctx.renderer.glowRing(cx, cy, radius, 3.0, 30.0, 20.0, ringColor, 0.25)) {
+            return
+        }
         let offsets: Array<Float32> = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0]
         let weights: Array<Float32> = [0.25, 0.19, 0.14, 0.10, 0.065, 0.035]
         for (i in 0..offsets.size) {

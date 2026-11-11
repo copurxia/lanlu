@@ -1,6 +1,0 @@
-[package]
-cjc-version = "1.2.0"
-name = "lanlu_client_platform"
-version = "0.1.0"
-description = "client-next platform abstraction (desktop SDL / OHOS SDL3 backends)"
-output-type = "static"

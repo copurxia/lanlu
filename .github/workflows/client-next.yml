@@ -43,6 +43,82 @@ defaults:
 env: {}
 
 jobs:
+  guards:
+    name: Layering guards (deps + platform isolation)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # T0 静态门禁（计划 docs/lwindow-platform-separation-plan.md §4.5 / §16.2）
+      # 违规集合记在 tools/quality-baseline.toml，只允许下降；新增即失败。
+      - name: Dependency whitelist
+        run: python3 tools/check-deps.py
+
+      - name: Platform isolation
+        run: python3 tools/check-platform-isolation.py
+
+      # LWP 生成物必须与 IDL 一致（计划 §5.1：生成物入库，CI 校验无 diff）
+      - name: LWP generated artifacts are up to date
+        run: python3 tools/lwp-gen.py --check
+
+      # 协议只允许追加（计划 §5.1）：删字段/改类型必须 protocol_major + 1
+      - name: LWP ABI is backward compatible
+        run: python3 tools/lwp-gen.py --check-abi
+
+      # 平台包自测：壳侧 LWP 发送端的字节级契约（协议模式 + 回落模式）
+      - name: Platform package selftest (shell LWP client)
+        run: bash packages/lplatform-ohos/selftest/run-tests.sh
+
+      - name: LWP tests (C side + generated artifacts)
+        run: bash packages/lwp/test.sh
+
+      # 壳/引擎都依赖 liblwp.so；导出符号必须恰好是公开 API（计划 §5.2 符号门禁）
+      - name: liblwp.so exports only the public API
+        run: |
+          set -euo pipefail
+          bash packages/lwp/native/build.sh
+          got=$(nm -D --defined-only packages/lwp/lib/liblwp_native.so | awk '{print $3}' | sort | tr '\n' ' ')
+          want="lwp_blob_get lwp_blob_put lwp_blob_release lwp_checker_enable lwp_close lwp_get_stats lwp_now_ns lwp_open lwp_recv lwp_recv_parts lwp_send lwp_send_parts lwp_trace_close lwp_trace_open lwp_wait lwp_wake "
+          if [ "$got" != "$want" ]; then
+            echo "导出符号不符："; echo "  实际: $got"; echo "  期望: $want"; exit 1
+          fi
+          echo "[PASS] liblwp_native.so 导出符号符合白名单"
+
+      - name: Legacy layering / SDL guards
+        run: |
+          set -euo pipefail
+          bash tools/check-layering.sh
+          bash tools/check-no-sdl.sh
+          # 文件桥只允许减少（计划 §11 / M6 删除进度）
+          bash tools/check-no-file-bridge.sh
+          # 文档里的数字/链接必须与仓库真实状态一致（防止文档漂移）
+          python3 tools/check-docs-consistency.py
+          # OHOS 打包环境自检（工具链缺失时跳过，不阻塞无关改动）
+          if [ -d /workspace/.cjv/toolchains ] || [ -n "${CANGJIE_HOME:-}" ]; then
+            bash packages/lpack-ohos/tools/build-ohos.sh --self-check
+          else
+            echo "[skip] 无仓颉工具链，跳过 lpack-ohos 自检"
+          fi
+          # Wayland 壳（M1W）：协议编解码单测 + 编译
+          if command -v cargo >/dev/null 2>&1; then
+            (cd packages/lplatform-wayland && cargo test --quiet)
+          else
+            echo "[skip] 无 cargo，跳过 lplatform-wayland"
+          fi
+
+      - name: Guard reports
+        if: always()
+        run: |
+          {
+            echo "### Layering guards"
+            echo
+            echo '```'
+            python3 tools/check-deps.py --report || true
+            python3 tools/check-platform-isolation.py --report || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
   quality:
     name: Quality report
     runs-on: ubuntu-24.04
@@ -214,6 +290,20 @@ jobs:
         working-directory: client-next
         run: cjpm build -V
 
+      - name: Run lwp protocol tests
+        run: |
+          export LWP_LIB_DIR="$PWD/packages/lwp/lib"
+          bash packages/lwp/native/build.sh
+          (cd packages/lwp && cjpm test --no-color)
+
+      # 引擎侧走协议的第一条路径：假壳 -> liblwp -> 漏斗 -> LWindowEvent
+      - name: Run lwindow backend.lwp tests
+        run: |
+          export LWP_LIB_DIR="$PWD/packages/lwp/lib"
+          export LGUI_SDL_LIB_DIR="$PWD/packages/cangjie-gui/sdl/.sdl3"
+          bash packages/lwp/native/build.sh
+          (cd packages/lwindow && cjpm test --no-color)
+
       - name: Run client-next tests
         working-directory: client-next
         env:
@@ -228,6 +318,12 @@ jobs:
             --report-path test-results \
             --report-format xml
 
+      # M0-4 的结论做成持续回归：引擎（仓颉 dylib）调壳（C）导出符号必须在以下
+      # 顺序下成功：壳 RTLD_GLOBAL 且先于引擎加载。探针同时覆盖 4 种错误顺序。
+      - name: FFI call probe (engine calls shell exports)
+        working-directory: tools/probes/ffi-call
+        run: bash run.sh
+
       - name: Run headless snapshot smoke test
         working-directory: client-next
         env:
@@ -241,74 +337,24 @@ jobs:
           timeout 60s xvfb-run -a ./target/release/bin/main --snapshot "${PWD}/client-next.bmp"
           test -s client-next.bmp
 
+      - name: Wayland smoke (weston headless)
+        working-directory: packages/lplatform-wayland
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends weston
+          cargo build --release
+          bash tools/smoke-weston.sh --require
+
       - name: Package Linux deb
         working-directory: client-next
         run: |
           set -euo pipefail
-          pkgname="lanlu-client-next"
-          version="0.1.0+nightly.$(date -u +%Y%m%d.%H%M)"
-          arch="amd64"
-          staging="dist/${pkgname}_${version}_${arch}"
-          appdir="${staging}/opt/${pkgname}"
-          mkdir -p "${staging}/DEBIAN" "${appdir}" "${staging}/usr/bin" dist
-
-          cp target/release/bin/main "${appdir}/${pkgname}"
-
-          # 捆绑非系统私有库（SDL3、仓颉 runtime 等）；
-          # apt 系统库（vips、vlc、rocksdb 等）通过 control 的 Depends 声明。
-          ldd "${appdir}/${pkgname}" | awk '$3 ~ /^\// {print $3}' | sort -u > dist/ldd.txt
-          while IFS= read -r lib; do
-            case "$lib" in
-              /usr/*|/lib/*|/lib64/*) ;;
-              *) cp -L "$lib" "${appdir}/" ;;
-            esac
-          done < dist/ldd.txt
-          # 兜底：如果 ldd 未能解析到仓颉 runtime，在 SDK 目录下查找。
-          # （setup-cangjie 会导出 CANGJIE_HOME，见 cjv envsetup 的 env.vars。）
-          if ! ls "${appdir}"/libcangjie-runtime.so* >/dev/null 2>&1; then
-            if [ -z "${CANGJIE_HOME:-}" ]; then
-              echo "error: libcangjie-runtime not found by ldd and CANGJIE_HOME is not set" >&2
-              exit 1
-            fi
-            find "${CANGJIE_HOME}" -name 'libcangjie-runtime.so*' -exec cp -L {} "${appdir}/" \; -quit
-          fi
-
-          # 用 printf 生成包装脚本，避免 heredoc 顶格内容破坏 YAML block scalar。
-          printf '%s\n' \
-            '#!/bin/sh' \
-            'exec env LD_LIBRARY_PATH="/opt/lanlu-client-next${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" /opt/lanlu-client-next/lanlu-client-next "$@"' \
-            > "${staging}/usr/bin/${pkgname}"
-          chmod 755 "${staging}/usr/bin/${pkgname}"
-
-          # 桌面入口与任务栏图标：app_id（main.cj 设置 SDL_APP_ID=lanlu）匹配
-          # /usr/share/applications/lanlu.desktop，Wayland 下任务栏图标由此解析。
-          mkdir -p "${staging}/usr/share/applications" "${staging}/usr/share/icons/hicolor/192x192/apps"
-          cp assets/lanlu_logo_gold.png "${staging}/usr/share/icons/hicolor/192x192/apps/lanlu.png"
-          printf '%s\n' \
-            '[Desktop Entry]' \
-            'Type=Application' \
-            'Name=Lanlu' \
-            'Comment=Lanlu desktop client' \
-            "Exec=/usr/bin/${pkgname}" \
-            'Icon=lanlu' \
-            'StartupWMClass=lanlu' \
-            'Terminal=false' \
-            'Categories=Graphics;' \
-            > "${staging}/usr/share/applications/lanlu.desktop"
-
-          installed_size="$(du -sk "${staging}" | cut -f1)"
-          printf '%s\n' \
-            "Package: ${pkgname}" \
-            "Version: ${version}" \
-            "Architecture: ${arch}" \
-            "Maintainer: lanlu <lanlu@localhost>" \
-            "Installed-Size: ${installed_size}" \
-            "Depends: libvips42t64 | libvips42, libvlc5, libfontconfig1, libfreetype6, librocksdb9.11 | librocksdb8.9, libavformat62, libavcodec62, libavutil60, libass9" \
-            "Section: graphics" \
-            "Priority: optional" \
-            "Description: Lanlu desktop client built on CangjieGUI" \
-            > "${staging}/DEBIAN/control"
-          dpkg-deb --build --root-owner-group "${staging}" "dist/${pkgname}_${version}_${arch}.deb"
+          # 打包逻辑在 packages/lpack-linux（计划 §4.4）：CI 只负责调用
+          bash ../packages/lpack-linux/tools/build-deb.sh \
+            --binary target/release/bin/main \
+            --icon assets/lanlu_logo_gold.png \
+            --out dist
 
       - name: Upload Linux deb
         uses: actions/upload-artifact@v4

@@ -1,58 +1,30 @@
 package lwindow
 
-// L 层剪贴板通道（P5）：引擎与 ArkTS 之间没有可用的同步 FFI，用文件传递。
-// - 写：引擎把文本写 clip_out.txt，ArkTS 轮询写入系统剪贴板；
-// - 读：引擎写 clip_req.txt，ArkTS 读系统剪贴板后写 clip_in.txt，引擎轮询取回。
+// L 层剪贴板通道（M6 第 2 步后）：**只有协议**，没有文件桥。
+// - 写：引擎发 `lw_clipboard.set(mime, text)`，壳负责写系统剪贴板；
+// - 读：引擎发 `lw_clipboard.get(serial)`，壳读系统剪贴板后回 `clipboard.text`，
+//   结果落进 lwpFrameTick 维护的缓存（异步语义，第一次读大概率是空串）。
 
-import std.env.getVariable
-import std.fs.{File, Path}
-
-private func clipDir(): String {
-    getVariable("HOME") ?? "."
-}
-
-private func writeFileText(name: String, text: String): Unit {
-    try {
-        File.writeTo(Path(clipDir() + "/" + name), text.toArray())
-    } catch (_) {}
-}
-
-private func readFileText(name: String): String {
-    try {
-        String.fromUtf8(File.readFrom(Path(clipDir() + "/" + name)))
-    } catch (_) {
-        ""
-    }
-}
-
-private func removeFile(name: String): Unit {
-    try {
-        File.writeTo(Path(clipDir() + "/" + name), Array<UInt8>())
-    } catch (_) {}
-}
-
-/// 写系统剪贴板（交给 ArkTS 执行）。
+/// 写系统剪贴板。协议不可用时返回 false（没有退路：M6 已删除文件桥）。
 public func clipboardSetText(text: String): Unit {
-    writeFileText("clip_out.txt", text)
-}
-
-/// 读系统剪贴板（阻塞等待 ArkTS 回写，最多 800ms）。
-public func clipboardGetText(): String {
-    removeFile("clip_in.txt")
-    writeFileText("clip_req.txt", "1")
-    var waited = 0
-    while (waited < 80) {
-        let text = readFileText("clip_in.txt")
-        if (text.size > 0) {
-            removeFile("clip_in.txt")
-            return text
-        }
-        sleep(Duration.millisecond * 10)
-        waited++
+    match (lwpClipboardSetText(text)) {
+        case Some(_) => ()
+        case None => ()   // 通道未就绪：丢弃。上层不做重试（剪贴板丢一次可接受）
     }
-    ""
 }
 
+/// 读系统剪贴板：返回本地缓存（异步填充）。首次调用可能为空。
+public func clipboardGetText(): String {
+    match (lwpClipboardGetText()) {
+        case Some(v) => v
+        case None => ""
+    }
+}
+
+/// 缓存里是否有文本（不额外发起请求）。
 public func clipboardHasText(): Bool {
-    clipboardGetText().size > 0
+    match (lwpClipboardGetText()) {
+        case Some(v) => v.size > 0
+        case None => false
+    }
 }

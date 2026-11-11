@@ -1,6 +1,7 @@
 package lanlu_client_next.i18n
 
 import cui.{LocalePreference, SystemLocales}
+import lwindow.lwpSystemInfo
 import std.collection.HashMap
 import std.env.getVariable
 
@@ -32,6 +33,15 @@ public func resolveLanguage(preference: String): String {
     let normalized = normalizeLanguagePreference(preference)
     if (normalized != LANGUAGE_SYSTEM) {
         return normalized
+    }
+    // 1) 壳下发的系统语言（计划 §8：系统事实由平台层提供，引擎不猜 locale）。
+    //    壳没起来时（LANLU_LWP 未开或未收到 system.info）自然回落到下面的探测。
+    match (lwpSystemInfo()) {
+        case Some((_, lang, _, _, _)) =>
+            if (lang.size > 0) {
+                return supportedLanguageForTag(lang)
+            }
+        case None => ()
     }
     try {
         let locales = SystemLocales.preferred()

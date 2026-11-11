@@ -1,0 +1,33 @@
+# 质量基线（计划 §16.2 T0）——由 tools/check-*.py --update-baseline 生成，勿手改。
+# 记录迁移起点的问题集合；数量只允许下降。清理后运行对应脚本刷新。
+
+[deps]
+keys = [
+  "cui:dep:lgui",
+  "cui:import:lgui",
+  "lanlu_client_next:dep:lgpu",
+  "lanlu_client_next:dep:lgui",
+  "lanlu_client_next:import:lgpu",
+  "lanlu_client_next:import:lgui",
+  "lgpu:dep:lgui",
+  "lgpu:import:lgui",
+  "lwindow:dep:lgui",
+  "lwindow:import:lgui",
+]
+
+[platform]
+keys = [
+  "client-next/src/main.cj|sdl",
+  "client-next/src/ui/lgpu_backend.cj|sdl",
+  "client-next/src/ui/reader_bar.cj|sdl",
+  "client-next/src/ui/titlebar.cj|sdl",
+  "client-next/src/ui/upload_drawer.cj|sdl",
+  "packages/lgpu/native/src/lib.rs|ohos",
+  "packages/libass_ffi/native/lanlu_ass_bridge.c|ohos",
+  "packages/lwindow/src/lwindow.cj|ohos",
+  "packages/lwindow/src/ohos_entry.cj|ohos",
+  "packages/lwindow/src/ohos_fontsconf.cj|ohos",
+  "packages/lwindow/src/window_policy.cj|ohos",
+  "packages/lwindow/src/window_policy.cj|sdl",
+  "packages/lwindow/src/window_policy.cj|wayland",
+]

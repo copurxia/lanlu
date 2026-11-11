@@ -1,0 +1,296 @@
+# LWP 协议 IDL —— 窗口与呈现（计划 §7）
+#
+# 与 wayland 的心智对应（§8A）：app≈xdg_wm_base，window≈xdg_toplevel，surface≈wl_surface，
+# frame≈wl_callback。差异：configure 必须 ack（否则引擎会一直用旧尺寸），apply 与 commit 分离。
+
+[interface.lw_app]
+id = 3
+version = 1
+doc = "应用级：启动、退出、生命周期。壳 -> 引擎为主。"
+
+[[interface.lw_app.event]]
+name = "started"
+since = 1
+doc = "壳 -> 引擎：应用已就绪，可以创建窗口（对应 OHOS onForeground）。"
+args = [
+  { name = "app_id", type = "u32" },
+]
+
+[[interface.lw_app.event]]
+name = "resumed"
+since = 1
+doc = "壳 -> 引擎：回到前台（OHOS onForeground / wayland focus）。"
+args = []
+
+[[interface.lw_app.event]]
+name = "paused"
+since = 1
+doc = "壳 -> 引擎：进入后台（OHOS onBackground）。引擎应停止渲染但保留状态。"
+args = []
+
+[[interface.lw_app.request]]
+name = "quit"
+since = 1
+doc = "引擎 -> 壳：请求退出应用。"
+args = [{ name = "code", type = "i32" }]
+
+[interface.lw_window]
+id = 4
+version = 1
+doc = "顶层窗口：状态、尺寸、装饰、最小/最大尺寸。"
+
+[[interface.lw_window.request]]
+name = "create"
+since = 1
+doc = "引擎 -> 壳：创建窗口。返回 id 通过事件 window.created 回来。"
+args = [
+  { name = "title", type = "string" },
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+  { name = "flags", type = "u32" },   # 1=可缩放 2=有装饰 4=透明
+]
+
+[[interface.lw_window.event]]
+name = "created"
+since = 1
+doc = "壳 -> 引擎：窗口已创建，带壳分配的 id 与初始缩放。"
+args = [
+  { name = "window_id", type = "u32" },
+  { name = "scale", type = "f32" },
+  { name = "server_side_decorations", type = "bool" },
+]
+
+[[interface.lw_window.event]]
+name = "configure"
+since = 1
+doc = "壳 -> 引擎：建议尺寸/状态变化。引擎必须回 ack（或 apply），否则壳按超时回退。"
+args = [
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+  { name = "state", type = "u32" },   # 1=普通 2=最大化 4=全屏 8=沉浸式
+]
+
+
+[[interface.lw_window.request]]
+name = "ack_configure"
+since = 1
+doc = "引擎 -> 壳：接受 configure。"
+args = [{ name = "serial", type = "u32" }]
+
+[[interface.lw_window.request]]
+name = "set_title"
+since = 1
+doc = "引擎 -> 壳：改标题。"
+args = [{ name = "title", type = "string" }]
+
+[[interface.lw_window.request]]
+name = "set_min_max"
+since = 1
+doc = "引擎 -> 壳：最小/最大尺寸（0 表示不限）。"
+args = [
+  { name = "min_w", type = "u32" },
+  { name = "min_h", type = "u32" },
+  { name = "max_w", type = "u32" },
+  { name = "max_h", type = "u32" },
+]
+
+[[interface.lw_window.request]]
+name = "set_state"
+since = 1
+doc = "引擎 -> 壳：请求窗口状态变化（最小化/最大化/还原/全屏）。state 位与 configure 一致。"
+args = [{ name = "state", type = "u32" }]
+
+[[interface.lw_window.request]]
+name = "close"
+since = 1
+doc = "引擎 -> 壳：请求关闭窗口（与 quit 不同：只关窗口，应用可继续）。"
+args = []
+
+[[interface.lw_window.request]]
+name = "begin_move"
+since = 1
+doc = "引擎 -> 壳：开始交互式移动窗口（标题栏按下时）。壳用最近一次输入 serial 发起。"
+args = []
+
+[[interface.lw_window.request]]
+name = "begin_resize"
+since = 1
+doc = "引擎 -> 壳：开始交互式缩放。edges 位：1=上 2=下 4=左 8=右（与 xdg-shell 一致）。"
+args = [{ name = "edges", type = "u32" }]
+
+[[interface.lw_app.request]]
+name = "exit"
+since = 1
+doc = "引擎 -> 壳：请求退出应用（TerminateSelf）。"
+args = [{ name = "code", type = "i32" }]
+
+[[interface.lw_window.event]]
+name = "close_request"
+since = 1
+doc = "壳 -> 引擎：用户点了关闭（对应 xdg_toplevel.close）。引擎可拒绝并继续运行。"
+args = []
+
+[[interface.lw_window.event]]
+name = "focus"
+since = 1
+doc = "壳 -> 引擎：焦点变化。"
+args = [{ name = "focused", type = "bool" }]
+
+[[interface.lw_window.event]]
+name = "drag_enter"
+since = 1
+doc = "壳 -> 引擎：拖放进入窗口。uris 以 \\n 分隔（可能为空，等 drop 时才有）。"
+args = [
+  { name = "x", type = "u32" },
+  { name = "y", type = "u32" },
+  { name = "uris", type = "string" },
+]
+
+[[interface.lw_window.event]]
+name = "drag_motion"
+since = 1
+doc = "壳 -> 引擎：拖放在窗口内移动。"
+args = [
+  { name = "x", type = "u32" },
+  { name = "y", type = "u32" },
+]
+
+[[interface.lw_window.event]]
+name = "drag_leave"
+since = 1
+doc = "壳 -> 引擎：拖放离开窗口（未落下）。"
+args = []
+
+[[interface.lw_window.event]]
+name = "drop"
+since = 1
+doc = "壳 -> 引擎：拖放落下。uris 以 \\n 分隔（file:// URI 已解码为本地路径）。"
+args = [
+  { name = "x", type = "u32" },
+  { name = "y", type = "u32" },
+  { name = "uris", type = "string" },
+]
+
+# ── 三键（最小化/最大化/关闭）平台化（docs/lwindow-title-buttons-plan.md）──────────
+# 背景：OHOS setWindowDecorVisible(false) 只隐藏标题栏，三键仍由系统绘制在应用窗口
+# 右上角；业务层不再自绘三键，由平台层配置/上报，业务层只做矩形避让。
+# 追加在 lw_window 段末尾（只允许追加；改已有字段 = protocol_major + 1）。
+
+[[interface.lw_window.request]]
+name = "set_title_buttons"
+since = 1
+doc = "引擎 -> 壳：配置平台侧三键（可见性/位置/尺寸/明暗）。壳按平台能力 best-effort 应用并 clamp；实际生效矩形以 title_buttons_rect 事件为准，不另设配置回执。"
+args = [
+  { name = "visible", type = "u32" },        # 位掩码：1=最大化 2=最小化 4=关闭
+  { name = "side", type = "u32" },           # 0=右上 1=左上（SDK 只支持右上，平台不支持时忽略）
+  { name = "close_margin", type = "u32" },   # 关闭钮距窗口右缘，vp（OHOS 合法区间 6..22）
+  { name = "spacing", type = "u32" },        # 钮间距，vp（OHOS 合法区间 8..24）
+  { name = "button_size", type = "u32" },    # 钮背景尺寸，vp（OHOS 合法区间 20..40）
+  { name = "color_mode", type = "u32" },     # 0=跟随系统 1=light 2=dark
+]
+
+[[interface.lw_window.event]]
+name = "title_buttons_rect"
+since = 1
+doc = "壳 -> 引擎：平台三键当前矩形（窗口局部**物理 px**，壳已从 vp 换算）+ 可见性。语义对齐 OHOS TitleButtonRect（right/top 是右/上边界）；right==0 表示平台未给出可靠左边界，引擎只按 width/height 做右侧/顶部避让。全屏或三键隐藏时 width=height=0、visible=false。"
+args = [
+  { name = "right", type = "i32" },
+  { name = "top", type = "i32" },
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+  { name = "visible", type = "bool" },
+]
+
+[interface.lw_surface]
+id = 5
+version = 1
+doc = "绘制表面：buffer 提交与帧回调。"
+
+[[interface.lw_surface.request]]
+name = "attach"
+since = 1
+doc = "引擎 -> 壳：提交一帧。buffer 句柄由 lgpu 分配（VkImage/共享内存），这里只传句柄。"
+args = [
+  { name = "buffer", type = "u64" },
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+  { name = "serial", type = "u32" },
+]
+
+[[interface.lw_surface.event]]
+name = "frame_done"
+since = 1
+doc = "壳 -> 引擎：上一帧已显示（对应 wl_callback.done），引擎可提交下一帧。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "time_ns", type = "u64" },
+]
+
+[[interface.lw_surface.event]]
+name = "available"
+since = 1
+doc = "壳 -> 引擎：surface 可用（含 native window 句柄与像素尺寸）。对应 OH_ArkUI_SurfaceCallback_SetSurfaceCreatedEvent。"
+args = [
+  { name = "handle", type = "u64" },
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+]
+
+[[interface.lw_surface.event]]
+name = "changed"
+since = 1
+doc = "壳 -> 引擎：尺寸变化（优先 reconfigure 现有 swapchain，不要销毁重建——Maleoon 第三次重建必崩，见 §7.1）。"
+args = [
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+]
+
+[[interface.lw_surface.event]]
+name = "will_destroy"
+since = 1
+doc = "壳 -> 引擎：surface 即将销毁。引擎必须**同步**停止渲染并释放 surface（回调返回后旧 window 立即失效）。"
+args = []
+
+[[interface.lw_surface.event]]
+name = "hidden"
+since = 1
+doc = "壳 -> 引擎：切后台/息屏（只触发 hidden，不触发 destroyed）。引擎停帧但保留 surface。"
+args = []
+
+[interface.lw_frame]
+id = 6
+version = 1
+doc = "帧调度：请求下一帧、vsync 参数。"
+
+[[interface.lw_frame.request]]
+name = "request"
+since = 1
+doc = "引擎 -> 壳：请求在下一帧回调我。"
+args = [{ name = "serial", type = "u32" }]
+
+[[interface.lw_frame.event]]
+name = "done"
+since = 1
+doc = "壳 -> 引擎：可以画了（vsync 到达）。"
+args = [
+  { name = "serial", type = "u32" },
+  { name = "time_ns", type = "u64" },
+]
+
+[interface.lw_display]
+id = 7
+version = 1
+doc = "显示信息：尺寸、缩放、刷新率、安全区。"
+
+[[interface.lw_display.event]]
+name = "info"
+since = 1
+doc = "壳 -> 引擎：显示器参数（含非整数缩放与 inset 安全区）。"
+args = [
+  { name = "width", type = "u32" },
+  { name = "height", type = "u32" },
+  { name = "scale", type = "f32" },
+  { name = "refresh_mhz", type = "u32" },
+  { name = "inset_top", type = "u32" },
+  { name = "inset_bottom", type = "u32" },
+]
