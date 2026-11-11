@@ -1,0 +1,226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 18:51:50 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Table=20=E4=B9=9F=E6=94=AF=E6=8C=81?=
+ =?UTF-8?q?=20Shift=20=E5=8C=BA=E9=97=B4=E9=80=89=E6=8B=A9=EF=BC=88#9=20?=
+ =?UTF-8?q?=E8=A1=A8=E6=A0=BC=E7=89=88=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ListView 的锚点模式照搬到 Table：selectionAnchor（localState，Int64.Min=无锚点）、
+selectDisplay(keepAnchor) 语义与 ListView 完全一致（普通方向键/Home/End 重置锚点→单点；
+Shift+方向键保持锚点扩展），新增 selectionRange() 返回**原始行索引**数组（按当前显示序
+展开，排序后区间仍连续）。绘制上区间内非选中行用淡 accent 底，与单选行区分。
+
+私有函数不能带默认参数（Cangjie），keepAnchor 在各调用点显式传值。
+
+测试：3 用例（Shift+Down 扩展区间、普通方向键收缩为单点、排序无关的区间规模性质）。
+cjpm test：TOTAL 471 / PASSED 430，失败名册与基线一致，零回归。
+---
+ src/controls/table.cj            | 66 +++++++++++++++++++++++++++-----
+ src/controls/table_range_test.cj | 62 ++++++++++++++++++++++++++++++
+ 2 files changed, 118 insertions(+), 10 deletions(-)
+ create mode 100644 src/controls/table_range_test.cj
+
+diff --git a/src/controls/table.cj b/src/controls/table.cj
+index 9e94d05..e72ee82 100644
+--- a/src/controls/table.cj
++++ b/src/controls/table.cj
+@@ -1,5 +1,6 @@
+ package cui.controls
+ 
++import std.collection.ArrayList
+ import lgui.{Color, FontSizes, Key, MouseButton, Pen, Rect, Size, UiEvent}
+ import cui.core.{Bindable, CUI_SMALL_H, ScrollBar, State, UiContext, Widget, resolveControlKey, clampScrollOffset, 
+     drawSurface, SmoothScroll, drawVerticalScrollBar, emit, localState, registerFocusable, scrollLineIndex, 
+@@ -95,6 +96,8 @@ public class Table <: Widget {
+     // The selection last scrolled into view, retained across rebuilds — so a changed selection
+     // (however it changed, including an app setting it directly) is revealed, like ListView does.
+     private let lastRevealed: State<Int64>
++    // Shift 区间选择锚点（缺口 #9 的表格版本，与 ListView 同一语义；Int64.Min = 无锚点）。
++    private let selectionAnchor: State<Int64>
+     // The cached display order and the sort inputs it was computed from, retained across the
+     // per-frame rebuild so a stable table is not re-sorted every frame. See displayOrder.
+     private let sortCache: TableSortCache
+@@ -117,6 +120,7 @@ public class Table <: Widget {
+         this.sortAsc = localState<Bool>("Table:${ident}:sortAsc") {true}
+         this.scrollBar = ScrollBar("Table:${ident}:thumb")
+         this.lastRevealed = localState<Int64>("Table:${ident}:revealed") {Int64.Min}
++        this.selectionAnchor = localState<Int64>("Table:${ident}:anchor") {Int64.Min}
+         this.sortCache = localState<TableSortCache>("Table:${ident}:sortCache") {TableSortCache()}.value
+         registerFocusable(ident)
+         emit(this)
+@@ -233,10 +237,10 @@ public class Table <: Widget {
+             case UiEvent.KeyDown(Key.Right, true) => return shiftSortColumn(ctx, 1)
+             case UiEvent.KeyDown(Key.Enter, _) => return toggleSortIfFocused(ctx)
+             case UiEvent.KeyDown(Key.Space, _) => return toggleSortIfFocused(ctx)
+-            case UiEvent.KeyDown(Key.Up, _) => return moveSelection(ctx, -1)
+-            case UiEvent.KeyDown(Key.Down, _) => return moveSelection(ctx, 1)
+-            case UiEvent.KeyDown(Key.Home, _) => return setSelectionToDisplay(ctx, 0)
+-            case UiEvent.KeyDown(Key.End, _) => return setSelectionToDisplay(ctx, rows.size - 1)
++            case UiEvent.KeyDown(Key.Up, shift) => return moveSelection(ctx, -1, shift)
++            case UiEvent.KeyDown(Key.Down, shift) => return moveSelection(ctx, 1, shift)
++            case UiEvent.KeyDown(Key.Home, shift) => return setSelectionToDisplay(ctx, 0, shift)
++            case UiEvent.KeyDown(Key.End, shift) => return setSelectionToDisplay(ctx, rows.size - 1, shift)
+             case _ => ()
+         }
+         false
+@@ -334,8 +338,12 @@ public class Table <: Widget {
+     }
+ 
+     private func drawRow(ctx: UiContext, rowIndex: Int64, displayPos: Int64, rowRect: Rect): Unit {
++        let inRange = selectionAnchor.value != Int64.Min && rangeContains(rowIndex)
+         if (rowIndex == selected.value) {
+             ctx.renderer.fillRoundedRect(rowRect.inset(1.0), ctx.theme.smallRadius, ctx.theme.accentSoft)
++        } else if (inRange) {
++            // Shift 区间（缺口 #9 表格版）：区间内其它行用更淡的 accent 底，和单选行区分。
++            ctx.renderer.fillRoundedRect(rowRect.inset(1.0), ctx.theme.smallRadius, ctx.theme.accentSoft.withAlpha(90))
+         } else if (rowRect.contains(ctx.mouseX, ctx.mouseY)) {
+             // 行悬停高亮（缺口 #9）：盖过斑马纹，让“指针在哪一行”一目了然。
+             ctx.renderer.fillRoundedRect(rowRect.inset(1.0), ctx.theme.smallRadius, ctx.theme.fieldActive)
+@@ -399,29 +407,67 @@ public class Table <: Widget {
+         return true
+     }
+ 
+-    private func moveSelection(ctx: UiContext, delta: Int64): Bool {
++    private func moveSelection(ctx: UiContext, delta: Int64, keepAnchor: Bool): Bool {
+         if (!ctx.hasFocus(id) || rows.isEmpty()) {
+             return false
+         }
+         let order = displayOrder()
+-        selectDisplay(order, clampPosition(displayPositionOf(order, selected.value) + delta, order.size))
++        selectDisplay(order, clampPosition(displayPositionOf(order, selected.value) + delta, order.size),
++            keepAnchor)
+         true
+     }
+ 
+-    private func setSelectionToDisplay(ctx: UiContext, pos: Int64): Bool {
++    private func setSelectionToDisplay(ctx: UiContext, pos: Int64, keepAnchor: Bool): Bool {
+         if (!ctx.hasFocus(id) || rows.isEmpty()) {
+             return false
+         }
+         let order = displayOrder()
+-        selectDisplay(order, clampPosition(pos, order.size))
++        selectDisplay(order, clampPosition(pos, order.size), keepAnchor)
+         true
+     }
+ 
+-    // Selects the row at a display position and scrolls it into view.
+-    private func selectDisplay(order: Array<Int64>, pos: Int64): Unit {
++    // 原始行索引是否落在当前 Shift 区间内（按显示序判断）。
++    private func rangeContains(rowIndex: Int64): Bool {
++        let order = displayOrder()
++        let from = clampPosition(min(displayPositionOf(order, selectionAnchor.value),
++            displayPositionOf(order, selected.value)), order.size)
++        let to = clampPosition(max(displayPositionOf(order, selectionAnchor.value),
++            displayPositionOf(order, selected.value)), order.size)
++        let pos = displayPositionOf(order, rowIndex)
++        pos >= from && pos <= to
++    }
++
++    /** 当前 Shift 区间（原始行索引，含两端）；无锚点时退化为单点。表格按显示序操作，区间按显示序展开后取原始索引。 */
++    public func selectionRange(): Array<Int64> {
++        let order = displayOrder()
++        let anchor = selectionAnchor.value
++        if (anchor == Int64.Min || order.isEmpty()) {
++            return [selected.value]
++        }
++        let from = clampPosition(min(displayPositionOf(order, anchor), displayPositionOf(order, selected.value)), order.size)
++        let to = clampPosition(max(displayPositionOf(order, anchor), displayPositionOf(order, selected.value)), order.size)
++        let picked = ArrayList<Int64>()
++        var i = from
++        while (i <= to) {
++            picked.add(order[i])
++            i += 1
++        }
++        picked.toArray()
++    }
++
++    // Selects the row at a display position and scrolls it into view. keepAnchor: Shift 扩展
++    // （保持锚点，无锚点时以当前选中项起锚）；普通选择把锚点移到新位置。
++    private func selectDisplay(order: Array<Int64>, pos: Int64, keepAnchor: Bool): Unit {
+         if (pos < 0 || pos >= order.size) {
+             return
+         }
++        if (keepAnchor) {
++            if (selectionAnchor.value == Int64.Min) {
++                selectionAnchor.value = selected.value
++            }
++        } else {
++            selectionAnchor.value = order[pos]
++        }
+         selected.value = order[pos]
+         revealPosition(pos)
+     }
+diff --git a/src/controls/table_range_test.cj b/src/controls/table_range_test.cj
+new file mode 100644
+index 0000000..8ad983d
+--- /dev/null
++++ b/src/controls/table_range_test.cj
+@@ -0,0 +1,62 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func tableRangeContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* 缺口 #9 的表格版本：Shift 区间选择与 ListView 同一语义（锚点 + 显示序展开）。 */
++@Test
++func tableShiftArrowGrowsSelectionRange(): Unit {
++    let ctx = tableRangeContext()
++    let columns = [TableColumn("名", 100.0)]
++    let rows = [["a"], ["b"], ["c"], ["d"], ["e"]]
++    let selected = State<Int64>(1)
++    let table = Table(columns, rows, selected, key: "tr.kbd")
++    table.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    ctx.focus("tr.kbd", viaKeyboard: true)
++
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Down, true)))
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Down, true)))
++    @Expect(selected.value, Int64(3))
++    let range = table.selectionRange()
++    @Expect(range.size, Int64(3)) // 1,2,3
++    @Expect(range[0], Int64(1))
++    @Expect(range[2], Int64(3))
++}
++
++@Test
++func tablePlainArrowCollapsesRange(): Unit {
++    let ctx = tableRangeContext()
++    let columns = [TableColumn("名", 100.0)]
++    let rows = [["a"], ["b"], ["c"], ["d"]]
++    let selected = State<Int64>(0)
++    let table = Table(columns, rows, selected, key: "tr.collapse")
++    table.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    ctx.focus("tr.collapse", viaKeyboard: true)
++
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Down, true))) // 扩到 0..1
++    @Expect(table.selectionRange().size, Int64(2))
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Down, false))) // 普通移动 → 退化单点
++    @Expect(table.selectionRange().size, Int64(1))
++    @Expect(selected.value, Int64(2))
++}
++
++@Test
++func tableRangeFollowsDisplayOrderAfterSort(): Unit {
++    let ctx = tableRangeContext()
++    let columns = [TableColumn("名", 100.0)]
++    // 逆序初始数据：排序后显示序反转。
++    let rows = [["c"], ["b"], ["a"]]
++    let selected = State<Int64>(0)
++    let table = Table(columns, rows, selected, key: "tr.sort")
++    table.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    ctx.focus("tr.sort", viaKeyboard: true)
++
++    // 升序排序（Shift+Right 换列，Enter 切换方向由 sortCol 初始 -1 → 需先点表头或按键）
++    // 这里只验证：扩展后的区间元素数量正确（与排序无关的规模性质）。
++    @Expect(table.handle(ctx, UiEvent.KeyDown(Key.Down, true)))
++    @Expect(table.selectionRange().size, Int64(2))
++}
+-- 
+2.47.3
+

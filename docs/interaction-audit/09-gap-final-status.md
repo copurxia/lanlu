@@ -15,7 +15,7 @@
 | 6 | Pagination/StepIndicator/Breadcrumb/WordCloud 不可聚焦 | ✅ | `9fe49b3` + `1db7709`；`pagination*`/`breadcrumb*`/`stepIndicator*`/`wordCloud*` 10 例 |
 | 7 | 无键盘滚动 / PageUp·PageDown | ✅ | `37573de` Key 枚举 + ScrollView；`54c5092` TextArea 翻页；`8671b44` LazyRow；`scrollView*`/`textAreaPageKeys*` 5 例 |
 | 8 | 焦点不滚入视野 | ✅ | `d509011` + `7b20493` + `8671b44`：矩形上报 + ScrollView/LazyColumn/LazyRow 最小滚动；6 例 |
-| 9 | 行无 hover 高亮（含 Shift 区间选择） | ✅ | `16d164b` 行 hover（ListView/Table）；`9327573` ListView Shift 区间选择（锚点 + `selectionRange()`，不改 `Bindable<Int64>` 类型） |
+| 9 | 行无 hover 高亮（含 Shift 区间选择） | ✅ | `16d164b` 行 hover（ListView/Table）；`9327573` ListView 区间选择；`5e308c7` **Table 区间选择**（同一锚点模式，`selectionRange()` 返回按显示序展开的原始行索引）。TreeView 需要时照搬（同一模式） |
 | 10 | 悬停视觉普遍缺失 | ✅ | `8b1c3c6` 字段族三态、`bba0ef6` 开关/单选/复选/滑块、`16d164b` 行 hover；带悬停视觉的控件文件 4→11 |
 | 11 | 按下态缺失 + 长按不连发 | ✅ | `8f44d11` 实心按钮按下/悬停；`ebf79bd` `KeyRepeat` 连发（无需改 L 层协议）；5 例 |
 | 12 | 焦点视觉语言不统一 | ✅ | 全部走 `showFocusRing`+`drawFocusRing`（并已公开给应用）；PR §六核对无旁路 |
