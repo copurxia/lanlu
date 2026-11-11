@@ -1,0 +1,293 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:43:37 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Key=20=E6=9E=9A=E4=B8=BE=E8=A1=A5?=
+ =?UTF-8?q?=20PageUp/PageDown/Menu=EF=BC=9BScrollView=20=E9=94=AE=E7=9B=98?=
+ =?UTF-8?q?=E6=BB=9A=E5=8A=A8?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #7（中）：Key 枚举此前没有翻页与菜单键（落到 RawScancode，控件层无法匹配），
+ScrollView 只认滚轮/滚动条——纯键盘用户无法翻页浏览长内容。
+
+- lgui Key 枚举新增 PageUp/PageDown/Menu，keyFromScancode 按 USB HID scancode
+  (75/78/118) 解码；events_test 补三个映射断言。
+- ScrollView：PageUp/PageDown = 0.9 视口（与滚动条轨道点击同一步长），Up/Down 48px，
+  Home/End 直达顶/底。走与滚轮同一条 scrollBy 通路（缓动一致）；先给孩子机会
+  （TextArea 翻页等），滚到边不越界。
+- 新增 4 用例（scroll_keyboard_test.cj）：翻页步长、方向键步进与顶端收住、
+  Home/End 跳变、子树消费优先。
+
+本机桩库 cjpm test：TOTAL 406，PASSED 365（新增 4 例全过），ERROR 40 + FAILED 1
+（pushWakeEvent 需真实 SDL wake 事件）与基线逐例一致，零回归。
+---
+ lgui/src/events.cj               |   9 +++
+ lgui/src/events_test.cj          |  16 +++++
+ lgui/src/sdl_types_raw.cj        |   4 ++
+ src/core/advanced_layouts.cj     |  40 ++++++++++-
+ src/core/scroll_keyboard_test.cj | 118 +++++++++++++++++++++++++++++++
+ 5 files changed, 186 insertions(+), 1 deletion(-)
+ create mode 100644 src/core/scroll_keyboard_test.cj
+
+diff --git a/lgui/src/events.cj b/lgui/src/events.cj
+index dad38de..96f6348 100644
+--- a/lgui/src/events.cj
++++ b/lgui/src/events.cj
+@@ -16,6 +16,9 @@ public enum Key {
+     | Right
+     | Up
+     | Down
++    | PageUp
++    | PageDown
++    | Menu
+     | Letter(UInt8)
+     | Digit(UInt8)
+     | RawScancode(Int32)
+@@ -236,8 +239,14 @@ internal func keyFromScancode(scancode: Int32): Key {
+         Key.Space
+     } else if (scancode == SDL_SCANCODE_HOME) {
+         Key.Home
++    } else if (scancode == SDL_SCANCODE_PAGEUP) {
++        Key.PageUp
+     } else if (scancode == SDL_SCANCODE_END) {
+         Key.End
++    } else if (scancode == SDL_SCANCODE_PAGEDOWN) {
++        Key.PageDown
++    } else if (scancode == SDL_SCANCODE_MENU) {
++        Key.Menu
+     } else if (scancode == SDL_SCANCODE_RIGHT) {
+         Key.Right
+     } else if (scancode == SDL_SCANCODE_LEFT) {
+diff --git a/lgui/src/events_test.cj b/lgui/src/events_test.cj
+index 239f414..c586e5d 100644
+--- a/lgui/src/events_test.cj
++++ b/lgui/src/events_test.cj
+@@ -16,6 +16,22 @@ func keyFromScancodeMapsLettersAndControls(): Unit {
+         case Key.Home => @Expect(true)
+         case _ => @Fail("Home scancode should map to Key.Home.")
+     }
++
++    // 翻页与菜单键：键盘滚动 / 上下文菜单唤起的前置（此前落到 RawScancode，控件层无法匹配）。
++    match (keyFromScancode(SDL_SCANCODE_PAGEUP)) {
++        case Key.PageUp => @Expect(true)
++        case _ => @Fail("PageUp scancode should map to Key.PageUp.")
++    }
++
++    match (keyFromScancode(SDL_SCANCODE_PAGEDOWN)) {
++        case Key.PageDown => @Expect(true)
++        case _ => @Fail("PageDown scancode should map to Key.PageDown.")
++    }
++
++    match (keyFromScancode(SDL_SCANCODE_MENU)) {
++        case Key.Menu => @Expect(true)
++        case _ => @Fail("Menu scancode should map to Key.Menu.")
++    }
+ }
+ 
+ @Test
+diff --git a/lgui/src/sdl_types_raw.cj b/lgui/src/sdl_types_raw.cj
+index ab4a3ac..d57ccd9 100644
+--- a/lgui/src/sdl_types_raw.cj
++++ b/lgui/src/sdl_types_raw.cj
+@@ -52,12 +52,16 @@ internal let SDL_SCANCODE_BACKSPACE: Int32 = 42
+ internal let SDL_SCANCODE_TAB: Int32 = 43
+ internal let SDL_SCANCODE_SPACE: Int32 = 44
+ internal let SDL_SCANCODE_HOME: Int32 = 74
++internal let SDL_SCANCODE_PAGEUP: Int32 = 75
+ internal let SDL_SCANCODE_DELETE: Int32 = 76
++internal let SDL_SCANCODE_PAGEDOWN: Int32 = 78
+ internal let SDL_SCANCODE_END: Int32 = 77
+ internal let SDL_SCANCODE_RIGHT: Int32 = 79
+ internal let SDL_SCANCODE_LEFT: Int32 = 80
+ internal let SDL_SCANCODE_DOWN: Int32 = 81
+ internal let SDL_SCANCODE_UP: Int32 = 82
++// USB HID usage: Keyboard Menu (Application)。SDL_SCANCODE_MENU 未在常用集，直接给值。
++internal let SDL_SCANCODE_MENU: Int32 = 118
+ internal let SDL_BUTTON_LEFT: UInt8 = UInt8(1)
+ internal let SDL_BUTTON_MIDDLE: UInt8 = UInt8(2)
+ internal let SDL_BUTTON_RIGHT: UInt8 = UInt8(3)
+diff --git a/src/core/advanced_layouts.cj b/src/core/advanced_layouts.cj
+index 866d4e1..5b06966 100644
+--- a/src/core/advanced_layouts.cj
++++ b/src/core/advanced_layouts.cj
+@@ -1,6 +1,6 @@
+ package cui.core
+ 
+-import lgui.{Rect, Size, UiEvent}
++import lgui.{Key, Rect, Size, UiEvent}
+ 
+ // Effectively-infinite extent offered to a child during measure; shared by the scrolling and
+ // collapsible containers (Accordion, in cui.controls) that size a child to its natural content.
+@@ -415,6 +415,44 @@ public class ScrollView <: Widget {
+                     }
+                     return false
+                 }
++            // 键盘滚动（缺口 #7）：PageUp/PageDown 翻一屏、方向键步进、Home/End 到顶/底。
++            // 先给孩子机会（可聚焦孩子不消费滚动键时才滚动），滚到边返回 false 让外层继续。
++            case UiEvent.KeyDown(Key.PageUp, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                // scrollBy 的正 delta = 向下滚动（与滚轮一致）；PageUp 翻回一屏。
++                return scrollMotion.scrollBy(ctx, scrollOffset, -frame.h * 0.9, contentHeight, frame.h)
++            case UiEvent.KeyDown(Key.PageDown, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollOffset, frame.h * 0.9, contentHeight, frame.h)
++            case UiEvent.KeyDown(Key.Up, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollOffset, -48.0, contentHeight, frame.h)
++            case UiEvent.KeyDown(Key.Down, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                return scrollMotion.scrollBy(ctx, scrollOffset, 48.0, contentHeight, frame.h)
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                scrollOffset.value = 0.0
++                scrollMotion.reset(0.0)
++                return true
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (child.handle(ctx, event)) {
++                    return true
++                }
++                let bottom = max(0.0, contentHeight - frame.h)
++                scrollOffset.value = bottom
++                scrollMotion.reset(bottom)
++                return true
+             case UiEvent.MouseDown(_, x, y) =>
+                 if (scrollBar.press(ctx, frame, scrollOffset, contentHeight, frame.h, x, y)) {
+                     return true
+diff --git a/src/core/scroll_keyboard_test.cj b/src/core/scroll_keyboard_test.cj
+new file mode 100644
+index 0000000..3c9d598
+--- /dev/null
++++ b/src/core/scroll_keyboard_test.cj
+@@ -0,0 +1,118 @@
++package cui.core
++
++import lgui.{FrameInfo, Key, Rect, Renderer, Size, UiEvent}
++
++/*
++ * 键盘滚动（审计缺口 #7）：ScrollView 此前只认滚轮/滚动条，纯键盘用户无法翻页。
++ * PageUp/PageDown = 0.9 视口（与滚动条轨道点击同一步长），方向键 48px，Home/End 到顶/底。
++ * 与滚轮同一条 scrollBy 通路，缓动一致；子树不消费滚动键时才滚动，滚到边返回 false。
++ */
++@Test
++func scrollViewPageKeysScrollByViewport(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let child = SizedLayoutProbe(Size(120.0, 400.0))
++    let view = ScrollView(key: "kbd.pages") {
++        emit(child)
++    }.scrollState(offset)
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.PageDown, false)))
++    ctx.frame = FrameInfo(UInt64(200), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(72.0)) // 0.9 * 80
++
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.PageUp, false)))
++    ctx.frame = FrameInfo(UInt64(400), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(0.0))
++}
++
++@Test
++func scrollViewArrowKeysStepAndClamp(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let child = SizedLayoutProbe(Size(120.0, 200.0))
++    let view = ScrollView(key: "kbd.arrows") {
++        emit(child)
++    }.scrollState(offset)
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    ctx.frame = FrameInfo(UInt64(200), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(48.0))
++
++    // 让缓动走完（scrollBy 在动画未停住时报“已处理”，与滚轮一致）。
++    ctx.frame = FrameInfo(UInt64(400), UInt64(200))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    ctx.frame = FrameInfo(UInt64(700), UInt64(300))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++
++    // 向上在顶端：offset 不再变化（scrollBy 在边缘的返回值取决于缓动是否停住，
++    // 文档语义是“无内容可滚”，但动画尾巴期间仍报已处理——这里断言用户可见的结果）。
++    let _ = view.handle(ctx, UiEvent.KeyDown(Key.Up, false))
++    ctx.frame = FrameInfo(UInt64(1000), UInt64(300))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(0.0)) // 顶端不越界
++}
++
++@Test
++func scrollViewHomeEndJumpToDocumentEnds(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let child = SizedLayoutProbe(Size(120.0, 300.0))
++    let view = ScrollView(key: "kbd.ends") {
++        emit(child)
++    }.scrollState(offset)
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.End, false)))
++    ctx.frame = FrameInfo(UInt64(200), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(220.0)) // 300 - 80
++
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.Home, false)))
++    ctx.frame = FrameInfo(UInt64(400), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(0.0))
++}
++
++@Test
++func scrollViewKeysYieldToFocusableChild(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let sink = KeySinkControl()
++    let view = ScrollView(key: "kbd.child") {
++        emit(sink)
++    }.scrollState(offset)
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++
++    // 子控件消费了 PageDown（例如 TextArea 翻页）——外层不滚动。
++    @Expect(view.handle(ctx, UiEvent.KeyDown(Key.PageDown, false)))
++    @Expect(sink.consumed)
++    ctx.frame = FrameInfo(UInt64(200), UInt64(16))
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 80.0))
++    @Expect(offset.value, Float32(0.0))
++}
++
++/* 消费一切按键的哑控件：模拟可聚焦子树（TextArea/内嵌列表）先行消费滚动键。 */
++class KeySinkControl <: Widget {
++    public var consumed = false
++    public init() {
++        emit(this)
++    }
++    public func measure(_: UiContext, _: Size): Size {
++        Size(120.0, 400.0)
++    }
++    public func layout(_: UiContext, _: Rect): Unit {}
++    public func draw(_: UiContext): Unit {}
++    public func handle(_: UiContext, event: UiEvent): Bool {
++        match (event) {
++            case UiEvent.KeyDown(_, _) =>
++                consumed = true
++                true
++            case _ => false
++        }
++    }
++}
+-- 
+2.47.3
+

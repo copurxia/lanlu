@@ -1,0 +1,319 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 16:15:24 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20RichText=20=E6=94=AF=E6=8C=81?=
+ =?UTF-8?q?=E5=8F=AF=E7=82=B9=E5=87=BB=E9=93=BE=E6=8E=A5=E7=89=87=E6=AE=B5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #19（低/M，框架侧最后一项）：RichText 此前 handle 恒 false——富文本区域
+选不中、复制不了、链接点不动，是唯一“完全无交互”的控件。
+
+新增 RichSpan.link(text, onClick)：链接片段以 accent 色 + 下划线绘制（显式 color 可覆盖），
+悬停时下划线加粗到 2px 并认领手型光标，左键按下即触发回调并消费事件。命中测试按片段
+实际矩形（文本片段按渲染宽度、跨行按所在行），同一段文字里的多个链接互不干扰；
+布局把 action/width 随片段携带，绘制与命中复用同一份缓存的布局。
+
+测试：2 用例（链接命中触发+空白处不触发+行外不触发、多链接互相独立）。
+走 tools/verify-cui-interactions.sh p0：TOTAL 441，PASSED 400（新增 2 例全过），
+失败名册与基线完全一致，零回归。
+---
+ src/controls/rich_text.cj           | 111 +++++++++++++++++++++++++---
+ src/controls/rich_text_link_test.cj |  96 ++++++++++++++++++++++++
+ 2 files changed, 197 insertions(+), 10 deletions(-)
+ create mode 100644 src/controls/rich_text_link_test.cj
+
+diff --git a/src/controls/rich_text.cj b/src/controls/rich_text.cj
+index 2b4cba1..51f39d8 100644
+--- a/src/controls/rich_text.cj
++++ b/src/controls/rich_text.cj
+@@ -1,8 +1,8 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{Color, FontSizes, IconName, Rect, Size, UiEvent, drawIcon}
+-import cui.core.{CUI_SMALL_H, Length, LengthUnit, UiContext, Widget, emit}
++import lgui.{Color, FontSizes, IconName, MouseButton, Rect, Size, UiEvent, drawIcon}
++import cui.core.{CUI_SMALL_H, CursorShape, Length, LengthUnit, UiContext, Widget, emit}
+ 
+ // Gap after an inline icon before the next span.
+ private let RICH_SPAN_GAP: Float32 = 3.0
+@@ -23,11 +23,15 @@ public struct RichSpan {
+     let kind: RichSpanKind
+     let color: ?Color
+     let isMuted: Bool
++    // 链接动作（None = 普通文本）。有动作的 span 以 accent 色 + 下划线绘制、悬停加粗下划线、
++    // 指针为手型，点击触发回调——RichText 此前 handle 恒 false，完全不可交互（审计缺口 #19）。
++    let action: ?() -> Unit
+ 
+-    private init(kind: RichSpanKind, color: ?Color, isMuted: Bool) {
++    private init(kind: RichSpanKind, color: ?Color, isMuted: Bool, action!: ?() -> Unit = None) {
+         this.kind = kind
+         this.color = color
+         this.isMuted = isMuted
++        this.action = action
+     }
+ 
+     /** A run of text in the default text colour, or an explicit `color`. */
+@@ -44,6 +48,15 @@ public struct RichSpan {
+     public static func icon(icon: IconName, color!: ?Color = None): RichSpan {
+         RichSpan(RichSpanKind.SpanIcon(icon), color, false)
+     }
++
++    /**
++     * A clickable link run: drawn in the accent colour with an underline, the pointer shows the
++     * interactive cursor over it, and a press calls `onClick`. Use for inline actions in running text
++     * (open a page, reveal details) where a full `Button` would be too heavy.
++     */
++    public static func link(text: String, onClick: () -> Unit, color!: ?Color = None): RichSpan {
++        RichSpan(RichSpanKind.SpanText(text), color, false, action: Some(onClick))
++    }
+ }
+ 
+ // A span fragment placed at a position during layout: a text slice or an icon at (x, y) in content space.
+@@ -58,13 +71,19 @@ struct PlacedItem {
+     let kind: PlacedKind
+     let color: ?Color
+     let muted: Bool
++    // 链接动作与命中宽度（文本项按渲染宽度；图标项为图标边长）。
++    let action: ?() -> Unit
++    let width: Float32
+ 
+-    init(x: Float32, y: Float32, kind: PlacedKind, color: ?Color, muted: Bool) {
++    init(x: Float32, y: Float32, kind: PlacedKind, color: ?Color, muted: Bool, action!: ?() -> Unit = None,
++        width!: Float32 = 0.0) {
+         this.x = x
+         this.y = y
+         this.kind = kind
+         this.color = color
+         this.muted = muted
++        this.action = action
++        this.width = width
+     }
+ }
+ 
+@@ -152,7 +171,18 @@ public class RichText <: Widget {
+             let py = frame.y + offsetY + item.y
+             let color = colorFor(ctx, item)
+             match (item.kind) {
+-                case PlacedKind.PlacedText(text) => ctx.renderer.text(text, px, py, color, pointSize: ps)
++                case PlacedKind.PlacedText(text) =>
++                    ctx.renderer.text(text, px, py, color, pointSize: ps)
++                    // 链接下划线：常态 1px，悬停 2px（同一 accent 色），让可点性一眼可见。
++                    if (item.action.isSome()) {
++                        let hovered = itemFrame(item, offsetY, lineHeight).contains(ctx.mouseX, ctx.mouseY)
++                        let underline = Rect(px, py + lineHeight - 1.0, max(1.0, item.width), if (hovered) {
++                            2.0
++                        } else {
++                            1.0
++                        })
++                        ctx.renderer.fillRoundedRect(underline, 0.5, color)
++                    }
+                 case PlacedKind.PlacedIcon(icon) =>
+                     let iconY = py + (lineHeight - iconSize) / 2.0
+                     drawIcon(ctx.renderer, icon, Rect(px, iconY, iconSize, iconSize), color)
+@@ -160,15 +190,73 @@ public class RichText <: Widget {
+         }
+     }
+ 
+-    public func handle(_: UiContext, _: UiEvent): Bool {
++    /*
++     * 链接交互（审计缺口 #19）：指针在链接上时认领手型光标；左键按下即触发回调并消费事件。
++     * 命中区是该片段的实际矩形（文本片段按渲染宽度，跨行时按片段所在行），不做整块 RichText 命中，
++     * 因此同一段文字里多个链接互不干扰。
++     */
++    public func handle(ctx: UiContext, event: UiEvent): Bool {
++        let ps = resolvedPointSize(ctx)
++        let lineHeight = ctx.renderer.textHeight(pointSize: ps)
++        let layout = layoutFor(ctx, frame.w, ps, lineHeight)
++        let offsetY = max(0.0, (frame.h - layout.height) / 2.0)
++        match (event) {
++            case UiEvent.MouseMove(x, y) =>
++                match (linkAt(ctx, layout, offsetY, lineHeight, x, y)) {
++                    case Some(_) => ctx.claimHover(controlIdentityOf(), CursorShape.Interactive)
++                    case None => ()
++                }
++            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
++                match (linkAt(ctx, layout, offsetY, lineHeight, x, y)) {
++                    case Some(action) =>
++                        action()
++                        return true
++                    case None => ()
++                }
++            case _ => ()
++        }
+         false
+     }
+ 
++    // 命中测试：返回指针所在链接的动作。
++    private func linkAt(
++        ctx: UiContext,
++        layout: RichLayout,
++        offsetY: Float32,
++        lineHeight: Float32,
++        x: Float32,
++        y: Float32
++    ): ?() -> Unit {
++        for (item in layout.items) {
++            match (item.action) {
++                case Some(action) =>
++                    if (itemFrame(item, offsetY, lineHeight).contains(x, y)) {
++                        return Some(action)
++                    }
++                case None => ()
++            }
++        }
++        None
++    }
++
++    // 片段在窗口坐标下的矩形（含纵向居中偏移与行高）。
++    private func itemFrame(item: PlacedItem, offsetY: Float32, lineHeight: Float32): Rect {
++        Rect(frame.x + item.x, frame.y + offsetY + item.y, max(1.0, item.width), lineHeight)
++    }
++
++    // 本控件的稳定身份（供悬停认领；同一 RichText 内所有链接共用一个 hover id）。
++    private func controlIdentityOf(): String {
++        "RichText:${Int64(frame.x)}:${Int64(frame.y)}"
++    }
++
+     private func colorFor(ctx: UiContext, item: PlacedItem): Color {
+         match (item.color) {
+             case Some(value) => value
+             case None =>
+-                if (item.muted) {
++                if (item.action.isSome()) {
++                    // 链接默认用强调色（显式 color 仍可覆盖），与下划线一起构成可点语义。
++                    ctx.theme.accent
++                } else if (item.muted) {
+                     ctx.theme.mutedText
+                 } else {
+                     ctx.theme.text
+@@ -242,8 +330,10 @@ internal func layoutRichSpans(
+                         fit = 1
+                     }
+                     let segment = richRuneSlice(runes, i, i + fit)
+-                    placed.add(PlacedItem(x, y, PlacedKind.PlacedText(segment), span.color, span.isMuted))
+-                    x += measure(segment)
++                    let segmentWidth = measure(segment)
++                    placed.add(PlacedItem(x, y, PlacedKind.PlacedText(segment), span.color, span.isMuted,
++                        action: span.action, width: segmentWidth))
++                    x += segmentWidth
+                     widest = max(widest, x)
+                     anyPlaced = true
+                     i += fit
+@@ -253,7 +343,8 @@ internal func layoutRichSpans(
+                     x = 0.0
+                     y += lineHeight
+                 }
+-                placed.add(PlacedItem(x, y, PlacedKind.PlacedIcon(icon), span.color, false))
++                placed.add(PlacedItem(x, y, PlacedKind.PlacedIcon(icon), span.color, false, action: span.action,
++                    width: iconSize))
+                 x += iconSize
+                 widest = max(widest, x)
+                 x += spanGap
+diff --git a/src/controls/rich_text_link_test.cj b/src/controls/rich_text_link_test.cj
+new file mode 100644
+index 0000000..deb7235
+--- /dev/null
++++ b/src/controls/rich_text_link_test.cj
+@@ -0,0 +1,96 @@
++package cui.controls
++
++import lgui.{Canvas, Color, MouseButton, Pen, Rect, Renderer, Size, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/* 固定度量的空画布：每个字符 8px、行高 16，便于精确算链接命中区。 */
++class TextMetricsCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        Float32(text.toRuneArray().size) * 8.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        16.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func richContext(): UiContext {
++    let renderer = Renderer.headless()
++    renderer.useBackend(TextMetricsCanvas())
++    UiContext(renderer, Theme.dark())
++}
++
++/*
++ * RichText 链接交互（审计缺口 #19）：指针在链接片段上点击触发回调并消费事件；
++ * 同一段文字里的多个链接互不干扰；空白处不触发。
++ *
++ * 布局（每字符 8px）：「看 」=16px、链接「详情」=16px（x 16..32）、「 完」=16px（x 32..48）。
++ * 控件 200x40，行高 16 → 纵向居中偏移 (40-16)/2 = 12。
++ */
++@Test
++func richTextLinkClickRunsCallback(): Unit {
++    let ctx = richContext()
++    let hits = State<Int64>(0)
++    let view = RichText([
++        RichSpan.text("看 "),
++        RichSpan.link("详情", {=> hits.value += 1 }),
++        RichSpan.text(" 完")
++    ])
++    view.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++
++    // 命中文档：x 在 16..32、y 在 12..28。
++    @Expect(view.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 20.0, 20.0)))
++    @Expect(hits.value, Int64(1))
++
++    // 普通文本区域不触发。
++    @Expect(!view.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 4.0, 20.0)))
++    @Expect(hits.value, Int64(1))
++
++    // 垂直方向在行外不触发。
++    @Expect(!view.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 20.0, 38.0)))
++}
++
++@Test
++func richTextMultipleLinksAreIndependent(): Unit {
++    let ctx = richContext()
++    let first = State<Int64>(0)
++    let second = State<Int64>(0)
++    let view = RichText([
++        RichSpan.link("AA", {=> first.value += 1 }),
++        RichSpan.text(" "),
++        RichSpan.link("BB", {=> second.value += 1 })
++    ])
++    view.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++
++    // 「AA」= x 0..16；空格 16..24；「BB」= x 24..40。
++    @Expect(view.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 8.0, 20.0)))
++    @Expect(first.value, Int64(1))
++    @Expect(second.value, Int64(0))
++
++    @Expect(view.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 30.0, 20.0)))
++    @Expect(first.value, Int64(1))
++    @Expect(second.value, Int64(1))
++}
+-- 
+2.47.3
+

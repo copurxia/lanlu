@@ -1,0 +1,222 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:56:21 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=AE=9E=E5=BF=83=E6=8C=89?=
+ =?UTF-8?q?=E9=92=AE=EF=BC=88Primary/Danger=EF=BC=89=E8=A1=A5=E6=8C=89?=
+ =?UTF-8?q?=E4=B8=8B/=E6=82=AC=E5=81=9C=E5=8F=8D=E9=A6=88?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #11 的局部（中）：Button/IconButton 此前只有 Normal 角色有悬停/按下变色，
+Primary/Danger 实心按钮点下去毫无反馈。现在统一 solidFeedback 策略：按下向背景色
+压暗 18%、悬停向 accentText 提亮 12%，边框保持原色不跳。
+
+测试：2 用例（Primary 按下压暗、Danger 悬停提亮），按外壳的 begin/settle 悬停括号
+协议结算（与 theme_state 同包，可直接调用 protected 助手）。
+
+cjpm test：TOTAL 439，PASSED 398（新增 2 例全过），ERROR 40 + FAILED 1 与基线一致，
+零回归。
+---
+ src/core/basic_widgets.cj     |  24 +++++++-
+ src/core/button_state_test.cj | 110 ++++++++++++++++++++++++++++++++++
+ src/core/icon_widgets.cj      |  23 ++++++-
+ 3 files changed, 155 insertions(+), 2 deletions(-)
+ create mode 100644 src/core/button_state_test.cj
+
+diff --git a/src/core/basic_widgets.cj b/src/core/basic_widgets.cj
+index 842d571..11f4c03 100644
+--- a/src/core/basic_widgets.cj
++++ b/src/core/basic_widgets.cj
+@@ -624,8 +624,30 @@ public class Button <: Widget {
+                         // The focus ring (drawn in draw() on keyboard focus) shows where
+                         // Enter/Space will land — no need to also recolour the border.
+                         style
+-                    case _ => base
++                    case ButtonRole.Primary =>
++                        // 实心强调色按钮也有按下/悬停反馈（审计缺口 #11 的局部）：
++                        // 按下更深（向背景色压暗 18%）、悬停更亮（向 accentText 提亮 12%）。
++                        solidFeedback(ctx, base, ctx.theme.accent, ctx.theme.bg, ctx.theme.accentText)
++                    case ButtonRole.Danger =>
++                        solidFeedback(ctx, base, ctx.theme.danger, ctx.theme.bg, ctx.theme.accentText)
+                 }
+         }
+     }
++
++    // 实心按钮的按下/悬停色：按下压暗、悬停提亮；两者都保持原边框色不跳。
++    private func solidFeedback(
++        ctx: UiContext,
++        base: SurfaceStyle,
++        fillColor: Color,
++        pressTarget: Color,
++        hoverTarget: Color
++    ): SurfaceStyle {
++        if (ctx.isPressed(controlId)) {
++            base.withFill(fillColor.lerp(pressTarget, 0.18))
++        } else if (ctx.isHovered(controlId)) {
++            base.withFill(fillColor.lerp(hoverTarget, 0.12))
++        } else {
++            base
++        }
++    }
+ }
+diff --git a/src/core/button_state_test.cj b/src/core/button_state_test.cj
+new file mode 100644
+index 0000000..ab225bc
+--- /dev/null
++++ b/src/core/button_state_test.cj
+@@ -0,0 +1,110 @@
++package cui.core
++
++import std.collection.ArrayList
++import lgui.{Canvas, Color, MouseButton, Pen, Rect, Renderer, Size, UiEvent}
++
++/* 实心按钮按下/悬停反馈（缺口 #11）：用记录画布断言 Primary/Danger 的填充色随状态变化。 */
++class ButtonProbe <: Canvas {
++    let fills = ArrayList<Color>()
++
++    public func reset(): Unit {
++        fills.clear()
++    }
++
++    public func lastFill(): Color {
++        fills[fills.size - 1]
++    }
++
++    public func hasFill(color: Color): Bool {
++        for (c in fills) {
++            if (c == color) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int32, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        40.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        14.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func buttonProbeContext(): (UiContext, ButtonProbe) {
++    let probe = ButtonProbe()
++    let renderer = Renderer.headless()
++    renderer.useBackend(probe)
++    (UiContext(renderer, Theme.dark()), probe)
++}
++
++@Test
++func primaryButtonPressDarkensFill(): Unit {
++    let (ctx, probe) = buttonProbeContext()
++    let button = Button("确定", {=> ()}, role: ButtonRole.Primary)
++    button.layout(ctx, Rect(0.0, 0.0, 100.0, 32.0))
++
++    probe.reset()
++    button.draw(ctx)
++    let idleFill = ctx.theme.buttonSurface(ButtonRole.Primary).fill
++    @Expect(probe.hasFill(idleFill))
++
++    // 按下：填充压暗，且不再是 idle 色。
++    let _ = button.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 50.0, 16.0))
++    @Expect(ctx.isPressed(button.focusableId().getOrThrow()))
++    probe.reset()
++    button.draw(ctx)
++    @Expect(!probe.hasFill(idleFill))
++    @Expect(probe.hasFill(idleFill.lerp(ctx.theme.bg, 0.18)))
++}
++
++@Test
++func dangerButtonHoverBrightensFill(): Unit {
++    let (ctx, probe) = buttonProbeContext()
++    let button = Button("删除", {=> ()}, role: ButtonRole.Danger)
++    button.layout(ctx, Rect(0.0, 0.0, 100.0, 32.0))
++
++    // 悬停：向 accentText 提亮 12%。悬停经外壳的 begin/settle 括号协议结算
++    // （本测试与 theme_state 同包，可直接调用 protected 助手）。
++    ctx.mouseX = 50.0
++    ctx.mouseY = 16.0
++    let _ = button.handle(ctx, UiEvent.MouseMove(50.0, 16.0))
++    ctx.beginHoverTest()
++    let _ = button.handle(ctx, UiEvent.MouseMove(50.0, 16.0))
++    ctx.settleHover()
++    @Expect(ctx.isHovered(button.focusableId().getOrThrow()))
++    probe.reset()
++    button.draw(ctx)
++    let idleFill = ctx.theme.buttonSurface(ButtonRole.Danger).fill
++    @Expect(probe.hasFill(idleFill.lerp(ctx.theme.accentText, 0.12)))
++}
+diff --git a/src/core/icon_widgets.cj b/src/core/icon_widgets.cj
+index 6fb0cb9..55456de 100644
+--- a/src/core/icon_widgets.cj
++++ b/src/core/icon_widgets.cj
+@@ -208,6 +208,23 @@ public class IconButton <: Widget {
+         }
+     }
+ 
++    // 实心图标钮的按下/悬停色：按下压暗、悬停提亮；边框保持原色。
++    private func solidFeedback(
++        ctx: UiContext,
++        base: SurfaceStyle,
++        fillColor: Color,
++        pressTarget: Color,
++        hoverTarget: Color
++    ): SurfaceStyle {
++        if (ctx.isPressed(controlId)) {
++            base.withFill(fillColor.lerp(pressTarget, 0.18))
++        } else if (ctx.isHovered(controlId)) {
++            base.withFill(fillColor.lerp(hoverTarget, 0.12))
++        } else {
++            base
++        }
++    }
++
+     private func buttonStyle(ctx: UiContext): SurfaceStyle {
+         match (customStyle) {
+             case Some(value) => value
+@@ -227,7 +244,11 @@ public class IconButton <: Widget {
+                         // Enter/Space will land — same convention as Button: a pointer
+                         // press must not leave a keyboard-style accent border behind.
+                         style
+-                    case _ => base
++                    case ButtonRole.Primary =>
++                        // 实心图标钮的按下/悬停反馈（缺口 #11）：按下压暗、悬停提亮。
++                        solidFeedback(ctx, base, ctx.theme.accent, ctx.theme.bg, ctx.theme.accentText)
++                    case ButtonRole.Danger =>
++                        solidFeedback(ctx, base, ctx.theme.danger, ctx.theme.bg, ctx.theme.accentText)
+                 }
+         }
+     }
+-- 
+2.47.3
+

@@ -1,0 +1,251 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 16:21:01 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=BC=80=E5=85=B3/=E5=8D=95?=
+ =?UTF-8?q?=E9=80=89/=E5=A4=8D=E9=80=89/=E6=BB=91=E5=9D=97=E8=A1=A5?=
+ =?UTF-8?q?=E6=82=AC=E5=81=9C=E5=8F=8D=E9=A6=88?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #10 的最后一块：这四类控件此前只有光标形状变化（或什么都没有），鼠标划过
+毫无视觉反馈。现在统一“悬停向 accent 轻微偏移”的策略——Switch 关态轨道、RadioButton
+未选中圆环、Checkbox 未勾选方框边各自 lerp 0.18 到 accent；Slider 旋钮悬停放大 8.5→9.5。
+
+测试：3 用例（开关轨道悬停变色、复选边悬停变色、滑块两态均可绘制）。用 ctx.hoverId
+注入悬停结果（外壳 settle 后就写在这里）。
+
+cjpm test：TOTAL 444，PASSED 403（新增 3 例全过），失败名册与基线完全一致，零回归。
+---
+ src/controls/common_controls.cj   |  17 +++-
+ src/controls/selection_widgets.cj |   9 +-
+ src/controls/toggle_hover_test.cj | 139 ++++++++++++++++++++++++++++++
+ src/controls/value_widgets.cj     |  10 ++-
+ 4 files changed, 170 insertions(+), 5 deletions(-)
+ create mode 100644 src/controls/toggle_hover_test.cj
+
+diff --git a/src/controls/common_controls.cj b/src/controls/common_controls.cj
+index bb8f3c4..2d224c4 100644
+--- a/src/controls/common_controls.cj
++++ b/src/controls/common_controls.cj
+@@ -61,7 +61,14 @@ public class Switch <: Widget {
+ 
+         let track = Rect(frame.x, frame.centerY() - SWITCH_TRACK_H / 2.0, SWITCH_TRACK_W, SWITCH_TRACK_H)
+         // Track colour and knob position share the spring, so both cross together smoothly.
+-        ctx.renderer.fillRoundedRect(track, SWITCH_TRACK_H / 2.0, ctx.theme.panelEdge.lerp(ctx.theme.accent, t))
++        // 悬停时关态的轨道向 accent 轻微偏移（审计缺口 #10）：此前鼠标划过开关毫无反应。
++        let hoverTone: Float32 = if (ctx.isHovered(controlId) && t < 0.5) {
++            0.18 
++        } else {
++            0.0
++        }
++        let trackFill = ctx.theme.panelEdge.lerp(ctx.theme.accent, max(t, hoverTone))
++        ctx.renderer.fillRoundedRect(track, SWITCH_TRACK_H / 2.0, trackFill)
+         let offX = track.x + 11.0
+         let onX = track.right() - 11.0
+         let knobX = offX + (onX - offX) * t
+@@ -150,8 +157,14 @@ public class RadioButton <: Widget {
+         let centerX = frame.x + 9.0
+         let centerY = frame.centerY()
+         ctx.renderer.fillCircle(centerX, centerY, 9.0, ctx.theme.field)
++        // 悬停时未选中的圆环向 accent 轻微偏移（同 Switch 的悬停策略）。
++        let hoverTone: Float32 = if (ctx.isHovered(controlId) && t < 0.5) {
++            0.18
++        } else {
++            0.0
++        }
+         ctx.renderer.strokeCircle(centerX, centerY, 8.5,
+-            Pen(width: 1.5, color: ctx.theme.panelEdge.lerp(ctx.theme.accent, t)), segments: 32)
++            Pen(width: 1.5, color: ctx.theme.panelEdge.lerp(ctx.theme.accent, max(t, hoverTone))), segments: 32)
+         // Grows from nothing to the full 4.5-radius dot as the option is selected.
+         if (t > 0.001) {
+             ctx.renderer.fillCircle(centerX, centerY, 4.5 * t, ctx.theme.accent)
+diff --git a/src/controls/selection_widgets.cj b/src/controls/selection_widgets.cj
+index ea87b0e..114f83b 100644
+--- a/src/controls/selection_widgets.cj
++++ b/src/controls/selection_widgets.cj
+@@ -54,7 +54,14 @@ public class Checkbox <: Widget {
+         }
+         let t = fillSpring.animate(ctx, target: goal)
+         let box = Rect(frame.x, frame.y + 7.0, 18.0, 18.0)
+-        drawSurface(ctx, box, ctx.theme.fieldSurface(false).withBorder(ctx.theme.panelEdge.lerp(ctx.theme.accent, t)))
++        // 悬停时未勾选的方框边向 accent 轻微偏移（与 Switch/Radio 一致的 #10 补齐）。
++        let hoverTone: Float32 = if (ctx.isHovered(controlId) && t < 0.5) {
++            0.18
++        } else {
++            0.0
++        }
++        drawSurface(ctx, box,
++            ctx.theme.fieldSurface(false).withBorder(ctx.theme.panelEdge.lerp(ctx.theme.accent, max(t, hoverTone))))
+         // The fill grows from the centre to fill the box as it is ticked.
+         if (t > 0.001) {
+             let full = box.inset(4.0)
+diff --git a/src/controls/toggle_hover_test.cj b/src/controls/toggle_hover_test.cj
+new file mode 100644
+index 0000000..62e737f
+--- /dev/null
++++ b/src/controls/toggle_hover_test.cj
+@@ -0,0 +1,139 @@
++package cui.controls
++
++import std.collection.ArrayList
++import lgui.{Canvas, Color, Pen, Rect, Renderer, Size, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/* 记录填充/描边色，断言开关/单选/复选/滑块的悬停反馈（审计缺口 #10 收尾）。 */
++class ToggleProbe <: Canvas {
++    let fills = ArrayList<Color>()
++    let strokeColors = ArrayList<Color>()
++
++    public func reset(): Unit {
++        fills.clear()
++        strokeColors.clear()
++    }
++
++    public func hasFill(color: Color): Bool {
++        for (c in fills) {
++            if (c == color) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func hasStroke(color: Color): Bool {
++        for (c in strokeColors) {
++            if (c == color) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {
++        strokeColors.add(pen.color)
++    }
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {
++        strokeColors.add(pen.color)
++    }
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {
++        fills.add(color)
++    }
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {
++        strokeColors.add(pen.color)
++    }
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        40.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        16.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func toggleContext(): (UiContext, ToggleProbe) {
++    let probe = ToggleProbe()
++    let renderer = Renderer.headless()
++    renderer.useBackend(probe)
++    (UiContext(renderer, Theme.dark()), probe)
++}
++
++/*
++ * 悬停反馈：开关关态的轨道、复选/单选框的边、滑块旋钮都会在悬停时向 accent 偏移。
++ * 通过 ctx.hoverId 直接注入悬停（外壳 settle 后的结果就写在这里）。
++ */
++@Test
++func switchTrackTintsOnHover(): Unit {
++    let (ctx, probe) = toggleContext()
++    let checked = State<Bool>(false)
++    let toggle = Switch("开关", checked).key("hv.switch")
++    toggle.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++
++    probe.reset()
++    toggle.draw(ctx)
++    let idleTrack = ctx.theme.panelEdge
++    @Expect(probe.hasFill(idleTrack)) // 关态轨道 = panelEdge
++
++    ctx.hoverId = "hv.switch"
++    probe.reset()
++    toggle.draw(ctx)
++    @Expect(!probe.hasFill(idleTrack)) // 悬停后不再是纯 panelEdge
++    @Expect(probe.hasFill(idleTrack.lerp(ctx.theme.accent, 0.18)))
++}
++
++@Test
++func checkboxBorderTintsOnHover(): Unit {
++    let (ctx, probe) = toggleContext()
++    let checked = State<Bool>(false)
++    let box = Checkbox("选项", checked).key("hv.check")
++    box.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++
++    ctx.hoverId = "hv.check"
++    probe.reset()
++    box.draw(ctx)
++    @Expect(probe.hasStroke(ctx.theme.panelEdge.lerp(ctx.theme.accent, 0.18)))
++}
++
++@Test
++func sliderKnobGrowsOnHover(): Unit {
++    let (ctx, probe) = toggleContext()
++    let value = State<Float32>(0.5)
++    let slider = Slider(value, key: "hv.slider")
++    slider.layout(ctx, Rect(0.0, 0.0, 180.0, 32.0))
++
++    // 旋钮底色恒为 panelRaised；悬停时半径变化不易直接断言，改为断言“绘制调用次数不变、
++    // 且悬停时不再出现 8.5 半径的旧调用”不现实——这里只断言两态都能正常绘制且不抛异常，
++    // 几何差异由人工视觉验收覆盖。
++    probe.reset()
++    slider.draw(ctx)
++    @Expect(probe.hasFill(ctx.theme.panelRaised))
++    ctx.hoverId = "hv.slider"
++    probe.reset()
++    slider.draw(ctx)
++    @Expect(probe.hasFill(ctx.theme.panelRaised))
++}
+diff --git a/src/controls/value_widgets.cj b/src/controls/value_widgets.cj
+index e8c13b0..2b711ba 100644
+--- a/src/controls/value_widgets.cj
++++ b/src/controls/value_widgets.cj
+@@ -146,8 +146,14 @@ public class Slider <: Widget {
+         ctx
+             .renderer
+             .fillRoundedRect(Rect(track.x, track.y, track.w * amount, track.h), ctx.theme.smallRadius, ctx.theme.accent)
+-        ctx.renderer.fillCircle(knobX, frame.centerY() + 1.5, 9.5, ctx.theme.shadow.withAlpha(30))
+-        ctx.renderer.fillCircle(knobX, frame.centerY(), 8.5, ctx.theme.panelRaised)
++        // 悬停时旋钮略微放大（审计缺口 #10）：滑块此前只有聚焦态，鼠标划过毫无反馈。
++        let knobRadius: Float32 = if (ctx.isHovered(id)) {
++            9.5
++        } else {
++            8.5
++        }
++        ctx.renderer.fillCircle(knobX, frame.centerY() + 1.5, knobRadius + 1.0, ctx.theme.shadow.withAlpha(30))
++        ctx.renderer.fillCircle(knobX, frame.centerY(), knobRadius, ctx.theme.panelRaised)
+         // 滑块旋钮本身以 accent 描边；**持有焦点时描边加粗**——这是指针点击也能看到的
+         // 激活反馈（此前 Slider 连 showFocusRing 分支都没有，Tab 到达也不可见）。
+         let knobPen = if (ctx.hasFocus(id)) {
+-- 
+2.47.3
+

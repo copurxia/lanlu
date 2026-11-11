@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:45:02 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20TextArea=20=E8=81=9A=E7=84=A6?=
+ =?UTF-8?q?=E6=97=B6=20PageUp/PageDown=20=E7=BF=BB=E9=A1=B5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+接上一提交的 Key.PageUp/PageDown：TextArea 聚焦时翻 0.9 视口（与滚轮/滚动条轨道同一
+缓动通路与步长），消费事件避免外层 ScrollView 二次滚动；未聚焦不消费、事件透传给外层。
+
+本机桩库 cjpm test：TOTAL 407，PASSED 366（新增 1 例全过），ERROR 40 + FAILED 1
+（pushWakeEvent 需真实 SDL wake 事件）与基线一致，零回归。
+---
+ src/text/text_area.cj                | 12 ++++++++++++
+ src/text/text_area_page_keys_test.cj | 24 ++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+ create mode 100644 src/text/text_area_page_keys_test.cj
+
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index 01d982a..0de41d3 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -185,6 +185,18 @@ public class TextArea <: Widget {
+                 {=> edit.extendToLineStart()})
+             case UiEvent.KeyDown(Key.End, _) => return navigate(ctx, {=> edit.moveToLineEnd()},
+                 {=> edit.extendToLineEnd()})
++            // 翻页：与滚轮同一缓动通路，0.9 视口（滚动条轨道同款步长）。聚焦时消费，
++            // 让外层 ScrollView 不再二次滚动。
++            case UiEvent.KeyDown(Key.PageUp, _) =>
++                if (ctx.hasFocus(id)) {
++                    return scrollMotion.scrollBy(ctx, scrollStateValue, -textViewport(frame).h * 0.9,
++                        textContentHeight(lines()), textViewport(frame).h)
++                }
++            case UiEvent.KeyDown(Key.PageDown, _) =>
++                if (ctx.hasFocus(id)) {
++                    return scrollMotion.scrollBy(ctx, scrollStateValue, textViewport(frame).h * 0.9,
++                        textContentHeight(lines()), textViewport(frame).h)
++                }
+             case UiEvent.KeyDown(Key.Letter(code), _) => return shortcut(ctx, edit, code)
+             case UiEvent.Frame(_) =>
+                 // One-time initial focus for an editable area, applied after the frame's pointer
+diff --git a/src/text/text_area_page_keys_test.cj b/src/text/text_area_page_keys_test.cj
+new file mode 100644
+index 0000000..536bdf3
+--- /dev/null
++++ b/src/text/text_area_page_keys_test.cj
+@@ -0,0 +1,24 @@
++package cui.text
++
++import lgui.{FrameInfo, Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func areaKeysContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* TextArea 翻页（缺口 #7）：聚焦时 PageUp/PageDown 被消费（不透传给外层滚动容器），未聚焦不消费。 */
++@Test
++func textAreaPageKeysConsumedOnlyWhileFocused(): Unit {
++    let ctx = areaKeysContext()
++    let body = State<String>("a\nb\nc\nd\ne\nf\ng\nh")
++    let area = TextArea(body, key: "pg.area")
++    area.layout(ctx, Rect(0.0, 0.0, 200.0, 100.0))
++
++    @Expect(!area.handle(ctx, UiEvent.KeyDown(Key.PageDown, false))) // 未聚焦：不拦截外层滚动
++
++    let _ = area.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, 50.0))
++    @Expect(ctx.hasFocus("pg.area"))
++    @Expect(area.handle(ctx, UiEvent.KeyDown(Key.PageDown, false))) // 聚焦：消费（内容滚一屏）
++    @Expect(area.handle(ctx, UiEvent.KeyDown(Key.PageUp, false))) // 回滚同样消费
++}
+-- 
+2.47.3
+

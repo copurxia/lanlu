@@ -1,0 +1,295 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:50:45 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E7=84=A6=E7=82=B9=E6=BB=9A?=
+ =?UTF-8?q?=E5=85=A5=E8=A7=86=E9=87=8E=EF=BC=88reveal-on-focus=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #8（中/L）：Tab 把焦点移到视口外时容器不滚动，焦点“跑到屏幕外”，用户以为
+焦点丢了。做法：UiContext 新增焦点矩形上报（reportFocusRect / focusedRect /
+clearFocusRects），控件在 layout 里报一次自己的矩形（Button/IconButton/TextField/
+TextArea/FocusTarget 已接），外壳每帧 layout 前清空；ScrollView 在 layout 末尾做
+最小滚动——已在视口内不动，否则刚好贴边并走 scrollMotion.reset（无缓动过度）。
+
+测试：3 用例（视口下方焦点滚入、已可见不动、矩形 API 往返与每帧清空）。
+cjpm test：TOTAL 435，PASSED 394（新增 3 例全过），ERROR 40 + FAILED 1 与基线一致，
+零回归。
+---
+ src/core/advanced_layouts.cj  | 27 +++++++++++++
+ src/core/basic_widgets.cj     |  4 +-
+ src/core/focus_reveal_test.cj | 74 +++++++++++++++++++++++++++++++++++
+ src/core/focus_target.cj      |  2 +
+ src/core/icon_widgets.cj      |  4 +-
+ src/core/theme_state.cj       | 28 +++++++++++++
+ src/desktop/desktop_app.cj    |  2 +
+ src/text/text_area.cj         |  4 +-
+ src/text/text_field.cj        |  4 +-
+ 9 files changed, 145 insertions(+), 4 deletions(-)
+ create mode 100644 src/core/focus_reveal_test.cj
+
+diff --git a/src/core/advanced_layouts.cj b/src/core/advanced_layouts.cj
+index 5b06966..612989e 100644
+--- a/src/core/advanced_layouts.cj
++++ b/src/core/advanced_layouts.cj
+@@ -388,6 +388,33 @@ public class ScrollView <: Widget {
+         }
+         let visibleOffset = scrollMotion.animate(ctx, scrollOffset, contentHeight, rect.h)
+         child.layout(ctx, Rect(rect.x, rect.y - visibleOffset, contentWidth, contentHeight))
++        revealFocused(ctx, rect, contentHeight)
++    }
++
++    /*
++     * 焦点滚入视野（审计缺口 #8）：Tab 把焦点移到视口外时，容器把滚动偏移拉到刚好能看见它
++     * ——此前焦点会“跑到屏幕外”，用户以为焦点丢了。焦点控件矩形由控件在 layout 中经
++     * ctx.reportFocusRect 上报，这里只做最小滚动：已在视口内不动，否则贴边。
++     */
++    private func revealFocused(ctx: UiContext, rect: Rect, contentHeight: Float32): Unit {
++        match (ctx.focusedRect()) {
++            case Some(focus) =>
++                let top = focus.y - rect.y
++                let bottom = top + focus.h
++                var target = scrollOffset.value
++                if (top < 0.0) {
++                    target = scrollOffset.value + top
++                } else if (bottom > rect.h) {
++                    target = scrollOffset.value + (bottom - rect.h)
++                }
++                let clamped = clampScrollOffset(target, contentHeight, rect.h)
++                if (clamped != scrollOffset.value) {
++                    scrollOffset.value = clamped
++                    scrollMotion.reset(clamped)
++                    ctx.requestFrame()
++                }
++            case None => ()
++        }
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+diff --git a/src/core/basic_widgets.cj b/src/core/basic_widgets.cj
+index 5faaa31..842d571 100644
+--- a/src/core/basic_widgets.cj
++++ b/src/core/basic_widgets.cj
+@@ -553,8 +553,10 @@ public class Button <: Widget {
+         Size(min(available.w, max(72.0, ctx.renderer.textWidth(title, pointSize: ps) + 24.0)), CUI_CONTROL_H)
+     }
+ 
+-    public func layout(_: UiContext, rect: Rect): Unit {
++    public func layout(ctx: UiContext, rect: Rect): Unit {
+         frame = rect
++        // 上报焦点矩形：容器据此把 Tab 焦点滚入视野（缺口 #8）。
++        ctx.reportFocusRect(controlId, rect)
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+diff --git a/src/core/focus_reveal_test.cj b/src/core/focus_reveal_test.cj
+new file mode 100644
+index 0000000..5b7850e
+--- /dev/null
++++ b/src/core/focus_reveal_test.cj
+@@ -0,0 +1,74 @@
++package cui.core
++
++import lgui.{FrameInfo, Rect, Size, UiEvent}
++
++/*
++ * 焦点滚入视野（缺口 #8）：控件在 layout 中上报焦点矩形，ScrollView 在 layout 末尾把
++ * 视口外的焦点滚入视野——此前 Tab 到视口外的控件时焦点“消失”。
++ */
++private class FocusReportingProbe <: Widget {
++    private let report: Rect
++
++    public init(report: Rect) {
++        this.report = report
++        emit(this)
++    }
++
++    public func measure(_: UiContext, _: Size): Size {
++        Size(120.0, 400.0)
++    }
++
++    public func layout(ctx: UiContext, _: Rect): Unit {
++        ctx.reportFocusRect("reveal.target", report)
++    }
++
++    public func draw(_: UiContext): Unit {}
++
++    public func handle(_: UiContext, _: UiEvent): Bool {
++        false
++    }
++}
++
++@Test
++func scrollViewRevealsFocusedRectBelowViewport(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    // 焦点控件在内容 y=300（视口只有 100 高）——应在 layout 后被滚入视野。
++    let probe = FocusReportingProbe(Rect(0.0, 300.0, 120.0, 30.0))
++    let view = ScrollView(key: "reveal.view") {
++        emit(probe)
++    }.scrollState(offset)
++    ctx.focus("reveal.target", viaKeyboard: true)
++
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 100.0))
++    // 焦点底边 330，视口 100 → 滚动到 230（刚好贴底）。
++    @Expect(offset.value, Float32(230.0))
++}
++
++@Test
++func scrollViewLeavesVisibleFocusAlone(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let probe = FocusReportingProbe(Rect(0.0, 20.0, 120.0, 30.0))
++    let view = ScrollView(key: "reveal.visible") {
++        emit(probe)
++    }.scrollState(offset)
++    ctx.focus("reveal.target", viaKeyboard: true)
++
++    view.layout(ctx, Rect(0.0, 0.0, 120.0, 100.0))
++    @Expect(offset.value, Float32(0.0)) // 已在视口内：不动
++}
++
++@Test
++func focusRectRoundTripsThroughContext(): Unit {
++    let ctx = testContext()
++    @Expect(ctx.focusedRect().isNone()) // 无焦点
++    ctx.reportFocusRect("a", Rect(1.0, 2.0, 3.0, 4.0))
++    ctx.focus("a")
++    let rect = ctx.focusedRect().getOrThrow()
++    @Expect(rect.x, Float32(1.0))
++    @Expect(rect.w, Float32(3.0))
++
++    ctx.clearFocusRects()
++    @Expect(ctx.focusedRect().isNone()) // 外壳每帧清空
++}
+diff --git a/src/core/focus_target.cj b/src/core/focus_target.cj
+index 183a386..3fd191b 100644
+--- a/src/core/focus_target.cj
++++ b/src/core/focus_target.cj
+@@ -42,6 +42,8 @@ public class FocusTarget <: Widget {
+ 
+     public func layout(ctx: UiContext, rect: Rect): Unit {
+         frame = rect
++        // 上报焦点矩形：容器据此把 Tab 焦点滚入视野（缺口 #8）。
++        ctx.reportFocusRect(id, rect)
+         child.layout(ctx, rect)
+     }
+ 
+diff --git a/src/core/icon_widgets.cj b/src/core/icon_widgets.cj
+index 25f3ee0..6fb0cb9 100644
+--- a/src/core/icon_widgets.cj
++++ b/src/core/icon_widgets.cj
+@@ -131,8 +131,10 @@ public class IconButton <: Widget {
+         Size(min(available.w, width), CUI_CONTROL_H)
+     }
+ 
+-    public func layout(_: UiContext, rect: Rect): Unit {
++    public func layout(ctx: UiContext, rect: Rect): Unit {
+         frame = rect
++        // 上报焦点矩形：容器据此把 Tab 焦点滚入视野（缺口 #8）。
++        ctx.reportFocusRect(controlId, rect)
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+diff --git a/src/core/theme_state.cj b/src/core/theme_state.cj
+index 33aa079..6800a20 100644
+--- a/src/core/theme_state.cj
++++ b/src/core/theme_state.cj
+@@ -1,6 +1,7 @@
+ package cui.core
+ 
+ import std.collection.ArrayList
++import std.collection.HashMap
+ import lgui.{Color, FrameInfo, Insets, Rect, Renderer, SurfaceStyle, UiEvent}
+ 
+ // A second press within this window and distance of the previous one continues a multi-click.
+@@ -249,6 +250,11 @@ public class UiContext {
+     public let renderer: Renderer
+     public var theme: Theme
+     public var focusId: String = ""
++
++    // 焦点控件的布局矩形（每帧由控件在 layout 中上报；容器据此把焦点滚入视野，审计缺口 #8）。
++    // 用 id → Rect 的槽位而非单值：Tab 移动发生在事件阶段，下一帧 layout 时新旧两个控件都可能
++    // 上报，容器只需查自己要处理的 id。
++    private var focusRects: HashMap<String, Rect> = HashMap<String, Rect>()
+     // Whether the focused control should paint a ring: true when focus last moved by keyboard
+     // (Tab traversal or autofocus), false when a pointer press claimed it — the :focus-visible
+     // convention. Behaviour (activation, caret, arrow nav) uses `focusId`; only the ring gates on this.
+@@ -457,6 +463,28 @@ public class UiContext {
+         focusRingVisible = viaKeyboard
+     }
+ 
++    /*
++     * 上报一个可聚焦控件的布局矩形（控件在 layout 里调用）。容器（ScrollView/LazyList 等）
++     * 在 layout 末尾查 focusedRect() 即可把焦点滚入视野——无需保留 Widget 引用。
++     * 每帧由外壳在 layout 之前经 clearFocusRects() 清空，避免陈旧矩形。
++     */
++    public func reportFocusRect(id: String, rect: Rect): Unit {
++        focusRects[id] = rect
++    }
++
++    /** 当前焦点控件的矩形（若本帧已上报）。 */
++    public func focusedRect(): ?Rect {
++        if (focusId.size == 0) {
++            return None
++        }
++        focusRects.get(focusId)
++    }
++
++    /** 外壳在每帧 layout 前清空矩形表。 */
++    public func clearFocusRects(): Unit {
++        focusRects.clear()
++    }
++
+     /** Removes keyboard focus from every control. */
+     public func clearFocus(): Unit {
+         focusId = ""
+diff --git a/src/desktop/desktop_app.cj b/src/desktop/desktop_app.cj
+index 46cc548..4e2574c 100644
+--- a/src/desktop/desktop_app.cj
++++ b/src/desktop/desktop_app.cj
+@@ -268,6 +268,8 @@ public class DesktopApp {
+                     lastWidget = Some(widget)
+                     let tLayout = FrameProfiler.now()
+                     ctx.adoptFocusRing(stateStore.focusRing())
++                    // 焦点矩形每帧重报：容器据此把焦点滚入视野（缺口 #8）。
++                    ctx.clearFocusRects()
+                     widget.layout(ctx, Rect(0.0, 0.0, Float32(viewportW), Float32(viewportH)))
+                     let tEvents = FrameProfiler.now()
+                     dispatchCollectedEvents(widget, events)
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index fcc3f30..d417dee 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -120,8 +120,10 @@ public class TextArea <: Widget {
+         Size(available.w, available.h)
+     }
+ 
+-    public func layout(_: UiContext, rect: Rect): Unit {
++    public func layout(ctx: UiContext, rect: Rect): Unit {
+         frame = rect
++        // 上报焦点矩形：外层 ScrollView 在 Tab 到达时把区域滚入视野（缺口 #8）。
++        ctx.reportFocusRect(id, rect)
+     }
+ 
+     // The document split into lines, cached by text revision so scrolling never re-splits per frame.
+diff --git a/src/text/text_field.cj b/src/text/text_field.cj
+index a6f805b..4b5d315 100644
+--- a/src/text/text_field.cj
++++ b/src/text/text_field.cj
+@@ -113,8 +113,10 @@ public class TextField <: Widget {
+         Size(available.w, CUI_CONTROL_H)
+     }
+ 
+-    public func layout(_: UiContext, rect: Rect): Unit {
++    public func layout(ctx: UiContext, rect: Rect): Unit {
+         frame = rect
++        // 上报焦点矩形：外层 ScrollView 在 Tab 到达时把字段滚入视野（缺口 #8）。
++        ctx.reportFocusRect(id, rect)
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-- 
+2.47.3
+

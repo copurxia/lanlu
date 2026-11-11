@@ -1,0 +1,180 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:30:28 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P0):=20Slider=20=E7=84=A6=E7=82=B9=E5=8F=AF?=
+ =?UTF-8?q?=E8=A7=81=E6=80=A7=20+=20Up/Down/Home/End=20=E9=94=AE=E7=9B=98?=
+ =?UTF-8?q?=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #5（高）：Slider 是全框架唯一连焦点绘制分支都没有的控件——Tab 到达后
+看不出焦点在哪，只能盲按方向键。现在：持有焦点时旋钮描边 2px→3px（指针点击可见
+的激活反馈，与字段族点击变 accent 边同一策略）；键盘到达再叠 drawFocusRing 外环
+（:focus-visible 只管外环，与上一提交的新约定一致）。
+
+键盘：Up/Down 与 Left/Right 同向步进（桌面惯例，竖排滑块语义），Home/End 跳到
+范围两端；未聚焦不消费、事件继续下传。
+
+测试：3 个新用例（步进四向、Home/End 跳变、越界 clamp）。本机桩库
+cjpm test：TOTAL 400，PASSED 359（新增 3 例全过），ERROR 40 + FAILED 1 与基线
+逐例一致，零回归。
+---
+ src/controls/slider_keyboard_test.cj | 61 ++++++++++++++++++++++++++++
+ src/controls/value_widgets.cj        | 51 +++++++++++++++++------
+ 2 files changed, 100 insertions(+), 12 deletions(-)
+ create mode 100644 src/controls/slider_keyboard_test.cj
+
+diff --git a/src/controls/slider_keyboard_test.cj b/src/controls/slider_keyboard_test.cj
+new file mode 100644
+index 0000000..6ab28f1
+--- /dev/null
++++ b/src/controls/slider_keyboard_test.cj
+@@ -0,0 +1,61 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{Bindable, State, Theme, UiContext}
++
++private func sliderTestContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++// 聚焦后 Up/Down 与 Left/Right 同向；Home/End 跳两端；未聚焦不消费。
++@Test
++func sliderKeyboardStepsUpAndDown(): Unit {
++    let ctx = sliderTestContext()
++    let value = State<Float32>(50.0)
++    let slider = Slider(value, key: "kbd.slider", lower: 0.0, upper: 100.0, step: 10.0)
++    slider.layout(ctx, Rect(0.0, 0.0, 180.0, 32.0))
++
++    @Expect(!slider.handle(ctx, UiEvent.KeyDown(Key.Right, false))) // 未聚焦
++    @Expect(value.value, Float32(50.0))
++
++    // 点击轨道中段聚焦（点击本身也会把值设到点击位置：x=94 → 约 50，离散到 50）。
++    @Expect(slider.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 94.0, 16.0)))
++    @Expect(ctx.hasFocus("kbd.slider"))
++    @Expect(value.value, Float32(50.0))
++
++    @Expect(slider.handle(ctx, UiEvent.KeyDown(Key.Up, false)))
++    @Expect(value.value, Float32(60.0))
++    @Expect(slider.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    @Expect(value.value, Float32(50.0))
++    @Expect(slider.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(value.value, Float32(60.0))
++    @Expect(slider.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(value.value, Float32(50.0))
++}
++
++@Test
++func sliderKeyboardHomeEndJumpToRangeEnds(): Unit {
++    let ctx = sliderTestContext()
++    let value = State<Float32>(40.0)
++    let slider = Slider(value, key: "kbd.ends", lower: 0.0, upper: 100.0, step: 10.0)
++    slider.layout(ctx, Rect(0.0, 0.0, 180.0, 32.0))
++    let _ = slider.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 80.0, 16.0)) // 聚焦
++    let _ = slider.handle(ctx, UiEvent.KeyDown(Key.End, false))
++    @Expect(value.value, Float32(100.0))
++    let _ = slider.handle(ctx, UiEvent.KeyDown(Key.Home, false))
++    @Expect(value.value, Float32(0.0))
++}
++
++@Test
++func sliderKeyboardClampsOutsideRange(): Unit {
++    let ctx = sliderTestContext()
++    let value = State<Float32>(0.0)
++    let slider = Slider(value, key: "kbd.clamp", lower: 0.0, upper: 100.0, step: 10.0)
++    slider.layout(ctx, Rect(0.0, 0.0, 180.0, 32.0))
++    let _ = slider.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 10.0, 16.0))
++    let _ = slider.handle(ctx, UiEvent.KeyDown(Key.Down, false))
++    @Expect(value.value, Float32(0.0)) // 不低于下界
++    let _ = slider.handle(ctx, UiEvent.KeyDown(Key.End, false))
++    let _ = slider.handle(ctx, UiEvent.KeyDown(Key.Up, false))
++    @Expect(value.value, Float32(100.0)) // 不高于上界
++}
+diff --git a/src/controls/value_widgets.cj b/src/controls/value_widgets.cj
+index fc71f06..e8c13b0 100644
+--- a/src/controls/value_widgets.cj
++++ b/src/controls/value_widgets.cj
+@@ -2,7 +2,8 @@ package cui.controls
+ 
+ import lgui.{FontSizes, Key, MouseButton, Pen, Rect, Size, UiEvent, clampF32}
+ import cui.core.{Bindable, CUI_CONTROL_H, CUI_SMALL_H, CursorShape, Observable, Spring, UiContext, Widget,
+-    claimHoverIfInside, controlIdentity, drawSurface, emit, localState, registerFocusable, resolveControlKey}
++    claimHoverIfInside, controlIdentity, drawFocusRing, drawSurface, emit, localState, registerFocusable,
++    resolveControlKey}
+ 
+ private let VALUE_CONTROL_W: Float32 = 180.0
+ 
+@@ -147,7 +148,18 @@ public class Slider <: Widget {
+             .fillRoundedRect(Rect(track.x, track.y, track.w * amount, track.h), ctx.theme.smallRadius, ctx.theme.accent)
+         ctx.renderer.fillCircle(knobX, frame.centerY() + 1.5, 9.5, ctx.theme.shadow.withAlpha(30))
+         ctx.renderer.fillCircle(knobX, frame.centerY(), 8.5, ctx.theme.panelRaised)
+-        ctx.renderer.strokeCircle(knobX, frame.centerY(), 8.0, Pen(width: 2.0, color: ctx.theme.accent), segments: 40)
++        // 滑块旋钮本身以 accent 描边；**持有焦点时描边加粗**——这是指针点击也能看到的
++        // 激活反馈（此前 Slider 连 showFocusRing 分支都没有，Tab 到达也不可见）。
++        let knobPen = if (ctx.hasFocus(id)) {
++            Pen(width: 3.0, color: ctx.theme.accent)
++        } else {
++            Pen(width: 2.0, color: ctx.theme.accent)
++        }
++        ctx.renderer.strokeCircle(knobX, frame.centerY(), 8.0, knobPen, segments: 40)
++        // 键盘到达的焦点（:focus-visible）再叠一圈外环，与按钮族/字段族同一套视觉语言。
++        if (ctx.showFocusRing(id)) {
++            drawFocusRing(ctx, frame, ctx.theme.controlRadius)
++        }
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
+@@ -170,16 +182,14 @@ public class Slider <: Widget {
+                     updateFromX(x)
+                     return true
+                 }
+-            case UiEvent.KeyDown(Key.Left, _) =>
+-                if (ctx.hasFocus(id)) {
+-                    value.value = normalize(value.value - keyboardStep())
+-                    return true
+-                }
+-            case UiEvent.KeyDown(Key.Right, _) =>
+-                if (ctx.hasFocus(id)) {
+-                    value.value = normalize(value.value + keyboardStep())
+-                    return true
+-                }
++            case UiEvent.KeyDown(Key.Left, _) => return stepIfFocused(ctx, -keyboardStep())
++            case UiEvent.KeyDown(Key.Right, _) => return stepIfFocused(ctx, keyboardStep())
++            // 竖排滑块语义：Up/Down 与 Left/Right 同向步进（桌面惯例）。
++            case UiEvent.KeyDown(Key.Up, _) => return stepIfFocused(ctx, keyboardStep())
++            case UiEvent.KeyDown(Key.Down, _) => return stepIfFocused(ctx, -keyboardStep())
++            // Home/End 跳到范围两端。
++            case UiEvent.KeyDown(Key.Home, _) => return jumpIfFocused(ctx, lowerBound)
++            case UiEvent.KeyDown(Key.End, _) => return jumpIfFocused(ctx, upperBound)
+             case _ => ()
+         }
+         false
+@@ -196,6 +206,23 @@ public class Slider <: Widget {
+         value.value = normalize(lowerBound + amount * rangeSize(lowerBound, upperBound))
+     }
+ 
++    // 聚焦时的键盘步进/跳变；未聚焦不消费（事件继续下传）。
++    private func stepIfFocused(ctx: UiContext, delta: Float32): Bool {
++        if (!ctx.hasFocus(id)) {
++            return false
++        }
++        value.value = normalize(value.value + delta)
++        true
++    }
++
++    private func jumpIfFocused(ctx: UiContext, target: Float32): Bool {
++        if (!ctx.hasFocus(id)) {
++            return false
++        }
++        value.value = normalize(target)
++        true
++    }
++
+     private func keyboardStep(): Float32 {
+         if (stepSize > 0.0) {
+             return stepSize
+-- 
+2.47.3
+

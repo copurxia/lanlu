@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:36:31 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E8=AE=B0=E5=BD=95=20Modal=20=E6=89=93?=
+ =?UTF-8?q?=E5=BC=80=E5=8D=B3=E8=81=9A=E7=84=A6/=E5=85=B3=E9=97=AD?=
+ =?UTF-8?q?=E6=81=A2=E5=A4=8D=E7=84=A6=E7=82=B9=E4=B8=8E=20Slider/Paginati?=
+ =?UTF-8?q?on/Breadcrumb/StepIndicator=20=E9=94=AE=E7=9B=98=E8=A1=8C?=
+ =?UTF-8?q?=E4=B8=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 2 +-
+ docs/components.md    | 2 +-
+ docs/user-guide.md    | 3 ++-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 7ed9ddd..ec01e60 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -160,7 +160,7 @@
+ | `Tooltip` | `text`、`body` | 悬停约 500ms 后在树上层绘制提示气泡；透明包裹，不改变布局/事件 |
+ | `Dropdown` | `items`、`selected`（可选 `key`） | 下拉选择：点击/Enter 打开，弹出列表浮于树上（下方放不下翻到上方）；选中/外点/Esc 关闭，上下键移动高亮。长列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮，打开时选中行滚入视野 |
+ | `ContextMenu` | `items`、`body` | 为子控件附加右键菜单：指针处弹出，选中运行动作并关闭、外点/Esc 取消、方向键与悬停移动高亮；透明包裹，仅拦截子区域内右键 |
+-| `Modal` | `presented`、`body`（可选 `onDismiss`） | 模态对话框：`presented` 为真时暗化背景+居中面板，承载真实控件子树；拦截全部输入，`Tab` 在对话框内循环（焦点陷阱），每帧 Frame 转发进子树（`autofocus` 可用）；外点/Esc 关闭；对话框内可再开 `Dropdown`/`ComboBox`/`ContextMenu`（弹层经浮层栈压在面板之上，逐层关闭）；零尺寸、仅呈现时构建 `body`，置于根部 `ZStack` |
++| `Modal` | `presented`、`body`（可选 `onDismiss`） | 模态对话框：`presented` 为真时暗化背景+居中面板，承载真实控件子树；拦截全部输入，`Tab` 在对话框内循环（焦点陷阱），打开即聚焦首个停靠点、关闭恢复打开前焦点，每帧 Frame 转发进子树（`autofocus` 可用）；外点/Esc 关闭；对话框内可再开 `Dropdown`/`ComboBox`/`ContextMenu`（弹层经浮层栈压在面板之上，逐层关闭）；零尺寸、仅呈现时构建 `body`，置于根部 `ZStack` |
+ | `Flexible` | `body` | 兼容的权重包装容器，新代码可用 `.flex` |
+ | `Spacer` | 无 | 弹性空白 |
+ | `SizeProbe` | `width: State<Float32>`（可选 `height`）、`body` | 尺寸探针：布局时把自身矩形写入 State，下一帧起视图构建期可读（写状态自动触发重渲染，一帧内收敛）；透明包装，measure/layout/事件全部透传子视图。用于按内容区实际宽度算自适应网格列数 |
+diff --git a/docs/components.md b/docs/components.md
+index cac8b03..3dc92be 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -1019,7 +1019,7 @@ MenuItem.separator()
+ 
+ ### Modal
+ 
+-模态对话框。`presented` 为真时暗化背景 + 居中面板，承载真实控件子树；拦截全部输入，`Tab` 在对话框内循环（焦点陷阱）；外点/Esc 关闭。
++模态对话框。`presented` 为真时暗化背景 + 居中面板，承载真实控件子树；拦截全部输入，`Tab` 在对话框内循环（焦点陷阱）；外点/Esc 关闭。**打开即聚焦**：首次布局时聚焦弹窗内第一个焦点停靠点（视为键盘意图，外环可见），用户开弹窗即可键入/Tab；**关闭恢复焦点**：dismiss 完成后焦点回到打开前的控件（此前会凭空丢失）。
+ 
+ ```cangjie
+ Modal(presented: Bindable<Bool>, onDismiss!: ?() -> Unit = None) { ... }
+diff --git a/docs/user-guide.md b/docs/user-guide.md
+index a32e641..b4cc035 100644
+--- a/docs/user-guide.md
++++ b/docs/user-guide.md
+@@ -381,7 +381,8 @@ ContextMenu(items: [
+ `Modal(presented) { body }` 是模态对话框：`presented` 为真时在暗化背景之上居中一个面板。与提示、下拉、
+ 右键菜单不同，模态**承载真实控件子树**——`body` 里的按钮、文本框等都是正常控件，布局在面板内、事件经
+ 浮层路由给它们。它拦截一切输入（背景不可交互）：`Tab`/`Shift+Tab` 只在对话框自己的可聚焦控件间循环
+-（焦点陷阱，不会逃逸到背景），每帧 `Frame` 事件会转发进子树（`autofocus` 等定时行为在对话框内照常
++（焦点陷阱，不会逃逸到背景）；**打开即聚焦**首个停靠点（开弹窗即可键入/Tab），**关闭恢复**打开前的
++焦点；每帧 `Frame` 事件会转发进子树（`autofocus` 等定时行为在对话框内照常
+ 生效）；点击面板外或按 `Esc` 关闭；仅在呈现时构建 `body`（隐藏的对话框不占空间、不注册可聚焦项）。
+ 它自身零尺寸，放进根部 `ZStack` 即可对视口居中，隐藏时完全不影响下方布局。浮层可嵌套：对话框内的
+ `Dropdown`/`ComboBox`/`ContextMenu` 照常可用——其弹出列表经**浮层栈**压在对话框之上绘制并优先
+-- 
+2.47.3
+

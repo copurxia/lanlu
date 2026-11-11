@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:14:26 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20RadioButton=20=E5=8F=AF=E9=80=89?=
+ =?UTF-8?q?=E7=BB=84=E5=86=85=E6=96=B9=E5=90=91=E9=94=AE=E5=AF=BC=E8=88=AA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #16（中）：RadioButton 单选选项此前没有组内方向键（键盘要 Tab N 次选 radio）。
+新增 opt-in groupRange(lower, upper)：组内每个 RadioButton 声明同一闭开区间，聚焦任一选项后
+Left/Up 选前一值、Right/Down 选后一值，越界收住；方向键移动选择而非焦点，Tab 仍是唯一控件间
+移动方式。未声明 groupRange 时事件不拦截，现有调用完全不变。
+
+测试：2 用例（组内四向选择/边界、默认不启用不拦截）。cjpm test：TOTAL 421，PASSED 380
+（新增 2 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/controls/common_controls.cj  | 44 +++++++++++++++++++++++++++++
+ src/controls/radio_group_test.cj | 48 ++++++++++++++++++++++++++++++++
+ 2 files changed, 92 insertions(+)
+ create mode 100644 src/controls/radio_group_test.cj
+
+diff --git a/src/controls/common_controls.cj b/src/controls/common_controls.cj
+index 4e43e66..6fa2333 100644
+--- a/src/controls/common_controls.cj
++++ b/src/controls/common_controls.cj
+@@ -90,6 +90,9 @@ public class RadioButton <: Widget {
+     private let optionValue: Int64
+     private var controlId: String
+     private let dotSpring: Spring
++    // 组内方向键区间（groupLower >= groupUpper 表示未启用）。
++    private var groupLower: Int64 = 0
++    private var groupUpper: Int64 = 0
+     private var frame = Rect.zero()
+ 
+     public init(label: String, selected: Bindable<Int64>, value: Int64) {
+@@ -108,6 +111,19 @@ public class RadioButton <: Widget {
+         emit(this)
+     }
+ 
++    /*
++     * 声明所在选项组的取值区间 [lower, upper)，启用组内方向键：聚焦在本选项上时
++     * Left/Up 选中上一个值、Right/Down 选中下一个值（桌面 radio 组惯例——方向键
++     * 移动选择而不是移动焦点，Tab 仍是唯一的控件间移动方式）。组内每个 RadioButton
++     * 声明同一区间；越界收住。未声明（区间为空）时方向键不拦截、事件下传，
++     * 行为与本改动前完全一致。
++     */
++    public func groupRange(lower: Int64, upper: Int64): RadioButton {
++        groupLower = lower
++        groupUpper = upper
++        this
++    }
++
+     /** Sets an explicit focus and press identity; defaults are unique per build. */
+     public func key(value: String): RadioButton {
+         validateControlId(value, "RadioButton")
+@@ -148,9 +164,37 @@ public class RadioButton <: Widget {
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
++        match (event) {
++            // 组内方向键：把「选中值」沿区间移动（选中即表达在本控件，accent 点随之）。
++            case UiEvent.KeyDown(Key.Left, _) => return groupStep(ctx, -1)
++            case UiEvent.KeyDown(Key.Up, _) => return groupStep(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, _) => return groupStep(ctx, 1)
++            case UiEvent.KeyDown(Key.Down, _) => return groupStep(ctx, 1)
++            case _ => ()
++        }
+         toggleInteraction(ctx, event, frame, controlId, {=> selected.value = optionValue})
+     }
+ 
++    // 组内移动选中值；未启用组区间或未聚焦时返回 false（事件下传）。
++    private func groupStep(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(controlId) || groupLower >= groupUpper) {
++            return false
++        }
++        // 当前选中值映射到区间下标；不在区间内时 Right 进入第一个、Left 进入最后一个。
++        let current = selected.value
++        var index = current - groupLower
++        if (index < 0 || index >= groupUpper - groupLower) {
++            index = if (delta > 0) {
++                -1
++            } else {
++                0
++            }
++        }
++        let nextIndex = max(0, min(groupUpper - groupLower - 1, index + delta))
++        selected.value = groupLower + nextIndex
++        true
++    }
++
+     public func focusableId(): ?String {
+         Some(controlId)
+     }
+diff --git a/src/controls/radio_group_test.cj b/src/controls/radio_group_test.cj
+new file mode 100644
+index 0000000..2ea96d7
+--- /dev/null
++++ b/src/controls/radio_group_test.cj
+@@ -0,0 +1,48 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{Bindable, State, Theme, UiContext}
++
++/* RadioButton 组内方向键（缺口 #16 收尾）：groupRange + Left/Up/Right/Down 移动选中值。 */
++@Test
++func radioButtonGroupArrowsMoveSelection(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let group = State<Int64>(0)
++    let opt0 = RadioButton("甲", group, 0).groupRange(0, 3).key("r.0")
++    let opt1 = RadioButton("乙", group, 1).groupRange(0, 3).key("r.1")
++    let opt2 = RadioButton("丙", group, 2).groupRange(0, 3).key("r.2")
++    opt0.layout(ctx, Rect(0.0, 0.0, 100.0, 28.0))
++    opt1.layout(ctx, Rect(0.0, 28.0, 100.0, 28.0))
++    opt2.layout(ctx, Rect(0.0, 56.0, 100.0, 28.0))
++
++    // 聚焦 opt0；Down → 选中值 1；Down → 2；Up → 1。
++    let _ = opt0.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 50.0, 14.0))
++    @Expect(ctx.hasFocus("r.0"))
++    @Expect(group.value, Int64(0))
++
++    @Expect(opt0.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    @Expect(group.value, Int64(1))
++    @Expect(opt0.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    @Expect(group.value, Int64(2))
++    @Expect(opt0.handle(ctx, UiEvent.KeyDown(Key.Up, false)))
++    @Expect(group.value, Int64(1))
++    @Expect(opt0.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(group.value, Int64(0))
++
++    // 边界收住：在最前时 Up 不再减。
++    @Expect(opt0.handle(ctx, UiEvent.KeyDown(Key.Up, false)))
++    @Expect(group.value, Int64(0))
++}
++
++@Test
++func radioButtonArrowsNoopWithoutGroupRange(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let group = State<Int64>(0)
++    let opt = RadioButton("甲", group, 0).key("r.plain")
++    opt.layout(ctx, Rect(0.0, 0.0, 100.0, 28.0))
++    let _ = opt.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 50.0, 14.0))
++
++    // 未声明 groupRange：方向键不拦截、事件下传（行为与本改动前一致）。
++    @Expect(!opt.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    @Expect(group.value, Int64(0))
++}
+-- 
+2.47.3
+

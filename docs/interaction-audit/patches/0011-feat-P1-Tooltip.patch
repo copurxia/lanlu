@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:04:52 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Tooltip=20=E9=94=AE=E7=9B=98?=
+ =?UTF-8?q?=E8=81=9A=E7=84=A6=E5=8D=B3=E6=98=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #15（高/S）：Tooltip 此前只认指针悬停（ctx.mouseX/Y），键盘用户把焦点
+Tab 到图标按钮上永远看不到说明。现在：键盘焦点落在子控件的可聚焦停靠点上时
+立即注册 tooltip（无 500ms 延时——键盘用户没有指针可悬停），失焦即消失；
+指针悬停路径保持原有延时行为不变。
+
+测试：1 用例三分支（无焦点不注册 / 焦点即显 / 失焦消失），指针停在窗口外以隔离
+悬停路径。
+
+cjpm test：TOTAL 417，PASSED 376（新增 1 例全过），ERROR 40 + FAILED 1 与基线
+一致，零回归。
+---
+ src/core/tooltip.cj               | 31 ++++++++++++++--
+ src/core/tooltip_keyboard_test.cj | 62 +++++++++++++++++++++++++++++++
+ 2 files changed, 89 insertions(+), 4 deletions(-)
+ create mode 100644 src/core/tooltip_keyboard_test.cj
+
+diff --git a/src/core/tooltip.cj b/src/core/tooltip.cj
+index 1bbfbd1..0cc18a8 100644
+--- a/src/core/tooltip.cj
++++ b/src/core/tooltip.cj
+@@ -9,10 +9,11 @@ private let TOOLTIP_GAP: Float32 = 6.0
+ private let TOOLTIP_MARGIN: Float32 = 4.0
+ 
+ /*
+- * Wraps a control with a hover tooltip. Once the pointer has rested on the child for
+- * `TOOLTIP_DELAY_MS`, the child registers its text with the shell, which paints it above the
+- * whole tree (a minimal single-slot overlay). Otherwise a transparent wrapper: it forwards
+- * measure, layout, draw and events straight to the child.
++ * Wraps a control with a tooltip. Two triggers: the pointer resting on the child for
++ * `TOOLTIP_DELAY_MS`, or keyboard focus landing on the child's focus stops (shown immediately —
++ * keyboard users have no pointer to hover with). The shell paints the text above the whole tree
++ * (a minimal single-slot overlay). Otherwise a transparent wrapper: it forwards measure, layout,
++ * draw and events straight to the child.
+  */
+ public class Tooltip <: Widget {
+     private let child: Widget
+@@ -41,6 +42,25 @@ public class Tooltip <: Widget {
+     public func draw(ctx: UiContext): Unit {
+         child.draw(ctx)
+         let now = ctx.frame.elapsedMs
++        /*
++         * 触发条件二选一（缺口 #15）：
++         * - 指针悬停在子控件上 ≥500ms（原有行为）；
++         * - 键盘焦点落在子控件的可聚焦停靠点上——键盘用户没有指针，此前永远看不到
++         *   tooltip。键盘路径不做延时（Tab 到达即显，无需等待），指针路径保持延时。
++         */
++        var keyboardFocused = false
++        match (child.focusableId()) {
++            case Some(id) => keyboardFocused = ctx.hasFocus(id)
++            case None => ()
++        }
++        if (!keyboardFocused) {
++            for (stop in child.focusableIds()) {
++                if (ctx.hasFocus(stop)) {
++                    keyboardFocused = true
++                    break
++                }
++            }
++        }
+         if (frame.contains(ctx.mouseX, ctx.mouseY)) {
+             if (hoverStart.value == UInt64.Max) {
+                 hoverStart.value = now
+@@ -52,6 +72,9 @@ public class Tooltip <: Widget {
+                 // tooltip is due.
+                 ctx.requestFrameAfter(TOOLTIP_DELAY_MS - (now - hoverStart.value))
+             }
++        } else if (keyboardFocused) {
++            // 键盘聚焦：即时显示，且聚焦期间持续注册（clearTooltip 每帧清空后由这里补回）。
++            ctx.showTooltip(text, frame)
+         } else if (hoverStart.value != UInt64.Max) {
+             hoverStart.value = UInt64.Max // reset once; a per-frame write would be wasted churn
+         }
+diff --git a/src/core/tooltip_keyboard_test.cj b/src/core/tooltip_keyboard_test.cj
+new file mode 100644
+index 0000000..0a551a6
+--- /dev/null
++++ b/src/core/tooltip_keyboard_test.cj
+@@ -0,0 +1,62 @@
++package cui.core
++
++import lgui.{FrameInfo, Rect, Renderer, Size, UiEvent}
++
++/* Tooltip 键盘可见（缺口 #15）：焦点落在子控件停靠点上时立即显示，无需指针。 */
++private class FocusableProbe <: Widget {
++    private var frame = Rect.zero()
++
++    public init() {
++        registerFocusable("tip.probe")
++        emit(this)
++    }
++
++    public func measure(_: UiContext, _: Size): Size {
++        Size(100.0, 30.0)
++    }
++
++    public func layout(_: UiContext, rect: Rect): Unit {
++        frame = rect
++    }
++
++    public func draw(_: UiContext): Unit {}
++
++    public func handle(_: UiContext, _: UiEvent): Bool {
++        false
++    }
++
++    public func focusableId(): ?String {
++        Some("tip.probe")
++    }
++}
++
++@Test
++func tooltipShowsOnKeyboardFocusImmediately(): Unit {
++    let ctx = testContext()
++    let tip = Tooltip(text: "说明文字") {
++        emit(FocusableProbe())
++    }
++    tip.layout(ctx, Rect(0.0, 0.0, 100.0, 30.0))
++
++    // 指针停在窗口外（避免与悬停路径互相干扰）。
++    ctx.mouseX = 500.0
++    ctx.mouseY = 500.0
++
++    // 无焦点、无悬停：不注册 tooltip。
++    ctx.frame = FrameInfo(UInt64(0), UInt64(0))
++    tip.draw(ctx)
++    @Expect(ctx.tooltipText.isEmpty())
++
++    // 键盘焦点落在子控件：立即注册（无 500ms 延时）。
++    ctx.focus("tip.probe", viaKeyboard: true)
++    ctx.frame = FrameInfo(UInt64(16), UInt64(16))
++    ctx.clearTooltip()
++    tip.draw(ctx)
++    @Expect(ctx.tooltipText == "说明文字")
++
++    // 失焦后不再注册。
++    ctx.clearFocus()
++    ctx.clearTooltip()
++    tip.draw(ctx)
++    @Expect(ctx.tooltipText.isEmpty())
++}
+-- 
+2.47.3
+

@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:53:20 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E7=84=A6=E7=82=B9=E6=BB=9A=E5=85=A5?=
+ =?UTF-8?q?=E8=A7=86=E9=87=8E=E7=9A=84=E7=9F=A9=E5=BD=A2=E4=B8=8A=E6=8A=A5?=
+ =?UTF-8?q?=E6=9C=BA=E5=88=B6=E5=85=A5=E5=86=8C=EF=BC=88architecture?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/architecture.md | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 846af2e..da148c6 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -98,6 +98,12 @@ View modifier、Jetpack Compose 的 Modifier tree 采用相同的核心思想。
+ `focus(id, viaKeyboard: true)` 即 `autofocus`）时置真、指针 `focus(id)` 与 `clearFocus` 置假；
+ 字段族在激活 chrome 之上经 `drawFocusRing` 再叠一圈外环，与按钮族同一套视觉语言。`:focus-visible`
+ 约定由此收窄为“只管外环”——选区、光标、方向键导航等行为仍以 `hasFocus` 为准，与来源无关。
++
++**焦点滚入视野（reveal-on-focus）**：Tab 把焦点移到视口外时，容器自动滚到能看见它。落地方式是
++一次「矩形上报」：`UiContext.reportFocusRect(id, rect)` 由可聚焦控件在自己的 `layout` 里调用，
++外壳每帧 `layout` 前 `clearFocusRects()` 清空，容器在 `layout` 末尾读 `focusedRect()` 做**最小滚动**
++——已在视口内不动，否则刚好贴边（`ScrollView`、`LazyColumn` 已接）。这样做不需要容器持有 Widget
++引用、也不依赖绘制顺序；虚拟列表里未构建的行没有矩形上报，自然不会误触发。
+ 所有可聚焦控件都通过一个共享的 `drawFocusRing(ctx, rect, radius)` 绘制同一种强调色外扩描边：字段族
+ （文本框、列表、表格、下拉、选择器、步进器）与按钮/图标按钮/复选框/单选/开关一样，在自身本体（或外壳）
+ 外描一圈。一处定义、各控件复用，保证键盘焦点在任何控件上都可见且风格一致。
+-- 
+2.47.3
+

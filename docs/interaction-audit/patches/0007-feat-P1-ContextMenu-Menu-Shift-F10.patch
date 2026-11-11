@@ -1,0 +1,206 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:50:29 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ContextMenu=20=E9=94=AE=E7=9B=98?=
+ =?UTF-8?q?=E5=94=A4=E8=B5=B7=EF=BC=88Menu=20=E9=94=AE=20/=20Shift+F10?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #13（中）：上下文菜单此前只能右键唤起（全框架仅一处处理 MouseButton.Right），
+键盘用户完全无法触达。现在：键盘焦点位于包裹子树内时，Menu 键（上一提交新增的
+Key.Menu）或 Shift+F10（RawScancode 68 + shift 修饰）在控件中心弹出菜单——右键的
+键盘等价物，桌面惯例。焦点不在子树内/无条目时不拦截，事件继续下传。
+
+测试：2 个新用例（焦点在子树内弹出+登记浮层；焦点不在子树内不拦截），本机无 GPU
+环境用 NoopCanvas 后端让 draw 路径可跑（Button.draw → 软阴影）。
+
+cjpm test：TOTAL 409，PASSED 368（新增 2 例全过），ERROR 40 + FAILED 1 与基线
+逐例一致，零回归。
+---
+ src/controls/context_menu.cj               |  44 +++++++++
+ src/controls/context_menu_keyboard_test.cj | 100 +++++++++++++++++++++
+ 2 files changed, 144 insertions(+)
+ create mode 100644 src/controls/context_menu_keyboard_test.cj
+
+diff --git a/src/controls/context_menu.cj b/src/controls/context_menu.cj
+index ebbc8c0..f6de91d 100644
+--- a/src/controls/context_menu.cj
++++ b/src/controls/context_menu.cj
+@@ -1,10 +1,13 @@
+ package cui.controls
+ 
+ import lgui.{Key, MouseButton, Rect, Size, UiEvent}
++import lgui.input.Keyboard
+ import cui.core.{Axis, CursorShape, Overlay, State, UiContext, Widget, resolveControlKey, buildChild, emit,
+     localState}
+ 
+ private let CONTEXT_MENU_MARGIN: Float32 = 4.0
++// USB HID scancode of F10：Shift+F10 是 Windows 的“上下文菜单”键盘等价物。
++private let F10_SCANCODE: Int32 = 68
+ 
+ /*
+  * Wraps a control with a right-click context menu. A secondary press inside the child opens a
+@@ -69,11 +72,52 @@ public class ContextMenu <: Widget {
+                     highlight.value = menuFirstSelectable(items)
+                     return true
+                 }
++            // 键盘唤起（缺口 #13）：Menu 键或 Shift+F10 在键盘焦点位于本控件子树内时
++            // 于控件中心弹出——桌面惯例（右键的键盘等价物）。
++            case UiEvent.KeyDown(Key.Menu, _) => return openByKeyboard(ctx, event)
++            // Shift+F10：F10 不在 Key 枚举（非字母/数字），经 RawScancode(68) 匹配。
++            case UiEvent.KeyDown(Key.RawScancode(F10_SCANCODE), _) =>
++                if (Keyboard.modifiers().shift) {
++                    return openByKeyboard(ctx, event)
++                }
+             case _ => ()
+         }
+         child.handle(ctx, event)
+     }
+ 
++    // 键盘焦点在子树内（含子控件自身持有焦点）时于控件中心弹出；否则把事件交还子树。
++    private func openByKeyboard(ctx: UiContext, event: UiEvent): Bool {
++        if (items.isEmpty() || !focusInside(ctx)) {
++            return child.handle(ctx, event)
++        }
++        open.value = true
++        menuX.value = frame.centerX()
++        menuY.value = frame.centerY()
++        highlight.value = menuFirstSelectable(items)
++        true
++    }
++
++    // 键盘焦点是否落在被包裹子树的某个停靠点上。
++    private func focusInside(ctx: UiContext): Bool {
++        let focused = ctx.focusId
++        if (focused.size == 0) {
++            return false
++        }
++        match (child.focusableId()) {
++            case Some(id) =>
++                if (id == focused) {
++                    return true
++                }
++            case None => ()
++        }
++        for (stop in child.focusableIds()) {
++            if (stop == focused) {
++                return true
++            }
++        }
++        false
++    }
++
+     public func isFlexible(): Bool {
+         child.isFlexible()
+     }
+diff --git a/src/controls/context_menu_keyboard_test.cj b/src/controls/context_menu_keyboard_test.cj
+new file mode 100644
+index 0000000..01beb14
+--- /dev/null
++++ b/src/controls/context_menu_keyboard_test.cj
+@@ -0,0 +1,100 @@
++package cui.controls
++
++import lgui.{Canvas, Color, Key, Pen, Rect, Renderer, Size, UiEvent}
++import cui.core.{Button, State, Theme, UiContext, Widget, emit}
++
++/* 空记录画布：让 draw 不因无后端抛异常（Button.draw → drawSurface → 软阴影）。 */
++private class NoopCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++private func kbdMenuContext(w: Float32, h: Float32): UiContext {
++    let renderer = Renderer.headless()
++    renderer.useBackend(NoopCanvas())
++    let ctx = UiContext(renderer, Theme.light())
++    ctx.viewportWidth = w
++    ctx.viewportHeight = h
++    ctx
++}
++
++private class PlainProbe <: Widget {
++    public func measure(_: UiContext, _: Size): Size {
++        Size(120.0, 60.0)
++    }
++
++    public func layout(_: UiContext, _: Rect): Unit {}
++
++    public func draw(_: UiContext): Unit {}
++
++    public func handle(_: UiContext, _: UiEvent): Bool {
++        false
++    }
++}
++
++/*
++ * 键盘唤起（缺口 #13）：Menu 键 / Shift+F10 在键盘焦点位于包裹子树内时弹出，
++ * 位置取控件中心；焦点不在子树内则不拦截。
++ */
++@Test
++func contextMenuOpensWithMenuKeyWhenFocusInside(): Unit {
++    let ctx = kbdMenuContext(300.0, 400.0)
++    let ran = State<Int64>(0)
++    let menu = ContextMenu(items: [MenuItem("复制", {=> ran.value = 1}), MenuItem("删除", {=> ran.value = 2})]) {
++        Button("目标", {=> ()}).key("kbd.target")
++    }
++    menu.layout(ctx, Rect(20.0, 20.0, 200.0, 60.0))
++
++    // 焦点不在子树内：Menu 键不被本控件拦截。
++    ctx.clearFocus()
++    @Expect(!menu.handle(ctx, UiEvent.KeyDown(Key.Menu, false)))
++
++    // 焦点在子树内（构建期登记的按钮）：弹出，位置在控件中心。
++    ctx.focus("kbd.target", viaKeyboard: true)
++    @Expect(menu.handle(ctx, UiEvent.KeyDown(Key.Menu, false)))
++    menu.draw(ctx)
++    @Expect(ctx.hasOverlay())
++    ctx.clearActiveOverlay()
++}
++
++@Test
++func contextMenuShiftF10NotInterceptedWithoutFocus(): Unit {
++    let ctx = kbdMenuContext(300.0, 400.0)
++    let ran = State<Int64>(0)
++    let menu = ContextMenu(items: [MenuItem("复制", {=> ran.value = 1})]) {
++        emit(PlainProbe())
++    }
++    menu.layout(ctx, Rect(20.0, 20.0, 120.0, 60.0))
++
++    // PlainProbe 无焦点停靠点：Shift+F10 也不拦截（无焦点可判）。
++    ctx.clearFocus()
++    @Expect(!menu.handle(ctx, UiEvent.KeyDown(Key.RawScancode(68), false)))
++}
+-- 
+2.47.3
+

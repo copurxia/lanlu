@@ -1,0 +1,782 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:27:22 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P0):=20=E7=82=B9=E5=87=BB=E8=81=9A=E7=84=A6?=
+ =?UTF-8?q?=E5=8F=AF=E8=A7=81=20+=20=E5=AD=97=E6=AE=B5=E6=97=8F=E9=94=AE?=
+ =?UTF-8?q?=E7=9B=98=E5=A4=96=E7=8E=AF=EF=BC=9BPagination/Breadcrumb/StepI?=
+ =?UTF-8?q?ndicator=20=E9=94=AE=E7=9B=98=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+用户反馈『点击输入框没有描边』的根因：drawTextBoxChrome 读 showFocusRing（:focus-visible，
+仅键盘聚焦可见），指针点击聚焦后整框纹丝不动。现改为两层：激活 chrome（accent 边 +
+fieldActive 底 + 光晕）按 hasFocus 判定（点击也着色，对齐 Windows/macOS/ArkUI/Qt 与应用层
+titlebar SearchChrome 的既有表现）；键盘到达的焦点再叠 drawFocusRing 外环，与按钮族同一套
+视觉语言。:focus-visible 约定收窄为『只管外环』（docs/architecture.md 同步）。
+
+同批 P0：Pagination 补 registerFocusable + 点击聚焦 + Left/Right 翻页；Breadcrumb 可点击时
+进焦点环 + Left/Right 移动 + Enter/Space 激活 + 键盘段高亮；StepIndicator 可选择时进焦点环 +
+Left/Right/Enter/Space + 键盘步圆环高亮。
+
+测试：ChromeProbe 记录型画布断言 chrome 图元（10 个新用例全过）。本机桩库链接（libvips/SDL
+stub，target/tmp/vips-stub|sdl-stub）：TOTAL 397，PASSED 356 + 新增 10，ERROR 40 与 FAILED 1
+（pushWakeEvent 需真实 SDL wake 事件）与改动前基线完全一致，零回归。
+---
+ docs/architecture.md               |  19 +--
+ src/controls/breadcrumb.cj         | 102 +++++++++++++++-
+ src/controls/nav_keyboard_test.cj  | 116 ++++++++++++++++++
+ src/controls/pagination.cj         |  40 +++----
+ src/controls/step_indicator.cj     |  87 ++++++++++++--
+ src/text/text_area.cj              |  17 ++-
+ src/text/text_focus_chrome_test.cj | 181 +++++++++++++++++++++++++++++
+ 7 files changed, 512 insertions(+), 50 deletions(-)
+ create mode 100644 src/controls/nav_keyboard_test.cj
+ create mode 100644 src/text/text_focus_chrome_test.cj
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 8e67c0a..846af2e 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -90,16 +90,17 @@ View modifier、Jetpack Compose 的 Modifier tree 采用相同的核心思想。
+ 任意粒度（单控件、一行表单、整个面板）。`TabView` 用同一协议摘除非活动页面的停靠点：隐藏页收不到
+ 事件，停靠点留在环里只会成为 Tab 死角；页签切换后由下一帧重建自动恢复。
+ 
+-**键盘专属焦点环（`:focus-visible`）**：焦点圈是给键盘用户的导航线索，鼠标用户点哪儿一目了然、
+-不需要它。`UiContext` 因此除 `focusId` 外再记一个 `focusRingVisible` 标志：`focus(id)` 由指针按下
+-调用时置假，`Tab` 遍历（`moveFocus`）与 `autofocus`（`focus(id, viaKeyboard: true)`）置真；`clearFocus`
+-复位。控件绘制描边时用 `showFocusRing(id)`（= 聚焦且经键盘到达）而非 `hasFocus(id)`，故点击聚焦不留
+-描边、`Tab` 到达才显。关键是**只有描边**依赖此标志——选区、光标、方向键导航等行为仍以 `hasFocus`
+-为准，与来源无关；`autofocus` 视为键盘意图（打开即待键入），因此自动聚焦的搜索框仍显描边、静态快照不变。
++**激活态与键盘焦点环两层区分（`:focus-visible`）**：输入框的“激活 chrome”（accent 边 + fieldActive
++底 + 光晕，`fieldSurface(active)`）按 `hasFocus(id)` 判定——**指针点击聚焦也着色**。桌面软件
++（Windows/macOS/ArkUI/Qt）点击输入框都会变色，用户据此判断“点中了、可以打字了”；此前这里读
++`showFocusRing`，点击后整框纹丝不动、只剩光标闪烁，被用户报告为“点击输入框没有描边”。
++键盘可区分度由第二层承担：`focusRingVisible` 仍只在键盘到达（`Tab` 遍历 `moveFocus`、
++`focus(id, viaKeyboard: true)` 即 `autofocus`）时置真、指针 `focus(id)` 与 `clearFocus` 置假；
++字段族在激活 chrome 之上经 `drawFocusRing` 再叠一圈外环，与按钮族同一套视觉语言。`:focus-visible`
++约定由此收窄为“只管外环”——选区、光标、方向键导航等行为仍以 `hasFocus` 为准，与来源无关。
+ 所有可聚焦控件都通过一个共享的 `drawFocusRing(ctx, rect, radius)` 绘制同一种强调色外扩描边：字段族
+-（文本框、列表、表格、下拉、选择器、步进器）用带焦点的 `fieldSurface` 围住整框，按钮/图标按钮/复选框/
+-单选/开关则在自身本体外描一圈（分别围按钮框、复选框、圆点、拨轨）。一处定义、各控件复用，保证键盘
+-焦点在任何控件上都可见且风格一致——补上了实心的主要/危险按钮此前无焦点提示的缺口。
++（文本框、列表、表格、下拉、选择器、步进器）与按钮/图标按钮/复选框/单选/开关一样，在自身本体（或外壳）
++外描一圈。一处定义、各控件复用，保证键盘焦点在任何控件上都可见且风格一致。
+ 
+ ### 指针悬停与光标
+ 
+diff --git a/src/controls/breadcrumb.cj b/src/controls/breadcrumb.cj
+index 44636de..152113b 100644
+--- a/src/controls/breadcrumb.cj
++++ b/src/controls/breadcrumb.cj
+@@ -1,8 +1,9 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{Color, FontSizes, MouseButton, Pen, Rect, Size, UiEvent}
+-import cui.core.{CursorShape, UiContext, Widget, resolveControlKey, emit}
++import lgui.{Color, FontSizes, Key, MouseButton, Pen, Rect, Size, UiEvent}
++import cui.core.{CursorShape, State, UiContext, Widget, claimHoverIfInside, localState, resolveControlKey, emit,
++    registerFocusable}
+ 
+ private let BC_H: Float32 = 28.0
+ private let BC_HPAD: Float32 = 7.0
+@@ -24,13 +25,23 @@ public class Breadcrumb <: Widget {
+     private let items: Array<Int64>
+     private var frame = Rect.zero()
+     private let itemRects: Array<Rect>
++    // 键盘导航当前指向的段索引（-1 = 未定，首次 Left/Right/Enter 时落到首个可点击段）。
++    private let keyboardIdx: State<Int64>
+ 
+     public init(segments: Array<String>, onSelect!: ?(Int64) -> Unit = None, maxItems!: Int64 = 0, key!: ?String = None) {
+         this.id = resolveControlKey(key, "Breadcrumb")
++        // 仅在可点击（有 onSelect）时进 Tab 焦点环：纯展示的面包屑不是焦点停靠点。
++        if (onSelect.isSome()) {
++            registerFocusable(this.id)
++        }
++        let ident = this.id
+         this.segments = segments
+         this.onSelect = onSelect
+         this.items = breadcrumbItems(segments.size, maxItems)
+         this.itemRects = Array<Rect>(this.items.size, {_ => Rect.zero()})
++        // 键盘段初始为 -1（未定）；首次 Left/Right/Enter 时落到首个可点击段。
++        // localState 的工厂 lambda 不能捕获可变局部量，因此这里给常量哨兵值。
++        this.keyboardIdx = localState<Int64>("${ident}:kbd") {-1}
+         emit(this)
+     }
+ 
+@@ -80,13 +91,12 @@ public class Breadcrumb <: Widget {
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
++        claimHoverIfInside(ctx, event, frame, id, CursorShape.Interactive)
+         match (event) {
+-            case UiEvent.MouseMove(x, y) => if (clickableIndexAt(x, y) >= 0) {
+-                ctx.claimHover(id, CursorShape.Interactive)
+-            }
+             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                 let hit = clickableIndexAt(x, y)
+                 if (hit >= 0) {
++                    ctx.focus(id)
+                     match (onSelect) {
+                         case Some(callback) =>
+                             callback(hit)
+@@ -94,11 +104,89 @@ public class Breadcrumb <: Widget {
+                         case None => ()
+                     }
+                 }
++            // 键盘导航：Left/Right 在可点击的链接段之间移动，Enter 激活当前段。
++            // 纯展示（无 onSelect）不消费任何按键。
++            case UiEvent.KeyDown(Key.Left, _) => return crumbStep(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, _) => return crumbStep(ctx, 1)
++            case UiEvent.KeyDown(Key.Enter, _) => return crumbActivate(ctx)
++            case UiEvent.KeyDown(Key.Space, _) => return crumbActivate(ctx)
+             case _ => ()
+         }
+         false
+     }
+ 
++    // 焦点在面包屑上时，当前键盘段（无焦点时落在首个可点击段）。
++    private func crumbStep(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(id) || onSelect.isNone()) {
++            return false
++        }
++        let links = clickableIndices()
++        if (links.size == 0) {
++            return false
++        }
++        // 未定（-1）视为指向首个链接段；否则在链接列表中找当前位置。
++        var pos = 0
++        let currentIdx = keyboardIdx.value
++        if (currentIdx >= 0) {
++            for (i in 0..links.size) {
++                if (links[i] == currentIdx) {
++                    pos = i
++                }
++            }
++        } else if (delta < 0) {
++            pos = links.size - 1 // 从"未定"向左：落到最后一个链接段
++        }
++        let next = clampInt(pos + delta, 0, links.size - 1)
++        keyboardIdx.value = links[next]
++        return true
++    }
++
++    private func crumbActivate(ctx: UiContext): Bool {
++        if (!ctx.hasFocus(id) || onSelect.isNone()) {
++            return false
++        }
++        var target = keyboardIdx.value
++        if (target < 0) {
++            let links = clickableIndices()
++            if (links.size > 0) {
++                target = links[0]
++            }
++        }
++        if (target >= 0 && target != segments.size - 1) {
++            match (onSelect) {
++                case Some(callback) =>
++                    callback(target)
++                    return true
++                case None => ()
++            }
++        }
++        false
++    }
++
++    // 当前显示的、可点击的段索引（跳过省略号与末段）。
++    private func clickableIndices(): Array<Int64> {
++        let result = ArrayList<Int64>()
++        for (i in 0..items.size) {
++            let idx = items[i]
++            if (idx != BC_ELLIPSIS && idx != segments.size - 1) {
++                result.add(idx)
++            }
++        }
++        result.toArray()
++    }
++
++    private func clampInt(value: Int64, low: Int64, high: Int64): Int64 {
++        max(low, min(high, value))
++    }
++
++    public func focusableId(): ?String {
++        if (onSelect.isSome()) {
++            Some(id)
++        } else {
++            None
++        }
++    }
++
+     // The segment index under a pointer that is a clickable link (a real, non-current segment with an
+     // `onSelect`), or -1.
+     private func clickableIndexAt(x: Float32, y: Float32): Int64 {
+@@ -117,7 +205,9 @@ public class Breadcrumb <: Widget {
+     private func drawSegment(ctx: UiContext, r: Rect, idx: Int64): Unit {
+         let isCurrent = idx == segments.size - 1
+         let clickable = !isCurrent && onSelect.isSome()
+-        if (clickable && r.contains(ctx.mouseX, ctx.mouseY)) {
++        let hovered = clickable && r.contains(ctx.mouseX, ctx.mouseY)
++        let keyed = clickable && ctx.showFocusRing(id) && idx == keyboardIdx.value
++        if (hovered || keyed) {
+             ctx.renderer.fillRoundedRect(r, ctx.theme.smallRadius, ctx.theme.fieldActive)
+         }
+         let color = if (isCurrent) {
+diff --git a/src/controls/nav_keyboard_test.cj b/src/controls/nav_keyboard_test.cj
+new file mode 100644
+index 0000000..c7c338a
+--- /dev/null
++++ b/src/controls/nav_keyboard_test.cj
+@@ -0,0 +1,116 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{Bindable, State, Theme, UiContext}
++
++private func navTestContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++// Pagination：不可聚焦 → 可聚焦 + Left/Right 翻页（P0-3）。
++@Test
++func paginationFocusesAndStepsWithArrows(): Unit {
++    let ctx = navTestContext()
++    let page = State<Int64>(2)
++    let pager = Pagination(5, page, key: "nav.pager")
++    pager.layout(ctx, Rect(0.0, 0.0, 300.0, 34.0))
++    @Expect(!ctx.hasFocus("nav.pager"))
++
++    @Expect(!pager.handle(ctx, UiEvent.KeyDown(Key.Right, false))) // 未聚焦不消费
++    @Expect(page.value, Int64(2))
++
++    // 点击聚焦（点在 prev 箭头上，必中；注意箭头本身会翻页：2 → 1），随后方向键翻页。
++    @Expect(pager.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 17.0, 17.0)))
++    @Expect(ctx.hasFocus("nav.pager"))
++    @Expect(page.value, Int64(1)) // prev 箭头已把 2 翻到 1
++
++    @Expect(pager.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(page.value, Int64(2))
++    @Expect(pager.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(page.value, Int64(1))
++}
++
++@Test
++func paginationKeyboardArrowsClampAtEnds(): Unit {
++    let ctx = navTestContext()
++    let page = State<Int64>(4)
++    let pager = Pagination(5, page, key: "nav.clamp")
++    pager.layout(ctx, Rect(0.0, 0.0, 300.0, 34.0))
++    // 从末页 4 出发：prev 箭头翻到 3，随后 Right 又回到 4 并被收住。
++    let _ = pager.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 17.0, 17.0))
++    @Expect(page.value, Int64(3))
++    @Expect(pager.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(page.value, Int64(4)) // 末页不越界
++}
++
++// Breadcrumb：可点击时进焦点环、Left/Right 移动、Enter/Space 激活；纯展示不进环。
++@Test
++func breadcrumbKeyboardWalksAndActivates(): Unit {
++    let ctx = navTestContext()
++    let picked = State<Int64>(-1)
++    let trail = Breadcrumb(["首页", "文档", "项目"], onSelect: {i => picked.value = i}, key: "nav.crumb")
++    trail.layout(ctx, Rect(0.0, 0.0, 400.0, 28.0))
++    @Expect(trail.focusableId().isSome()) // 可点击面包屑进焦点环
++    // 点击首个链接段（"首页"，宽约 textWidth+14）获得焦点——键盘导航从这里开始。
++    @Expect(trail.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 12.0, 14.0)))
++    @Expect(ctx.hasFocus("nav.crumb"))
++
++    // 初始键盘段未定（-1）：Right 落到首个链接段 0（"首页"），再 Right → 1（"文档"）。Enter 激活。
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(picked.value, 1)
++
++    // Right 在最后一个链接段被收住（当前位置"项目"不是链接，不在列表里）。
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    let _ = trail.handle(ctx, UiEvent.KeyDown(Key.Enter, false))
++    @Expect(picked.value, 1) // 仍是 1：Right 没有越界到别的段
++
++    // Left 回到 0（"首页"），Space 同样激活。
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(trail.handle(ctx, UiEvent.KeyDown(Key.Space, false)))
++    @Expect(picked.value, 0)
++}
++
++@Test
++func breadcrumbDisplayOnlyStaysOutOfFocusRing(): Unit {
++    let ctx = navTestContext()
++    let trail = Breadcrumb(["a", "b"], key: "nav.plain")
++    trail.layout(ctx, Rect(0.0, 0.0, 120.0, 28.0))
++    @Expect(trail.focusableId().isNone()) // 纯展示面包屑不是焦点停靠点
++    @Expect(!trail.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++}
++
++// StepIndicator：可选择时进焦点环、Left/Right/Enter/Space；纯指示器不进环。
++@Test
++func stepIndicatorKeyboardWalksAndActivates(): Unit {
++    let ctx = navTestContext()
++    let picked = State<Int64>(-1)
++    let steps = StepIndicator(["注册", "付款", "完成"], 1, onSelect: {i => picked.value = i}, key: "nav.steps")
++    steps.layout(ctx, Rect(0.0, 0.0, 400.0, 60.0))
++    @Expect(steps.focusableId().isSome())
++    // 点击已到达步（step 0 的节点中心）获得焦点。measure 后 xs[0] = 44+14 = 58?（EDGE_PAD=44，
++    // 圆心在 x=44+…；用 3 步均分：left=44, right=356, gap=156 → xs[0]=44）
++    @Expect(steps.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 44.0, 18.0)))
++    @Expect(ctx.hasFocus("nav.steps"))
++
++    // 点击已把键盘步定到 0；Right → 1；再 Right 收住仍 1；Enter 激活 1。
++    @Expect(steps.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(steps.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++    @Expect(steps.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(picked.value, 1)
++
++    // Left → 0，Space 激活 0。
++    @Expect(steps.handle(ctx, UiEvent.KeyDown(Key.Left, false)))
++    @Expect(steps.handle(ctx, UiEvent.KeyDown(Key.Space, false)))
++    @Expect(picked.value, 0)
++}
++
++@Test
++func stepIndicatorDisplayOnlyIgnoresKeyboard(): Unit {
++    let ctx = navTestContext()
++    let steps = StepIndicator(["a", "b"], 1, key: "nav.plainsteps")
++    steps.layout(ctx, Rect(0.0, 0.0, 200.0, 60.0))
++    @Expect(steps.focusableId().isNone())
++    @Expect(!steps.handle(ctx, UiEvent.KeyDown(Key.Right, false)))
++}
+diff --git a/src/controls/pagination.cj b/src/controls/pagination.cj
+index 1922154..88ca63d 100644
+--- a/src/controls/pagination.cj
++++ b/src/controls/pagination.cj
+@@ -1,8 +1,9 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{Color, FontSizes, MouseButton, Pen, Rect, Size, UiEvent}
+-import cui.core.{Bindable, CursorShape, UiContext, Widget, resolveControlKey, emit}
++import lgui.{Color, FontSizes, Key, MouseButton, Pen, Rect, Size, UiEvent}
++import cui.core.{Bindable, CursorShape, UiContext, Widget, claimHoverIfInside, resolveControlKey, emit,
++    registerFocusable}
+ 
+ private let PAGE_BTN_W: Float32 = 34.0
+ private let PAGE_BTN_H: Float32 = 34.0
+@@ -28,6 +29,7 @@ public class Pagination <: Widget {
+ 
+     public init(pageCount: Int64, current: Bindable<Int64>, window!: Int64 = 1, key!: ?String = None) {
+         this.id = resolveControlKey(key, "Pagination")
++        registerFocusable(this.id) // 进 Tab 焦点环：Left/Right 翻页的键盘可达性由焦点保证
+         this.pageCount = max(1, pageCount)
+         this.current = current
+         this.items = paginationItems(this.pageCount, clampPage(current.value, this.pageCount), max(0, window))
+@@ -67,11 +69,12 @@ public class Pagination <: Widget {
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
++        claimHoverIfInside(ctx, event, frame, id, CursorShape.Interactive)
+         match (event) {
+-            case UiEvent.MouseMove(x, y) => if (clickableAt(x, y)) {
+-                ctx.claimHover(id, CursorShape.Interactive)
+-            }
+             case UiEvent.MouseDown(MouseButton.Left, x, y) =>
++                if (frame.contains(x, y)) {
++                    ctx.focus(id)
++                }
+                 let page = clampPage(current.value, pageCount)
+                 if (prevRect.contains(x, y)) {
+                     if (page > 0) {
+@@ -91,27 +94,24 @@ public class Pagination <: Widget {
+                         return true
+                     }
+                 }
++            case UiEvent.KeyDown(Key.Left, _) => return stepIfFocused(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, _) => return stepIfFocused(ctx, 1)
+             case _ => ()
+         }
+         false
+     }
+ 
+-    // The pointer is over a clickable target: an enabled arrow or a real (non-ellipsis) page cell.
+-    // The ellipsis cell and a disabled arrow keep the default cursor.
+-    private func clickableAt(x: Float32, y: Float32): Bool {
+-        let page = clampPage(current.value, pageCount)
+-        if (prevRect.contains(x, y)) {
+-            return page > 0
+-        }
+-        if (nextRect.contains(x, y)) {
+-            return page < pageCount - 1
+-        }
+-        for (i in 0..items.size) {
+-            if (items[i] != PAGE_ELLIPSIS && itemRects[i].contains(x, y)) {
+-                return true
+-            }
++    // 聚焦时的键盘翻页：Left/Right 步进一页（越界被 clampPage 收住，语义与点击箭头一致）。
++    private func stepIfFocused(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(id)) {
++            return false
+         }
+-        false
++        current.value = clampPage(current.value + delta, pageCount)
++        return true
++    }
++
++    public func focusableId(): ?String {
++        Some(id)
+     }
+ 
+     private func drawPage(ctx: UiContext, rect: Rect, page: Int64, isCurrent: Bool): Unit {
+diff --git a/src/controls/step_indicator.cj b/src/controls/step_indicator.cj
+index 930d30a..0997890 100644
+--- a/src/controls/step_indicator.cj
++++ b/src/controls/step_indicator.cj
+@@ -1,7 +1,8 @@
+ package cui.controls
+ 
+-import lgui.{Color, FontSizes, MouseButton, Pen, Rect, Size, UiEvent}
+-import cui.core.{CursorShape, UiContext, Widget, resolveControlKey, emit}
++import lgui.{Color, FontSizes, Key, MouseButton, Pen, Rect, Size, UiEvent}
++import cui.core.{CursorShape, State, UiContext, Widget, claimHoverIfInside, localState, resolveControlKey, emit,
++    registerFocusable}
+ 
+ private let STEP_CIRCLE_R: Float32 = 14.0
+ private let STEP_EDGE_PAD: Float32 = 44.0
+@@ -23,12 +24,19 @@ public class StepIndicator <: Widget {
+     private let current: Int64
+     private let onSelect: ?(Int64) -> Unit
+     private var frame = Rect.zero()
++    // 键盘选中步（仅在有 onSelect 时有意义）；-1 = 未定（首次交互落到 current）。
++    private let keyboardStepIdx: State<Int64>
+ 
+     public init(steps: Array<String>, current: Int64, onSelect!: ?(Int64) -> Unit = None, key!: ?String = None) {
+         this.id = resolveControlKey(key, "StepIndicator")
++        // 可选择（有 onSelect）时进 Tab 焦点环并提供键盘；纯指示器不进环。
++        if (onSelect.isSome()) {
++            registerFocusable(this.id)
++        }
+         this.steps = steps
+         this.current = current
+         this.onSelect = onSelect
++        this.keyboardStepIdx = localState<Int64>("StepIndicator:${this.id}:kbd") {-1}
+         emit(this)
+     }
+ 
+@@ -65,22 +73,71 @@ public class StepIndicator <: Widget {
+     }
+ 
+     public func handle(ctx: UiContext, event: UiEvent): Bool {
+-        match ((event, onSelect)) {
+-            // Only the already-reached steps are clickable, so only they show the interactive cursor.
+-            case (UiEvent.MouseMove(x, y), Some(_)) => if (reachedStepAt(x, y) >= 0) {
+-                ctx.claimHover(id, CursorShape.Interactive)
+-            }
+-            case (UiEvent.MouseDown(MouseButton.Left, x, y), Some(callback)) =>
+-                let step = reachedStepAt(x, y)
+-                if (step >= 0) {
+-                    callback(step)
+-                    return true
++        claimHoverIfInside(ctx, event, frame, id, CursorShape.Interactive)
++        match (event) {
++            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
++                match (onSelect) {
++                    case Some(callback) =>
++                        let step = reachedStepAt(x, y)
++                        if (step >= 0) {
++                            ctx.focus(id)
++                            keyboardStepIdx.value = step
++                            callback(step)
++                            return true
++                        }
++                    case None => ()
+                 }
++            // 键盘：Left/Right 在“已到达”的步（0..current）间移动，Enter/Space 选择。
++            // 纯指示器（无 onSelect）不消费任何按键。
++            case UiEvent.KeyDown(Key.Left, _) => return stepKeyboard(ctx, -1)
++            case UiEvent.KeyDown(Key.Right, _) => return stepKeyboard(ctx, 1)
++            case UiEvent.KeyDown(Key.Enter, _) => return stepActivate(ctx)
++            case UiEvent.KeyDown(Key.Space, _) => return stepActivate(ctx)
+             case _ => ()
+         }
+         false
+     }
+ 
++    // 键盘移动：从未定（-1）落到 current；随后在 0..current 内左右收住。
++    private func stepKeyboard(ctx: UiContext, delta: Int64): Bool {
++        if (!ctx.hasFocus(id) || onSelect.isNone()) {
++            return false
++        }
++        let now = keyboardStepIdx.value
++        if (now < 0) {
++            keyboardStepIdx.value = current
++            return true
++        }
++        keyboardStepIdx.value = max(0, min(current, now + delta))
++        return true
++    }
++
++    private func stepActivate(ctx: UiContext): Bool {
++        if (!ctx.hasFocus(id) || onSelect.isNone()) {
++            return false
++        }
++        let target = keyboardStepIdx.value
++        if (target < 0) {
++            keyboardStepIdx.value = current
++            return true
++        }
++        match (onSelect) {
++            case Some(callback) =>
++                callback(target)
++                return true
++            case None => ()
++        }
++        false
++    }
++
++    public func focusableId(): ?String {
++        if (onSelect.isSome()) {
++            Some(id)
++        } else {
++            None
++        }
++    }
++
+     // The reached (index ≤ current) step whose hit circle contains the pointer, or -1.
+     private func reachedStepAt(x: Float32, y: Float32): Int64 {
+         let cy = frame.y + STEP_TOP_PAD + STEP_CIRCLE_R
+@@ -111,6 +168,12 @@ public class StepIndicator <: Widget {
+     private func drawNode(ctx: UiContext, cx: Float32, cy: Float32, step: Int64): Unit {
+         let done = step < current
+         let isCurrent = step == current
++        // 键盘选中步：仅在键盘焦点下描一圈（与 :focus-visible 约定一致），指针用户不受影响。
++        let keyed = ctx.showFocusRing(id) && step == keyboardStepIdx.value
++        if (keyed) {
++            ctx.renderer.strokeCircle(cx, cy, STEP_CIRCLE_R + 2.5, Pen(width: 1.6, color: ctx.theme.accent),
++                segments: 40)
++        }
+         if (done || isCurrent) {
+             ctx.renderer.fillCircle(cx, cy, STEP_CIRCLE_R, ctx.theme.accent)
+             if (done) {
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index e8ea1f1..01d982a 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -3,8 +3,8 @@ package cui.text
+ import lgui.{FontSizes, Key, MouseButton, Point, Rect, Size, UiEvent}
+ import lgui.input.{Clipboard, Keyboard}
+ import cui.core.{Bindable, CUI_SMALL_H, CursorShape, ScrollBar, State, UiContext, Widget, claimHoverIfInside, 
+-    clampScrollOffset, drawSurface, drawVerticalScrollBar, emit, localState, registerFocusable, resolveControlKey, 
+-    SmoothScroll, scrollLineIndex, scrollLineRemainder}
++    clampScrollOffset, drawFocusRing, drawSurface, drawVerticalScrollBar, emit, localState, registerFocusable, 
++    resolveControlKey, SmoothScroll, scrollLineIndex, scrollLineRemainder}
+ 
+ // SDL reports letter keys as their uppercase ASCII code (see the Ctrl+letter shortcuts).
+ private let AREA_LETTER_A: UInt8 = 65
+@@ -397,8 +397,19 @@ private func drawTextAreaBox(
+     drawVerticalScrollBar(ctx, frame, content.scroll, textContentHeight(lines), viewport.h, active: barActive)
+ }
+ 
++/*
++ * 输入框外壳 chrome：激活态（accent 边 + fieldActive 底 + 光晕）按“是否持有焦点”判定，
++ * 指针点击聚焦也着色——桌面软件（Windows/macOS/ArkUI/Qt）点击输入框都会变色，用户据此判断
++ * “点中了、可以打字了”；此前这里读 showFocusRing，点击后描边一点都不变，只剩光标闪烁。
++ *
++ * 键盘可区分度不丢：键盘到达的焦点（Tab / autofocus）在激活 chrome 之上再叠一圈
++ * drawFocusRing 外环，与按钮族同一套视觉语言；:focus-visible 仍然只作用于“外环”。
++ */
+ internal func drawTextBoxChrome(ctx: UiContext, frame: Rect, id: String): Unit {
+-    drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id)))
++    drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.hasFocus(id)))
++    if (ctx.showFocusRing(id)) {
++        drawFocusRing(ctx, frame, ctx.theme.controlRadius)
++    }
+ }
+ 
+ private func drawLines(ctx: UiContext, rect: Rect, lines: Array<String>, scroll: Float32): Unit {
+diff --git a/src/text/text_focus_chrome_test.cj b/src/text/text_focus_chrome_test.cj
+new file mode 100644
+index 0000000..398a4fc
+--- /dev/null
++++ b/src/text/text_focus_chrome_test.cj
+@@ -0,0 +1,181 @@
++package cui.text
++
++import lgui.{Canvas, Color, MouseButton, Pen, Rect, Renderer, UiEvent}
++import std.collection.ArrayList
++import cui.core.{State, Theme, UiContext}
++
++/*
++ * 记录型画布：把 drawSurface / drawFocusRing 真正用到的两类图元记下来（圆角填充色、
++ * 圆角描边色 + 线宽 + 半径），其余图元空实现。这样测试不依赖真实渲染设备，
++ * 也能断言输入框 chrome 的激活态与键盘外环——这是本机（无 GPU/SDL 设备）唯一可观测的路径。
++ */
++class ChromeProbe <: Canvas {
++    let fills: ArrayList<Color> = ArrayList<Color>()
++    let strokeColors: ArrayList<Color> = ArrayList<Color>()
++    let strokeWidths: ArrayList<Float32> = ArrayList<Float32>()
++    let strokeRadii: ArrayList<Float32> = ArrayList<Float32>()
++
++    public func reset(): Unit {
++        fills.clear()
++        strokeColors.clear()
++        strokeWidths.clear()
++        strokeRadii.clear()
++    }
++
++    private func recordPen(pen: Pen): Unit {
++        strokeColors.add(pen.color)
++        strokeWidths.add(pen.width)
++    }
++
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {
++        fills.add(color)
++    }
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {
++        // 阴影也是 chrome 可观测的一部分：记录颜色即可区分激活态（有 accent 光晕）与常态（无）。
++        fills.add(color)
++    }
++    public func strokeRect(rect: Rect, pen: Pen): Unit {
++        recordPen(pen)
++    }
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {
++        recordPen(pen)
++        strokeRadii.add(radius)
++    }
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {
++        recordPen(pen)
++    }
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++
++    public func hasFill(color: Color): Bool {
++        for (c in fills) {
++            if (c == color) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func hasStroke(color: Color, width: Float32): Bool {
++        for (i in 0..strokeColors.size) {
++            if (strokeColors[i] == color && strokeWidths[i] == width) {
++                return true
++            }
++        }
++        false
++    }
++
++    public func strokeCount(): Int64 {
++        strokeColors.size
++    }
++}
++
++private func chromeContext(): (UiContext, ChromeProbe) {
++    let probe = ChromeProbe()
++    let renderer = Renderer.headless()
++    renderer.useBackend(probe)
++    (UiContext(renderer, Theme.dark()), probe)
++}
++
++private let FOCUS_RING_WIDTH: Float32 = 1.6
++
++/*
++ * 用户反馈的那条：点击输入框必须出现可见的激活态（accent 边 + fieldActive 底），
++ * 而不是只有光标在闪。此前 chrome 读 showFocusRing，指针聚焦时整框纹丝不动。
++ */
++@Test
++func pointerFocusPaintsActiveFieldChrome(): Unit {
++    let (ctx, probe) = chromeContext()
++    let body = State<String>("abc")
++    let field = TextField(body, key: "chrome.field")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++    @Expect(field.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 10.0, 10.0)))
++    @Expect(ctx.hasFocus("chrome.field"))
++    @Expect(!ctx.showFocusRing("chrome.field")) // 指针聚焦：键盘外环仍不画
++
++    probe.reset()
++    field.draw(ctx)
++    let active = ctx.theme.fieldSurface(true)
++    let idle = ctx.theme.fieldSurface(false)
++    @Expect(probe.hasFill(active.fill)) // 底色切到 fieldActive
++    @Expect(!probe.hasFill(idle.fill)) // 不再是常态底色
++    @Expect(probe.hasStroke(active.border, active.borderWidth)) // 1px accent 边
++    @Expect(!probe.hasStroke(ctx.theme.accent, FOCUS_RING_WIDTH)) // 外环留给键盘
++}
++
++@Test
++func keyboardFocusAddsRingOnTopOfActiveChrome(): Unit {
++    let (ctx, probe) = chromeContext()
++    let body = State<String>("")
++    let field = TextField(body, key: "chrome.kbd")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++    ctx.focus("chrome.kbd", viaKeyboard: true)
++    @Expect(ctx.showFocusRing("chrome.kbd"))
++
++    probe.reset()
++    field.draw(ctx)
++    let active = ctx.theme.fieldSurface(true)
++    @Expect(probe.hasFill(active.fill))
++    @Expect(probe.hasStroke(active.border, active.borderWidth)) // 激活边仍在
++    @Expect(probe.hasStroke(ctx.theme.accent, FOCUS_RING_WIDTH)) // Tab 到达：叠外环
++}
++
++@Test
++func unfocusedFieldKeepsIdleChrome(): Unit {
++    let (ctx, probe) = chromeContext()
++    let body = State<String>("abc")
++    let field = TextField(body, key: "chrome.idle")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 32.0))
++    ctx.clearFocus()
++
++    probe.reset()
++    field.draw(ctx)
++    let idle = ctx.theme.fieldSurface(false)
++    let active = ctx.theme.fieldSurface(true)
++    @Expect(probe.hasFill(idle.fill))
++    @Expect(!probe.hasFill(active.fill))
++    @Expect(probe.hasStroke(idle.border, idle.borderWidth))
++    @Expect(!probe.hasStroke(ctx.theme.accent, FOCUS_RING_WIDTH))
++}
++
++@Test
++func textAreaSharesTheSameActivationPolicy(): Unit {
++    let (ctx, probe) = chromeContext()
++    let body = State<String>("line")
++    let area = TextArea(body, key: "chrome.area")
++    area.layout(ctx, Rect(0.0, 0.0, 240.0, 96.0))
++    @Expect(area.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 12.0, 12.0)))
++    @Expect(ctx.hasFocus("chrome.area"))
++    @Expect(!ctx.showFocusRing("chrome.area"))
++
++    probe.reset()
++    area.draw(ctx)
++    let active = ctx.theme.fieldSurface(true)
++    @Expect(probe.hasFill(active.fill))
++    @Expect(probe.hasStroke(active.border, active.borderWidth))
++    @Expect(!probe.hasStroke(ctx.theme.accent, FOCUS_RING_WIDTH))
++}
+-- 
+2.47.3
+

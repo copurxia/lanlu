@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 16:16:36 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20RichSpan.link=20=E4=B8=8E=20RichText=20?=
+ =?UTF-8?q?=E9=93=BE=E6=8E=A5=E4=BA=A4=E4=BA=92=E5=85=A5=E5=86=8C=EF=BC=88?=
+ =?UTF-8?q?components=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/components.md | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/docs/components.md b/docs/components.md
+index 3dc92be..89bfe75 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -397,6 +397,8 @@ RichText(spans: Array<RichSpan>, fontSize!: Length = Length(FontSizes.BODY, Leng
+ - spans：样式段数组；fontSize! 所有文本段共享的字号。
+ 
+ 修饰符：`fontSize(Length | Float32)`。单行时按内容收缩（便于行内嵌入），换行后填满宽度。
++链接片段（`RichSpan.link`）可点击：悬停变手型并加粗下划线，点击触发回调，命中按片段实际矩形计算
++（同段文字里多个链接互不干扰）。
+ 
+ ### RichSpan
+ 
+@@ -406,6 +408,7 @@ RichText(spans: Array<RichSpan>, fontSize!: Length = Length(FontSizes.BODY, Leng
+ RichSpan.text(text: String, color!: ?Color = None) // 默认或指定颜色的文本段
+ RichSpan.muted(text: String)                        // 次要（弱化）文字色
+ RichSpan.icon(icon: IconName, color!: ?Color = None) // 内联图标，按行高取尺寸
++RichSpan.link(text: String, onClick: () -> Unit, color!: ?Color = None) // 可点击链接（accent 色 + 下划线）
+ ```
+ 
+ ### Icon
+-- 
+2.47.3
+

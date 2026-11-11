@@ -1,0 +1,251 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 15:36:17 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E5=AD=97=E6=AE=B5=E6=97=8F?=
+ =?UTF-8?q?=E6=82=AC=E5=81=9C=E5=8F=8D=E9=A6=88=20+=20=E7=A6=81=E7=94=A8?=
+ =?UTF-8?q?=E8=92=99=E7=89=88=E6=8C=89=E5=9C=86=E8=A7=92?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #10（中，字段族部分）：fieldSurface 新增 hovered 参数——悬停时 fieldActive 底 +
+accent 40% 边（与顶栏搜索框 :hover 同观感），激活优先于悬停。接线：TextField/TextArea
+（drawTextBoxChrome）、Picker/Stepper、Dropdown（亮暗两条表面路径）、Table、TreeView、
+DatePicker、TimePicker——此前这些控件鼠标划过毫无反应。
+
+审计缺口 #20（低）：.enabled(false) 的灰色蒙版由方形 fill 改为按 controlRadius 的圆角
+填充，圆角输入框/按钮禁用时不再被切成直角。
+
+测试：2 用例（三态契约：常态/悬停/激活互不相同且激活优先；字段焦点 id 与 hover id 一致）。
+cjpm test：TOTAL 425，PASSED 384（新增 2 例全过），ERROR 40 + FAILED 1 与基线一致，零回归。
+---
+ src/controls/common_controls.cj   |  4 ++--
+ src/controls/date_picker.cj       |  2 +-
+ src/controls/dropdown.cj          | 11 +++++++----
+ src/controls/table.cj             |  2 +-
+ src/controls/time_picker.cj       |  2 +-
+ src/controls/tree_view.cj         |  2 +-
+ src/core/theme_state.cj           | 15 ++++++++++++++-
+ src/core/widget_modifiers.cj      |  3 ++-
+ src/text/text_area.cj             |  2 +-
+ src/text/text_field_hover_test.cj | 31 +++++++++++++++++++++++++++++++
+ 10 files changed, 61 insertions(+), 13 deletions(-)
+ create mode 100644 src/text/text_field_hover_test.cj
+
+diff --git a/src/controls/common_controls.cj b/src/controls/common_controls.cj
+index 6fa2333..bb8f3c4 100644
+--- a/src/controls/common_controls.cj
++++ b/src/controls/common_controls.cj
+@@ -235,7 +235,7 @@ public class Picker <: Widget {
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id)))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id), hovered: ctx.isHovered(id)))
+         let label = if (items.isEmpty()) {
+             "—"
+         } else {
+@@ -370,7 +370,7 @@ public class Stepper <: Widget {
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id)))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id), hovered: ctx.isHovered(id)))
+         ctx.renderer.textCenter("−", decrementButton(), ctx.theme.text, pointSize: FontSizes.TITLE)
+         ctx.renderer.textCenter("${value.value}", valueFrame(), ctx.theme.text, pointSize: FontSizes.CONTROL)
+         ctx.renderer.textCenter("+", incrementButton(), ctx.theme.text, pointSize: FontSizes.TITLE)
+diff --git a/src/controls/date_picker.cj b/src/controls/date_picker.cj
+index 8822e76..d778dee 100644
+--- a/src/controls/date_picker.cj
++++ b/src/controls/date_picker.cj
+@@ -100,7 +100,7 @@ public class DatePicker <: Widget {
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id) || open.value))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id) || open.value, hovered: ctx.isHovered(id)))
+         let labelArea = Rect(frame.x + 10.0, frame.y, max(0.0, frame.w - 36.0), frame.h)
+         ctx.renderer.pushClip(labelArea)
+         let textY = frame.centerY() - ctx.renderer.textHeight(pointSize: FontSizes.CONTROL) / 2.0
+diff --git a/src/controls/dropdown.cj b/src/controls/dropdown.cj
+index 2d9242b..3bdd736 100644
+--- a/src/controls/dropdown.cj
++++ b/src/controls/dropdown.cj
+@@ -74,7 +74,8 @@ public class Dropdown <: Widget {
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-        drawSurface(ctx, frame, closedSurface(ctx, ctx.showFocusRing(id) || open.value))
++        drawSurface(ctx, frame,
++            closedSurface(ctx, ctx.showFocusRing(id) || open.value, hovered: ctx.isHovered(id)))
+         let labelArea = Rect(frame.x + 10.0, frame.y, max(0.0, frame.w - 40.0), frame.h)
+         ctx.renderer.pushClip(labelArea)
+         let textY = frame.centerY() - ctx.renderer.textHeight(pointSize: FontSizes.CONTROL) / 2.0
+@@ -374,14 +375,16 @@ public class Dropdown <: Widget {
+         ctx.renderer.popClip()
+     }
+ 
+-    private func closedSurface(ctx: UiContext, active: Bool): SurfaceStyle {
++    private func closedSurface(ctx: UiContext, active: Bool, hovered!: Bool = false): SurfaceStyle {
+         if (!isLightTheme(ctx)) {
+-            return ctx.theme.fieldSurface(active)
++            return ctx.theme.fieldSurface(active, hovered: hovered)
+         }
+         SurfaceStyle(
+             DROPDOWN_BACKGROUND,
+             border: if (active) {
+                 ctx.theme.accent
++            } else if (hovered) {
++                ctx.theme.accent.withAlpha(102)
+             } else {
+                 ctx.theme.panelEdge
+             },
+@@ -397,7 +400,7 @@ public class Dropdown <: Widget {
+     }
+ 
+     private func morphSurface(ctx: UiContext, progress: Float32): SurfaceStyle {
+-        let collapsed = closedSurface(ctx, open.value || ctx.showFocusRing(id))
++        let collapsed = closedSurface(ctx, open.value || ctx.showFocusRing(id), hovered: ctx.isHovered(id))
+         let expanded = popupSurface(ctx)
+         SurfaceStyle(
+             collapsed.fill.lerp(expanded.fill, progress),
+diff --git a/src/controls/table.cj b/src/controls/table.cj
+index d3c855e..5e848d6 100644
+--- a/src/controls/table.cj
++++ b/src/controls/table.cj
+@@ -167,7 +167,7 @@ public class Table <: Widget {
+ 
+     public func draw(ctx: UiContext): Unit {
+         let order = displayOrder()
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id)))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id), hovered: ctx.isHovered(id)))
+         let body = bodyRect()
+         // Clamp on change only: draw runs every frame, and an unconditional write bumps the
+         // state generation each frame, defeating the loop's dirty-frame skipping.
+diff --git a/src/controls/time_picker.cj b/src/controls/time_picker.cj
+index 616c59a..07990f8 100644
+--- a/src/controls/time_picker.cj
++++ b/src/controls/time_picker.cj
+@@ -106,7 +106,7 @@ public class TimePicker <: Widget {
+     }
+ 
+     public func draw(ctx: UiContext): Unit {
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id) || open.value))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(id) || open.value, hovered: ctx.isHovered(id)))
+         let labelArea = Rect(frame.x + 10.0, frame.y, max(0.0, frame.w - 36.0), frame.h)
+         ctx.renderer.pushClip(labelArea)
+         let textY = frame.centerY() - ctx.renderer.textHeight(pointSize: FontSizes.CONTROL) / 2.0
+diff --git a/src/controls/tree_view.cj b/src/controls/tree_view.cj
+index 17af090..7e42847 100644
+--- a/src/controls/tree_view.cj
++++ b/src/controls/tree_view.cj
+@@ -156,7 +156,7 @@ public class TreeView <: Widget {
+             lastRevealed.value = selected.value
+         }
+         let visibleScroll = scrollMotion.animate(ctx, scrollStateValue, content, viewport.h)
+-        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(controlId)))
++        drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.showFocusRing(controlId), hovered: ctx.isHovered(controlId)))
+ 
+         ctx.renderer.pushClip(viewport)
+         var i = scrollLineIndex(visibleScroll)
+diff --git a/src/core/theme_state.cj b/src/core/theme_state.cj
+index c9469ca..33aa079 100644
+--- a/src/core/theme_state.cj
++++ b/src/core/theme_state.cj
+@@ -175,15 +175,28 @@ public struct Theme {
+         )
+     }
+ 
+-    public func fieldSurface(active: Bool): SurfaceStyle {
++    /*
++     * 输入区域表面。三态：常态 / 悬停 / 激活（聚焦）。
++     * - active：fieldActive 底 + accent 边 + accent 光晕（指针点击也走这里，见 drawTextBoxChrome）；
++     * - hovered：fieldActive 底 + accent 40% 边过渡（与顶栏搜索框的 :hover 同观感）——
++     *   字段族此前完全没有悬停反馈（审计缺口 #10）；
++     * - 常态：field 底 + panelEdge 边。
++     * active 优先于 hovered。
++     */
++    public func fieldSurface(active: Bool, hovered!: Bool = false): SurfaceStyle {
++        let hoverTone = accent.withAlpha(102)
+         SurfaceStyle(
+             if (active) {
+                 fieldActive
++            } else if (hovered) {
++                fieldActive
+             } else {
+                 field
+             },
+             border: if (active) {
+                 accent
++            } else if (hovered) {
++                hoverTone
+             } else {
+                 panelEdge
+             },
+diff --git a/src/core/widget_modifiers.cj b/src/core/widget_modifiers.cj
+index 2605e79..39b672b 100644
+--- a/src/core/widget_modifiers.cj
++++ b/src/core/widget_modifiers.cj
+@@ -118,7 +118,8 @@ class ModifiedWidget <: Widget {
+             case WidgetModifier.Enabled(isEnabled) =>
+                 child.draw(ctx)
+                 if (!isEnabled) {
+-                    ctx.renderer.fill(frame, ctx.theme.bg.withAlpha(96))
++                    // 用控件圆角画禁用蒙版：方角会把圆角输入框/按钮切成直角（审计缺口 #20）。
++                    ctx.renderer.fillRoundedRect(frame, ctx.theme.controlRadius, ctx.theme.bg.withAlpha(96))
+                 }
+             case WidgetModifier.Opacity(value) =>
+                 let alpha = clampF32(value, 0.0, 1.0)
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index 729b886..fcc3f30 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -421,7 +421,7 @@ private func drawTextAreaBox(
+  * drawFocusRing 外环，与按钮族同一套视觉语言；:focus-visible 仍然只作用于“外环”。
+  */
+ internal func drawTextBoxChrome(ctx: UiContext, frame: Rect, id: String): Unit {
+-    drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.hasFocus(id)))
++    drawSurface(ctx, frame, ctx.theme.fieldSurface(ctx.hasFocus(id), hovered: ctx.isHovered(id)))
+     if (ctx.showFocusRing(id)) {
+         drawFocusRing(ctx, frame, ctx.theme.controlRadius)
+     }
+diff --git a/src/text/text_field_hover_test.cj b/src/text/text_field_hover_test.cj
+new file mode 100644
+index 0000000..2109160
+--- /dev/null
++++ b/src/text/text_field_hover_test.cj
+@@ -0,0 +1,31 @@
++package cui.text
++
++import lgui.{Canvas, Color, Rect, Renderer}
++import cui.core.{State, Theme, UiContext}
++
++/* 字段三态契约（缺口 #10）：常态 / 悬停 / 激活在底色与边上有明确区别。 */
++@Test
++func fieldSurfaceHasDistinctHoverState(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.dark())
++    let idle = ctx.theme.fieldSurface(false)
++    let hover = ctx.theme.fieldSurface(false, hovered: true)
++    let active = ctx.theme.fieldSurface(true)
++
++    // 悬停与常态可区分：底色与边都不同。
++    @Expect(!(hover.fill == idle.fill))
++    @Expect(!(hover.border == idle.border))
++    // 激活（聚焦）与悬停再区分：边是全强调色，悬停是 40% 过渡色。
++    @Expect(!(active.border == hover.border))
++    @Expect(active.border == ctx.theme.accent)
++    // 激活优先于悬停（两者同时为真时取激活）。
++    let both = ctx.theme.fieldSurface(true, hovered: true)
++    @Expect(both.border == active.border)
++    @Expect(both.fill == active.fill)
++}
++
++@Test
++func textFieldHoverIdMatchesFieldId(): Unit {
++    // 字段在悬停时以自身焦点 id 认领 hover——chrome 读的 isHovered(id) 才可能命中。
++    let field = TextField(State<String>("abc"), key: "hover.field")
++    @Expect(field.focusableId().getOrThrow() == "hover.field")
++}
+-- 
+2.47.3
+

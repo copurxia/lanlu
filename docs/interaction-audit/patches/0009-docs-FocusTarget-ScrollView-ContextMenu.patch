@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 14:54:21 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20FocusTarget=20=E7=94=A8=E6=B3=95?=
+ =?UTF-8?q?=E4=B8=8E=20ScrollView=20=E9=94=AE=E7=9B=98=E6=BB=9A=E5=8A=A8?=
+ =?UTF-8?q?=E3=80=81ContextMenu=20=E9=94=AE=E7=9B=98=E5=94=A4=E8=B5=B7?=
+ =?UTF-8?q?=E5=85=A5=E5=86=8C?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 3 ++-
+ docs/user-guide.md    | 5 +++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index ec01e60..b5f8f00 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -155,7 +155,8 @@
+ | `ZStack` | `body` | `alignment`；后声明的子项绘制在上层 |
+ | `Grid` | `columns`、`body` | `spacing(all)`、`spacing(horizontal, vertical)`；列数小于 1 抛异常 |
+ | `FlowRow` | `body` | `spacing`；空间不足自动换行 |
+-| `ScrollView` | `body`（可选 `key`） | 垂直滚动；`scrollState` 接管偏移；溢出时为滚动条预留轨道，不遮挡内容；滑块可拖动、轨道可翻页 |
++| `ScrollView` | `body`（可选 `key`） | 垂直滚动；`scrollState` 接管偏移；溢出时为滚动条预留轨道，不遮挡内容；滑块可拖动、轨道可翻页；键盘滚动（PageUp/PageDown=0.9 视口、方向键 48px、Home/End 直达，子树消费优先） |
++| `FocusTarget` | `onClick`、`body`（可选 `key`） | 自绘内容的可聚焦/可点击包装器：注册焦点停靠点、点击聚焦、Enter/Space 激活、键盘焦点画统一外环、悬停认领 Interactive 光标；布局/绘制透传子树（行为壳，不加视觉） |
+ | `Panel` | `body`（可选 `padding: LengthInsets`） | `contentPadding`、`style`、`flexible`、`hug` |
+ | `Tooltip` | `text`、`body` | 悬停约 500ms 后在树上层绘制提示气泡；透明包裹，不改变布局/事件 |
+ | `Dropdown` | `items`、`selected`（可选 `key`） | 下拉选择：点击/Enter 打开，弹出列表浮于树上（下方放不下翻到上方）；选中/外点/Esc 关闭，上下键移动高亮。长列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮，打开时选中行滚入视野 |
+diff --git a/docs/user-guide.md b/docs/user-guide.md
+index b4cc035..0617c6b 100644
+--- a/docs/user-guide.md
++++ b/docs/user-guide.md
+@@ -479,6 +479,11 @@ CanvasWidget({renderer, rect => drawScene(renderer, rect)})
+ 自定义画布处理指针事件时，凡是“按下开始、松开结束”的手势都必须检查事件坐标是否落在自己的
+ `rect` 内，画布外的事件返回 `false` 放行，否则会吞掉同窗口其他控件的手势收尾。
+ 
++**自绘点击件请包 `FocusTarget`**：只画外观、不处理交互的控件（图标钮、卡片、标签）直接包一层
++`FocusTarget(onClick: {...}) { ... }`，即可获得焦点停靠点（Tab 可达）、点击聚焦、Enter/Space
++激活、键盘焦点外环与 Interactive 悬停光标——行为壳不加视觉，布局/绘制全部透传；子树自己的
++焦点停靠点仍然可达（自身在前）。不包的自绘件对键盘用户不可见（Tab 会跳过它们）。
++
+ `ImageView(path).fit(ImageFit.Contain)` 像其他控件一样**逐帧内联声明**即可：解码后的纹理由按路径
+ 键控的共享缓存持有，重建只花一次查表、不触碰磁盘；加载失败也会被记住，不会每帧重试。覆盖图片
+ 文件后调用 `invalidateImage(path)` 让下一帧重载（`clearImageCache()` 清空全部）。尺寸建议使用通用
+-- 
+2.47.3
+
