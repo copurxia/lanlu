@@ -70,7 +70,8 @@
 
 > **进度 2026-11-11（十一轮）**：**P0 与框架侧审计缺口全部完成**（20 类缺口中框架可独立
 > 落地的均已落地），应用层接线清单已备好——分支 `p0-focus-visible`
-> （工作树 `packages/cangjie-gui-p0`，34 个提交，最新 `9c3c04e`）：
+> （工作树 `packages/cangjie-gui-p0`，34 个提交，最新 `9c3c04e`；**应用层 A/B/D 已落地**——
+> feature 分支提交 `e100c33e`，见下）：
 > 字段族点击聚焦可见 + 键盘外环；Pagination/Breadcrumb/StepIndicator/WordCloud 键盘化（四个
 > 漏登记控件全部收尾）；Slider 焦点可见性 + Up/Down/Home/End；Modal 打开即聚焦/关闭恢复
 > 焦点（Drawer 仅恢复）；`Key` 枚举补 PageUp/PageDown/Menu；ScrollView 与 TextArea 键盘滚动
