@@ -34,6 +34,108 @@ thread_local! {
 /// 而 ArkTS 线程同时也在调（自检）；两份 &mut SurfaceCtx 并发就是数据竞争（真机上直接 SIGSEGV）。
 static SURF_LOCK: Mutex<()> = Mutex::new(());
 
+// ---- 帧统计（M0 度量：draw call / 实例 / 上传 / 测量）----------------------
+// 全部用 Relaxed 原子计数：只做趋势观测，不参与同步。
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub struct FrameStats {
+    /// 每帧渲染 pass 内的 draw call 次数（rect 组 + tex 组）
+    pub draw_calls: AtomicU64,
+    /// 每帧矩形实例数
+    pub rect_instances: AtomicU64,
+    /// 每帧纹理/字形实例数
+    pub tex_instances: AtomicU64,
+    /// 纹理实例合批后的 run 数（每 run 一次 bind group 切换）
+    pub tex_runs: AtomicU64,
+    /// write_texture 累计字节（RGBA）
+    pub upload_bytes: AtomicU64,
+    /// write_texture 调用次数
+    pub uploads: AtomicU64,
+    /// lgpu_text_measure 调用次数
+    pub text_measures: AtomicU64,
+    /// lgpu_texture_create 调用次数
+    pub texture_creates: AtomicU64,
+    /// lgpu_texture_destroy 调用次数
+    pub texture_destroys: AtomicU64,
+    /// 当前存活纹理数（create - destroy 的差值维护）
+    pub textures_alive: AtomicU64,
+    /// 累计渲染帧数
+    pub frames: AtomicU64,
+    /// R5.3：超过整页图集的单个字形被跳过的次数（仍前进半个字宽，不中断整段）
+    pub glyph_overflow: AtomicU64,
+    /// R5.3：图集页因超上限被淘汰的次数（FIFO）
+    pub atlas_page_evict: AtomicU64,
+}
+
+static STATS: FrameStats = FrameStats {
+    draw_calls: AtomicU64::new(0),
+    rect_instances: AtomicU64::new(0),
+    tex_instances: AtomicU64::new(0),
+    tex_runs: AtomicU64::new(0),
+    upload_bytes: AtomicU64::new(0),
+    uploads: AtomicU64::new(0),
+    text_measures: AtomicU64::new(0),
+    texture_creates: AtomicU64::new(0),
+    texture_destroys: AtomicU64::new(0),
+    textures_alive: AtomicU64::new(0),
+    frames: AtomicU64::new(0),
+    glyph_overflow: AtomicU64::new(0),
+    atlas_page_evict: AtomicU64::new(0),
+};
+
+fn stats_view() -> &'static FrameStats {
+    &STATS
+}
+
+fn stats_reset() {
+    for f in [
+        &STATS.draw_calls,
+        &STATS.rect_instances,
+        &STATS.tex_instances,
+        &STATS.tex_runs,
+        &STATS.upload_bytes,
+        &STATS.uploads,
+        &STATS.text_measures,
+        &STATS.texture_creates,
+        &STATS.texture_destroys,
+        &STATS.frames,
+        &STATS.glyph_overflow,
+        &STATS.atlas_page_evict,
+    ] {
+        f.store(0, Ordering::Relaxed);
+    }
+}
+
+/// 把当前统计打包成 "k=v k=v ..." 的一行（Cangjie 侧解析打点）。
+#[no_mangle]
+pub extern "C" fn lgpu_stats_line(out: *mut c_char, out_len: usize) -> i32 {
+    let s = stats_view();
+    let line = format!(
+        "draws={} rects={} texs={} runs={} uploads={} up_bytes={} measures={} tex_create={} tex_destroy={} tex_alive={} frames={} glyph_overflow={} atlas_evict={}",
+        s.draw_calls.load(Ordering::Relaxed),
+        s.rect_instances.load(Ordering::Relaxed),
+        s.tex_instances.load(Ordering::Relaxed),
+        s.tex_runs.load(Ordering::Relaxed),
+        s.uploads.load(Ordering::Relaxed),
+        s.upload_bytes.load(Ordering::Relaxed),
+        s.text_measures.load(Ordering::Relaxed),
+        s.texture_creates.load(Ordering::Relaxed),
+        s.texture_destroys.load(Ordering::Relaxed),
+        s.textures_alive.load(Ordering::Relaxed),
+        s.frames.load(Ordering::Relaxed),
+        s.glyph_overflow.load(Ordering::Relaxed),
+        s.atlas_page_evict.load(Ordering::Relaxed),
+    );
+    write_c_str(out, out_len, &line);
+    0
+}
+
+/// 清零全部计数（配合窗口采样：reset → 渲染 N 帧 → read）。
+#[no_mangle]
+pub extern "C" fn lgpu_stats_reset() {
+    stats_reset()
+}
+
 // ---- 抓帧（Modal 模糊 / 页面转场快照）------------------------------------
 // 渲染完一帧后把 surface 纹理拷进缓冲区，供 Cangjie 侧读取（CPU 模糊用）。
 static CAPTURE_REQ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -215,16 +317,48 @@ pub struct SurfaceCtx {
     tex_buffer: Option<wgpu::Buffer>,
     tex_capacity: usize,
     tex_order: Vec<*mut c_void>,
+    /// 层断点：(rect 实例数, 纹理实例数)。帧内按断点分段，段内仍是"先矩形后纹理"，
+    /// 段间严格按录制顺序——快照遮罩之上的描边/图标/Toast 不会再被纹理盖住。
+    layer_marks: Vec<(usize, usize)>,
+    /// 字形图集页（RGBA8，A 通道存覆盖率）。R5.3：满页自动新开一页，
+    /// **绝不丢字**——之前单页 1024² 满了直接 break，CJK/多字号场景文字静默消失。
+    atlas_pages: Vec<(*mut c_void, text::Atlas)>,
+    /// 待销毁的纹理：帧内淘汰的图集页不能立刻 free（本帧已录制的图元还引用它），
+    /// 统一在 frame_end 提交之后销毁。只放裸指针，数量很小。
+    pending_destroy: Vec<*mut c_void>,
     /// 离屏 gamma 目标与上屏 blit 管线
     offscreen: Option<Offscreen>,
     blit_pipeline: Option<wgpu::RenderPipeline>,
     blit_bgl: Option<wgpu::BindGroupLayout>,
     blit_sampler: Option<wgpu::Sampler>,
-    /// 字形图集（RGBA8，A 通道存覆盖率），惰性创建
-    atlas: Option<*mut c_void>,
-    atlas_packer: Option<text::Atlas>,
 }
 
+/// 图集页上限：8 页 × 1024² × 4B = 32MB 显存。超过就淘汰最旧页（FIFO），
+/// 其字形之后按需重新光栅化——比无界增长/静默丢字都好。
+const MAX_ATLAS_PAGES: usize = 8;
+
+/// 已持锁时的纹理销毁（避免第二次 lock_surface 死锁）。
+fn destroy_texture_locked(tex: *mut c_void) {
+    if tex.is_null() {
+        return;
+    }
+    STATS.texture_destroys.fetch_add(1, Ordering::Relaxed);
+    STATS.textures_alive.fetch_sub(1, Ordering::Relaxed);
+    drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
+}
+
+impl Drop for SurfaceCtx {
+    fn drop(&mut self) {
+        // SurfaceCtx 被 Box::from_raw 释放时，图集页与待销毁纹理的 TexCtx 也要释放，
+        // 否则每页泄漏一张 wgpu 纹理（数组里存的是裸指针）。
+        for (tex, _) in self.atlas_pages.drain(..) {
+            drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
+        }
+        for tex in self.pending_destroy.drain(..) {
+            drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
+        }
+    }
+}
 
 /// 离屏目标格式：Unorm —— 存的是 **gamma 空间**的值，混合也在该空间完成。
 const SCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -433,12 +567,13 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             tex_buffer: None,
             tex_capacity: 0,
             tex_order: Vec::new(),
+            layer_marks: Vec::new(),
+            atlas_pages: Vec::new(),
+            pending_destroy: Vec::new(),
             offscreen: None,
             blit_pipeline: None,
             blit_bgl: None,
             blit_sampler: None,
-            atlas: None,
-            atlas_packer: None,
         })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
@@ -461,7 +596,8 @@ pub extern "C" fn lgpu_surface_destroy(surface: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn lgpu_self_check() -> i32 {
     let mut buf = [0u8; 4096];
-    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut core::ffi::c_char, buf.len());
+    // c_char 在本工具链上是 i8：u8 数组按位重解释（长度一致，无值变化）。
+    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut c_char, buf.len());
     if n < 0 { n } else { 0 }
 }
 
@@ -494,6 +630,44 @@ fn draw_rect_batches(
         pass.draw(0..6, 0..(j - i) as u32);
         i = j;
     }
+}
+
+/// 统计矩形实例按 clip 分组后的组数（与 draw_rect_batches 的分组一致，纯计数用）。
+fn draw_rect_batch_count(instances: &[gpu::RectInstance]) -> u64 {
+    let mut groups = 0u64;
+    let mut i = 0usize;
+    while i < instances.len() {
+        let clip = instances[i].clip;
+        let mut j = i + 1;
+        while j < instances.len() && instances[j].clip == clip {
+            j += 1;
+        }
+        groups += 1;
+        i = j;
+    }
+    groups
+}
+
+/// 把纹理实例列表按「相邻且 (纹理指针, clip) 相同」划分为若干 run，返回每段的 [begin, end)。
+/// R1 合批的唯一分组规则：frame_end 与 capture_offscreen 共用，保证抓帧与屏幕一致。
+fn tex_run_bounds(instances: &[(gpu::TexInstance, *mut c_void)]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0usize;
+    while i < instances.len() {
+        let (inst, tex_ptr) = &instances[i];
+        let clip = inst.clip;
+        let mut j = i + 1;
+        while j < instances.len() {
+            let (ninst, ntex) = &instances[j];
+            if *ntex != *tex_ptr || ninst.clip != clip {
+                break;
+            }
+            j += 1;
+        }
+        out.push((i, j));
+        i = j;
+    }
+    out
 }
 
 /// 把 clip 矩形（像素，命中测试用 top-left 原点）转成 scissor（整数、裁到 surface 内）。
@@ -530,8 +704,8 @@ fn write_c_str(out: *mut c_char, out_len: usize, text: &str) {
 #[no_mangle]
 pub extern "C" fn lgpu_debug_dump(out: *mut c_char, out_len: usize) -> i32 {
     let mut buf = [0u8; 4096];
-    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut core::ffi::c_char, buf.len());
-    let adapters = unsafe { CStr::from_ptr(buf.as_ptr() as *const core::ffi::c_char) }.to_string_lossy().to_string();
+    let n = lgpu_adapter_summary(buf.as_mut_ptr() as *mut c_char, buf.len());
+    let adapters = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) }.to_string_lossy().to_string();
     let text = format!(
         "{}\n-- adapters ({}) --\n{}\n-- last_error: {} --\n",
         VERSION,
@@ -541,6 +715,24 @@ pub extern "C" fn lgpu_debug_dump(out: *mut c_char, out_len: usize) -> i32 {
     );
     write_c_str(out, out_len, &text);
     0
+}
+
+
+/// swapchain 格式：**非 sRGB** 目标。
+///
+/// 对齐 horizon（`crates/horizon-client/src/gfx.rs::surface_format`）的做法与理由：
+/// horizon 的做法（`crates/horizon-client/src/gfx.rs::surface_format`）：选非 sRGB 目标，
+/// 理由是其内容在 gamma 空间混合。**OHOS 上该方案不可用**：配非 sRGB 目标直接原生崩溃
+/// （第 117 轮实测两次，Rgba8Unorm/Bgra8Unorm 皆崩），故退回 sRGB 目标，
+/// 由 `canvas.cj` 的 sRGB→linear 预解码抵消硬件的 linear→sRGB 编码。
+fn surface_format(formats: &[wgpu::TextureFormat], default: wgpu::TextureFormat) -> wgpu::TextureFormat {
+    // 实测：OHOS 上非 sRGB swapchain 一 configure 就崩（Cpp Crash），
+    // 只能保留 sRGB 目标，改由 CPU 侧把调色板预解码成线性来抵消硬件编码。
+    formats
+        .iter()
+        .copied()
+        .find(|f| f.is_srgb())
+        .unwrap_or(default)
 }
 
 /// 在已有 surface 上初始化 device/queue 并按尺寸配置 swapchain。
@@ -593,12 +785,7 @@ pub extern "C" fn lgpu_surface_init(surface: *mut c_void, width: u32, height: u3
     };
 
     let caps = ctx.surface.get_capabilities(&adapter);
-    let format = caps
-        .formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or_else(|| caps.formats[0]);
+    let format = surface_format(&caps.formats, caps.formats[0]);
 
     let config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -918,6 +1105,7 @@ pub extern "C" fn lgpu_frame_begin(surface: *mut c_void, r: f32, g: f32, b: f32,
     };
     ctx.instances.clear();
     ctx.tex_instances.clear();
+    ctx.layer_marks.clear();
     ctx.clear_color = [r, g, b, a];
     let screen: [f32; 12] = [
         config.width as f32,
@@ -1052,6 +1240,31 @@ pub extern "C" fn lgpu_draw_rect_gradient(
     0
 }
 
+/// 辉光环：环半径 ring_r 处 stroke 宽的实线，外侧 outer、内侧 inner 像素的二次衰减
+/// 辉光（峰值 = a * glow）。单实例 SDF，替代多层同心 strokeCircle 模拟 box-shadow。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_glow_ring(
+    surface: *mut c_void,
+    cx: f32, cy: f32, ring_r: f32, stroke: f32, outer: f32, inner: f32, glow: f32,
+    r: f32, g: f32, b: f32, a: f32,
+) -> i32 {
+    if surface.is_null() || ring_r <= 0.0 {
+        return E_BAD_ARG;
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let half = ring_r + outer.max(stroke) + 2.0;
+    ctx.instances.push(gpu::RectInstance {
+        rect: [cx - half, cy - half, half * 2.0, half * 2.0],
+        color: [r, g, b, a],
+        params: [ring_r, stroke, 3.0, 0.0],
+ clip: ctx.clip,
+        color2: [outer, inner, glow, 0.0],
+    });
+    0
+}
+
 /// 结束一帧：上传实例、绘制、present。
 #[no_mangle]
 pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
@@ -1060,8 +1273,6 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     }
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    // 克隆句柄/配置（wgpu 句柄是 Arc，clone 很轻）：下面要 &mut ctx 建离屏目标，
-    // 不能同时持有 &ctx 的借用。
     let (device, queue, pipeline, bind_group, cfg) = match (
         ctx.device.clone(),
         ctx.queue.clone(),
@@ -1077,7 +1288,10 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     };
     let (fw, fh) = (cfg.width, cfg.height);
 
-    // 纹理实例缓冲：整帧一次性上传（见下方 pass 内的说明）
+    // 纹理实例缓冲：整帧一次性上传（见下方 pass 内的说明）。
+    // M0：帧级计数在写入前采样（tex_instances 此时已定型）。
+    STATS.rect_instances.fetch_add(ctx.instances.len() as u64, Ordering::Relaxed);
+    STATS.tex_instances.fetch_add(ctx.tex_instances.len() as u64, Ordering::Relaxed);
     let tex_need = ctx.tex_instances.len();
     if tex_need > 0 {
         let tstride = std::mem::size_of::<gpu::TexInstance>();
@@ -1093,9 +1307,14 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
             }));
             ctx.tex_capacity = cap;
         }
-        let items: Vec<gpu::TexInstance> = ctx.tex_instances.iter().map(|(i, _)| *i).collect();
+        // 直接从 (TexInstance, ptr) 元组序列化 TexInstance，不再额外收集 Vec<TexInstance>。
+        // bytemuck::Pod 保证 TexInstance 无 padding，逐个 cast_slice 后拼接等价于连续数组。
         if let Some(buf) = &ctx.tex_buffer {
-            queue.write_buffer(buf, 0, bytemuck::cast_slice(&items));
+            let mut staging: Vec<u8> = Vec::with_capacity(tex_need * tstride);
+            for (inst, _) in &ctx.tex_instances {
+                staging.extend_from_slice(bytemuck::bytes_of(inst));
+            }
+            queue.write_buffer(buf, 0, &staging);
         }
     }
 
@@ -1126,7 +1345,6 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     };
     let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-    // UI 先画到离屏 gamma 目标，再 blit 上屏（避免 sRGB 二次编码，见 SCREEN_FORMAT 注释）
     ensure_offscreen(ctx, &device, cfg.format);
     let Some(off_view) = ctx.offscreen.as_ref().map(|o| o.view.clone()) else {
         set_error("offscreen target missing");
@@ -1157,31 +1375,27 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if need > 0 {
-            if let Some(buf) = &ctx.inst_buffer {
-                draw_rect_batches(&mut pass, &pipeline, &bind_group, buf, &ctx.instances, fw, fh);
-            }
-        }
-        // 纹理：每张纹理一次 draw（bind group 不同，无法合批）。
-        // 注意：**不能**在 pass 内对同一个缓冲多次 write_buffer——写操作在提交时生效，
-        // 同一次 pass 的所有 draw 都会看到最后一次写入的参数（曾导致所有图元重叠到最后一张）。
-        if !ctx.tex_instances.is_empty() {
-            if let (Some(tp), Some(tbuf)) = (&ctx.tex_pipeline, &ctx.tex_buffer) {
-                let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
-                for (i, (inst, tex_ptr)) in ctx.tex_instances.iter().enumerate() {
-                    let t = unsafe { &*(*tex_ptr as *const TexCtx) };
-                    pass.set_pipeline(tp);
-                    apply_scissor(&mut pass, inst.clip, fw, fh);
-                    pass.set_bind_group(0, &bind_group, &[]);
-                    pass.set_bind_group(1, &t.bind_group, &[]);
-                    let begin = i as u64 * tstride;
-                    pass.set_vertex_buffer(0, tbuf.slice(begin..begin + tstride));
-                    pass.draw(0..6, 0..1);
-                }
-            }
-        }
+        // 绘制：走上屏同一条录制顺序路径（draw_recorded）。
+        // R1：文本/图片实例按相邻 (纹理, clip) 合批 —— 之前是每张纹理一次 draw，
+        // 文字页每个字形一次 draw call（真机一帧数千次）；合批后 draw 数 = run 数。
+        // R2：layer_marks 断点让段与段之间严格保持录制顺序（模态/快照遮罩正确遮挡）。
+        // **不要**在同一个 pass 内多次 write_buffer（写入在提交时生效，会让所有图元
+        // 看到最后一次参数 —— 历史上踩过）。
+        let calls = draw_recorded(
+            &mut pass,
+            &pipeline,
+            ctx.tex_pipeline.as_ref(),
+            &bind_group,
+            ctx.inst_buffer.as_ref(),
+            ctx.tex_buffer.as_ref(),
+            &ctx.instances,
+            &ctx.tex_instances,
+            &ctx.layer_marks,
+            fw,
+            fh,
+        );
+        STATS.draw_calls.fetch_add(calls, Ordering::Relaxed);
     }
-    // blit：离屏 gamma 目标 → 交换链（片元里做 sRGB→linear，硬件再编码回原值）
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("lgpu-blit-pass"),
@@ -1203,10 +1417,278 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     }
     queue.submit(Some(encoder.finish()));
     queue.present(frame);
+    // R5.3：帧内淘汰的图集页在这里真正释放——本帧的绘制指令已经提交，
+    // 之后不会再有图元引用这些纹理（延迟一帧销毁的代价是峰值多一页）。
+    if !ctx.pending_destroy.is_empty() {
+        let pending: Vec<*mut c_void> = ctx.pending_destroy.drain(..).collect();
+        for tex in pending {
+            destroy_texture_locked(tex);
+        }
+    }
+    STATS.frames.fetch_add(1, Ordering::Relaxed);
     0
 }
 
 
+/// 按录制顺序绘制一帧（矩形 + 纹理），返回 draw call 数。
+///
+/// 管线约束：矩形和纹理是两条独立管线、各自一个实例缓冲，无法逐图元交错。折中是
+/// 层断点（layer_marks，由 lgpu_layer_mark 推入）：每段内先矩形后纹理（与旧行为
+/// 一致，保证普通 UI 的文字压在底色上），段与段之间严格按录制顺序。全屏快照遮罩之后
+/// 打一个断点，其上的描边/图标/Toast 就不会再被快照纹理整片盖住。
+#[allow(clippy::too_many_arguments)]
+fn draw_recorded(
+    pass: &mut wgpu::RenderPass<'_>,
+    rect_pipeline: &wgpu::RenderPipeline,
+    tex_pipeline: Option<&wgpu::RenderPipeline>,
+    bind_group: &wgpu::BindGroup,
+    rect_buf: Option<&wgpu::Buffer>,
+    tex_buf: Option<&wgpu::Buffer>,
+    rects: &[gpu::RectInstance],
+    texs: &[(gpu::TexInstance, *mut c_void)],
+    marks: &[(usize, usize)],
+    width: u32,
+    height: u32,
+) -> u64 {
+    let rstride = std::mem::size_of::<gpu::RectInstance>() as u64;
+    let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
+    let mut calls = 0u64;
+    let (mut r0, mut t0) = (0usize, 0usize);
+    let total = (rects.len(), texs.len());
+    for &(mr, mt) in marks.iter().chain(std::iter::once(&total)) {
+        let r1 = mr.clamp(r0, rects.len());
+        let t1 = mt.clamp(t0, texs.len());
+        if r1 > r0 {
+            if let Some(buf) = rect_buf {
+                pass.set_pipeline(rect_pipeline);
+                pass.set_bind_group(0, bind_group, &[]);
+                let mut i = r0;
+                while i < r1 {
+                    let clip = rects[i].clip;
+                    let mut j = i + 1;
+                    while j < r1 && rects[j].clip == clip {
+                        j += 1;
+                    }
+                    apply_scissor(pass, clip, width, height);
+                    pass.set_vertex_buffer(0, buf.slice(i as u64 * rstride..j as u64 * rstride));
+                    pass.draw(0..6, 0..(j - i) as u32);
+                    calls += 1;
+                    i = j;
+                }
+            }
+        }
+        if t1 > t0 {
+            if let (Some(tp), Some(buf)) = (tex_pipeline, tex_buf) {
+                // 纹理实例合批（R1）：相邻且 (纹理指针, clip) 相同的实例合并为一次 draw。
+                pass.set_pipeline(tp);
+                pass.set_bind_group(0, bind_group, &[]);
+                let mut i = t0;
+                while i < t1 {
+                    let (inst, tex_ptr) = &texs[i];
+                    let clip = inst.clip;
+                    let mut j = i + 1;
+                    while j < t1 && texs[j].1 == *tex_ptr && texs[j].0.clip == clip {
+                        j += 1;
+                    }
+                    let t = unsafe { &*(*tex_ptr as *const TexCtx) };
+                    apply_scissor(pass, clip, width, height);
+                    pass.set_bind_group(1, &t.bind_group, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(i as u64 * tstride..j as u64 * tstride));
+                    pass.draw(0..6, 0..(j - i) as u32);
+                    STATS.tex_runs.fetch_add(1, Ordering::Relaxed);
+                    calls += 1;
+                    i = j;
+                }
+            }
+        }
+        r0 = r1;
+        t0 = t1;
+    }
+    calls
+}
+
+/// 层断点：此后录制的图元整体画在此前所有图元（含纹理）之上。见 draw_recorded。
+#[no_mangle]
+pub extern "C" fn lgpu_layer_mark(surface: *mut c_void) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let mark = (ctx.instances.len(), ctx.tex_instances.len());
+    if ctx.layer_marks.last() != Some(&mark) {
+        ctx.layer_marks.push(mark);
+    }
+    0
+}
+
+/// 丢弃本帧到目前为止录制的全部图元。全屏不透明遮罩（主题涟漪）已完全覆盖下层时
+/// 调用，省掉被盖住那部分的 GPU 填充。
+#[no_mangle]
+pub extern "C" fn lgpu_discard_recorded(surface: *mut c_void) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    ctx.instances.clear();
+    ctx.tex_instances.clear();
+    ctx.layer_marks.clear();
+    0
+}
+
+/// GPU 快照：把本帧到目前为止录制的图元渲染进一张可采样纹理，直接返回纹理句柄。
+///
+/// 与 lgpu_capture_offscreen 的区别：全程不离开 GPU——不建 readback 缓冲、不
+/// map/poll 等待、不写文件、不再上传。只 submit 一次就返回（不阻塞），之后的绘制在
+/// 同一队列上按提交顺序执行，天然在快照完成之后采样。纹理物理像素尺寸 = surface
+/// 尺寸，格式 = surface 格式（非 sRGB，与 gamma 直传链路一致）。失败返回 null。
+#[no_mangle]
+pub extern "C" fn lgpu_snapshot_texture(
+    surface: *mut c_void,
+    out_w: *mut u32,
+    out_h: *mut u32,
+) -> *mut c_void {
+    if surface.is_null() {
+        set_error("snapshot: null surface");
+        return std::ptr::null_mut();
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let (
+        Some(device),
+        Some(queue),
+        Some(pipeline),
+        Some(bind_group),
+        Some(config),
+        Some(sampler),
+        Some(bgl),
+    ) = (
+        &ctx.device,
+        &ctx.queue,
+        &ctx.pipeline,
+        &ctx.bind_group,
+        ctx.config.clone(),
+        &ctx.tex_sampler,
+        &ctx.tex_bgl,
+    )
+    else {
+        set_error("snapshot: pipeline not initialised");
+        return std::ptr::null_mut();
+    };
+    let (w, h) = (config.width.max(1), config.height.max(1));
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("lgpu-snapshot"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    // 本帧实例用临时缓冲（ctx.inst_buffer/tex_buffer 要到 frame_end 才写入本帧数据）。
+    let make_buf = |label: &'static str, bytes: &[u8]| -> Option<wgpu::Buffer> {
+        if bytes.is_empty() {
+            return None;
+        }
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: bytes.len() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buf, 0, bytes);
+        Some(buf)
+    };
+    let rect_buf = make_buf("lgpu-snapshot-rects", bytemuck::cast_slice(&ctx.instances));
+    let mut tex_bytes: Vec<u8> =
+        Vec::with_capacity(ctx.tex_instances.len() * std::mem::size_of::<gpu::TexInstance>());
+    for (inst, _) in &ctx.tex_instances {
+        tex_bytes.extend_from_slice(bytemuck::bytes_of(inst));
+    }
+    let tex_buf = make_buf("lgpu-snapshot-texs", &tex_bytes);
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("lgpu-snapshot-enc"),
+    });
+    {
+        let clear = ctx.clear_color;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-snapshot-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: clear[0] as f64,
+                        g: clear[1] as f64,
+                        b: clear[2] as f64,
+                        a: clear[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        draw_recorded(
+            &mut pass,
+            pipeline,
+            ctx.tex_pipeline.as_ref(),
+            bind_group,
+            rect_buf.as_ref(),
+            tex_buf.as_ref(),
+            &ctx.instances,
+            &ctx.tex_instances,
+            &ctx.layer_marks,
+            w,
+            h,
+        );
+    }
+    queue.submit(Some(encoder.finish()));
+
+    let tex_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("lgpu-snapshot-bg"),
+        layout: bgl,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    if !out_w.is_null() {
+        unsafe { *out_w = w };
+    }
+    if !out_h.is_null() {
+        unsafe { *out_h = h };
+    }
+    let tex = Box::into_raw(Box::new(TexCtx {
+        texture,
+        view,
+        bind_group: tex_bind_group,
+        width: w,
+        height: h,
+    })) as *mut c_void;
+    texture_created_hook();
+    tex
+}
+
+#[allow(dead_code)]
 fn cap_log(home: &str, msg: &str) {
     use std::io::Write;
     let p = format!("{home}/cap_step.txt");
@@ -1230,22 +1712,17 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
             return E_BAD_ARG;
         }
     };
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/data/storage/el2/base/files".to_string());
-    cap_log(&home, "1 enter");
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    cap_log(&home, "2 locked");
     let (Some(device), Some(queue)) = (&ctx.device, &ctx.queue) else {
         set_error("capture: no device");
         return E_NO_DEVICE;
     };
-    cap_log(&home, "3 device ok");
     let Some(config) = ctx.config.clone() else {
         set_error("capture: no config");
         return E_NO_DEVICE;
     };
     let (w, h) = (config.width.max(1), config.height.max(1));
-    cap_log(&home, &format!("4 config {w}x{h} fmt={:?} rects={} texs={}", config.format, ctx.instances.len(), ctx.tex_instances.len()));
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("lgpu-capture-offscreen"),
@@ -1257,9 +1734,7 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    cap_log(&home, "4a texture created");
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    cap_log(&home, "4b view created");
     let bpr = ((w * 4 + 255) / 256) * 256;
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lgpu-capture-readback"),
@@ -1284,7 +1759,6 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         queue.write_buffer(&buf, 0, bytes);
         Some(buf)
     };
-    cap_log(&home, "4f tex inst buffer ready");
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("lgpu-capture-enc"),
@@ -1312,28 +1786,34 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        cap_log(&home, "4c pass begun");
-        if !ctx.instances.is_empty() {
-            if let (Some(p), Some(bg), Some(buf)) = (&ctx.pipeline, &ctx.bind_group, &ctx.inst_buffer) {
-                draw_rect_batches(&mut pass, p, bg, buf, &ctx.instances, w, h);
-            }
-        }
-        cap_log(&home, "4d rects drawn");
-        cap_log(&home, "4e tex draw start");
-        if !ctx.tex_instances.is_empty() {
-            if let (Some(tp), Some(tbuf), Some(bg)) = (&ctx.tex_pipeline, &cap_tex_buf, &ctx.bind_group) {
-                let tstride = std::mem::size_of::<gpu::TexInstance>() as u64;
-                for (i, (inst, tex_ptr)) in ctx.tex_instances.iter().enumerate() {
-                    let t = unsafe { &*(*tex_ptr as *const TexCtx) };
-                    pass.set_pipeline(tp);
-                    apply_scissor(&mut pass, inst.clip, w, h);
-                    pass.set_bind_group(0, bg, &[]);
-                    pass.set_bind_group(1, &t.bind_group, &[]);
-                    let begin = i as u64 * tstride;
-                    pass.set_vertex_buffer(0, tbuf.slice(begin..begin + tstride));
-                    pass.draw(0..6, 0..1);
-                }
-            }
+        // 与 frame_end 同一套按层断点分段的绘制，保证抓帧内容与屏幕一致。
+        if let (Some(p), Some(bg)) = (&ctx.pipeline, &ctx.bind_group) {
+            let cap_rect_buf = if ctx.instances.is_empty() {
+                None
+            } else {
+                let bytes: &[u8] = bytemuck::cast_slice(&ctx.instances);
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("lgpu-capture-rectinst"),
+                    size: bytes.len() as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&buf, 0, bytes);
+                Some(buf)
+            };
+            draw_recorded(
+                &mut pass,
+                p,
+                ctx.tex_pipeline.as_ref(),
+                bg,
+                cap_rect_buf.as_ref(),
+                cap_tex_buf.as_ref(),
+                &ctx.instances,
+                &ctx.tex_instances,
+                &ctx.layer_marks,
+                w,
+                h,
+            );
         }
     }
     encoder.copy_texture_to_buffer(
@@ -1353,15 +1833,12 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
-    cap_log(&home, "5 pass recorded");
     let sub = queue.submit(Some(encoder.finish()));
-    cap_log(&home, "6 submitted");
     let slice = readback.slice(..);
     if !map_and_wait(device, &slice, sub) {
         set_error("capture: map timeout");
         return E_NO_DEVICE;
     }
-    cap_log(&home, "7 mapped");
     let data = match slice.get_mapped_range() {
         Ok(v) => v,
         Err(_) => {
@@ -1376,7 +1853,6 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
     }
     drop(data);
     readback.unmap();
-    cap_log(&home, &format!("8 collected {} bytes", out.len()));
     match std::fs::write(&path_s, &out) {
         Ok(_) => (w as i32) * 1_000_000 + (h as i32),
         Err(e) => {
@@ -1410,6 +1886,15 @@ pub extern "C" fn lgpu_texture_create(
     }
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    texture_create_locked(ctx, width, height)
+}
+
+/// 已持有 SURF_LOCK 时的纹理创建（图集新页路径使用；避免二次加锁死锁）。
+fn texture_create_locked(
+    ctx: &mut SurfaceCtx,
+    width: u32,
+    height: u32,
+) -> *mut c_void {
     let (Some(device), Some(sampler), Some(bgl)) =
         (&ctx.device, &ctx.tex_sampler, &ctx.tex_bgl)
     else {
@@ -1447,13 +1932,21 @@ pub extern "C" fn lgpu_texture_create(
         ],
     });
 
-    Box::into_raw(Box::new(TexCtx {
+    let tex = Box::into_raw(Box::new(TexCtx {
         texture,
         view,
         bind_group,
         width,
         height,
-    })) as *mut c_void
+    })) as *mut c_void;
+    texture_created_hook();
+    tex
+}
+
+/// 纹理存活/创建计数（create 成功路径统一走这里，含 PNG 直载）。
+fn texture_created_hook() {
+    STATS.texture_creates.fetch_add(1, Ordering::Relaxed);
+    STATS.textures_alive.fetch_add(1, Ordering::Relaxed);
 }
 
 /// 上传一块 RGBA8 像素到纹理的 (x, y) 处。stride 是每行字节数。
@@ -1484,6 +1977,8 @@ pub extern "C" fn lgpu_texture_upload(
         return E_BAD_ARG;
     }
     let bytes = unsafe { std::slice::from_raw_parts(pixels, (stride * height) as usize) };
+    STATS.uploads.fetch_add(1, Ordering::Relaxed);
+    STATS.upload_bytes.fetch_add((width * height * 4) as u64, Ordering::Relaxed);
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &t.texture,
@@ -1580,7 +2075,7 @@ pub extern "C" fn lgpu_texture_destroy(tex: *mut c_void) {
     if tex.is_null() {
         return;
     }
-    drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
+    destroy_texture_locked(tex);
 }
 
 // ---- 离屏渲染 + 读回自检 ---------------------------------------------------
@@ -1755,13 +2250,13 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         .config
         .as_ref()
         .map(|c| c.format)
-        .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+        .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
 
     let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(screen_buffer)) = (
         ctx.device.as_ref(),
         ctx.queue.as_ref(),
-        ctx.pipeline.clone(),
-        ctx.bind_group.clone(),
+        ctx.pipeline.as_ref(),
+        ctx.bind_group.as_ref(),
         ctx.screen_buffer.as_ref(),
     ) else {
         return 1 << 2;
@@ -1786,7 +2281,7 @@ pub extern "C" fn lgpu_selftest(surface: *mut c_void) -> i32 {
         color2: [1.0, 1.0, 1.0, 1.0],
     };
     let Some(buf) = render_to_texture(
-        device, queue, &pipeline, &bind_group, screen_buffer,
+        device, queue, pipeline, bind_group, screen_buffer,
         [1.0, 1.0], [0.0, 0.0], w, h, fmt, &[inst, inst2],
     ) else {
         return 1 << 2;
@@ -1871,6 +2366,7 @@ pub extern "C" fn lgpu_text_measure(font: *mut c_void, utf8: *const u8, len: usi
     if font.is_null() || utf8.is_null() || len == 0 {
         return 0.0;
     }
+    STATS.text_measures.fetch_add(1, Ordering::Relaxed);
     let f = unsafe { &*(font as *const text::FontHandle) };
     let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(utf8, len) }).to_string();
     text::measure(f, &s, px_size)
@@ -1910,32 +2406,28 @@ pub extern "C" fn lgpu_text_draw(
     let fh = unsafe { &*(font as *const text::FontHandle) };
     let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(utf8, len) }).to_string();
 
-    // 阶段 0：确保图集存在。注意**不要**在持有 &mut SurfaceCtx 时再调同名 FFI——
+    // 阶段 0：确保至少有一页图集。注意**不要**在持有 &mut SurfaceCtx 时再调同名 FFI——
     // 那会造出第二个 &mut（别名 UB），真机上表现为图集内容错乱/不显示。
-    let atlas_missing = unsafe { &*(surface as *const SurfaceCtx) }.atlas.is_none();
-    if atlas_missing {
+    // R5.3：wgpu 新纹理默认零初始化，无需上传 4MB 空白缓冲（省一次全页上传）。
+    let pages_empty = unsafe { &*(surface as *const SurfaceCtx) }.atlas_pages.is_empty();
+    if pages_empty {
         let atlas_tex = lgpu_texture_create(surface, ATLAS_SIZE, ATLAS_SIZE);
         if atlas_tex.is_null() {
             set_error("create text atlas failed");
             return 0.0;
         }
-        let blank = vec![0u8; (ATLAS_SIZE * ATLAS_SIZE * 4) as usize];
-        lgpu_texture_upload(
-            surface, atlas_tex, 0, 0, ATLAS_SIZE, ATLAS_SIZE, blank.as_ptr(), ATLAS_SIZE * 4,
-        );
         let _guard = lock_surface();
-    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-        ctx.atlas = Some(atlas_tex);
-        ctx.atlas_packer = Some(text::Atlas::new(ATLAS_SIZE));
+        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+        ctx.atlas_pages.push((atlas_tex, text::Atlas::new(ATLAS_SIZE)));
     }
-    let atlas_tex = unsafe { &*(surface as *const SurfaceCtx) }.atlas.unwrap();
 
-    // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）
+    // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）。
+    // 多页查找/分配：先在现有页里找缓存槽或能放下的空位；全都放不下就新开一页。
     let size_key = (px_size * 4.0) as u32;
     let mut pen_x = x;
     // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）
     let baseline = y + text::metrics(fh, px_size).0;
-    let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32)> = Vec::new();
+    let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)> = Vec::new();
 
     for ch in s.chars() {
         let glyph_id = {
@@ -1944,13 +2436,21 @@ pub extern "C" fn lgpu_text_draw(
         };
         let key = (fh.id, glyph_id, size_key);
 
-        let cached = unsafe { &*(surface as *const SurfaceCtx) }
-            .atlas_packer
-            .as_ref()
-            .and_then(|p| p.cache.get(&key).copied());
+        // (a) 已缓存：直接用（跨页查找，页号随槽一起返回）。
+        let cached: Option<(text::GlyphSlot, *mut c_void)> = {
+            let ro = unsafe { &*(surface as *const SurfaceCtx) };
+            let mut found = None;
+            for (tex, packer) in ro.atlas_pages.iter() {
+                if let Some(slot) = packer.cache.get(&key).copied() {
+                    found = Some((slot, *tex));
+                    break;
+                }
+            }
+            found
+        };
 
-        let slot = match cached {
-            Some(slot) => slot,
+        let (slot, page_tex) = match cached {
+            Some(v) => v,
             None => {
                 let Some(rg) = text::rasterize(fh, ch, px_size) else {
                     pen_x += px_size * 0.5;
@@ -1960,14 +2460,44 @@ pub extern "C" fn lgpu_text_draw(
                     pen_x += rg.advance;
                     continue;
                 }
-                let alloc = {
+                // (b) 逐页找空位；都满了新开一页（R5.3：不再丢字）。
+                let mut alloc: Option<(*mut c_void, u32, u32)> = None;
+                {
                     let _guard = lock_surface();
-    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-                    ctx.atlas_packer.as_mut().and_then(|p| p.alloc(rg.w, rg.h))
-                };
-                let Some((ax, ay)) = alloc else {
-                    set_error("glyph atlas full");
-                    break;
+                    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                    // 从最后一页开始尝试（新字形大概率落在活跃页）。
+                    for (tex, packer) in ctx.atlas_pages.iter_mut().rev() {
+                        if let Some((ax, ay)) = packer.alloc(rg.w, rg.h) {
+                            alloc = Some((*tex, ax, ay));
+                            break;
+                        }
+                    }
+                    if alloc.is_none() {
+                        // 所有页都放不下：先用一个**全新** packer 试分配，成功才建纹理。
+                        // 关键：槽位必须来自与纹理配对的那个 packer，否则 (x,y) 会
+                        // 落到别的页上 —— 表现为字形错位/串位（写这段时踩过）。
+                        let mut fresh = text::Atlas::new(ATLAS_SIZE);
+                        if let Some((ax, ay)) = fresh.alloc(rg.w, rg.h) {
+                            // 页数到上限：淘汰最旧页（FIFO）。**不立即 free**：
+                            // 本帧已录制的图元还引用它，推迟到 frame_end 之后销毁。
+                            if ctx.atlas_pages.len() >= MAX_ATLAS_PAGES {
+                                let (old_tex, _) = ctx.atlas_pages.remove(0);
+                                ctx.pending_destroy.push(old_tex);
+                                STATS.atlas_page_evict.fetch_add(1, Ordering::Relaxed);
+                            }
+                            let atlas_tex = texture_create_locked(ctx, ATLAS_SIZE, ATLAS_SIZE);
+                            if !atlas_tex.is_null() {
+                                alloc = Some((atlas_tex, ax, ay));
+                                ctx.atlas_pages.push((atlas_tex, fresh));
+                            }
+                        }
+                    }
+                }
+                let Some((page_tex, ax, ay)) = alloc else {
+                    // 单个字形比整页还大：跳过该字符（仍前进半个字宽），不再中断整段。
+                    STATS.glyph_overflow.fetch_add(1, Ordering::Relaxed);
+                    pen_x += px_size * 0.5;
+                    continue;
                 };
                 let mut rgba = vec![0u8; (rg.w * rg.h * 4) as usize];
                 for i in 0..(rg.w * rg.h) as usize {
@@ -1976,7 +2506,7 @@ pub extern "C" fn lgpu_text_draw(
                     rgba[i * 4 + 2] = 255;
                     rgba[i * 4 + 3] = rg.coverage[i];
                 }
-                lgpu_texture_upload(surface, atlas_tex, ax, ay, rg.w, rg.h, rgba.as_ptr(), rg.w * 4);
+                lgpu_texture_upload(surface, page_tex, ax, ay, rg.w, rg.h, rgba.as_ptr(), rg.w * 4);
                 let slot = text::GlyphSlot {
                     x: ax,
                     y: ay,
@@ -1987,15 +2517,20 @@ pub extern "C" fn lgpu_text_draw(
                     advance: rg.advance,
                 };
                 let _guard = lock_surface();
-    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-                if let Some(p) = ctx.atlas_packer.as_mut() {
-                    p.cache.insert(key, slot);
+                let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+                // 槽位登记到刚分配的页（按纹理指针找到它）
+                for (tex, packer) in ctx.atlas_pages.iter_mut() {
+                    if *tex == page_tex {
+                        packer.cache.insert(key, slot);
+                        break;
+                    }
                 }
-                slot
+                (slot, page_tex)
             }
         };
 
         if slot.w > 0 && slot.h > 0 {
+            let page_size = ATLAS_SIZE as f32;
             let dx = pen_x + slot.bearing_x;
             let dy = baseline + slot.bearing_y;
             quads.push((
@@ -2003,19 +2538,20 @@ pub extern "C" fn lgpu_text_draw(
                 dy,
                 slot.w as f32,
                 slot.h as f32,
-                slot.x as f32 / ATLAS_SIZE as f32,
-                slot.y as f32 / ATLAS_SIZE as f32,
-                (slot.x + slot.w) as f32 / ATLAS_SIZE as f32,
-                (slot.y + slot.h) as f32 / ATLAS_SIZE as f32,
+                slot.x as f32 / page_size,
+                slot.y as f32 / page_size,
+                (slot.x + slot.w) as f32 / page_size,
+                (slot.y + slot.h) as f32 / page_size,
+                page_tex,
             ));
         }
         pen_x += slot.advance;
     }
 
-    // 阶段 2：把四边形推入当前帧
+    // 阶段 2：把四边形推入当前帧（quad 自带所在页的纹理指针）
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    for (dx, dy, dw, dh, u0, v0, u1, v1) in quads {
+    for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in quads {
         ctx.tex_instances.push((
             gpu::TexInstance {
                 dst: [dx, dy, dw, dh],
@@ -2025,7 +2561,7 @@ pub extern "C" fn lgpu_text_draw(
                 color2: [r, g, b, a],
                 params: [0.0, 0.0, 0.0, 0.0],
             },
-            atlas_tex,
+            page_tex,
         ));
     }
 
@@ -2049,7 +2585,7 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
             .config
             .as_ref()
             .map(|c| c.format)
-            .unwrap_or(wgpu::TextureFormat::Bgra8UnormSrgb);
+            .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
         (200u32, 120u32, fmt)
     };
 
@@ -2445,4 +2981,79 @@ pub extern "C" fn lgpu_texture_create_from_png(
         unsafe { *out_h = h };
     }
     tex
+}
+
+// ---- 单元测试：实例合批分组（R1 回归保护）----------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inst(clip: [f32; 4]) -> gpu::TexInstance {
+        gpu::TexInstance {
+            dst: [0.0, 0.0, 1.0, 1.0],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            tint: [1.0, 1.0, 1.0, 1.0],
+            clip,
+            color2: [1.0, 1.0, 1.0, 1.0],
+            params: [0.0, 0.0, 0.0, 0.0],
+        }
+    }
+
+    fn tex(n: u8) -> *mut c_void {
+        n as usize as *mut c_void
+    }
+
+    /// run 划分：相邻且 (纹理, clip) 相同的实例必须合并，边界处必须断开。
+    #[test]
+    fn tex_runs_merge_adjacent_same_texture_and_clip() {
+        let a = tex(1);
+        let b = tex(2);
+        let c0 = [0.0, 0.0, 0.0, 0.0];
+        let c1 = [0.0, 0.0, 100.0, 50.0];
+        let list = vec![
+            (inst(c0), a),
+            (inst(c0), a),
+            (inst(c0), a), // run [0,3) tex a clip c0
+            (inst(c0), b), // 纹理变 -> 断开
+            (inst(c0), b), // run [3,5) tex b clip c0
+            (inst(c1), b), // clip 变 -> 断开
+            (inst(c1), b), // run [5,7) tex b clip c1
+            (inst(c0), a), // run [7,8)
+        ];
+        let bounds = tex_run_bounds(&list);
+        assert_eq!(bounds, vec![(0, 3), (3, 5), (5, 7), (7, 8)]);
+    }
+
+    #[test]
+    fn tex_runs_single_texture_glyphs_collapse_to_one_draw() {
+        // 一页文字：上千个字形共享同一图集与同一 clip，必须合成 1 个 run。
+        let a = tex(9);
+        let c0 = [0.0, 0.0, 0.0, 0.0];
+        let list: Vec<(gpu::TexInstance, *mut c_void)> = (0..1000).map(|_| (inst(c0), a)).collect();
+        let bounds = tex_run_bounds(&list);
+        assert_eq!(bounds.len(), 1);
+        assert_eq!(bounds[0], (0, 1000));
+    }
+
+    #[test]
+    fn tex_runs_empty() {
+        let list: Vec<(gpu::TexInstance, *mut c_void)> = Vec::new();
+        assert!(tex_run_bounds(&list).is_empty());
+    }
+
+    #[test]
+    fn rect_batch_count_matches_clip_groups() {
+        let c0 = [0.0, 0.0, 0.0, 0.0];
+        let c1 = [0.0, 0.0, 10.0, 10.0];
+        let mk = |clip: [f32; 4]| gpu::RectInstance {
+            rect: [0.0, 0.0, 1.0, 1.0],
+            color: [1.0, 1.0, 1.0, 1.0],
+            params: [0.0, 0.0, 0.0, 0.0],
+            clip,
+            color2: [1.0, 1.0, 1.0, 1.0],
+        };
+        let v = vec![mk(c0), mk(c0), mk(c1), mk(c0)];
+        assert_eq!(draw_rect_batch_count(&v), 3);
+        assert_eq!(draw_rect_batch_count(&[]), 0);
+    }
 }
