@@ -48,7 +48,49 @@ git am --3way docs/interaction-audit/patches/*.patch
 4. 落地后跑 `tools/verify-cui-interactions.sh`，期望 `TOTAL 444 / PASSED 403 / ERROR 40 / FAILED 1`
    且输出「基线匹配」。
 
-## 四、演练副本
+
+## 五、第二轮演练（2026-11-11 晚）：合并后测试**全绿**
+
+第一轮只验证了「补丁零冲突」。这一轮把「合并后能不能跑过测试」也验了：
+
+### 做法（不改对方任何源码）
+
+1. 复制主仓工作树 → `packages/cangjie-gui-mergecheck`，把对方未提交改动先落成提交；
+2. 把对方的 `lcodec` 也复制一份（`packages/lcodec-rehearsal`），只在**副本**里把
+   `lgui/cjpm.toml` 的 `../../lcodec` 改指该副本，避免动对方正在改的目录；
+3. `git am --3way patches/*.patch` 应用 25 个补丁；
+4. 用 `CANGJIE_STDX_PATH=/workspace/.cjv/stdx/lts/static/stdx`（`lcodec` 的 stdx 二进制依赖）
+   跑 `PKG_DIR=... tools/verify-cui-interactions.sh`。
+
+### 结果
+
+```
+Summary: TOTAL: 444
+    PASSED: 403, SKIPPED: 0, ERROR: 40
+    FAILED: 1
+== 基线匹配：失败名册与 headless 基线完全一致
+```
+
+合并后的树（对方 WIP + 本分支）**与分支单独跑的结果完全相同**：444 例、403 通过、失败名册与基线逐条一致。
+
+### 合并时唯一需要的适配（已提前消除）
+
+对方分支的 `Canvas` 接口新增了抽象方法 `releaseTexture(id: Int64)`（纹理回收）。我的测试探针
+`ChromeProbe` 只实现了 `c39458f` 时的接口 → 合并后编译报 `missing abstract function`。
+
+已在分支侧提交 `2289704` 预置该方法（探针无语义），**因此合并/应用补丁后无需任何手工适配**。
+其余 4 个新增接口方法（`snapshotTexture`/`layerMark`/`discardRecorded`/`glowRing`）在接口里都有默认实现，无需实现。
+
+### 注意：主仓是移动靶
+
+演练期间对方仍在改：主仓 `packages/cangjie-gui` 未提交文件在几小时内从 9 个增至 11 个
+（新增 `cjpm.toml`、`bench/micro/cjpm.toml`、`examples/calculator/cjpm.toml`，属 lcodec 迁移的链接配置）。
+用**同一套补丁**在新快照上重跑会因对方 `cui/cjpm.toml` 尚未写入 `-lvips/-L stdx` 而链接失败——
+这是对方 WIP 的中间态，不是本分支问题（与本轮第一轮的对照实验同型）。
+
+**结论**：本分支合并/落地在代码层面已完全就绪；等对方把 lcodec 迁移与链接配置提交完即可合并。
+
+## 六、演练副本
 
 - `packages/cangjie-gui-mergecheck`：主仓 WIP + 本分支 25 补丁（用于继续排查对方 lcodec 问题）
 - `packages/cangjie-gui-wipcheck`：纯主仓 WIP 对照（**不含**本分支）

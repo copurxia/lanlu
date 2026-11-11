@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 16:31:07 +0000
+Subject: [PATCH] =?UTF-8?q?test:=20=E6=B5=8B=E8=AF=95=E6=8E=A2=E9=92=88?=
+ =?UTF-8?q?=E9=A2=84=E7=BD=AE=20Canvas.releaseTexture=EF=BC=8C=E5=90=88?=
+ =?UTF-8?q?=E5=B9=B6=E6=97=B6=E9=9B=B6=E9=80=82=E9=85=8D?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+合并演练发现：对方分支的 Canvas 接口新增 releaseTexture（纹理回收）抽象方法，我的
+ChromeProbe 只实现了 c39458f 时的接口，合并后编译报 missing abstract function。
+本提交在分支侧预置该方法（探针无语义），使合并/应用补丁后无需任何手工适配。
+
+验证：分支桩库测试 TOTAL 444 / PASSED 403 / 基线匹配，与提交前一致。
+---
+ src/text/text_focus_chrome_test.cj | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/text/text_focus_chrome_test.cj b/src/text/text_focus_chrome_test.cj
+index 398a4fc..231b1fb 100644
+--- a/src/text/text_focus_chrome_test.cj
++++ b/src/text/text_focus_chrome_test.cj
+@@ -60,6 +60,9 @@ class ChromeProbe <: Canvas {
+     public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
+     public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
+     public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    // Canvas 接口在其它分支新增了 releaseTexture（纹理回收）；探针无需语义，但必须实现——
++    // 预置在这里，合并时零适配（合并演练已验证）。
++    public func releaseTexture(id: Int64): Unit {}
+     public func pushClip(rect: Rect): Unit {}
+     public func popClip(): Unit {}
+     public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
+-- 
+2.47.3
+

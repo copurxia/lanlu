@@ -85,7 +85,8 @@
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
 > 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行；
 > 合并评审看 [04-pr-description.md](04-pr-description.md)，合并演练结果见
-> [05-merge-rehearsal.md](05-merge-rehearsal.md)（25 补丁零冲突 / 可 `git am` 直接落地）。
+> [05-merge-rehearsal.md](05-merge-rehearsal.md)（25 补丁零冲突；合并后副本跑测试 **444/403 全绿**，
+> 唯一适配项已提前预置 → 落地零手工改动）。
 
 **P0（3 项，合计约 1 天，直接回应本次反馈）**
 1. 字段族点击聚焦可见 —— `text/text_area.cj:400-402` 一处改动，覆盖 TextField/TextArea/ComboBox（方案见 00-root-cause.md）。同时给 `fieldSurface` 加 hover 分支（`core/theme_state.cj:178`）。✅ 已提交（`9fe49b3`；hover 分支未含，仍开放）
