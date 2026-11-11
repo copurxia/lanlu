@@ -316,7 +316,7 @@ public func runApp(): Int64 {
                 Some(settings.fontPath)
             } else {
                 systemSansFontPath()
-            }), theme: lanluThemeFor(settings.theme),
+            }), theme: lanluThemeFor(forcedThemeMode() ?? settings.theme),
     )
     // 联调：LANLU_PROBE_CLIP=1 各发一次 clipboard.set / get（验 M6 第 2 步双向通路）
     if ((getVariable("LANLU_PROBE_CLIP") ?? "0") == "1") {
