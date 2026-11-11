@@ -106,8 +106,18 @@ blit shader 里做 sRGB→linear。等价于 B，且不要求交换链非 sRGB�
   （最可能是 `draw_recorded` 里解引用的 `TexCtx` 指针已失效，或 wgpu 内部断言）；
 - 主 pass 的管线目标格式已改为与离屏目标一致（`SCREEN_FORMAT`），排除格式不匹配。
 
+### 两次排除实验（都做了，都是负结果）
+
+| 实验 | 做法 | 结果 | 说明 |
+|---|---|---|---|
+| 悬空指针假设 | 加文件开关 `$HOME/lgpu_no_destroy`：淘汰页只 `texture.destroy()`、**不释放 Box** | **仍然崩溃** | 排除"`pending_destroy` 释放后仍被 `tex_instances` 引用" |
+| 旧渲染路径 + 新色彩管线 | 用 16e4b2df 的内联绘制 + 方案 C，并给新符号（`snapshot_texture`/`layer_mark`/`discard_recorded`）打最小桩 | **更早崩溃**（onCreate 阶段） | 说明新引擎代码已依赖新渲染语义，不能简单退回旧路径 |
+
+> 结论：崩溃根因仍在并发会话的帧渲染重构内部（第 28 帧、`draw_recorded` 期间、原生段错误），
+> 需要该会话自己修或回滚后再谈合并与验证。
+
 下一步（需在并发会话停下后做）：在 `draw_recorded` 每次 draw 前校验 `tex_ptr` 是否仍在
-存活表里，或直接回滚 `pending_destroy` 的延迟销毁逻辑做对照。
+存活表里；或用 ASan/`addr2line` 解 `cppcrash` 栈（faultlog 目录当前无权限读取）。
 
 ## 5. 现状## 5. 现状
 
