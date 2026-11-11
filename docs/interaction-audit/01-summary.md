@@ -66,7 +66,33 @@
 | 右键菜单 | 1 / 33（ContextMenu） | 3% |
 | Tab 环登记（`registerFocusable`/`focusableControlIdentity`） | 17 类（+ComboBox 经内嵌 TextField）；漏登记 Pagination/StepIndicator/Breadcrumb/WordCloud/ReorderableList grip，另应用层 17 类自绘件全 0 | 52% |
 
-## 五、修复优先级（建议排期）
+
+## 六、最终交付状态（2026-11-11 19:30，第 55 轮）
+
+| 维度 | 状态 | 证据 |
+|---|---|---|
+| 原始问题（为什么点输入框没描边） | **已解答并修复** | [00-root-cause.md](00-root-cause.md)；`drawTextBoxChrome` 按 `hasFocus` 上激活边 + 键盘外环 |
+| 20 类交互缺口 | **全部落地**（+3 项审计外补充） | [09-gap-final-status.md](09-gap-final-status.md) |
+| 实现 | 43 个提交（39 代码 + 4 文档） | 分支 `p0-focus-visible` |
+| 测试 | **479 例 / 438 通过 / 失败名册与基线逐条一致** | `tools/verify-cui-interactions.sh p0` |
+| 新增测试 | 92 个用例 | 见 [02-p0-batch.md](02-p0-batch.md) |
+| 文档 | 框架 5 份 + 审计 11 份，内链 0 断链，签名与源码逐字一致 | `docs/`、`docs/interaction-audit/` |
+| 工具 | 验证 / 演练 / 落地 3 个脚本 | `tools/verify-cui-interactions.sh`、`rehearse-merge.sh`、`land-focus-interactions.sh` |
+| 应用层接线 | 3 个补丁已备并在合并副本上验证应用；改动保留在分支 `app-focus-wiring` | [patches-app/](patches-app/README.md) |
+| 合并演练 | 43 补丁对主仓最新 WIP **零冲突 + 合并后 479/438 基线匹配** | [05-merge-rehearsal.md](05-merge-rehearsal.md) |
+| **合并本身** | **阻塞**：`packages/cangjie-gui` 有他人 11 个未提交文件（最新改动停在 16:26，已停笔约 3 小时）| `tools/land-focus-interactions.sh --check` 会拒绝执行 |
+| 真机验收 | 待合并后执行 | [06-acceptance-checklist.md](06-acceptance-checklist.md)（31 条，其中 20 条有自动化兜底）|
+
+### 解除阻塞后的动作（一条命令）
+
+```bash
+tools/land-focus-interactions.sh --check   # 确认前置条件
+tools/land-focus-interactions.sh           # 合并 + 补 link-option + 跑测试 + cherry-pick 应用层
+```
+
+随后按 [06-acceptance-checklist.md](06-acceptance-checklist.md) 真机逐条验收。
+
+## 五、修复优先级（历史排期，已全部完成）
 
 > **进度 2026-11-11（十一轮）**：**P0 与框架侧审计缺口全部完成**（20 类缺口中框架可独立
 > 落地的均已落地），应用层接线清单已备好——分支 `p0-focus-visible`
