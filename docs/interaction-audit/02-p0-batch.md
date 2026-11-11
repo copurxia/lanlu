@@ -30,6 +30,7 @@
 | `bba0ef6` | P1 开关/单选/复选/滑块补悬停反馈（#10 最后一块） |
 | `2289704` | test 探针预置 `Canvas.releaseTexture`（合并零适配） |
 | `8671b44` | P1 LazyRow 键盘横向滚动 + 焦点滚入视野（#7/#8 横排） |
+| `c62b524` | P1 开放 `registerFocusStop` / `reregisterFocusStop`（#2 第二个入口） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -126,7 +127,11 @@ lerp 0.18，滑块旋钮悬停放大；带悬停视觉的控件文件从 4 个�
 合并演练已验证）；LazyRow 键盘横向滚动（Left/Right 48px、PageUp/Down 0.9 视口、Home/End）+
 焦点滚入视野——应用的书架行/缩略图条正是 LazyRow。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 447，PASSED 406（累计新增 60 例 + 改写 1 例全过），
+**第十五批（`c62b524`）**：开放 `registerFocusStop`/`reregisterFocusStop`——应用层"自身即控件"
+的自绘件（GhostIconButton 等）终于能自登记焦点停靠点；顺带修掉 `cui.cj` 里 FocusTarget
+重复 import 三遍的警告。对应应用层补丁 [patches-app/0002](patches-app/README.md)。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 449，PASSED 408（累计新增 62 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
