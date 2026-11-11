@@ -8,6 +8,7 @@ import lcodec.NativeDecodedImage
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.convert.Parsable
+import std.env.getVariable
 import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.io.OutputStream
 import std.sync.Mutex
@@ -4032,6 +4033,12 @@ public class AppModel {
     // 构建期主题判定：视图构建时拿不到 ctx.theme（绘制期上下文），需要铺底/描边色时
     // 用本判定在 palette.cj 的明/暗常量间二选一（settings.theme 由 setTheme 即时更新并触发重绘）。
     public func isLight(): Bool {
+        // 联调/截图钩子（与 theme.cj::forcedThemeMode 配套）：LANLU_FORCE_THEME
+        // 同时影响"用哪套调色板"，否则只有 Theme 对象变了、控件颜色还是旧主题。
+        match (getVariable("LANLU_FORCE_THEME")) {
+            case Some(v) => if (v == "light") { return true } else if (v == "dark") { return false }
+            case None => ()
+        }
         settings.theme == "light"
     }
 
