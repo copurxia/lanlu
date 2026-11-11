@@ -184,6 +184,10 @@ Summary: TOTAL: 450
 **为何不重写历史**：feature 分支可能已被对方工具链引用；重写（reset/rebase）会把 `dc45e03b` 之后的
 4 个提交一起改写，风险大于收益。选择保留历史 + 文档记录。
 
+**后续清理（2026-11-11 19:30）**：该误操作还把 `packages/cangjie-gui-p0`（嵌套仓库的 linked worktree）
+当作 gitlink（mode 160000）记进了 parent 仓库，导致 p0 分支每推进一步都显示为 parent 仓库修改。
+已 `git rm --cached` 移除该指针并加入 `.gitignore`——worktree 目录仍在磁盘上，只是不再被 parent 跟踪。
+
 **教训（已并入操作规范）**：在共享 worktree 或嵌套仓库环境下做演练，一律先把副本变成**独立克隆**
 （`git clone` 而非 `git worktree`），或在副本内 `git init` 全新仓库；绝不在"看似独立实则共享引用"的
 目录里执行任何 `git add -A`。
