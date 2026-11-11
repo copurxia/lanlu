@@ -3,7 +3,22 @@
 > 目标：把 `p0-focus-visible`（29 个提交）与应用层 3 个补丁落到主仓，并确认没有回归。
 > 全程预计 10–20 分钟（含一次全量测试）。
 
-## 0. 前置检查
+## 0. 最快路径：一条命令
+
+```bash
+tools/land-focus-interactions.sh --check   # 只检查前置条件，不写任何东西
+tools/land-focus-interactions.sh           # 真正落地（会先自检，脏树直接拒绝）
+```
+
+脚本做的事与下面 §1–§5 完全一致（合并 gui → 补宿主机 link-option → 跑测试比基线 →
+cherry-pick 应用层），但带前置校验：**gui 工作树不干净就拒绝执行**，避免在他人未提交改动上
+误合并。实测 `--check` 当前输出：
+
+```
+✗ packages/cangjie-gui 有 11 个未提交文件——请先让对方提交或协调，绝不能在脏树上合并
+```
+
+## 0b. 手工步骤（脚本不可用时）
 
 ```bash
 cd /path/to/lanlu
