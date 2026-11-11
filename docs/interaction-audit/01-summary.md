@@ -83,7 +83,8 @@
 > 本机桩库测试 447 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
 > （失败名册自动 diff，见 [test-baseline-names.txt](test-baseline-names.txt)）；
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
-> 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行；
+> 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行（A/B 两批已做成补丁：
+> [patches-app/](patches-app/README.md)，合并后 `git apply` 即可）；
 > 合并评审看 [04-pr-description.md](04-pr-description.md)，合并演练结果见
 > [05-merge-rehearsal.md](05-merge-rehearsal.md)（25 补丁零冲突；合并后副本跑测试 **444/403 全绿**，
 > 唯一适配项已提前预置 → 落地零手工改动）。

@@ -82,6 +82,10 @@ tools/verify-cui-interactions.sh p0
 
 ## 五、合并后待办（应用层，见 [03-app-wiring-plan.md](03-app-wiring-plan.md)）
 
+> 其中 **A（表单回车）与 B（弹窗/登录初始聚焦）已做成可直接应用的补丁**：
+> [patches-app/0001](patches-app/README.md) —— `git apply --check` 已通过，
+> 逻辑全部复用同文件既有的按钮回调表达式，合并后可立即落地。
+
 - A 表单回车提交（`TextField(onSubmit:)` 已就绪，约 12 处）
 - B 弹窗初始聚焦（`.autofocus()`，约 8 处）
 - C 自绘点击件迁移到 `FocusTarget`（17 类，解掉「Tab 跳过主内容」）
