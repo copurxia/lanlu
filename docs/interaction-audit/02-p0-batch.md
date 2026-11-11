@@ -157,12 +157,18 @@ Ctrl+Backspace/Delete 删词；词边界与双击选词同一套脚本分类，�
 `selectionRange()` 查询，不改 `Bindable<Int64>` 类型（零影响现有调用方）。**至此审计 20 类
 缺口全部落地**（含两项核实后判为不应做）。
 
-**第二十二批（`9c3c04e` + 主仓 `e100c33e`）**：对比度守卫 + **应用层 A/B/D 落地**——
-patches-app 三个补丁已提交到 feature 分支（表单回车/初始聚焦、ClickArea 与图标钮焦点化、
-阅读器 dock 键盘化）。注意：主仓 feature 分支上出现了一个由演练误操作产生的 `snapshot`
-提交（`dc45e03b`，把对方当时的未提交改动收编成了提交），其内容完整保留、未丢失；对方
-packages/cangjie-gui 内的 11 个文件仍在嵌套仓库中保持未提交状态（嵌套仓库不随父仓库提交），
-gui 分支合并仍需与其协调。
+**第二十二批（`9c3c04e`）**：对比度守卫（F1 可自动化部分）。
+
+**第二十三批（应用层 A/B/D，已迁移到独立分支）**：patches-app 三个补丁的内容曾提交到
+feature 分支（`e100c33e`），随后发现这会**破坏 feature 分支的构建**——client-next 依赖
+`TextField(onSubmit:)`/`.autofocus()`/`FocusTarget`/`registerFocusStop`/`Key.PageUp`
+等尚未合并进嵌套 gui 仓库的 API。已把该提交**移出** feature 分支（保留在独立分支
+`app-focus-wiring`，内容与标记完好），feature 分支恢复为可构建状态。正确落地顺序：
+**先合并 gui 分支 → 再应用 patches-app**（或直接 `git cherry-pick` `app-focus-wiring`）。
+
+另注：主仓 feature 分支上有一个由演练误操作产生的 `snapshot` 提交（`dc45e03b`，把对方
+当时的未提交改动收编成提交），内容完整保留；对方 `packages/cangjie-gui` 的 11 个文件在
+嵌套仓库中仍为未提交状态（嵌套仓库不随父仓库提交），gui 合并仍需协调。
 
 **验证（累计）**：桩库 `cjpm test` TOTAL 468，PASSED 427（累计新增 81 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
