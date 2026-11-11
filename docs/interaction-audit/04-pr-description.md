@@ -44,7 +44,21 @@
 - `8f44d11` 实心按钮（Primary/Danger）按下/悬停反馈
 - `3dfae21` RichText 可点击链接片段（`RichSpan.link`）
 
-**E. 文档**：`8bc83a7`、`e5b26b1`、`19daf09`、`d51919b`（architecture / components / api-reference / user-guide）
+**E. 应用层可用的框架 API（后续几轮补齐，应用补丁依赖它们）**
+- `c62b524` **`registerFocusStop`** / `reregisterFocusStop`：给"自身即控件"的自绘件（GhostIconButton 等）开放焦点登记
+- `e5ee7f9` **`drawFocusRing`** 公开：应用自绘件画与框架完全一致的焦点环（外扩 2px / 1.6px accent）
+- `ebf79bd` **`KeyRepeat`**：框架级长按连发（OHOS 的 LWP 输入桥不带 repeat，也能连发；后端自带 repeat 时顺延不双发）
+- `8671b44` LazyRow 键盘横向滚动 + 焦点滚入视野（书架行/缩略图条正是 LazyRow）
+
+**F. 收尾打磨与回归防线**
+- `7e7de10` Picker/Stepper Home/End 跳两端 + **Table 键盘排序**（Shift+方向换列、Enter 翻转）
+- `c117d4b` **按词编辑**：Ctrl+方向跳词 / Ctrl+Backspace·Delete 删词（与双击选词同一套脚本分类）
+- `9327573` ListView Shift **区间选择**（锚点 + `selectionRange()`，不改 `Bindable<Int64>`）
+- `5e308c7` Table Shift 区间选择（按显示序返回原始行索引，排序后仍连续）
+- `9c3c04e` **主题对比度下限守卫**：accent 与 field/panel 亮度差 ≥0.18（双主题），调色退化即失败
+- `70d5be3` **焦点环契约测试**：只在键盘到达时绘制（防止有人用 `hasFocus` 画描边——正是顶栏搜索框当初的不一致）
+
+**G. 文档**：`8bc83a7`、`e5b26b1`、`19daf09`、`d51919b`（architecture / components / api-reference / user-guide）
 
 ## 三、如何验证
 
@@ -59,7 +73,7 @@ tools/verify-cui-interactions.sh p0
 - 新增 54 个测试用例覆盖每条行为（焦点/键盘/悬停/Toast/Tooltip/选词/reveal/链接）。
 - 真机（OHOS）需用 `sts-1.2.0-linux-x64-ohos` 工具链重编并复验焦点环与实际观感。
 - **一条命令复现合并演练**：`tools/rehearse-merge.sh`（复制工作树快照 → 应用补丁 → 跑测试 → 比基线）。
-  实测（最近一次，2026-11-11 18:20，33 补丁）：零冲突，合并后 **TOTAL 465 / PASSED 424 / 基线匹配**。详见
+  实测（最近一次，2026-11-11 19:20，36 补丁）：零冲突，合并后 **TOTAL 474 / PASSED 433 / 基线匹配**。详见
   [05-merge-rehearsal.md](05-merge-rehearsal.md)。
 - **合并演练已完成且全绿**（见 [05-merge-rehearsal.md](05-merge-rehearsal.md)）：把主仓工作树（含对方
   未提交改动）复制成同级副本、对方改动先落成提交、应用 25 个补丁——**零冲突**；随后在副本里跑
@@ -138,6 +152,12 @@ grep -rn "hasFocus(" src | grep -v _test      # 均为行为门控，无绘制�
 | 13 | 开关/单选/复选/滑块鼠标划过有反馈 | `bba0ef6` | `toggle_hover_test.cj` | 关态轨道对比度 |
 | 14 | 富文本里的链接可以点（手型+下划线） | `3dfae21` | `rich_text_link_test.cj` | 应用内目前无使用点，供后续接入 |
 | 15 | 只读字段点击不再抢走焦点 | `1db7709` | 字段族用例 | — |
+| 16 | 按住方向键会连续翻页（长按连发） | `ebf79bd` | `keyRepeat*` 4 例 | 真机节奏感（400ms 延迟 / 60ms 间隔） |
+| 17 | Ctrl+方向键按词跳转、Ctrl+Backspace 按词删除 | `c117d4b` | `wordMotion*`/`deleteWord*` 5 例 | 中日混排下按词手感 |
+| 18 | Shift+点击/方向键可选中一段连续行（列表与表格） | `9327573`、`5e308c7` | `shiftClick*`/`shiftArrow*`/`tableShift*` 6 例 | 区间高亮对比度 |
+| 19 | 表格可用键盘排序（Shift+方向换列、Enter 翻转） | `7e7de10` | `tableKeyboardSort*` | — |
+| 20 | 书架横排可用方向键/PgUp/PgDn 滚动 | `8671b44` | `lazyRow*` 3 例 | 横向滚动手感 |
+| 21 | 焦点指示色在两套主题下都够醒目（有测试兜底） | `9c3c04e` | `focusAccent*`/`hoverFieldActive*` 3 例 | 视觉风格仍人工 |
 
 > 验收建议顺序：先按 §三 跑一次 `tools/verify-cui-interactions.sh`（应有 450/409 与基线匹配），
 > 再按 §六 应用层补丁顺序落地，最后真机逐条对照本表。

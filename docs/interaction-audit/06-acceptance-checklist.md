@@ -2,7 +2,7 @@
 
 > 用途：合并 `p0-focus-visible` 并应用 `patches-app/` 三个补丁后，按本表逐条确认。
 > 每条给出「怎么试 → 期望 → 可能的回归风险」。前置：`tools/verify-cui-interactions.sh` 输出
-> 「基线匹配」（TOTAL 465 / PASSED 424）。
+> 「基线匹配」（TOTAL 474 / PASSED 433）。
 > 哪些条目有自动化兜底、哪些必须人工看：见 [08-coverage-matrix.md](08-coverage-matrix.md)。
 
 ## A. 字段与表单（用户最初反馈的那类问题）
