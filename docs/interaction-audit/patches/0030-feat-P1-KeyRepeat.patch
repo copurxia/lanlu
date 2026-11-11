@@ -1,0 +1,250 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 17:32:16 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E6=A1=86=E6=9E=B6=E7=BA=A7?=
+ =?UTF-8?q?=E6=8C=89=E9=94=AE=E9=95=BF=E6=8C=89=E8=BF=9E=E5=8F=91=EF=BC=88?=
+ =?UTF-8?q?KeyRepeat=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计缺口 #11/D2（真机最可感知的剩余项）：OHOS 的 LWP 输入桥不带 repeat 标志
+（LWindowEvent 只有 key+pressed），桥接后 UiEvent.KeyDown 的 repeat 恒 false——
+"按住方向键连续翻页"在真机上不成立。
+
+做法：core 新增 KeyRepeat（delay 400ms / interval 60ms，可关），DesktopApp 在派发完
+一批事件后 observe 按下/抬起、poll 到点补一个 repeat=true 的 KeyDown 并
+requestFrameAfter(interval) 维持节奏；后端若自带 repeat 事件（SDL）则顺延计时，
+不会双发。无需改 L 层协议。
+
+测试：4 用例（延迟后首发+按间隔续发、KeyUp 停止、后端 repeat 顺延不双发、可禁用）。
+cjpm test：TOTAL 454 / PASSED 413，失败名册与基线一致，零回归。
+---
+ src/core/key_repeat.cj      | 111 ++++++++++++++++++++++++++++++++++++
+ src/core/key_repeat_test.cj |  54 ++++++++++++++++++
+ src/desktop/desktop_app.cj  |  16 +++++-
+ 3 files changed, 180 insertions(+), 1 deletion(-)
+ create mode 100644 src/core/key_repeat.cj
+ create mode 100644 src/core/key_repeat_test.cj
+
+diff --git a/src/core/key_repeat.cj b/src/core/key_repeat.cj
+new file mode 100644
+index 0000000..259ba3f
+--- /dev/null
++++ b/src/core/key_repeat.cj
+@@ -0,0 +1,111 @@
++package cui.core
++
++import lgui.{Key, UiEvent}
++
++/*
++ * 按键长按连发（审计缺口 #11/D2：OHOS 的 LWP 输入桥不带 repeat 标志，长按方向键只翻一页）。
++ *
++ * SDL 后端自己会产生 repeat 事件（lgui 的 KeyDown 带 repeat=true），但 OHOS 侧 L 层
++ * `LWindowEvent` 只有 key+pressed，桥接时 UiEvent.KeyDown 的 repeat 恒为 false —— 于是"按住
++ * 不放连续翻页"在真机上不成立。
++ *
++ * 这里在框架侧做合成：外壳把收到的 KeyDown/KeyUp 喂给本对象，它记住"哪个键还按着"，
++ * 超过 delayMs 后每 intervalMs 产出一个待派发的键；外壳把这些键当作 repeat=true 的
++ * KeyDown 再派发一次即可。若后端自带 repeat 事件，收到 repeat=true 时会顺延计时，
++ * 两者不会双发。
++ */
++public class KeyRepeat {
++    public static let DEFAULT_DELAY_MS: Int64 = 400
++    public static let DEFAULT_INTERVAL_MS: Int64 = 60
++
++    private let delayMs: Int64
++    private let intervalMs: Int64
++    private var held: ?Key = None
++    private var nextDueMs: Int64 = 0
++    private var active: Bool = true
++
++    public init(delayMs!: Int64 = DEFAULT_DELAY_MS, intervalMs!: Int64 = DEFAULT_INTERVAL_MS) {
++        this.delayMs = max(1, delayMs)
++        this.intervalMs = max(1, intervalMs)
++    }
++
++    /** 关掉合成（例如后端自带 repeat 且希望完全交给它）。 */
++    public func enable(value: Bool): KeyRepeat {
++        active = value
++        if (!value) {
++            held = None
++        }
++        this
++    }
++
++    /**
++     * 喂入一个已派发的事件。KeyDown(repeat=false) 开始计时；KeyDown(repeat=true) 视为后端
++     * 自己的连发，顺延到下一个周期；KeyUp 结束持有。
++     */
++    public func observe(event: UiEvent, nowMs: Int64): Unit {
++        match (event) {
++            case UiEvent.KeyDown(key, repeat) =>
++                if (repeat) {
++                    // 后端在替我们连发：把下一个合成点推后，避免一个周期里发两次。
++                    if (held.isSome()) {
++                        nextDueMs = nowMs + intervalMs
++                    }
++                } else {
++                    held = Some(key)
++                    nextDueMs = nowMs + delayMs
++                }
++            case UiEvent.KeyUp(key) =>
++                match (held) {
++                    case Some(current) =>
++                        // 枚举相等用模式匹配表达（Key 上没有 == / equals / toString）。
++                        let same = match ((current, key)) {
++                            case (Key.Escape, Key.Escape)
++                                | (Key.Backspace, Key.Backspace)
++                                | (Key.Enter, Key.Enter)
++                                | (Key.Tab, Key.Tab)
++                                | (Key.Delete, Key.Delete)
++                                | (Key.Space, Key.Space)
++                                | (Key.Home, Key.Home)
++                                | (Key.End, Key.End)
++                                | (Key.Left, Key.Left)
++                                | (Key.Right, Key.Right)
++                                | (Key.Up, Key.Up)
++                                | (Key.Down, Key.Down)
++                                | (Key.PageUp, Key.PageUp)
++                                | (Key.PageDown, Key.PageDown)
++                                | (Key.Menu, Key.Menu) => true
++                            case (Key.Letter(a), Key.Letter(b)) => a == b
++                            case (Key.Digit(a), Key.Digit(b)) => a == b
++                            case (Key.RawScancode(a), Key.RawScancode(b)) => a == b
++                            case _ => false
++                        }
++                        if (same) {
++                            held = None
++                        }
++                    case None => ()
++                }
++            case _ => ()
++        }
++    }
++
++    /** 到点则该产出一次合成键；外壳把它作为 `KeyDown(key, true)` 派发。 */
++    public func poll(nowMs: Int64): ?Key {
++        if (!active) {
++            return None
++        }
++        match (held) {
++            case Some(key) =>
++                if (nowMs >= nextDueMs) {
++                    nextDueMs = nowMs + intervalMs
++                    return Some(key)
++                }
++                None
++            case None => None
++        }
++    }
++
++    /** 正在长按的键（诊断/测试用）。 */
++    public func heldKey(): ?Key {
++        held
++    }
++}
+diff --git a/src/core/key_repeat_test.cj b/src/core/key_repeat_test.cj
+new file mode 100644
+index 0000000..69774d5
+--- /dev/null
++++ b/src/core/key_repeat_test.cj
+@@ -0,0 +1,54 @@
++package cui.core
++
++import lgui.{Key, UiEvent}
++
++/* KeyRepeat：无原生 repeat 的后端（OHOS/LWP）由框架合成连发（缺口 #11/D2）。 */
++@Test
++func keyRepeatFiresAfterDelayThenAtInterval(): Unit {
++    let repeat = KeyRepeat(delayMs: 400, intervalMs: 60)
++    repeat.observe(UiEvent.KeyDown(Key.Right, false), 0)
++
++    @Expect(repeat.poll(399).isNone()) // 延迟期内不连发
++    match (repeat.poll(400)) {
++        case Some(key) => @Expect(isRight(key))
++        case None => @Expect(false)
++    }
++    @Expect(repeat.poll(440).isNone()) // 间隔期内不再发
++    match (repeat.poll(460)) {
++        case Some(key) => @Expect(isRight(key))
++        case None => @Expect(false)
++    }
++}
++
++@Test
++func keyRepeatStopsOnKeyUp(): Unit {
++    let repeat = KeyRepeat(delayMs: 400, intervalMs: 60)
++    repeat.observe(UiEvent.KeyDown(Key.Left, false), 0)
++    repeat.observe(UiEvent.KeyUp(Key.Left), 100)
++    @Expect(repeat.poll(1000).isNone()) // 抬起后永不再发
++}
++
++@Test
++func keyRepeatDefersWhenBackendProvidesRepeat(): Unit {
++    let repeat = KeyRepeat(delayMs: 400, intervalMs: 60)
++    repeat.observe(UiEvent.KeyDown(Key.Up, false), 0)
++    // 后端自带 repeat 事件：顺延到下一个周期，不与合成双发。
++    repeat.observe(UiEvent.KeyDown(Key.Up, true), 410)
++    @Expect(repeat.poll(411).isNone())
++    @Expect(repeat.poll(470).isSome())
++}
++
++@Test
++func keyRepeatCanBeDisabled(): Unit {
++    let repeat = KeyRepeat()
++    repeat.enable(false)
++    repeat.observe(UiEvent.KeyDown(Key.Down, false), 0)
++    @Expect(repeat.poll(10000).isNone())
++}
++
++private func isRight(key: Key): Bool {
++    match (key) {
++        case Key.Right => true
++        case _ => false
++    }
++}
+diff --git a/src/desktop/desktop_app.cj b/src/desktop/desktop_app.cj
+index 4e2574c..2aa902d 100644
+--- a/src/desktop/desktop_app.cj
++++ b/src/desktop/desktop_app.cj
+@@ -13,7 +13,7 @@ import lgui.system.AppMetadata
+ import lgui.system.ApplicationMetadata
+ import lgui.system.SdlHintSetting
+ import lgui.system.SdlHints
+-import cui.core.{CursorShape, StateStore, Theme, UiContext, Widget, buildRoot, currentStateGeneration, drawTooltip}
++import cui.core.{CursorShape, KeyRepeat, StateStore, Theme, UiContext, Widget, buildRoot, currentStateGeneration, drawTooltip}
+ 
+ // Long enough for the first paint to settle and for background work started at launch
+ // (dialog-free examples fetch data on worker threads) to land in the frame.
+@@ -27,6 +27,8 @@ public class DesktopApp {
+     private let window: SdlWindow
+     private let ctx: UiContext
+     private let frameDelay: UInt32
++    // 长按连发器：LWP/OHOS 后端不带 repeat 标志，由它补合成事件（core/key_repeat.cj）。
++    private let keyRepeat = KeyRepeat()
+     /**
+      * Called once per loop iteration on the UI thread, BEFORE the render decision,
+      * whether or not a frame ends up being drawn. Use it to pump background results
+@@ -371,6 +373,18 @@ public class DesktopApp {
+             preparePointer(event)
+             routeEvent(widget, event)
+             completePointer(event)
++            // 长按连发：记住按键状态（LWP 后端不带 repeat，见 core/key_repeat.cj）。
++            keyRepeat.observe(event, Int64(ctx.frame.elapsedMs))
++        }
++        // 到点则补一个 repeat=true 的 KeyDown，让"按住方向键连续翻页"在无原生 repeat 的后端也成立。
++        match (keyRepeat.poll(Int64(ctx.frame.elapsedMs))) {
++            case Some(key) =>
++                let repeatEvent = UiEvent.KeyDown(key, true)
++                preparePointer(repeatEvent)
++                routeEvent(widget, repeatEvent)
++                completePointer(repeatEvent)
++                ctx.requestFrameAfter(UInt64(KeyRepeat.DEFAULT_INTERVAL_MS))
++            case None => ()
+         }
+     }
+ 
+-- 
+2.47.3
+

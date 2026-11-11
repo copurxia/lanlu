@@ -27,7 +27,7 @@
 | C3 Tooltip 键盘即显 | ✅ | `tooltipShowsOnKeyboardFocusImmediately` |
 | C4 Menu / Shift+F10 | ✅ | `menuBarOpensWithMenuKeyShortcut`、`contextMenuOpensWithMenuKeyWhenFocusInside`、`contextMenuShiftF10NotInterceptedWithoutFocus`、`keyFromScancodeMapsLettersAndControls` |
 | D1 dock 键盘翻页 | 🟡 | 框架键位：`scrollViewPageKeysScrollByViewport`、`textAreaPageKeysConsumedOnlyWhileFocused`；dock 侧应用补丁 0003 需人工 |
-| D2 长按连发 | ⛔ | 未实现（需 L 层 `LWindowEvent.repeat` 贯通 ArkTS，见 03-app-wiring-plan.md E） |
+| D2 长按连发 | 🟡 | 框架：`keyRepeatFiresAfterDelayThenAtInterval`、`keyRepeatStopsOnKeyUp`、`keyRepeatDefersWhenBackendProvidesRepeat`、`keyRepeatCanBeDisabled`；真机节奏需人工 |
 | D3 html 页内翻滚 | ❌ | 应用侧 `readerHtmlPageTurn`，无自动化 |
 | E1 实心按钮按下/悬停 | ✅ | `primaryButtonPressDarkensFill`、`dangerButtonHoverBrightensFill` |
 | E2 开关/单选/复选/滑块悬停 | ✅ | `switchTrackTintsOnHover`、`checkboxBorderTintsOnHover`、`sliderKnobGrowsOnHover` |
@@ -45,9 +45,9 @@
 共 31 条（A8 / B6 / C4 / D3 / E6 / F4）：
 
 - 自动化兜底（✅）：**20** 条
-- 框架有覆盖、应用侧需人工（🟡）：**6** 条（A4、A5、A6、B1、D1、F3）
+- 框架有覆盖、应用侧需人工（🟡）：**7** 条（A4、A5、A6、B1、D1、D2、F3）
 - 仅人工（❌）：**4** 条（D3、F1、F2、F4）
-- 已知未实现（⛔）：**1** 条（D2 长按连发）
+- 已知未实现（⛔）：0 条
 
 > 结论：合并后真正需要人工盯的是**应用层接线**（回车、初始聚焦、自绘件布局）与**视觉/DPI/IME**，
 > 框架行为本身已被 60+ 个新用例覆盖。

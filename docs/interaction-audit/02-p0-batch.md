@@ -32,6 +32,7 @@
 | `8671b44` | P1 LazyRow 键盘横向滚动 + 焦点滚入视野（#7/#8 横排） |
 | `c62b524` | P1 开放 `registerFocusStop` / `reregisterFocusStop`（#2 第二个入口） |
 | `e5ee7f9` | P1 公开 `drawFocusRing`（应用自绘件画同一焦点环） |
+| `ebf79bd` | P1 框架级按键长按连发 `KeyRepeat`（#11/D2，无需改 L 层协议） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -136,7 +137,12 @@ lerp 0.18，滑块旋钮悬停放大；带悬停视觉的控件文件从 4 个�
 不仅进得了 Tab 环，还能画出与框架完全一致的焦点环（外扩 2px / 1.6px accent）。对应应用补丁
 [patches-app/0003](patches-app/README.md)（阅读器 dock 键盘翻页 + `Key.PageUp/PageDown` 去魔数）。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 450，PASSED 409（累计新增 63 例 + 改写 1 例全过），
+**第十八批（`ebf79bd`）**：框架级按键长按连发 `KeyRepeat`——OHOS 的 LWP 输入桥不带 repeat
+标志，桥接后 KeyDown 的 repeat 恒 false。现在外壳在派发完事件后合成连发（400ms 延迟 +
+60ms 间隔；后端自带 repeat 时顺延不双发），**无需改 L 层协议**。D2 从"未实现"变为"框架就绪、
+真机复验节奏"。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 454，PASSED 413（累计新增 67 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
