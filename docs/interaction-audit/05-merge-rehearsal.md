@@ -162,8 +162,11 @@ Summary: TOTAL: 450
 
 > 演练副本已清理（每个约 165M，脚本可随时重建）。
 >
-> **就绪心跳（滚动更新）**：2026-11-11 19:20——全量演练复验：**35 补丁零冲突 + 471/430 基线匹配**
+> **就绪心跳（滚动更新）**：2026-11-11 19:45——全量演练复验：**43 个补丁零冲突 + 479/438 基线匹配**
 > （对主仓最新 WIP 快照）。合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 执行。
+> 同时核对：`api-reference.md` §12 里列出的每个签名都与源码逐字一致（FocusTarget 构造、
+> registerFocusStop、drawFocusRing、KeyRepeat 默认值、selectionRange 两种形态、onSubmit、
+> groupRange、RichSpan.link）。
 > 合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 执行。
 > （历史：18:20 时点为 33 补丁 / 465·424；补丁序列与数字以此处为准。）
 
