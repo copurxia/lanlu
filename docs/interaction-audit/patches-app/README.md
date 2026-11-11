@@ -31,6 +31,11 @@ git apply docs/interaction-audit/patches-app/0001-*.patch
   `saveServer(String, String)`、`createTankAndAdd(String, ArrayList<String>)`、
   `submitTankAddSearch(model, cell, tankId, String)`）。
 
+**组合应用已实测**：三个补丁在干净基线上**按 0001→0002→0003 顺序连续 `git apply` 全部成功**，
+且三个补丁的改动标记（onSubmit / FocusTarget / registerFocusStop）在应用后全部就位——顺序应用
+没有 hunk 相互干扰。附注：补丁会把相关文件的 git mode 从 100755 规整为 100644（生成补丁时
+工作树的可执行位差异），仅是无害告警。
+
 **未验证**：整包 `cjpm build`。本机缺少 `cargo`（应用 `build.cj` 的 pre-build 需要构建
 fontkit 原生库），`--skip-script` 又会因依赖树里同时存在 `lcodec` 与演练副本而冲突；
 请在具备完整构建环境的机器上编译确认。
