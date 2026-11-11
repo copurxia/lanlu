@@ -39,12 +39,12 @@ public func readerView(model: AppModel): Unit {
                 model.noteReaderActivity()
                 model.readerKeyTurn(KeyCode.KeyDown)
                 true
-            // PgDn/PgUp（SDL scancode 78/75，Key 枚举未收录走 RawScancode）与空格：
-            // html 页页内翻滚；非 html 页不消费（方向键翻页不受影响）。
-            case UiEvent.KeyDown(Key.RawScancode(78), false) =>
+            // PgDn/PgUp 与空格：html 页页内翻滚；非 html 页不消费（方向键翻页不受影响）。
+            // Key.PageUp/PageDown 是框架分支新收进枚举的成员，不再写 scancode 魔数。
+            case UiEvent.KeyDown(Key.PageDown, false) =>
                 model.noteReaderActivity()
                 model.readerHtmlPageTurn(down: true)
-            case UiEvent.KeyDown(Key.RawScancode(75), false) =>
+            case UiEvent.KeyDown(Key.PageUp, false) =>
                 model.noteReaderActivity()
                 model.readerHtmlPageTurn(down: false)
             case UiEvent.KeyDown(Key.Space, false) =>
