@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:18:41 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E4=BD=BF=E7=94=A8=E6=8C=87=E5=8D=97?=
+ =?UTF-8?q?=E6=96=B0=E5=A2=9E=20=C2=A712=20=E9=94=AE=E7=9B=98=E4=B8=8E?=
+ =?UTF-8?q?=E6=97=A0=E9=9A=9C=E7=A2=8D=E6=80=BB=E8=A7=88?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+框架的键盘能力是逐控件实现的，此前没有任何一处把所有快捷键汇总给使用者。新增：
+- §12.1 全局与导航（Tab/Enter/Esc/Menu/F10/方向键/PgUp-PgDn/Home-End）
+- §12.2 文本编辑（Ctrl+A/C/X/V、Ctrl+Z/Y、Shift 扩选、Ctrl+方向按词、Ctrl+Backspace 删词、onSubmit）
+- §12.3 排列与区间（Alt+Up/Down 重排、Shift 区间选择、Table Shift+方向排序）
+- §12.4 长按连发（KeyRepeat 合成机制与双发规避）
+- §12.5 自绘控件接入键盘的两条路径（FocusTarget 包裹 / registerFocusStop 自登记）
+  + showFocusRing 与 hasFocus 的区别（用户最初那个问题的根因）
+
+文中列出的快捷键已逐条在源码中核对存在（PageUp/PageDown/Menu/Home/End、RawScancode(68)、
+altPressed、deleteWordBackward 均命中）。
+---
+ docs/user-guide.md | 68 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 68 insertions(+)
+
+diff --git a/docs/user-guide.md b/docs/user-guide.md
+index 0617c6b..5f06ec1 100644
+--- a/docs/user-guide.md
++++ b/docs/user-guide.md
+@@ -506,6 +506,74 @@ try/catch，把失败信息与成功结果走同一条回传通道，避免忙
+ cjpm run --run-args "--snapshot output.bmp"
+ ```
+ 
++
++## 12. 键盘与无障碍总览
++
++框架的键盘可达性是**逐控件**实现的；下表是现有全部快捷键的权威清单（应用层若自绘控件，
++按 §12.2 的接入方式补上同样能力）。
++
++### 12.1 全局与导航
++
++| 按键 | 行为 |
++|---|---|
++| `Tab` / `Shift+Tab` | 按构建序在焦点停靠点之间移动（弹窗/抽屉打开时被其内部焦点环接管）|
++| `Enter` / `Space` | 激活聚焦控件（按钮、卡片、图标钮、折叠头、树节点、链接等）|
++| `Esc` | 关闭弹层（弹窗/下拉/上下文菜单/抽屉）；阅读器等应用可另作他用 |
++| `Menu` 或 `Shift+F10` | 唤起当前区域的上下文菜单；`Menu`/`F10` 唤起菜单栏 |
++| `Left/Right/Up/Down` | 线性容器与列表导航、滑块/步进器调值、分栏调整、页签切换 |
++| `PageUp` / `PageDown` | 滚动容器翻页（`ScrollView`、`TextArea`、`LazyRow`）、阅读器页内翻滚 |
++| `Home` / `End` | 跳到列表首/末、滑块与步进器两端、滚动容器顶/底 |
++
++### 12.2 文本编辑
++
++| 按键 | 行为 |
++|---|---|
++| `Ctrl+A/C/X/V` | 全选 / 复制 / 剪切 / 粘贴 |
++| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
++| `Shift+方向键` | 扩展选区（跨行亦可用）|
++| `Ctrl+Left/Right` | 按词跳转（Shift 组合则按词扩展选区）|
++| `Ctrl+Backspace/Delete` | 删除左侧/右侧整词（词边界与双击选词同一套脚本分类）|
++| `Enter` | 有 `onSubmit` 的单行字段触发提交；多行区域插入换行 |
++
++### 12.3 排列与区间
++
++| 按键 | 行为 |
++|---|---|
++| `Alt+Up/Down` | `ReorderableList`：把持焦行上移/下移 |
++| `Shift+点击` / `Shift+方向键` | `ListView`/`Table`：区间选择（`selectionRange()` 查询）|
++| `Shift+Left/Right` + `Enter` | `Table`：切换排序列 / 翻转升降序 |
++
++### 12.4 长按连发
++
++无原生 repeat 的后端（OHOS 的 LWP 输入桥）由框架 `KeyRepeat` 合成：按住 400ms 后每 60ms
++补发一次 `repeat=true` 的 `KeyDown`；SDL 后端自带 repeat 时自动顺延不双发。因此"按住方向键
++连续翻页"在所有后端一致可用。
++
++### 12.5 自绘控件如何接入键盘
++
++```cangjie
++// 方式一：整块区域可点 → 包裹一层
++FocusTarget(onClick: {=> open()}, key: "card.1") { 自绘内容() }
++
++// 方式二：控件本身就是 Widget → 自己登记
++public init(...) {
++    registerFocusStop(id)   // Tab 可达
++    emit(this)
++}
++public func focusableId(): ?String { Some(id) }
++public func draw(ctx: UiContext): Unit {
++    自绘内容()
++    if (ctx.showFocusRing(id)) {   // 注意：showFocusRing，不是 hasFocus
++        drawFocusRing(ctx, frame, radius)
++    }
++}
++```
++
++焦点环只在**键盘到达**时绘制（`:focus-visible` 语义）；指针点击只改变激活态 chrome，不画环。
++这一约定由 `focus_ring_contract_test` 跨控件固定。
++
++## 13. 示例
++
+ `contacts`、`planner` 与 `data_board` 是新布局、状态和控件的综合端到端示例；`contacts` 把
+ `Table`、`ComboBox`、`Modal`、`ContextMenu` 组合成一个增删改查界面，`data_board` 额外演示了
+ `derive` 派生计数与 `ForEach` 列表身份。
+-- 
+2.47.3
+
