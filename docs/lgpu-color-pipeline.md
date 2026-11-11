@@ -74,19 +74,42 @@ blit shader 里做 sRGB→linear。等价于 B，且不要求交换链非 sRGB�
 也就是说：阴影、遮罩这类半透明层在线性空间混合后**普遍亮 20~64 级**，
 这正是"不透明色已经准了、但整体仍然发白"的原因。
 
-## 4.3 设备二分：崩溃与本方案无关（重要）
+## 4.3 设备二分：崩溃归属（两次实验，第二次有效）
 
-真机上用 `LANLU_LGPU_NOBLIT=1`（跳过离屏目标与 blit pass，直接画交换链）对照：
+**第一次（无效）**：用 `LANLU_LGPU_NOBLIT=1` 对照，两种模式都崩。
+但 ArkTS 侧 `--ps lanlu.env.*` 设置的环境变量**未必对 Rust 可见** —— 事后在 step log 里
+找不到 `noblit=` 打点，说明该开关很可能根本没生效，所以"两模式都崩"不能作为结论。**已撤回。**
 
-| 模式 | 结果 |
+**第二次（有效）**：把 `lib.rs` 换回并发会话的版本、`canvas.cj` 换回其版本
+（即**完全不含**本方案的任何改动），重新构建装机：
+
+| 变体 | 结果 |
 |---|---|
-| 正常（离屏 + blit） | `lgpu main surfaceId=…` 之后 `reason=Cpp Crash` |
-| `LANLU_LGPU_NOBLIT=1` | **同样在同一位置崩溃** |
+| 仅并发会话的重构（无本方案代码） | `reason=Cpp Crash`，同样崩溃 |
+| 本方案合并到该重构上 | 同样崩溃 |
 
-结论：崩溃发生在另一会话未完成的帧渲染重构里（`draw_recorded` / `layer_marks` /
-图集页延迟销毁），**与本色彩方案无关**。方案要真机验证，前提是那个重构先能跑。
+**结论**：崩溃出在那个**未提交的帧渲染重构**里，与本色彩方案无关。
 
-## 5. 现状
+## 4.4 崩溃定位（已缩到很窄）
+
+在 native 侧加了帧路径打点（写 `$HOME/lgpu_steps.txt`，`LANLU_PROBE_LGPU=1` 时启用）
+与 panic hook（写 `$HOME/lgpu_panic.txt`）：
+
+```
+28 frame_end:pass-begin      ← 每帧都到这一行
+27 frame_end:pre-submit
+27 frame_end:presented       ← 第 28 帧没有走到这里
+```
+
+- 崩溃发生在 **第 28 帧**、`begin_render_pass` 之后、`draw_recorded` 执行期间；
+- `lgpu_panic.txt` **没有生成** → 不是 Rust panic，而是原生段错误/abort
+  （最可能是 `draw_recorded` 里解引用的 `TexCtx` 指针已失效，或 wgpu 内部断言）；
+- 主 pass 的管线目标格式已改为与离屏目标一致（`SCREEN_FORMAT`），排除格式不匹配。
+
+下一步（需在并发会话停下后做）：在 `draw_recorded` 每次 draw 前校验 `tex_ptr` 是否仍在
+存活表里，或直接回滚 `pending_destroy` 的延迟销毁逻辑做对照。
+
+## 5. 现状## 5. 现状
 
 - 已修：不透明颜色逐字节正确（见上表）。
 - 未修：半透明混合仍在双线性空间 → 阴影/遮罩偏亮。需方案 C。
