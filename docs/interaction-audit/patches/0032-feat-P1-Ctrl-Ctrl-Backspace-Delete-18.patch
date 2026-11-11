@@ -1,0 +1,253 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 18:09:18 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20=E6=8C=89=E8=AF=8D=E7=BC=96?=
+ =?UTF-8?q?=E8=BE=91=E2=80=94=E2=80=94Ctrl+=E6=96=B9=E5=90=91=E9=94=AE?=
+ =?UTF-8?q?=E8=B7=B3=E8=AF=8D=E8=BE=B9=E7=95=8C=20/=20Ctrl+Backspace=C2=B7?=
+ =?UTF-8?q?Delete=20=E5=88=A0=E8=AF=8D=EF=BC=88#18=20=E6=94=B6=E5=B0=BE?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+词边界复用双击选词的同一套脚本分类（charClassAt：ASCII 单词/汉字/假名/谚文/空白/
+标点各自成词），TextEditState 新增 moveWordLeft/Right、extendWordLeft/Right、
+deleteWordBackward/Forward；TextField 聚焦时接 Ctrl+Left/Right（含 Shift 扩展）与
+Ctrl+Backspace/Delete。汉字连续串与双击选词同语义——整串算一个词。
+
+match 模式位不能调用函数（Keyboard.modifiers()），Ctrl 分支在各键 arm 内显式判断。
+
+测试：5 用例（跳空白停脚本边界、右移逐词落点、Ctrl+Backspace 删词且汉字整串语义、
+Ctrl+Delete、Shift+Ctrl 扩展选区）。测试需同时重置 cursor 与 anchor（构造后两者都在
+末尾，只动 cursor 会留下选区，走 selectionEnd 分支）。
+
+cjpm test：TOTAL 463 / PASSED 422，失败名册与基线一致，零回归。
+---
+ src/text/text_edit_state.cj | 104 ++++++++++++++++++++++++++++++++++++
+ src/text/text_field.cj      |  27 ++++++++--
+ src/text/word_edit_test.cj  |  60 +++++++++++++++++++++
+ 3 files changed, 187 insertions(+), 4 deletions(-)
+ create mode 100644 src/text/word_edit_test.cj
+
+diff --git a/src/text/text_edit_state.cj b/src/text/text_edit_state.cj
+index fa54e23..2e05bce 100644
+--- a/src/text/text_edit_state.cj
++++ b/src/text/text_edit_state.cj
+@@ -111,6 +111,110 @@ public class TextEditState {
+         }
+     }
+ 
++    /*
++     * 按词操作（缺口 #18 后半）：词边界由 charClassAt 的脚本分类决定——同一类连续字符构成
++     * 一个"词"（ASCII 单词、汉字、假名、谚文、空白、标点各自成词），与双击选词同一套语义。
++     */
++    public func moveWordLeft(): Unit {
++        let content = text.value
++        var pos = normalizedTextCursor(content, cursor.value)
++        if (hasSelection()) {
++            pos = selectionStart()
++            cursor.value = pos
++            anchor.value = pos
++        }
++        // 跳过紧邻的空白，再吃掉同一类的连续字符。
++        while (pos > 0 && charClassAt(content, pos - 1) == CHAR_CLASS_SPACE) {
++            pos = previousTextBoundary(content, pos)
++        }
++        if (pos > 0) {
++            let cls = charClassAt(content, pos - 1)
++            while (pos > 0 && charClassAt(content, pos - 1) == cls) {
++                pos = previousTextBoundary(content, pos)
++            }
++        }
++        cursor.value = pos
++        anchor.value = pos
++    }
++
++    public func moveWordRight(): Unit {
++        let content = text.value
++        var pos = normalizedTextCursor(content, cursor.value)
++        if (hasSelection()) {
++            pos = selectionEnd()
++        }
++        while (pos < content.size && charClassAt(content, pos) == CHAR_CLASS_SPACE) {
++            pos = nextTextBoundary(content, pos)
++        }
++        if (pos < content.size) {
++            let cls = charClassAt(content, pos)
++            while (pos < content.size && charClassAt(content, pos) == cls) {
++                pos = nextTextBoundary(content, pos)
++            }
++        }
++        cursor.value = pos
++        anchor.value = pos
++    }
++
++    /** 删除光标左侧的一个词（Ctrl+Backspace）。 */
++    public func deleteWordBackward(): Unit {
++        if (deleteSelection()) {
++            return
++        }
++        let end = normalizedTextCursor(text.value, cursor.value)
++        let before = cursor.value
++        moveWordLeft()
++        let start = cursor.value
++        if (start >= end) {
++            cursor.value = before
++            anchor.value = before
++            return
++        }
++        text.value = text.value[0..start] + text.value[end..text.value.size]
++        cursor.value = start
++        anchor.value = start
++    }
++
++    /** 删除光标右侧的一个词（Ctrl+Delete）。 */
++    /** Shift 扩展到左侧词边界（Ctrl+Shift+Left）。 */
++    public func extendWordLeft(): Unit {
++        let before = cursor.value
++        let hadSelection = hasSelection()
++        let anchorBefore = anchor.value
++        moveWordLeft()
++        if (!hadSelection) {
++            anchor.value = anchorBefore
++        }
++        if (cursor.value == before && !hadSelection) {
++            anchor.value = before
++        }
++    }
++
++    /** Shift 扩展到右侧词边界（Ctrl+Shift+Right）。 */
++    public func extendWordRight(): Unit {
++        let hadSelection = hasSelection()
++        let anchorBefore = anchor.value
++        moveWordRight()
++        if (!hadSelection) {
++            anchor.value = anchorBefore
++        }
++    }
++
++    public func deleteWordForward(): Unit {
++        if (deleteSelection()) {
++            return
++        }
++        let start = normalizedTextCursor(text.value, cursor.value)
++        moveWordRight()
++        let end = cursor.value
++        if (end <= start) {
++            return
++        }
++        text.value = text.value[0..start] + text.value[end..text.value.size]
++        cursor.value = start
++        anchor.value = start
++    }
++
+     /** Collapses any selection onto the caret. */
+     public func clearSelection(): Unit {
+         anchor.value = normalizedTextCursor(text.value, cursor.value)
+diff --git a/src/text/text_field.cj b/src/text/text_field.cj
+index 4b5d315..2b87a5f 100644
+--- a/src/text/text_field.cj
++++ b/src/text/text_field.cj
+@@ -235,10 +235,29 @@ public class TextField <: Widget {
+                     return true
+                 }
+             case UiEvent.TextInput(value) => return recordedEdit(ctx, {=> edit.insert(value)})
+-            case UiEvent.KeyDown(Key.Backspace, _) => return recordedEdit(ctx, {=> edit.backspace()})
+-            case UiEvent.KeyDown(Key.Delete, _) => return recordedEdit(ctx, {=> edit.deleteForward()})
+-            case UiEvent.KeyDown(Key.Left, _) => return navigate(ctx, {=> edit.moveLeft()}, {=> edit.extendLeft()})
+-            case UiEvent.KeyDown(Key.Right, _) => return navigate(ctx, {=> edit.moveRight()}, {=> edit.extendRight()})
++            // 按词编辑（缺口 #18 后半）：Ctrl+方向键跳词边界、Ctrl+Backspace/Delete 删词——
++            // 词边界与双击选词同一套脚本分类（ASCII 单词/汉字/假名/空白/标点各自成词）。
++            // （match 模式位不能调用函数，Ctrl 分支在普通分支前用 if 显式判断。）
++            case UiEvent.KeyDown(Key.Backspace, _) =>
++                if (Keyboard.modifiers().ctrl) {
++                    return recordedEdit(ctx, {=> edit.deleteWordBackward()})
++                }
++                return recordedEdit(ctx, {=> edit.backspace()})
++            case UiEvent.KeyDown(Key.Delete, _) =>
++                if (Keyboard.modifiers().ctrl) {
++                    return recordedEdit(ctx, {=> edit.deleteWordForward()})
++                }
++                return recordedEdit(ctx, {=> edit.deleteForward()})
++            case UiEvent.KeyDown(Key.Left, _) =>
++                if (Keyboard.modifiers().ctrl) {
++                    return navigate(ctx, {=> edit.moveWordLeft()}, {=> edit.extendWordLeft()})
++                }
++                return navigate(ctx, {=> edit.moveLeft()}, {=> edit.extendLeft()})
++            case UiEvent.KeyDown(Key.Right, _) =>
++                if (Keyboard.modifiers().ctrl) {
++                    return navigate(ctx, {=> edit.moveWordRight()}, {=> edit.extendWordRight()})
++                }
++                return navigate(ctx, {=> edit.moveRight()}, {=> edit.extendRight()})
+             case UiEvent.KeyDown(Key.Home, _) => return navigate(ctx, {=> edit.moveToStart()}, {=> edit.extendToStart()})
+             case UiEvent.KeyDown(Key.End, _) => return navigate(ctx, {=> edit.moveToEnd()}, {=> edit.extendToEnd()})
+             // 单行表单 Enter：有 onSubmit 时消费并提交；无回调时不插入换行、继续下传。
+diff --git a/src/text/word_edit_test.cj b/src/text/word_edit_test.cj
+new file mode 100644
+index 0000000..9ed05c6
+--- /dev/null
++++ b/src/text/word_edit_test.cj
+@@ -0,0 +1,60 @@
++package cui.text
++
++/* 按词编辑（缺口 #18 后半）：词边界与双击选词同一套脚本分类。 */
++@Test
++func wordMotionSkipsSpaceAndStopsAtScriptBoundary(): Unit {
++    let state = TextEditState("hello 世界！")
++    // 光标在末尾：moveWordLeft 应跳过紧邻空白回到「世界」的词首。
++    state.cursor.value = "hello 世界！".size
++    state.anchor.value = "hello 世界！".size
++    state.moveWordLeft()
++    @Expect(state.cursor.value, Int64("hello ".size))
++
++    // 再往左一次应落到 "hello" 的词首（跳过空白）。
++    state.moveWordLeft()
++    @Expect(state.cursor.value, Int64(0))
++}
++
++@Test
++func wordMotionRightLandsAfterEachWord(): Unit {
++    let state = TextEditState("hello 世界！")
++    // 构造后 cursor/anchor 都在末尾；先把 anchor 一起归零，避免"已有选区"分支把起点拉到 selectionEnd。
++    state.cursor.value = 0
++    state.anchor.value = 0
++    state.moveWordRight()
++    @Expect(state.cursor.value, Int64("hello".size)) // 停在 "hello" 词尾（空白前）
++    state.moveWordRight()
++    @Expect(state.cursor.value, Int64("hello 世界".size)) // 跳过空白，停在「界」后
++}
++
++@Test
++func deleteWordBackwardRemovesWholeCjkWord(): Unit {
++    let state = TextEditState("你好world")
++    state.cursor.value = "你好world".size
++    state.anchor.value = "你好world".size
++    state.deleteWordBackward()
++    @Expect(state.text.value, "你好") // Ctrl+Backspace 删掉 ASCII 词，汉字保留
++
++    // 汉字连续串是同一个"词"（与双击选词同语义）：再删一次整串删光，而不是逐字。
++    state.deleteWordBackward()
++    @Expect(state.text.value, "")
++}
++
++@Test
++func deleteWordForwardRemovesLeadingWord(): Unit {
++    let state = TextEditState("你好 world")
++    state.cursor.value = 0
++    state.anchor.value = 0
++    state.deleteWordForward()
++    @Expect(state.text.value, " world") // Ctrl+Delete 删掉「你好」，空白与后词保留
++}
++
++@Test
++func extendWordLeftGrowsSelectionByWord(): Unit {
++    let state = TextEditState("hello 世界")
++    state.cursor.value = "hello 世界".size
++    state.anchor.value = "hello 世界".size
++    state.extendWordLeft()
++    @Expect(state.selectionStart(), Int64("hello ".size))
++    @Expect(state.selectionEnd(), Int64("hello 世界".size)) // 选中的是「世界」
++}
+-- 
+2.47.3
+

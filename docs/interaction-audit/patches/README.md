@@ -1,6 +1,6 @@
 # p0-focus-visible 补丁序列（可直接 git am 落地）
 
-> 由 `git format-patch --zero-commit c39458f..HEAD` 生成，**31 个补丁 = 分支全部 31 个提交**。
+> 由 `git format-patch --zero-commit c39458f..HEAD` 生成，**32 个补丁 = 分支全部 32 个提交**。
 > 已校验：在 `c39458f` 的干净克隆上 `git am --3way patches/*.patch` 全部干净应用，
 > 重建出的 tree hash 与分支 tip **完全一致**（`b902e1a3dfe413252109cafd4d52f31e1c481c27`）。
 > 补丁文件名为 ASCII 截断（git 生成），提交标题在补丁内是标准 UTF-8 编码，`git am` 会正确还原。
@@ -48,6 +48,7 @@ git am --3way /path/to/lanlu/docs/interaction-audit/patches/000{1,2}-*.patch  # 
 | 0029 | 公开 `drawFocusRing`：应用自绘件画同一种焦点环 |
 | 0030 | 框架级按键长按连发 `KeyRepeat`（OHOS 无原生 repeat） |
 | 0031 | Picker/Stepper Home/End + Table 键盘排序（#20 收尾） |
+| 0032 | 按词编辑：Ctrl+跳词/删词（#18 收尾） |
 
 ## 已知冲突面
 
