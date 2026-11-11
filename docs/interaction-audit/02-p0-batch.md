@@ -36,6 +36,7 @@
 | `7e7de10` | P1 缺口 #20 收尾：Picker/Stepper Home/End + Table 键盘排序 |
 | `c117d4b` | P1 按词编辑：Ctrl+方向键跳词 / Ctrl+Backspace·Delete 删词（#18 收尾） |
 | `9327573` | P1 ListView Shift 区间选择（#9 收尾，**审计 20 类缺口全部落地**） |
+| `9c3c04e` | test 焦点指示色主题对比度下限守卫（F1 可自动化部分） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -156,7 +157,10 @@ Ctrl+Backspace/Delete 删词；词边界与双击选词同一套脚本分类，�
 `selectionRange()` 查询，不改 `Bindable<Int64>` 类型（零影响现有调用方）。**至此审计 20 类
 缺口全部落地**（含两项核实后判为不应做）。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 465，PASSED 424（累计新增 78 例 + 改写 1 例全过），
+**第二十二批（`9c3c04e`）**：焦点指示色的主题对比度下限守卫（F1 的可自动化部分）——
+accent 与 field/panel 的亮度差 ≥0.18、悬停态与空闲态 ≥0.02，双主题遍历；调色退化会被测试拦下。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 468，PASSED 427（累计新增 81 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用

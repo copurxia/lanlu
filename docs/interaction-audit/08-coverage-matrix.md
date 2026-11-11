@@ -35,7 +35,7 @@
 | E4 中文双击选词 | ✅ | `doubleClickCjkStopsAtPunctuation`、`doubleClickMixedScriptsStaySeparate`、`doubleClickFullwidthPunctuationSelectsItsRun`、`doubleClickAsciiWordUnchanged`、`doubleClickWhitespaceSelectsSpaceRun` |
 | E5 富文本链接 | ✅ | `richTextLinkClickRunsCallback`、`richTextMultipleLinksAreIndependent` |
 | E6 Slider/Radio 键盘 | ✅ | `sliderKeyboardStepsUpAndDown`、`sliderKeyboardHomeEndJumpToRangeEnds`、`sliderKeyboardClampsOutsideRange`、`radioButtonGroupArrowsMoveSelection`、`radioButtonArrowsNoopWithoutGroupRange` |
-| F1 深浅主题对照 | ❌ | 仅人工（配色无快照测试） |
+| F1 深浅主题对照 | 🟡 | 框架下限已自动化：`focusAccentStandsOutAgainstFieldInBothThemes`、`focusAccentStandsOutAgainstPanelInBothThemes`、`hoverFieldActiveDiffersFromIdleFieldInBothThemes`（亮度差下限守卫）；视觉风格仍人工 |
 | F2 高 DPI / 窗口尺寸 | ❌ | 仅人工 |
 | F3 输入法候选框位置 | 🟡 | 桌面：`focusedCaretReportsImeAnchorInBothBlinkPhases`（基线中为 ERROR，需真实渲染后端）；真机仍须人工 |
 | F4 重启后无残留焦点环 | ❌ | 仅人工 |
@@ -44,9 +44,9 @@
 
 共 31 条（A8 / B6 / C4 / D3 / E6 / F4）：
 
-- 自动化兜底（✅）：**20** 条
-- 框架有覆盖、应用侧需人工（🟡）：**7** 条（A4、A5、A6、B1、D1、D2、F3）
-- 仅人工（❌）：**4** 条（D3、F1、F2、F4）
+- 自动化兜底（✅）：**20** 条（另 F1 有亮度差下限守卫）
+- 框架有覆盖、应用侧需人工（🟡）：**8** 条（A4、A5、A6、B1、D1、D2、F1、F3）
+- 仅人工（❌）：**3** 条（D3、F2、F4）
 - 已知未实现（⛔）：0 条
 
 > 结论：合并后真正需要人工盯的是**应用层接线**（回车、初始聚焦、自绘件布局）与**视觉/DPI/IME**，

@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 18:29:22 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E7=84=A6=E7=82=B9=E6=8C=87?=
+ =?UTF-8?q?=E7=A4=BA=E8=89=B2=E7=9A=84=E4=B8=BB=E9=A2=98=E5=AF=B9=E6=AF=94?=
+ =?UTF-8?q?=E5=BA=A6=E4=B8=8B=E9=99=90=E5=AE=88=E5=8D=AB=EF=BC=88F1=20?=
+ =?UTF-8?q?=E7=9A=84=E5=8F=AF=E8=87=AA=E5=8A=A8=E5=8C=96=E9=83=A8=E5=88=86?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+覆盖矩阵里 F1（深浅主题对照）原为"仅人工"。本提交把它拆成可自动化的下限：
+两套主题下，accent（焦点环/激活边色）与 field、panel 的亮度差都必须 ≥ 0.18
+（WCAG 简化亮度式，约 46/255），悬停态 fieldActive 与 field 差 ≥ 0.02——低于
+下限即测试失败，防止未来调色把焦点指示调成"几乎看不见"。视觉风格仍留人工验收。
+
+测试：3 用例（accent/field、accent/panel、fieldActive/field，均双主题遍历）。
+cjpm test：TOTAL 468 / PASSED 427，失败名册与基线一致，零回归。
+---
+ src/core/theme_contrast_test.cj | 46 +++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+ create mode 100644 src/core/theme_contrast_test.cj
+
+diff --git a/src/core/theme_contrast_test.cj b/src/core/theme_contrast_test.cj
+new file mode 100644
+index 0000000..aefe3ca
+--- /dev/null
++++ b/src/core/theme_contrast_test.cj
+@@ -0,0 +1,46 @@
++package cui.core
++
++import std.math.abs
++import lgui.Color
++
++/*
++ * F1 的可自动化部分：焦点指示色（accent）在两套主题里都必须与字段底色拉开足够的
++ * 亮度差——否则焦点环/激活边在某个主题下几乎不可见（人工验收只兜视觉风格，这里兜下限）。
++ * 用相对亮度（WCAG 简化式）而非完整对比度公式：足够表达"看得见"的下限且不依赖文本度量。
++ */
++private func luminance(c: Color): Float64 {
++    (0.2126 * Float64(c.r) + 0.7152 * Float64(c.g) + 0.0722 * Float64(c.b)) / 255.0
++}
++
++private func luminanceGap(a: Color, b: Color): Float64 {
++    abs(luminance(a) - luminance(b))
++}
++
++@Test
++func focusAccentStandsOutAgainstFieldInBothThemes(): Unit {
++    // 焦点环/激活边画在 field 底上：亮度差至少 0.18（约 46/255），否则接近不可辨。
++    let themes = [("light", Theme.light()), ("dark", Theme.dark())]
++    for ((name, theme) in themes) {
++        let gap = luminanceGap(theme.accent, theme.field)
++        @Expect(gap >= 0.18)
++    }
++}
++
++@Test
++func focusAccentStandsOutAgainstPanelInBothThemes(): Unit {
++    let themes = [("light", Theme.light()), ("dark", Theme.dark())]
++    for ((name, theme) in themes) {
++        let gap = luminanceGap(theme.accent, theme.panel)
++        @Expect(gap >= 0.18)
++    }
++}
++
++@Test
++func hoverFieldActiveDiffersFromIdleFieldInBothThemes(): Unit {
++    // 悬停三态的可见性下限：fieldActive 与 field 也要拉开差距（悬停反馈能被察觉）。
++    let themes = [("light", Theme.light()), ("dark", Theme.dark())]
++    for ((name, theme) in themes) {
++        let gap = luminanceGap(theme.fieldActive, theme.field)
++        @Expect(gap >= 0.02)
++    }
++}
+\ No newline at end of file
+-- 
+2.47.3
+
