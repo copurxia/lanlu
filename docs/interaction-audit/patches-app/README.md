@@ -38,6 +38,13 @@ git apply docs/interaction-audit/patches-app/0001-*.patch
 没有 hunk 相互干扰。附注：补丁会把相关文件的 git mode 从 100755 规整为 100644（生成补丁时
 工作树的可执行位差异），仅是无害告警。
 
+**应用层补丁在"合并后 gui"上的应用已验证**（2026-11-11 19:05）：把主仓 WIP + 36 个 gui 补丁
+做成合并副本 `cangjie-gui-rehearse`，再把 client-next 副本的 `cui`/`lgui`/`lcodec` 指向它，
+三个补丁 `git apply` 全部成功、标记就位。**但完整编译仍无法在本机构造**：兄弟包
+（`lwindow` 等）的 `cjpm.toml` 硬编码了 `../cangjie-gui`，与演练副本形成同模块双路径冲突
+（cjpm 报 `modules with name 'lgui'/'lcodec' are conflicted`）——也就是说**编译验证必须等真实合并**，
+无法用副本旁路。
+
 **未验证**：整包 `cjpm build`。本机缺少 `cargo`（应用 `build.cj` 的 pre-build 需要构建
 fontkit 原生库），`--skip-script` 又会因依赖树里同时存在 `lcodec` 与演练副本而冲突；
 请在具备完整构建环境的机器上编译确认。
