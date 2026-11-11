@@ -10,7 +10,7 @@
 |---|---|---|
 | A1 点进输入框激活边 | ✅ | `pointerFocusPaintsActiveFieldChrome`、`unfocusedFieldKeepsIdleChrome`、`textAreaSharesTheSameActivationPolicy` |
 | A2 字段悬停三态 | ✅ | `fieldSurfaceHasDistinctHoverState`、`textFieldHoverIdMatchesFieldId` |
-| A3 Tab 外环 / 鼠标不画外环 | ✅ | `keyboardFocusAddsRingOnTopOfActiveChrome`、`drawFocusRingPaintsAccentHaloOutsideBounds` |
+| A3 Tab 外环 / 鼠标不画外环 | ✅ | `keyboardFocusAddsRingOnTopOfActiveChrome`、`drawFocusRingPaintsAccentHaloOutsideBounds`、`focusRingIsKeyboardOnlyAcrossControlFamilies`、`focusRingFollowsFocusIdentityNotPresence`、`clearingFocusRemovesRing` |
 | A4 回车提交（登录） | 🟡 | 框架：`textFieldEnterCallsSubmitWhenFocused`、`textFieldEnterWithoutSubmitPreservesNoop`；应用接线需人工 |
 | A5 回车提交（弹窗/合集） | 🟡 | 同上（应用补丁 0001 未在完整环境编译验证） |
 | A6 打开即聚焦 | 🟡 | 框架：`modalOpenFocusesFirstStop`、`autofocusClaimsFocusOnceOnFirstFrame`；应用各处需人工 |

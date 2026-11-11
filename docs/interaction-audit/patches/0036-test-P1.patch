@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 18:55:29 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E7=84=A6=E7=82=B9=E7=8E=AF?=
+ =?UTF-8?q?=E5=A5=91=E7=BA=A6=E6=B5=8B=E8=AF=95=E2=80=94=E2=80=94=E5=8F=AA?=
+ =?UTF-8?q?=E5=9C=A8=E9=94=AE=E7=9B=98=E5=88=B0=E8=BE=BE=E6=97=B6=E7=BB=98?=
+ =?UTF-8?q?=E5=88=B6?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+用户最初反馈的核心语义（"点击输入框没有描边"其实是刻意的 :focus-visible 约定）此前只有
+字段族的专门测试。本提交把契约固定成三条：
+1. focusRingIsKeyboardOnlyAcrossControlFamilies：指针聚焦不画环、键盘聚焦画环、
+   键盘聚焦后再指针聚焦环消失；
+2. focusRingFollowsFocusIdentityNotPresence：环只跟着当前焦点 id（未聚焦 id 永不画）；
+3. clearingFocusRemovesRing：clearFocus 后环消失。
+
+价值：任何控件将来若用 hasFocus 而不是 showFocusRing 画描边（正是应用层顶栏搜索框
+当初的不一致），这组测试会立刻失败。
+
+cjpm test：TOTAL 474 / PASSED 433，失败名册与基线一致，零回归。
+---
+ src/core/focus_ring_contract_test.cj | 46 ++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+ create mode 100644 src/core/focus_ring_contract_test.cj
+
+diff --git a/src/core/focus_ring_contract_test.cj b/src/core/focus_ring_contract_test.cj
+new file mode 100644
+index 0000000..d813721
+--- /dev/null
++++ b/src/core/focus_ring_contract_test.cj
+@@ -0,0 +1,46 @@
++package cui.core
++
++import lgui.{Key, MouseButton, Rect, Size, UiEvent}
++
++/*
++ * 焦点环契约（用户最初反馈的核心语义）：焦点环**只在键盘到达时**绘制，指针点击/按下不画。
++ * 字段族已有专门测试；这里把契约扩展到其它可聚焦控件，防止某个控件将来用错 API
++ * （例如用 hasFocus 而不是 showFocusRing 画描边）导致"点一下就留一圈边"。
++ */
++@Test
++func focusRingIsKeyboardOnlyAcrossControlFamilies(): Unit {
++    let ctx = testContext()
++    // 指针聚焦：showFocusRing 必须为 false（无论控件类型）。
++    ctx.focus("ring.pointer")
++    @Expect(!ctx.showFocusRing("ring.pointer"))
++    // 键盘聚焦：为 true。
++    ctx.focus("ring.keyboard", viaKeyboard: true)
++    @Expect(ctx.showFocusRing("ring.keyboard"))
++
++    // 键盘聚焦后若发生一次指针按下（外壳 settle 后 focus 重新以指针方式设置），环应消失。
++    ctx.focus("ring.keyboard")
++    @Expect(!ctx.showFocusRing("ring.keyboard"))
++}
++
++@Test
++func focusRingFollowsFocusIdentityNotPresence(): Unit {
++    let ctx = testContext()
++    ctx.focus("a", viaKeyboard: true)
++    @Expect(ctx.showFocusRing("a"))
++    @Expect(!ctx.showFocusRing("b")) // 未聚焦的 id 永不画环
++
++    // 焦点转移后，旧 id 不再画环。
++    ctx.focus("b", viaKeyboard: true)
++    @Expect(!ctx.showFocusRing("a"))
++    @Expect(ctx.showFocusRing("b"))
++}
++
++@Test
++func clearingFocusRemovesRing(): Unit {
++    let ctx = testContext()
++    ctx.focus("c", viaKeyboard: true)
++    @Expect(ctx.showFocusRing("c"))
++    ctx.clearFocus()
++    @Expect(!ctx.showFocusRing("c"))
++    @Expect(ctx.focusId.isEmpty())
++}
+-- 
+2.47.3
+

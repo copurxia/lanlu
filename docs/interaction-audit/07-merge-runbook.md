@@ -59,14 +59,14 @@ tools/verify-cui-interactions.sh
 期望结尾：
 
 ```
-Summary: TOTAL: 471
-    PASSED: 430, SKIPPED: 0, ERROR: 40
+Summary: TOTAL: 474
+    PASSED: 433, SKIPPED: 0, ERROR: 40
     FAILED: 1
 == 基线匹配：失败名册与 headless 基线完全一致
 ```
 
 本节已按原文**逐字实跑验证**（2026-11-11，含对方 WIP 快照的演练副本）：步骤 0/1B/2/4 全部
-按文档产出预期结果；步骤 3 在补上 `CANGJIE_STDX_PATH` 后输出 471/430 与基线匹配。
+按文档产出预期结果；步骤 3 在补上 `CANGJIE_STDX_PATH` 后输出 474/433 与基线匹配。
 若打出 diff：对比 [test-baseline-names.txt](test-baseline-names.txt)，
 新增失败即回归；消失的失败通常是环境变化（例如某个 headless 用例碰巧通过），也要留意。
 
