@@ -167,6 +167,14 @@ Summary: TOTAL: 450
 > 同时核对：`api-reference.md` §12 里列出的每个签名都与源码逐字一致（FocusTarget 构造、
 > registerFocusStop、drawFocusRing、KeyRepeat 默认值、selectionRange 两种形态、onSubmit、
 > groupRange、RichSpan.link）。
+>
+> **阻塞现状（19:25 实测时间戳）**：`packages/cangjie-gui` 的 11 个未提交文件里，最新改动停在
+> **16:26**（`cjpm.toml`/`bench`/`examples` 三处链接配置），其余更早（06:00–14:10）——即对方的
+> gui 层改动已**停笔约 3 小时**；但父仓库仍有活跃改动（`client-next/src/main.cj`、ArkTS
+> `Index.ets`、rocksdb 原生库，最近 19:20）。判断：gui 改动是同一迁移的一部分、被暂时搁置，
+> 不是放弃。
+> 落地入口已备好：`tools/land-focus-interactions.sh`（脏树自检 → 合并 → 补 link-option →
+> 跑测试 → cherry-pick 应用层），`--check` 现在会明确报出 "11 个未提交文件" 并拒绝执行。
 > 合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 执行。
 > （历史：18:20 时点为 33 补丁 / 465·424；补丁序列与数字以此处为准。）
 
