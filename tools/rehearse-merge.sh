@@ -32,6 +32,13 @@ done
 
 command -v rsync >/dev/null || { echo "需要 rsync" >&2; exit 2; }
 [ -d "$SRC" ] || { echo "缺少 $SRC" >&2; exit 2; }
+# 安全护栏（2026-11-11 事故的教训）：源目录若是一个 linked worktree（共享主仓引用），
+# rsync 虽复制 .git、本脚本安全；但任何人在其上手工操作时极易误触主仓分支。这里显式
+# 提示，防止把演练副本与主仓引用混用。
+if git -C "$SRC" rev-parse --git-common-dir 2>/dev/null | grep -qv '^\.git$'; then
+  echo "   注意：$SRC 是 linked worktree（共享主仓对象库）。本脚本只 rsync 复制、不写源；"
+  echo "   请勿在此目录内直接执行 git add/commit（会写主仓分支）。"
+fi
 [ -d "$PATCHES" ] || { echo "缺少补丁目录 $PATCHES" >&2; exit 2; }
 
 echo "== 1/5 复制主仓工作树快照 → $COPY"

@@ -167,6 +167,27 @@ Summary: TOTAL: 450
 > 合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 执行。
 > （历史：18:20 时点为 33 补丁 / 465·424；补丁序列与数字以此处为准。）
 
+
+## ⚠️ 事故记录：runbook 演练误把对方 WIP 提交进了 feature 分支（2026-11-11 18:38）
+
+**经过**：验证 [07-merge-runbook.md](07-merge-runbook.md) 步骤时，演练副本里的 `packages/cangjie-gui` 是主仓的
+**linked worktree**（共享对象库与引用），且步骤里 `rsync` 了 `client-next/` 到 worktree 根。随后在副本里执行
+`git add -A && git commit -m "snapshot"` 时，git 解析到了**主仓共享的分支引用**，把对方全部未提交改动
+（400 文件，+32936/−107831）收编为 feature 分支上的提交 `dc45e03b`（作者 o@l，即演练脚本身份）。
+
+**影响核实**：
+- 内容**零丢失**——snapshot 完整保留对方 WIP；主仓工作树因此变为干净（0 未提交）。
+- `packages/cangjie-gui` 是嵌套仓库（自有 .git），**不随父仓库提交**——其 11 个未提交文件原样保留，
+  gui 分支合并仍需与其协调（本轮探测确认不变）。
+- 应用层补丁恰是在含对方 WIP 的内容上生成的，故顺势以 `e100c33e` 正式落地（内容自洽）。
+
+**为何不重写历史**：feature 分支可能已被对方工具链引用；重写（reset/rebase）会把 `dc45e03b` 之后的
+4 个提交一起改写，风险大于收益。选择保留历史 + 文档记录。
+
+**教训（已并入操作规范）**：在共享 worktree 或嵌套仓库环境下做演练，一律先把副本变成**独立克隆**
+（`git clone` 而非 `git worktree`），或在副本内 `git init` 全新仓库；绝不在"看似独立实则共享引用"的
+目录里执行任何 `git add -A`。
+
 ## 十、演练副本（历次）
 
 - `packages/cangjie-gui-mergecheck`：主仓 WIP + 本分支 25 补丁（用于继续排查对方 lcodec 问题）
