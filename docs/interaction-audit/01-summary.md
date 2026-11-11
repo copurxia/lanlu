@@ -86,6 +86,8 @@
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
 > 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行（A/B 两批已做成补丁：
 > [patches-app/](patches-app/README.md)，合并后 `git apply` 即可）；
+> 合并操作照 [07-merge-runbook.md](07-merge-runbook.md)（单页：命令、预期输出、失败处理），
+> 验收照 [06-acceptance-checklist.md](06-acceptance-checklist.md)（分 A–F 六组可勾选）；
 > 合并评审看 [04-pr-description.md](04-pr-description.md)，合并演练结果见
 > [05-merge-rehearsal.md](05-merge-rehearsal.md)（25 补丁零冲突；合并后副本跑测试 **444/403 全绿**，
 > 唯一适配项已提前预置 → 落地零手工改动）。

@@ -141,6 +141,8 @@ grep -rn "hasFocus(" src | grep -v _test      # 均为行为门控，无绘制�
 
 > 验收建议顺序：先按 §三 跑一次 `tools/verify-cui-interactions.sh`（应有 450/409 与基线匹配），
 > 再按 §六 应用层补丁顺序落地，最后真机逐条对照本表。
+> 逐条勾选版见 [06-acceptance-checklist.md](06-acceptance-checklist.md)；落地步骤见
+> [07-merge-runbook.md](07-merge-runbook.md)。
 
 ## 八、回滚策略
 
