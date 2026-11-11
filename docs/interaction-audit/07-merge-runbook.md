@@ -84,7 +84,8 @@ git apply docs/interaction-audit/patches-app/0003-*.patch
 
 ## 5. 真机/桌面验收
 
-按 [06-acceptance-checklist.md](06-acceptance-checklist.md) 逐条勾选；重点：
+按 [06-acceptance-checklist.md](06-acceptance-checklist.md) 逐条勾选（哪条能靠测试兜底见
+[08-coverage-matrix.md](08-coverage-matrix.md)）；重点：
 
 1. A1/A3（点进输入框、Tab 外环）——用户最初反馈的问题；
 2. B1/B2（自绘卡片可 Tab、Enter 激活）——改动面最大的部分；
