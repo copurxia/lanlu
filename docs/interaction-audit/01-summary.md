@@ -70,7 +70,7 @@
 
 > **进度 2026-11-11（十一轮）**：**P0 与框架侧审计缺口全部完成**（20 类缺口中框架可独立
 > 落地的均已落地），应用层接线清单已备好——分支 `p0-focus-visible`
-> （工作树 `packages/cangjie-gui-p0`，32 个提交，最新 `c117d4b`）：
+> （工作树 `packages/cangjie-gui-p0`，33 个提交，最新 `9327573`）：
 > 字段族点击聚焦可见 + 键盘外环；Pagination/Breadcrumb/StepIndicator/WordCloud 键盘化（四个
 > 漏登记控件全部收尾）；Slider 焦点可见性 + Up/Down/Home/End；Modal 打开即聚焦/关闭恢复
 > 焦点（Drawer 仅恢复）；`Key` 枚举补 PageUp/PageDown/Menu；ScrollView 与 TextArea 键盘滚动
@@ -82,8 +82,9 @@
 > RichText 可点击链接片段；开关/单选/复选/滑块悬停反馈；LazyRow 键盘横向滚动；
 > 开放 `registerFocusStop` 与 `drawFocusRing`（应用层自绘件既能进 Tab 环、也能画同一焦点环）；
 > 框架级按键长按连发 `KeyRepeat`（OHOS 无原生 repeat 也能连发）；Picker/Stepper
-> Home/End 与 Table 键盘排序（#20 收尾）；按词编辑 Ctrl+跳词/删词（#18 收尾）。
-> 本机桩库测试 463 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
+> Home/End 与 Table 键盘排序（#20 收尾）；按词编辑 Ctrl+跳词/删词（#18 收尾）；
+> ListView Shift 区间选择（#9 收尾）——**20 类缺口全部落地**。
+> 本机桩库测试 465 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
 > （失败名册自动 diff，见 [test-baseline-names.txt](test-baseline-names.txt)）；
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
 > 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行（A/B 两批已做成补丁：

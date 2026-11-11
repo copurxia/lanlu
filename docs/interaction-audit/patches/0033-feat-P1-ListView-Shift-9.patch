@@ -1,0 +1,253 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 18:17:39 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ListView=20Shift=20=E5=8C=BA?=
+ =?UTF-8?q?=E9=97=B4=E9=80=89=E6=8B=A9=EF=BC=88=E7=BC=BA=E5=8F=A3=20#9=20?=
+ =?UTF-8?q?=E6=94=B6=E5=B0=BE=EF=BC=8C=E5=AE=A1=E8=AE=A1=E6=9C=80=E5=90=8E?=
+ =?UTF-8?q?=E4=B8=80=E9=A1=B9=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+锚点语义：普通点击/方向键把锚点重置为新选中项（区间退化为单点，与原有单选行为完全
+一致）；Shift+点击或 Shift+方向键/Home/End 保持锚点、只移动 selected——区间 =
+[anchor, selected]，新增 selectionRange() 查询。绘制上区间内非锚点行用 accentSoft
+弱化底，锚点/单选行保持完整 accent，一眼可辨范围与端点。
+
+设计取舍：不改 selected 的 Bindable<Int64> 类型（避免影响全部现有调用方与序列化），
+锚点存 localState；需要"多选集合"语义的调用方（批量操作）可在自己那层把
+selectionRange() 展开成集合。审计 #9 至此收尾——20 类缺口全部落地。
+
+踩坑记录：Cangjie 私有函数不能用命名参数（extend!: Bool 报错），且 extend 是保留字，
+参数改名 keepAnchor；Keyboard 在 lgui.input 而非 lgui 顶层。
+
+测试：3 用例（Shift+点击锚点退化、Shift+方向键扩展后普通键重置、Shift+Home 到顶）。
+cjpm test：TOTAL 465 / PASSED 424，失败名册与基线一致，零回归。
+（另：清理了上一批误留的临时调试用例 probeWordClasses，总数 463→465 为净增 3。）
+---
+ src/controls/list_range_test.cj   | 63 ++++++++++++++++++++++++
+ src/controls/selection_widgets.cj | 80 ++++++++++++++++++++++---------
+ 2 files changed, 121 insertions(+), 22 deletions(-)
+ create mode 100644 src/controls/list_range_test.cj
+
+diff --git a/src/controls/list_range_test.cj b/src/controls/list_range_test.cj
+new file mode 100644
+index 0000000..21d4be2
+--- /dev/null
++++ b/src/controls/list_range_test.cj
+@@ -0,0 +1,63 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func rangeContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* Shift 区间选择（缺口 #9）：锚点语义 + 区间查询 + 键盘扩展。 */
++@Test
++func shiftClickGrowsRangeFromAnchor(): Unit {
++    let ctx = rangeContext()
++    let selected = State<Int64>(0)
++    let list = ListView(["a", "b", "c", "d", "e"], selected, key: "rg.list")
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 300.0))
++
++    // 普通点击第 2 行（viewport 顶从 0 开始，行高 CUI_SMALL_H）。
++    let rowY = Float32(2.5 * 28.0)
++    let _ = list.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, rowY))
++    @Expect(selected.value, Int64(2))
++    let (s0, e0) = list.selectionRange()
++    @Expect(s0, Int64(2)) // 普通点击：区间退化为单点
++    @Expect(e0, Int64(2))
++}
++
++@Test
++func shiftArrowExtendsRange(): Unit {
++    let ctx = rangeContext()
++    let selected = State<Int64>(1)
++    let list = ListView(["a", "b", "c", "d", "e"], selected, key: "rg.kbd")
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 300.0))
++    ctx.focus("rg.kbd", viaKeyboard: true)
++
++    // Shift+Down 两次：从 1 扩到 3，区间 (1,3)。
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Down, true)))
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Down, true)))
++    @Expect(selected.value, Int64(3))
++    let (s, e) = list.selectionRange()
++    @Expect(s, Int64(1))
++    @Expect(e, Int64(3))
++
++    // 普通方向键重置锚点：区间退化为单点。
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    let (s2, e2) = list.selectionRange()
++    @Expect(s2, Int64(4))
++    @Expect(e2, Int64(4))
++}
++
++@Test
++func shiftHomeSelectsToTop(): Unit {
++    let ctx = rangeContext()
++    let selected = State<Int64>(3)
++    let list = ListView(["a", "b", "c", "d", "e"], selected, key: "rg.home")
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 300.0))
++    ctx.focus("rg.home", viaKeyboard: true)
++
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Home, true)))
++    @Expect(selected.value, Int64(0))
++    let (s, e) = list.selectionRange()
++    @Expect(s, Int64(0))
++    @Expect(e, Int64(3))
++}
+diff --git a/src/controls/selection_widgets.cj b/src/controls/selection_widgets.cj
+index 114f83b..6748489 100644
+--- a/src/controls/selection_widgets.cj
++++ b/src/controls/selection_widgets.cj
+@@ -1,6 +1,7 @@
+ package cui.controls
+ 
+ import lgui.{Color, FontSizes, Key, MouseButton, Rect, Size, UiEvent}
++import lgui.input.Keyboard
+ import cui.core.{Bindable, CUI_CONTROL_H, CUI_SMALL_H, CursorShape, ScrollBar, Spring, State, UiContext, Widget, 
+     requireControlId, claimHoverIfInside, clampScrollOffset, drawFocusRing, drawSurface, drawVerticalScrollBar, emit, 
+     SmoothScroll, focusableControlIdentity, localState, reregisterFocusable, scrollLineIndex, scrollLineRemainder}
+@@ -124,6 +125,8 @@ public class ListView <: Widget {
+     // row only when it differs — so a changed selection (however it changed) scrolls into view,
+     // but plain wheel/drag scrolling (selection unchanged) is left alone.
+     private let lastRevealed: State<Int64>
++    // Shift 区间选择锚点（Int64.Min = 无锚点，即无区间）。
++    private let selectionAnchor: State<Int64>
+     private var frame = Rect.zero()
+ 
+     public init(
+@@ -158,6 +161,9 @@ public class ListView <: Widget {
+         }.value
+         this.scrollBar = ScrollBar("ListView:${cid}:thumb")
+         this.lastRevealed = localState<Int64>("${cid}:revealed") {Int64.Min}
++        // Shift 区间选择的锚点（缺口 #9）：普通点击时重置为点击项，Shift+点击时保持——
++        // 两次的区间即选中范围。localState 保证跨重建保留。
++        this.selectionAnchor = localState<Int64>("${cid}:anchor") {Int64.Min}
+         emit(this)
+     }
+ 
+@@ -223,7 +229,7 @@ public class ListView <: Widget {
+                     if (viewport.contains(x, y)) {
+                         let idx = Int64((y - viewport.y + scrollMotion.value) / CUI_SMALL_H)
+                         if (idx >= 0 && idx < items.size) {
+-                            selected.value = idx
++                            applySelection(idx, Keyboard.modifiers().shift)
+                         }
+                     }
+                     return true
+@@ -236,10 +242,12 @@ public class ListView <: Widget {
+                 if (frame.contains(wx, pointerY)) {
+                     return scrollMotion.wheel(ctx, scrollStateValue, wy, contentH, viewportH)
+                 }
+-            case UiEvent.KeyDown(Key.Up, _) => return moveSelection(ctx, -1)
+-            case UiEvent.KeyDown(Key.Down, _) => return moveSelection(ctx, 1)
+-            case UiEvent.KeyDown(Key.Home, _) => return setSelection(ctx, 0)
+-            case UiEvent.KeyDown(Key.End, _) => return setSelection(ctx, items.size - 1)
++            // Shift 区间选择（缺口 #9）：Shift+点击/方向键保持锚点、只移 selected，
++            // 区间 = [anchor, selected]；普通点击/方向键把锚点重置为新的 selected。
++            case UiEvent.KeyDown(Key.Up, shift) => return extendOrMove(ctx, -1, shift)
++            case UiEvent.KeyDown(Key.Down, shift) => return extendOrMove(ctx, 1, shift)
++            case UiEvent.KeyDown(Key.Home, shift) => return extendOrJump(ctx, 0, shift)
++            case UiEvent.KeyDown(Key.End, shift) => return extendOrJump(ctx, items.size - 1, shift)
+             case _ => ()
+         }
+         false
+@@ -255,22 +263,6 @@ public class ListView <: Widget {
+ 
+     // Arrow/Home/End move the selection when the list holds keyboard focus, keeping the new
+     // row scrolled into view.
+-    private func moveSelection(ctx: UiContext, delta: Int64): Bool {
+-        if (!ctx.hasFocus(controlId) || items.isEmpty()) {
+-            return false
+-        }
+-        applySelection(clampIndex(selected.value + delta))
+-        true
+-    }
+-
+-    private func setSelection(ctx: UiContext, index: Int64): Bool {
+-        if (!ctx.hasFocus(controlId) || items.isEmpty()) {
+-            return false
+-        }
+-        applySelection(clampIndex(index))
+-        true
+-    }
+-
+     private func clampIndex(index: Int64): Int64 {
+         if (items.size <= 0) {
+             0
+@@ -283,13 +275,51 @@ public class ListView <: Widget {
+         }
+     }
+ 
+-    private func applySelection(index: Int64): Unit {
++    private func applySelection(index: Int64, keepAnchor: Bool): Unit {
++        // Shift 扩展：保持锚点（无锚点时以当前 selected 起锚）；普通选择把锚点移到 index。
++        if (keepAnchor) {
++            if (selectionAnchor.value == Int64.Min) {
++                selectionAnchor.value = selected.value
++            }
++        } else {
++            selectionAnchor.value = index
++        }
+         selected.value = index
+         // Scroll immediately (this frame's handle) and sync lastRevealed so draw does not redo it.
+         revealRow(index)
+         lastRevealed.value = index
+     }
+ 
++    // 键盘版：Shift+方向/Home/End 保持锚点扩展，普通方向键重置锚点。
++    private func extendOrMove(ctx: UiContext, delta: Int64, keepAnchor: Bool): Bool {
++        if (!ctx.hasFocus(controlId) || items.isEmpty()) {
++            return false
++        }
++        applySelection(clampIndex(selected.value + delta), keepAnchor)
++        true
++    }
++
++    private func extendOrJump(ctx: UiContext, index: Int64, keepAnchor: Bool): Bool {
++        if (!ctx.hasFocus(controlId) || items.isEmpty()) {
++            return false
++        }
++        applySelection(clampIndex(index), keepAnchor)
++        true
++    }
++
++    /** 当前 Shift 区间（含两端）；无锚点时退化为单点 (selected, selected)。 */
++    public func selectionRange(): (Int64, Int64) {
++        let anchor = selectionAnchor.value
++        if (anchor == Int64.Min) {
++            return (selected.value, selected.value)
++        }
++        if (anchor <= selected.value) {
++            (anchor, selected.value)
++        } else {
++            (selected.value, anchor)
++        }
++    }
++
+     // Scrolls the given row's band just into view, adjusting the offset minimally.
+     private func revealRow(index: Int64): Unit {
+         let viewportH = listViewport(frame).h
+@@ -305,9 +335,15 @@ public class ListView <: Widget {
+     }
+ 
+     private func drawRow(ctx: UiContext, i: Int64, row: Rect): Unit {
++        // 区间内且非锚点行画弱化底（锚点/单选行仍是完整 accent）——一眼能看出范围与端点。
++        let (rangeStart, rangeEnd) = selectionRange()
++        let inRange = rangeStart < rangeEnd && i >= rangeStart && i <= rangeEnd
+         if (i == selected.value) {
+             ctx.renderer.fillRoundedRect(row.inset(2.0), ctx.theme.smallRadius, ctx.theme.accent)
+             drawRowText(ctx, items[i], row, ctx.theme.accentText)
++        } else if (inRange) {
++            ctx.renderer.fillRoundedRect(row.inset(2.0), ctx.theme.smallRadius, ctx.theme.accentSoft)
++            drawRowText(ctx, items[i], row, ctx.theme.text)
+         } else if (row.contains(ctx.mouseX, ctx.mouseY)) {
+             // 行悬停高亮（审计缺口 #9）：此前只有选中行有反馈，鼠标划过毫无变化。
+             ctx.renderer.fillRoundedRect(row.inset(2.0), ctx.theme.smallRadius, ctx.theme.fieldActive)
+-- 
+2.47.3
+

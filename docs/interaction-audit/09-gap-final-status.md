@@ -15,7 +15,7 @@
 | 6 | Pagination/StepIndicator/Breadcrumb/WordCloud 不可聚焦 | ✅ | `9fe49b3` + `1db7709`；`pagination*`/`breadcrumb*`/`stepIndicator*`/`wordCloud*` 10 例 |
 | 7 | 无键盘滚动 / PageUp·PageDown | ✅ | `37573de` Key 枚举 + ScrollView；`54c5092` TextArea 翻页；`8671b44` LazyRow；`scrollView*`/`textAreaPageKeys*` 5 例 |
 | 8 | 焦点不滚入视野 | ✅ | `d509011` + `7b20493` + `8671b44`：矩形上报 + ScrollView/LazyColumn/LazyRow 最小滚动；6 例 |
-| 9 | 行无 hover 高亮（含 Shift 区间选择） | 🔶 | `16d164b` 行 hover（ListView/Table）；**Shift 区间选择未做**（需选择模型扩展，建议独立任务） |
+| 9 | 行无 hover 高亮（含 Shift 区间选择） | ✅ | `16d164b` 行 hover（ListView/Table）；`9327573` ListView Shift 区间选择（锚点 + `selectionRange()`，不改 `Bindable<Int64>` 类型） |
 | 10 | 悬停视觉普遍缺失 | ✅ | `8b1c3c6` 字段族三态、`bba0ef6` 开关/单选/复选/滑块、`16d164b` 行 hover；带悬停视觉的控件文件 4→11 |
 | 11 | 按下态缺失 + 长按不连发 | ✅ | `8f44d11` 实心按钮按下/悬停；`ebf79bd` `KeyRepeat` 连发（无需改 L 层协议）；5 例 |
 | 12 | 焦点视觉语言不统一 | ✅ | 全部走 `showFocusRing`+`drawFocusRing`（并已公开给应用）；PR §六核对无旁路 |
@@ -30,15 +30,16 @@
 
 ## 汇总
 
-- ✅ 完成并测试：**15**
+- ✅ 完成并测试：**16**
 - 🟡 框架完成、应用补丁已备：**3**（#2 #3 #4）
-- 🔶 部分：**1**（#9 的 Shift 区间选择）
-- 未动：0
+- 🔶 部分：**0**
+- 未动：**0**
 
-### 🔶 一项的移交说明
+> **20 类缺口全部落地。** 其中两项经核实判为「不应做」（ComboBox 展开亮边已有、Drawer 焦点陷阱与设计相悖）；
+> #9 的多选集合语义留给应用层按需在 `selectionRange()` 之上展开。`Table`/`TreeView` 的区间选择可复用
+> ListView 的锚点模式（`localState` 锚点 + `applySelection(keepAnchor)`），按需照搬即可。
 
-- **#9 Shift 区间选择**：ListView/Table/TreeView 目前是单选模型；做区间选择要把选中项从
-  `Bindable<Int64>` 扩成可选集（影响序列化与批量操作入口）。建议合并后单独立任务。
+### 设计取舍说明（#9）
 
 ### #20 中两项"核对后不应做"的说明
 
