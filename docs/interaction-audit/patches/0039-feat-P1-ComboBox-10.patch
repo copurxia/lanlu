@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:15:38 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ComboBox=20=E7=AE=AD=E5=A4=B4?=
+ =?UTF-8?q?=E6=82=AC=E5=81=9C=E5=8F=8D=E9=A6=88=EF=BC=88=E7=BC=BA=E5=8F=A3?=
+ =?UTF-8?q?=20#10=20=E6=94=B6=E5=B0=BE=E7=9A=84=E6=9C=80=E5=90=8E=E4=B8=80?=
+ =?UTF-8?q?=E5=9D=97=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+悬停覆盖扫描发现 ComboBox 是唯一"可点但无悬停反馈"的输入类控件——字段本体由内嵌
+TextField 的三态负责，只有右侧展开箭头是可点却毫无反馈的热区。
+
+现在：指针进入箭头热区时 claimHover（独立 hover id，避免与字段本体互相覆盖），箭头
+由 mutedText 变 accent。ComboBox 其余交互（键盘开合/上下选/Enter 提交/Esc 关闭）此前已齐。
+
+扫描同时确认：drawer/modal 的"无悬停"是遮罩层点击（语义上不需要）、toast 的悬停暂停
+是用绘制矩形自判而非 claimHover（实现方式不同但功能在）。
+
+cjpm test：TOTAL 479 / PASSED 438，失败名册与基线逐条一致（BASELINE_MATCH），零回归。
+---
+ src/text/combo_box.cj | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/src/text/combo_box.cj b/src/text/combo_box.cj
+index c4bed45..0702325 100644
+--- a/src/text/combo_box.cj
++++ b/src/text/combo_box.cj
+@@ -2,7 +2,7 @@ package cui.text
+ 
+ import std.collection.ArrayList
+ import lgui.{Color, FontSizes, Key, MouseButton, Pen, Rect, Size, SurfaceStyle, UiEvent}
+-import cui.core.{Bindable, CUI_CONTROL_H, CUI_SMALL_H, Overlay, ScrollBar, SmoothScroll, State, UiContext, Widget, 
++import cui.core.{Bindable, CUI_CONTROL_H, CUI_SMALL_H, CursorShape, Overlay, ScrollBar, SmoothScroll, State, UiContext, Widget, 
+     resolveControlKey, buildChild, clampScrollOffset, drawSurface, drawVerticalScrollBar, emit, localState, 
+     scrollBarGutter}
+ 
+@@ -166,7 +166,10 @@ public class ComboBox <: Widget {
+                 // A press on the chevron toggles closed; any other outside press dismisses and is
+                 // let through (e.g. to reposition the caret or focus another control).
+                 chevronRect().contains(x, y)
+-            case UiEvent.MouseMove(_, y) =>
++            case UiEvent.MouseMove(x, y) =>
++                if (chevronRect().contains(x, y)) {
++                    ctx.claimHover(chevronHoverId(), CursorShape.Interactive)
++                }
+                 // While the thumb is grabbed the move scrolls the list; hover falls through.
+                 popupBar.drag(ctx, listRect(popup), popupScroll, contentHeight(filtered),
+                 listHeight(popup), y)
+@@ -242,6 +245,11 @@ public class ComboBox <: Widget {
+         result.toArray()
+     }
+ 
++    // 箭头热区的悬停 id（独立于字段本体，避免与内嵌 TextField 的悬停互相覆盖）。
++    private func chevronHoverId(): String {
++        fieldId + ":chevron"
++    }
++
+     private func chevronRect(): Rect {
+         Rect(frame.right() - COMBO_CHEVRON_W, frame.y, COMBO_CHEVRON_W, frame.h)
+     }
+@@ -329,7 +337,14 @@ public class ComboBox <: Widget {
+     private func drawChevron(ctx: UiContext): Unit {
+         let cx = frame.right() - 18.0
+         let cy = frame.centerY()
+-        let pen = Pen(width: 1.6, color: ctx.theme.mutedText)
++        // 悬停反馈（缺口 #10 收尾）：指针在箭头热区时箭头改 accent 色——字段本体由内嵌
++        // TextField 的悬停三态负责，箭头此前是唯一没有反馈的可点区域。
++        let chevronHovered = ctx.isHovered(chevronHoverId())
++        let pen = Pen(width: 1.6, color: if (chevronHovered) {
++            ctx.theme.accent
++        } else {
++            ctx.theme.mutedText
++        })
+         ctx.renderer.strokeLine(cx - 4.0, cy - 2.0, cx, cy + 2.5, pen)
+         ctx.renderer.strokeLine(cx, cy + 2.5, cx + 4.0, cy - 2.0, pen)
+     }
+-- 
+2.47.3
+

@@ -41,6 +41,7 @@
 | `70d5be3` | test 焦点环契约（只在键盘到达时绘制） |
 | `daeef09` | P1 ReorderableList 键盘重排（Alt+Up/Down，审计外补充） |
 | `92680c2` | P1 RichText 链接键盘可达（审计外补充） |
+| `52ce6bb` | P1 ComboBox 箭头悬停反馈（#10 收尾） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -187,6 +188,8 @@ Alt+Up/Down 键盘重排（走同一条 onMove 通路）；同批核对 Accordio
 **第二十七批（`92680c2`）**：RichText 链接键盘可达（Left/Right 切换、Enter/Space 触发、
 焦点环画在选中链接）。同批修正了扫描方法（`grep 'KeyDown'` 而非 `KeyDown(Key.`），避免把
 SplitView 这类先解构键的写法误判为无键盘支持。
+
+**第二十八批（`52ce6bb`）**：ComboBox 展开箭头补悬停反馈（它是唯一"可点但无反馈"的输入热区）。
 
 **验证（累计）**：桩库 `cjpm test` TOTAL 479，PASSED 438（累计新增 92 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
