@@ -1,0 +1,46 @@
+# 20 类缺口 · 最终状态总表
+
+> 逐条标注 2026-11-11 本轮工作的结果。分支：`p0-focus-visible`（30 个提交，测试 454/413/基线匹配）。
+> 应用层交付：`patches-app/` 3 个补丁（已 `git apply --check` 通过）。
+
+图例：✅ 框架内完成并测试；🟡 框架完成、应用接线已备（补丁）；🔵 框架完成、应用接线待做；🔶 部分。
+
+| # | 缺口 | 最终状态 | 落点（提交 / 文件 / 测试） |
+|---|---|---|---|
+| 1 | 字段族点击聚焦无可见变化 | ✅ | `9fe49b3`：`drawTextBoxChrome` 激活边 + 键盘外环；`pointerFocusPaintsActiveFieldChrome` 等 4 例 |
+| 2 | 自绘件不在 Tab 焦点环 | 🟡 | 框架：`bd05059` FocusTarget + `c62b524` `registerFocusStop` + `e5ee7f9` `drawFocusRing`；应用：补丁 0002（ClickArea 40+ 处 + GhostIconButton）|
+| 3 | 全应用 0 autofocus + 弹窗不恢复焦点 | 🟡 | 框架：`3426fb5`（Modal 初始聚焦+恢复、Drawer 恢复）；应用：补丁 0001（登录/TOTP/服务器弹窗）|
+| 4 | 表单 Enter 不提交 | 🟡 | 框架：`a3bb419` `TextField(onSubmit:)`；应用：补丁 0001（登录、建合集、搜索、服务器编辑）|
+| 5 | Slider 键盘聚焦不可见 | ✅ | `cdd5924`：焦点环 + Up/Down/Home/End；`sliderKeyboard*` 3 例 |
+| 6 | Pagination/StepIndicator/Breadcrumb/WordCloud 不可聚焦 | ✅ | `9fe49b3` + `1db7709`；`pagination*`/`breadcrumb*`/`stepIndicator*`/`wordCloud*` 10 例 |
+| 7 | 无键盘滚动 / PageUp·PageDown | ✅ | `37573de` Key 枚举 + ScrollView；`54c5092` TextArea 翻页；`8671b44` LazyRow；`scrollView*`/`textAreaPageKeys*` 5 例 |
+| 8 | 焦点不滚入视野 | ✅ | `d509011` + `7b20493` + `8671b44`：矩形上报 + ScrollView/LazyColumn/LazyRow 最小滚动；6 例 |
+| 9 | 行无 hover 高亮（含 Shift 区间选择） | 🔶 | `16d164b` 行 hover（ListView/Table）；**Shift 区间选择未做**（需选择模型扩展，建议独立任务） |
+| 10 | 悬停视觉普遍缺失 | ✅ | `8b1c3c6` 字段族三态、`bba0ef6` 开关/单选/复选/滑块、`16d164b` 行 hover；带悬停视觉的控件文件 4→11 |
+| 11 | 按下态缺失 + 长按不连发 | ✅ | `8f44d11` 实心按钮按下/悬停；`ebf79bd` `KeyRepeat` 连发（无需改 L 层协议）；5 例 |
+| 12 | 焦点视觉语言不统一 | ✅ | 全部走 `showFocusRing`+`drawFocusRing`（并已公开给应用）；PR §六核对无旁路 |
+| 13 | 右键/上下文菜单不可用（含键盘唤起） | ✅ | `3a143fd` ContextMenu Menu/Shift+F10；`808332e` MenuBar Menu/F10；4 例 |
+| 14 | Toast 不可关闭且穿透 | ✅ | `670d77f`：点击关闭/不穿透/悬停暂停；4 例 |
+| 15 | Tooltip 只认鼠标 | ✅ | `38299bd` 键盘聚焦即显；`tooltipShowsOnKeyboardFocusImmediately` |
+| 16 | Radio 组内方向键 / 连发 | ✅ | `81fe548` `groupRange`（opt-in）；连发见 #11 `KeyRepeat`；3 例 |
+| 17 | 只读字段语义矛盾 | ✅ | `1db7709` 只读不进焦点环、不抢焦；`editableTextAreaJoinsFocusRingButReadOnlyDoesNot` 等 2 例 |
+| 18 | 中文双击选词退化 | 🔶 | `9fdc0b4` 按 Unicode 脚本分组（8 类字符分类）；**Ctrl+Backspace/按词移动未做**（需要光标模型扩展） |
+| 19 | RichText 完全无交互 | ✅ | `3dfae21` `RichSpan.link`（accent+下划线+手型+点击）；2 例。应用暂无使用点，API 已备 |
+| 20 | 禁用态等打磨 | 🔶 | `8b1c3c6` 禁用蒙版随圆角；**Drawer 焦点陷阱、ComboBox 展开亮边、Picker Home/End、表头键盘排序**未做（低频，建议随手做或独立小任务） |
+
+## 汇总
+
+- ✅ 完成并测试：**13**
+- 🟡 框架完成、应用补丁已备：**3**（#2 #3 #4）
+- 🔶 部分：**3**（#9 的 Shift 区间选择、#18 的按词编辑、#20 的四项打磨）
+- 未动：0
+
+### 🔶 三项的移交说明
+
+1. **#9 Shift 区间选择**：ListView/Table/TreeView 目前是单选模型；做区间选择要把选中项从
+   `Bindable<Int64>` 扩成可选集（影响序列化与批量操作入口）。建议合并后单独立任务。
+2. **#18 按词编辑**：双击选词已按脚本分组；Ctrl+Backspace/按词移动需要光标模型增加
+   "词边界跳转"原语，可复用 `text_edit_utf8.cj` 的 `classOfCodePoint`（已按脚本分类）。
+3. **#20 打磨**：Drawer 焦点陷阱（可仿 Modal 的 `contentFocusables`）、ComboBox 展开亮边
+   （`closedSurface` 已有 hover 分支，展开态补一个 active 变体）、Picker/Stepper Home/End、
+   表头键盘排序——每项都 ≤S 成本，合并后顺手即可。
