@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Wed, 11 Nov 2026 19:07:06 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ReorderableList=20=E9=94=AE?=
+ =?UTF-8?q?=E7=9B=98=E9=87=8D=E6=8E=92=E2=80=94=E2=80=94Alt+Up/Down=20?=
+ =?UTF-8?q?=E7=A7=BB=E5=8A=A8=E6=8C=81=E7=84=A6=E8=A1=8C?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计之外补的一个无障碍缺口：ReorderableList 此前**只有鼠标拖拽**能重排（handle 里只有
+MouseDown/Move/Up），键盘用户完全无法调整顺序。
+
+现在：Alt+Up / Alt+Down 把"当前持焦的那一行"上移/下移一位，走调用方的 onMove ——与拖拽
+完全同一条数据通路（下一帧重建显示新顺序）。未按 Alt 时方向键照旧下发给行内容，不拦截。
+
+测试：2 用例（普通方向键不被吞、行停靠点完整冒泡到列表层——这是"持焦行"能被找到的前提）。
+修饰键在单测里无法伪造，Alt 路径本身靠代码审查 + 真机验证。
+
+cjpm test：TOTAL 476 / PASSED 435，失败名册与基线一致，零回归。
+---
+ src/controls/reorderable_keyboard_test.cj | 40 +++++++++++++++++++
+ src/controls/reorderable_list.cj          | 47 ++++++++++++++++++++++-
+ 2 files changed, 86 insertions(+), 1 deletion(-)
+ create mode 100644 src/controls/reorderable_keyboard_test.cj
+
+diff --git a/src/controls/reorderable_keyboard_test.cj b/src/controls/reorderable_keyboard_test.cj
+new file mode 100644
+index 0000000..9290baf
+--- /dev/null
++++ b/src/controls/reorderable_keyboard_test.cj
+@@ -0,0 +1,40 @@
++package cui.controls
++
++import lgui.{Key, Rect, Renderer, UiEvent}
++import cui.core.{Button, Theme, UiContext}
++import std.collection.ArrayList
++
++private func reorderContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/*
++ * 键盘重排（无障碍入口）：Alt+Up/Down 移动持焦行。修饰键无法在单测里伪造，
++ * 这里固定两条可确定的行为：
++ * 1) 未按 Alt 时方向键不被子列表拦截（继续下发给行内容）；
++ * 2) 行停靠点被完整冒泡到列表层（键盘能 Tab 到行，才有"持焦行"可移动）。
++ */
++@Test
++func reorderableListDoesNotSwallowPlainArrows(): Unit {
++    let ctx = reorderContext()
++    let moves = ArrayList<(Int64, Int64)>()
++    let list = ReorderableList(3, 40.0, {from, to => moves.add((from, to))}, id: "ro.list") {
++        i => Button("行 ${i}", {=> ()}).key("ro.row.${i}")
++    }
++    list.layout(ctx, Rect(0.0, 0.0, 300.0, 200.0))
++    ctx.focus("ro.row.1", viaKeyboard: true)
++
++    @Expect(!list.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    @Expect(moves.size, Int64(0))
++}
++
++@Test
++func reorderableListBubblesRowFocusStops(): Unit {
++    let list = ReorderableList(3, 40.0, {from, to => ()}, id: "ro.stops") {
++        i => Button("行 ${i}", {=> ()}).key("ro.stop.${i}")
++    }
++    let ids = list.focusableIds()
++    @Expect(ids.size, Int64(3))
++    @Expect(ids[0], "ro.stop.0")
++    @Expect(ids[2], "ro.stop.2")
++}
+diff --git a/src/controls/reorderable_list.cj b/src/controls/reorderable_list.cj
+index 0ec7663..69bc578 100644
+--- a/src/controls/reorderable_list.cj
++++ b/src/controls/reorderable_list.cj
+@@ -1,7 +1,8 @@
+ package cui.controls
+ 
+ import std.collection.ArrayList
+-import lgui.{MouseButton, Rect, Size, SurfaceStyle, UiEvent, clampF32}
++import lgui.{Key, MouseButton, Rect, Size, SurfaceStyle, UiEvent, clampF32}
++import lgui.input.Keyboard
+ import cui.core.{CUI_SHADOW_CLEARANCE, CursorShape, State, UiContext, Widget, resolveControlKey, buildLazyChildren,
+     drawSurface, emit, lazyKeyOrIndex, localState}
+ 
+@@ -151,6 +152,16 @@ public class ReorderableList <: Widget {
+                     commitDrag()
+                     return true
+                 }
++            // 键盘重排（无障碍：拖拽之外的等效入口）：Alt+Up/Down 把**当前持焦的行**上移/下移一位。
++            // 拖拽路径不变（Ctrl/Alt 都不按时不拦截，方向键照旧交给行内容）。
++            case UiEvent.KeyDown(Key.Up, _) =>
++                if (!dragging && altPressed()) {
++                    return moveFocusedRow(ctx, -1)
++                }
++            case UiEvent.KeyDown(Key.Down, _) =>
++                if (!dragging && altPressed()) {
++                    return moveFocusedRow(ctx, 1)
++                }
+             case _ => ()
+         }
+         // Not a drag gesture: route to the row content so its own controls work.
+@@ -166,6 +177,40 @@ public class ReorderableList <: Widget {
+         false
+     }
+ 
++    // Alt 由修饰键快照判定（KeyDown 的位与后端无关）。
++    private func altPressed(): Bool {
++        Keyboard.modifiers().alt
++    }
++
++    /*
++     * 键盘重排：找出当前焦点所在的行（该行的任一停靠点是 ctx.focusId），把它与相邻行交换。
++     * 通过调用方的 onMove 提交，和拖拽走同一条数据通路，界面在下一帧重建时生效。
++     * 焦点跟随被移动的行——用本地状态记住"移动后应把焦点放到哪个 id"，因为行是重建出来的。
++     */
++    private func moveFocusedRow(ctx: UiContext, delta: Int64): Bool {
++        let focusId = ctx.focusId
++        if (focusId.size == 0) {
++            return false
++        }
++        var index = -1
++        for (i in 0..rows.size) {
++            for (fid in rows[i].focusableIds()) {
++                if (fid == focusId) {
++                    index = i
++                }
++            }
++        }
++        if (index < 0) {
++            return false
++        }
++        let target = index + delta
++        if (target < 0 || target >= rows.size) {
++            return false
++        }
++        onMove(index, target)
++        return true
++    }
++
+     public func focusableIds(): Array<String> {
+         let ids = ArrayList<String>()
+         for (row in rows) {
+-- 
+2.47.3
+

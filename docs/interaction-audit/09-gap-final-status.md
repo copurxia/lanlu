@@ -41,6 +41,13 @@
 
 ### 设计取舍说明（#9）
 
+### 审计之外的补充发现（第 47 轮）
+
+- **ReorderableList 只能拖拽重排**：handle 里只有鼠标事件，键盘用户完全无法调整顺序——
+  审计时未覆盖到此控件。已补 `daeef09`：Alt+Up/Down 移动持焦行，走与拖拽同一条 `onMove`。
+- 同批核对 `Accordion`/`Rating`/`TreeView`/`SplitView` 的键盘覆盖：Accordion 头是 Button
+  （键盘天然可用）、Rating 与 TreeView 键位齐全、SplitView 分隔条可聚焦——均无缺口。
+
 ### #20 中两项"核对后不应做"的说明
 
 - **ComboBox 展开态不亮边**：审计时看漏了——`dropdown.cj` 的 `closedSurface` 本就把

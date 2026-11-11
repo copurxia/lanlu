@@ -39,6 +39,7 @@
 | `9c3c04e` | test 焦点指示色主题对比度下限守卫（F1 可自动化部分） |
 | `5e308c7` | P1 Table 区间选择（#9 表格版，锚点模式复用） |
 | `70d5be3` | test 焦点环契约（只在键盘到达时绘制） |
+| `daeef09` | P1 ReorderableList 键盘重排（Alt+Up/Down，审计外补充） |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -178,7 +179,11 @@ feature 分支（`e100c33e`），随后发现这会**破坏 feature 分支的构
 **第二十五批（`70d5be3`）**：焦点环契约测试——把"环只在键盘到达时画"固定成跨控件契约，
 防止将来有控件用 `hasFocus` 画描边（正是应用层顶栏搜索框当初的不一致）。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 474，PASSED 433（累计新增 87 例 + 改写 1 例全过），
+**第二十六批（`daeef09`）**：审计之外的补充——ReorderableList 此前只能鼠标拖拽重排，现补
+Alt+Up/Down 键盘重排（走同一条 onMove 通路）；同批核对 Accordion/Rating/TreeView/SplitView
+键盘覆盖，无缺口。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 476，PASSED 435（累计新增 89 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
