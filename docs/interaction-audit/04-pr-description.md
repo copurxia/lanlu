@@ -58,6 +58,10 @@ tools/verify-cui-interactions.sh p0
   名单固化在 [`test-baseline-names.txt`](test-baseline-names.txt)，脚本会对整份名单做 diff。
 - 新增 54 个测试用例覆盖每条行为（焦点/键盘/悬停/Toast/Tooltip/选词/reveal/链接）。
 - 真机（OHOS）需用 `sts-1.2.0-linux-x64-ohos` 工具链重编并复验焦点环与实际观感。
+- **合并演练已完成**（见 [05-merge-rehearsal.md](05-merge-rehearsal.md)）：把主仓当前工作树（含对方
+  未提交改动）复制成同级副本、把对方改动先落成提交，再应用 25 个补丁——**零冲突全部应用成功**
+  （含对方改过的 `modal.cj`，3-way 自动合并）；合并后的构建目前被对方 in-progress 的 `lcodec`
+  重构阻塞（已定位并为对照实验证实与本分支无关）。
 - **无法直接合并分支时**（主仓被他人未提交改动占用）：用 [patches/](patches/README.md) 里的
   25 个补丁在干净克隆上 `git am --3way patches/*.patch` 落地——已验证重建出的 tree 与分支
   tip 完全一致（`b902e1a3`），也支持只应用前 N 个（例如先要 P0）。

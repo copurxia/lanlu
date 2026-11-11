@@ -20,6 +20,10 @@ case "$TREE" in
   p0|branch) PKG="$ROOT/packages/cangjie-gui-p0" ;;
   main|*)    PKG="$ROOT/packages/cangjie-gui" ;;
 esac
+# 自定义工程目录（例如合并演练副本）：显式路径优先于上面的预设。
+if [ -n "${PKG_DIR:-}" ]; then
+  PKG="$PKG_DIR"
+fi
 
 CJV="${CJV:-/workspace/.cjv}"
 STUB="${STUB:-/workspace/tmp/cui-test-stubs}"
