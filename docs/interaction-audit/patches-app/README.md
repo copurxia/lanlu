@@ -35,6 +35,23 @@ git apply docs/interaction-audit/patches-app/0001-*.patch
 fontkit 原生库），`--skip-script` 又会因依赖树里同时存在 `lcodec` 与演练副本而冲突；
 请在具备完整构建环境的机器上编译确认。
 
+## 0002 ClickArea 与自绘图标钮接入焦点环
+
+依赖框架新增的公开 API `registerFocusStop`（gui 补丁 `c62b524`）与既有 `FocusTarget`。
+
+| 位置 | 改动 |
+|---|---|
+| `widgets.cj` `ClickArea` | 实现由「ZStack + ClickSensor」改为 **`FocusTarget` 包裹**：一次改动让全部 **40+ 处**调用点（详情页 10、设置页 5、登录页 5、阅读器 4、书架/标签等）同时获得 Tab 可达、Enter/Space 激活、键盘焦点外环；点击语义不变（按下+框内抬起才触发），悬停仍认领手型 |
+| `widgets.cj` `GhostIconButton` | 自绘图标钮自己就是控件：`registerFocusStop(hoverId)` 登记停靠点、`MouseDown` 聚焦、`Enter/Space` 激活、`showFocusRing` 时画外环、`layout` 上报焦点矩形（配合框架的滚入视野）。`hoverId` 本身实例唯一（`detail:addtank`/`reader.topbar.back` 等），直接复用为焦点 id |
+
+这是审计缺口 #2（17 类自绘点击件全不在 Tab 环）**结构性解法**的落地：框架侧开放登记能力，
+应用侧两处小改动覆盖绝大多数自绘件。
+
+**已验证**：`git apply --check` 在当前仓库状态干净通过（1 文件 5 hunk）。
+**需视觉回归**：焦点环出现在这些区域时是否压住相邻内容、`ClickArea` 包裹后布局是否与原先一致
+（`FocusTarget` 透传 measure/layout，理论上无差异，但覆盖 40+ 处调用点，建议真机扫一遍）。
+**未验证**：整包编译（同 0001，本机缺 cargo/依赖条件）。
+
 ## 后续（本目录尚未包含）
 
 - #2：17 类自绘点击件迁 `FocusTarget`（改动面大，需逐个视觉回归）；
