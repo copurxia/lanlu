@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:15:51 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20=E5=8E=9F=E7=94=9F=E5=83=8F=E7=B4=A0?=
+ =?UTF-8?q?=E6=8B=92=E7=BB=9D=E8=B7=AF=E5=BE=84=E5=85=88=E9=87=8A=E6=94=BE?=
+ =?UTF-8?q?=E5=86=8D=E5=9B=9E=E8=B0=83?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+notifyRejected 会调用应用提供的回调；若先通知后释放，回调抛异常就会让原生像素泄漏。
+顺序改为 releaser.release() → notifyRejected，保证通知失败不影响所有权归还。
+---
+ src/media/pixel_texture_cache.cj | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index ef51ade..210baff 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -341,8 +341,10 @@ public func stageNativePixelImage(key: String, width: Int32, height: Int32, poin
+     // 尺寸校验：非正尺寸的原生图登记后会在上传时建 0 尺寸纹理（永远画不出来）。
+     // 所有权已随调用转移到这里，因此拒绝时必须**自己**用 releaser 释放，否则泄漏。
+     if (width <= 0 || height <= 0) {
+-        notifyRejected(key, "non-positive size " + width.toString() + "x" + height.toString())
++        // 先释放再回调：回调是应用代码，万一下面通知里抛异常，所有权也已经归还，
++        // 不会因为"通知失败"而泄漏原生像素。
+         releaser.release()
++        notifyRejected(key, "non-positive size " + width.toString() + "x" + height.toString())
+         return
+     }
+     removeTextureEntry(key)
+-- 
+2.47.3
+
