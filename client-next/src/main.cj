@@ -472,6 +472,7 @@ public func runApp(): Int64 {
     model.worker.onResult = { => app.requestWake() }
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
     model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
+
     try { app.setMinimumSize(960, 640) } catch (_: Exception) {}  // OHOS: SDL_SetWindowMinimumSize 不支持
     // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
     // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
