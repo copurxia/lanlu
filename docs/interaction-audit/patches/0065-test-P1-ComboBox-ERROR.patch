@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:07:19 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20ComboBox=20=E5=85=A8=E9=83=A8?=
+ =?UTF-8?q?=E7=94=A8=E4=BE=8B=E6=94=B9=E4=B8=BA=E7=9C=9F=E5=AE=9E=E9=80=9A?=
+ =?UTF-8?q?=E8=BF=87=E2=80=94=E2=80=94=E5=9F=BA=E7=BA=BF=20ERROR=20?=
+ =?UTF-8?q?=E5=AE=B6=E6=97=8F=E5=89=8A=E5=87=8F=E5=BC=80=E5=A7=8B?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+基线里 40 个"环境失败"其实全是一个原因：headless 渲染器无后端，绘制路径抛异常。
+用例装一个空记录画布即可真实通过——此前一直没做，是把它们当成了"环境税"。
+
+试点：comboTestContext() 统一安装本文件已有的 ComboNoopCanvas（一行改动）。
+结果：7 个 comboBox* 用例从 ERROR 转为 **PASSED**（含弹层绘制、过滤提交、模态内
+弹层、长列表滚动），失败名册从 41 条减到 35 条。TOTAL 491 / PASSED 456。
+
+后续轮次可按同模式逐步消化 dropdown*/datePicker*/toast* 等剩余 34 条（每族都是
+"测试上下文加一个画布"的小改动）；全部消化后基线只剩 1 条真实 FAILED
+（pushWakeEventWakesWaitingLoopFromAnotherThread，需要真实唤醒事件）。
+---
+ src/text/combo_box_test.cj | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/text/combo_box_test.cj b/src/text/combo_box_test.cj
+index 2595cb2..1525801 100644
+--- a/src/text/combo_box_test.cj
++++ b/src/text/combo_box_test.cj
+@@ -5,7 +5,11 @@ import cui.controls.Modal
+ import cui.core.{State, Theme, UiContext}
+ 
+ private func comboTestContext(): UiContext {
+-    let ctx = UiContext(Renderer.headless(), Theme.light())
++    // 弹层/字段绘制走软阴影，无后端会抛异常（基线 ERROR 家族）；统一装空记录画布后
++    // 这些用例在本机真实通过，不再依赖"环境失败"豁免。
++    let renderer = Renderer.headless()
++    renderer.useBackend(ComboNoopCanvas())
++    let ctx = UiContext(renderer, Theme.light())
+     ctx.viewportWidth = 300.0
+     ctx.viewportHeight = 400.0
+     ctx
+-- 
+2.47.3
+

@@ -41,6 +41,22 @@ if git -C "$SRC" rev-parse --git-common-dir 2>/dev/null | grep -qv '^\.git$'; th
 fi
 [ -d "$PATCHES" ] || { echo "缺少补丁目录 $PATCHES" >&2; exit 2; }
 
+# 补丁新鲜度护栏（2026-11-12 教训）：补丁数必须等于分支自基点以来的提交数。
+# 忘了 format-patch 会让演练悄悄跑旧代码——本轮就因此出现过一次"假失败"。
+PATCH_COUNT=$(ls "$PATCHES"/*.patch 2>/dev/null | wc -l)
+if git -C "$SRC" rev-parse -q --verify p0-focus-visible >/dev/null 2>&1; then
+  BASE=$(git -C "$SRC" rev-parse -q --verify c39458f^{commit} 2>/dev/null || true)
+  if [ -n "$BASE" ]; then
+    BRANCH_COUNT=$(git -C "$SRC" rev-list --count "$BASE"..p0-focus-visible)
+    if [ "$PATCH_COUNT" -ne "$BRANCH_COUNT" ]; then
+      echo "✗ 补丁过期：$PATCHES 有 $PATCH_COUNT 个，但分支有 $BRANCH_COUNT 个提交。" >&2
+      echo "  请先重新生成：cd packages/cangjie-gui-p0 && git format-patch --no-numbered --zero-commit -o ../../docs/interaction-audit/patches c39458f..HEAD" >&2
+      exit 3
+    fi
+  fi
+fi
+echo "   补丁数与分支提交数一致（$PATCH_COUNT）"
+
 echo "== 1/5 复制主仓工作树快照 → $COPY"
 rm -rf "$COPY"
 mkdir -p "$COPY"

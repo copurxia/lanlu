@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:14:56 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E5=9F=BA=E7=BA=BF=E5=86=8D?=
+ =?UTF-8?q?=E5=89=8A=201=20=E6=9D=A1=EF=BC=88textAreaWheel=EF=BC=89?=
+ =?UTF-8?q?=EF=BC=9B=E5=8F=91=E7=8E=B0"=E9=9B=B6=E6=B5=8B=E5=BA=A6?=
+ =?UTF-8?q?=E7=94=BB=E5=B8=83"=E7=9A=84=E8=BE=B9=E7=95=8C?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+textAreaWheelUpdatesSharedScrollState 转真实通过（textTestContext 装空记录画布）。
+
+**重要发现——零测度画布不是万能的**：同文件尝试转换
+textFieldFollowsCaretHorizontally 时，它从 ERROR 变成了 FAILED（断言 40 字节光标应滚回
+0，实际停在 40）。根因：该测试依赖**真实文本度量**（注释写明 40 bytes = 330px），而空
+记录画布的 textWidth 恒 0，caret 永远"已在视野内"。已回退——这条留在环境基线里
+（headless 渲染器既无绘制后端也无字体度量）。
+
+判定规则（写给后续轮次）：断言不依赖文本度量的绘制用例 → 空画布可转；
+依赖度量的（caret 滚动、宽度自适应类）→ 必须留在基线，除非引入带度量桩的画布。
+
+PASSED 482 → 483，基线 23→…→ 9→8 条（本轮 -1）。TOTAL 491。
+---
+ src/text/text_edit_state_test.cj | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/text/text_edit_state_test.cj b/src/text/text_edit_state_test.cj
+index 1550054..38ddee7 100644
+--- a/src/text/text_edit_state_test.cj
++++ b/src/text/text_edit_state_test.cj
+@@ -4,7 +4,10 @@ import lgui.{FrameInfo, Key, MouseButton, Rect, Renderer, UiEvent}
+ import cui.core.{CursorShape, State, StateStore, Theme, UiContext, buildRoot}
+ 
+ private func textTestContext(): UiContext {
+-    UiContext(Renderer.headless(), Theme.light())
++    // 空记录画布：绘制路径在 headless 无后端会抛异常（基线 ERROR 家族削减）。
++    let renderer = Renderer.headless()
++    renderer.useBackend(ComboNoopCanvas())
++    UiContext(renderer, Theme.light())
+ }
+ 
+ @Test
+-- 
+2.47.3
+
