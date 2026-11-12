@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:01:01 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E9=94=81=E5=AE=9A=20Table.of=20?=
+ =?UTF-8?q?=E5=B7=A5=E5=8E=82=E7=9A=84=20onActivate=20=E8=BD=AC=E5=8F=91?=
+ =?UTF-8?q?=EF=BC=88=E9=98=B2"=E5=8F=AA=E8=A1=A5=E4=B8=80=E6=9D=A1?=
+ =?UTF-8?q?=E6=9E=84=E9=80=A0=E8=B7=AF=E5=BE=84"=E5=A4=8D=E5=8F=91?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一提交修了 Table.of 不转发 onActivate 的问题；补测试把它钉住——否则以后新增构造
+参数时很容易再漏。用例走工厂路径（抽取器写法）选中首行后按 Space，断言回调收到 0。
+
+cjpm test：TOTAL 528 / PASSED 521，基线匹配零回归。
+---
+ src/controls/table_activate_test.cj | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/controls/table_activate_test.cj b/src/controls/table_activate_test.cj
+index 45076be..b13bb69 100644
+--- a/src/controls/table_activate_test.cj
++++ b/src/controls/table_activate_test.cj
+@@ -53,3 +53,22 @@ func tableSpaceFallsBackToSortWithoutActivate(): Unit {
+     let _ = tbl.handle(ctx, UiEvent.KeyDown(Key.Space, false))
+     @Expect(true) // 到这里没崩即通过（排序状态是内部 State）
+ }
++
++@Test
++func tableOfFactoryForwardsOnActivate(): Unit {
++    let ctx = tblCtx()
++    let activated = State<Int64>(-1)
++    // 工厂路径（抽取器写法）必须与主构造函数一样拿到行激活能力。
++    let tbl = Table.of<String>(
++        ["a", "b", "c"],
++        [DataColumn<String>("名称", 120.0, value: {v => v})],
++        State<Int64>(0),
++        key: "of.tbl",
++        onActivate: {i => activated.value = i}
++    )
++    tbl.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    let _ = tbl.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, 40.0)) // 选中某行并聚焦
++    let _ = tbl.handle(ctx, UiEvent.KeyDown(Key.Space, false))
++    @Expect(activated.value, Int64(0)) // 选中行是 0（点在第一行）
++}
++
+-- 
+2.47.3
+
