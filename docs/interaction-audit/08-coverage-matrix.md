@@ -21,6 +21,7 @@
 | A6 打开即聚焦 | 🟡 | 框架：`modalOpenFocusesFirstStop`、`autofocusClaimsFocusOnceOnFirstFrame`；应用各处需人工 |
 | A7 关闭弹窗焦点回原位 | ✅ | `modalDismissRestoresPriorFocus`、`modalTabCyclesDialogFocusOnly`、`modalEscapeDismissesAndHiddenRegistersNothing` |
 | A8 只读字段不抢焦 | ✅ | `editableTextAreaJoinsFocusRingButReadOnlyDoesNot`、`editableTextAreaRequestsTextCursorButReadOnlyDoesNot` |
+| A8d 表格行激活 | ✅ | `tableDoubleClickActivatesRow`、`tableSpaceFallsBackToSortWithoutActivate`、`tableOfFactoryForwardsOnActivate`（双击行 / 聚焦后 Space；Enter 保持表头排序；未启用时 Space 退回排序）|
 | A8c 树叶子激活 | ✅ | `treeEnterOnLeafActivates`、`treeEnterOnParentExpandsWithoutActivating`（TreeView onActivate：叶子 Enter 激活、父节点 Enter 只展开/折叠）|
 | A8b 按词编辑（缺口 #18 后半） | ✅ | TextField 原有；TextArea 本轮补齐——`textAreaCtrlBackspaceDeletesPreviousWord`、`textAreaWordMotionMethodsExistOnEditState`（词边界 UTF-8 字节偏移逐跳验证：标点/汉字/单词各自成词）|
 | B1 自绘件可 Tab | 🟡 | 框架：`registerFocusStopPutsSelfDrawnWidgetInTabRing`、`registerFocusStopIsNoOpOutsideBuildRoot`、`focusTargetReportsOwnStopBeforeChildStops`；应用 40+ 处需人工 |
@@ -71,6 +72,8 @@
 | 一步注册 | 同上（视频/流式路径） | `0083` 同校验 | ✅ `registerRejectsByteCountMismatch`、`registerRejectsNonPositiveSize` |
 | 可观测性 | 静默拒绝 → 只看到空白无线索 | `0086` `onPixelImageRejected(key, reason)` | ✅ `rejectionCallbackReportsReason` |
 | 巨量 memcpy | 荒唐尺寸在拷贝前未拦 → OOM/崩溃 | `0092` `pixelMaxImageSide`（默认 16384） | ✅ `oversizedSideIsRejectedBeforeCopy`、`oversizedSideOnRegisterIsRejected` |
+
+| 失败可观测 | 排查靠打日志/落盘 | `rejectedCountTracksRegistrationRejections`、`budgetDeniedCountTracksUploadThrottling`、`uploadFailedCountTracksBackendFailure`（`pixelFailureCounts()` 三计数，全 0 = 管线健康）|
 
 另有 4 个几何用例固定适配行为（Contain/Cover/Stretch/零尺寸），证明**裁切几何本身正确**
 ——真机"封面空白"的嫌疑因此收窄到**纹理获取**（见 [12-findings-for-other-party.md](12-findings-for-other-party.md)）。
