@@ -1,7 +1,12 @@
 # 点击输入框没有描边：根因与交互缺口总览
 
 > 调查基线：仓库 /workspace/lanlu/lanlu，框架 packages/cangjie-gui（lgui/cui）自身是独立 git 仓库，
-> 应用 client-next。本机无 cjc/cjpm，所有结论均为源码静态取证（未编译、未真机复跑）。
+> 应用 client-next。
+>
+> **本节为最初静态取证阶段的记录**（当时本机无 cjc/cjpm）。**后续已在真实工具链上编译并跑通
+> 531 个用例**（见 [11-rc-report.md](11-rc-report.md)），且下文方案 A（+hover）**已实现并有测试**：
+> `text_area.cj` 的 `drawTextBoxChrome` 现在用 `hasFocus` 决定"边"、用 `showFocusRing` 决定"外环"，
+> `fieldSurface(active, hovered)` 增加了 hover 分支。
 
 ## 一、结论：不是 bug，是框架刻意实现 `:focus-visible`
 
@@ -38,6 +43,8 @@
    只有“外扩 ring”留给键盘；框架把“边”和“环”绑在同一标志上，取舍比 web 更激进。
 
 ### 建议改法（三选一，成本递增）
+
+> **状态：方案 A 已采纳并实现**（含 hover 分支），方案 B/C 未采用。以下是当时的方案分析，留作设计依据。
 
 ```cangjie
 // 方案 A（推荐，1 处改动）：点击聚焦也给“边”，键盘再加“环”，与按钮族视觉语言对齐
