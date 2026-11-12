@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:20:09 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E6=8E=A7=E4=BB=B6=E8=BA=AB?=
+ =?UTF-8?q?=E4=BB=BD=E8=A7=A3=E6=9E=90=E5=A5=91=E7=BA=A6=EF=BC=88resolveCo?=
+ =?UTF-8?q?ntrolKey=20=E4=B8=89=E4=BE=8B=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+身份是焦点/按压/局部状态的唯一锚点，其中 resolveControlKey 此前无直接测试。补三条契约：
+显式 key 原样使用；空显式 key 抛 IllegalArgumentException；无 key 时构建期内按声明序
+派生唯一身份（两个同类控件必须不同，否则焦点与按压会互相串）。
+
+写测试踩到 lambda 不能捕获可变局部变量（改用 State 承载，与 binding_test 同款）。
+
+cjpm test：TOTAL 514 / PASSED 507，基线匹配零回归。
+---
+ src/core/control_identity_test.cj | 41 +++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+ create mode 100644 src/core/control_identity_test.cj
+
+diff --git a/src/core/control_identity_test.cj b/src/core/control_identity_test.cj
+new file mode 100644
+index 0000000..e9582a4
+--- /dev/null
++++ b/src/core/control_identity_test.cj
+@@ -0,0 +1,41 @@
++package cui.core
++
++/*
++ * 控件身份的解析契约（resolveControlKey）：
++ *   - 显式 key 原样使用（这是"状态跨结构变化存活"的唯一入口）；
++ *   - 显式 key 为空 → 抛 IllegalArgumentException（防止两个控件共用空身份）；
++ *   - 无 key → 构建期内按声明序派生唯一身份（两个同类控件不会互相串）。
++ */
++@Test
++func explicitKeyIsUsedVerbatim(): Unit {
++    @Expect(resolveControlKey(Some("my.field"), "TextField"), "my.field")
++}
++
++@Test
++func emptyExplicitKeyIsRejected(): Unit {
++    var threw = false
++    try {
++        resolveControlKey(Some(""), "TextField")
++    } catch (_: IllegalArgumentException) {
++        threw = true
++    }
++    @Expect(threw)
++}
++
++@Test
++func absentKeyDerivesUniqueIdentityInsideBuild(): Unit {
++    let store = StateStore()
++    // lambda 不能直接捕获可变局部变量 → 用 State 承载结果。
++    let first = State<String>("")
++    let second = State<String>("")
++    let _ = buildRoot(
++        {
++            =>
++                first.value = resolveControlKey(None, "Button")
++                second.value = resolveControlKey(None, "Button")
++        },
++        store
++    )
++    @Expect(first.value.size > 0)
++    @Expect(first.value != second.value) // 两个同类控件不得共用派生身份
++}
+-- 
+2.47.3
+
