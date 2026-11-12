@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:44:15 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20MenuItem=20=E6=BF=80=E6=B4=BB?=
+ =?UTF-8?q?=E5=A5=91=E7=BA=A6=EF=BC=88invoke/isEnabled/=E5=88=86=E9=9A=94?=
+ =?UTF-8?q?=E6=9D=A1=EF=BC=89=E2=80=94=E2=80=94=E5=BA=94=E7=94=A8=E8=87=AA?=
+ =?UTF-8?q?=E5=AE=9A=E4=B9=89=E8=8F=9C=E5=8D=95=E7=9A=84=E5=BF=85=E9=9C=80?=
+ =?UTF-8?q?=E5=85=A5=E5=8F=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+符号扫描发现的第三个零测试符号（menu_popup.cj 无配对测试文件；editMenuItems 的集成测试
+不覆盖 MenuItem 自身语义）。补三例：
+- 正常项 invoke 执行 action；
+- 置灰项 invoke no-op；
+- 分隔条永不可选、不可运行。
+
+cjpm test：TOTAL 538 / PASSED 531，基线匹配零回归。
+---
+ src/controls/menu_item_test.cj | 37 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+ create mode 100644 src/controls/menu_item_test.cj
+
+diff --git a/src/controls/menu_item_test.cj b/src/controls/menu_item_test.cj
+new file mode 100644
+index 0000000..d5dde90
+--- /dev/null
++++ b/src/controls/menu_item_test.cj
+@@ -0,0 +1,37 @@
++package cui.controls
++
++import cui.core.State
++
++/*
++ * MenuItem 的激活契约（应用自定义菜单的必需入口，此前零测试）：
++ *   - 正常项 invoke 执行 action；
++ *   - 置灰项 invoke 是 no-op（isEnabled false）；
++ *   - 分隔条 invoke 是 no-op、不可高亮；
++ *   - shortcut 只是展示文案，不参与判定。
++ */
++@Test
++func menuItemInvokeRunsEnabledAction(): Unit {
++    let fired = State<Bool>(false)
++    let item = MenuItem("复制", {=> fired.value = true}, shortcut: "Ctrl+C")
++    @Expect(item.isEnabled())
++    item.invoke()
++    @Expect(fired.value)
++}
++
++@Test
++func disabledItemInvokeIsNoop(): Unit {
++    let fired = State<Bool>(false)
++    let item = MenuItem("粘贴", {=> fired.value = true}, enabled: false)
++    @Expect(!item.isEnabled())
++    item.invoke()
++    @Expect(!fired.value)
++}
++
++@Test
++func separatorIsNeverSelectableOrRunnable(): Unit {
++    let fired = State<Bool>(false)
++    let sep = MenuItem.separator()
++    @Expect(!sep.isEnabled())
++    sep.invoke()
++    @Expect(!fired.value)
++}
+-- 
+2.47.3
+
