@@ -168,6 +168,29 @@ if (pixels.size != expected) {
 
 结论：**无需改动**。记录在此是为了防止后人"顺手统一"两条路径——那会把视频播放打坏。
 
+## 新增：`pixelFailureCounts()`——不用落盘也能定位卡在哪一环（`0106`）
+
+对方现在的诊断是往 `~/img_diag.txt` 写文件（每次**重写整个文件**，真机上慢且有竞态）。
+框架现在提供三个计数，应用打一行就够了：
+
+```cangjie
+match (pixelFailureCounts()) {
+    case (budgetDenied, rejected, uploadFailed) =>
+        println("[img] budgetDenied=${budgetDenied} rejected=${rejected} uploadFailed=${uploadFailed}")
+}
+```
+
+判读表：
+
+| 计数 | 含义 | 结论 |
+|---|---|---|
+| `budgetDenied` 持续增长 | 帧上传预算拒绝 | **有图被长期饿死** → 拉 `0081` 补丁即愈 |
+| `rejected` 增长 | 登记被拒（尺寸/字节/上限） | 解码或调用方给的尺寸/字节数有问题 |
+| `uploadFailed` 增长 | 后端建纹理失败 | **渲染后端问题**，与预算无关（查 lgpu/纹理创建） |
+| 三者全 0 但画面空 | 管线健康 | 问题在**绘制/裁剪/可见性**，不在数据通路 |
+
+三者全 0 是一种**有价值的结论**：它把嫌疑从"图像数据没上来"转向"画的时候没画"。
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
