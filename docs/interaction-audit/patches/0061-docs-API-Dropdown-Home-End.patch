@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:55:56 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20API=20=E5=8F=82=E8=80=83=20Dropdown=20?=
+ =?UTF-8?q?=E8=A1=8C=E8=A1=A5=20Home/End?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 8906eb2..33074bc 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -159,7 +159,7 @@
+ | `FocusTarget` | `onClick`、`body`（可选 `key`） | 自绘内容的可聚焦/可点击包装器：注册焦点停靠点、点击聚焦、Enter/Space 激活、键盘焦点画统一外环、悬停认领 Interactive 光标；布局/绘制透传子树（行为壳，不加视觉） |
+ | `Panel` | `body`（可选 `padding: LengthInsets`） | `contentPadding`、`style`、`flexible`、`hug` |
+ | `Tooltip` | `text`、`body` | 悬停约 500ms 后在树上层绘制提示气泡；透明包裹，不改变布局/事件 |
+-| `Dropdown` | `items`、`selected`（可选 `key`） | 下拉选择：点击/Enter 打开，弹出列表浮于树上（下方放不下翻到上方）；选中/外点/Esc 关闭，上下键移动高亮。长列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮，打开时选中行滚入视野 |
++| `Dropdown` | `items`、`selected`（可选 `key`） | 下拉选择：点击/Enter 打开，弹出列表浮于树上（下方放不下翻到上方）；选中/外点/Esc 关闭，上下键移动高亮，**Home/End 跳首/尾**。长列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮，打开时选中行滚入视野 |
+ | `ContextMenu` | `items`、`body` | 为子控件附加右键菜单：指针处弹出，选中运行动作并关闭、外点/Esc 取消、方向键与悬停移动高亮；透明包裹，仅拦截子区域内右键 |
+ | `Modal` | `presented`、`body`（可选 `onDismiss`） | 模态对话框：`presented` 为真时暗化背景+居中面板，承载真实控件子树；拦截全部输入，`Tab` 在对话框内循环（焦点陷阱），打开即聚焦首个停靠点、关闭恢复打开前焦点，每帧 Frame 转发进子树（`autofocus` 可用）；外点/Esc 关闭；对话框内可再开 `Dropdown`/`ComboBox`/`ContextMenu`（弹层经浮层栈压在面板之上，逐层关闭）；零尺寸、仅呈现时构建 `body`，置于根部 `ZStack` |
+ | `Flexible` | `body` | 兼容的权重包装容器，新代码可用 `.flex` |
+-- 
+2.47.3
+

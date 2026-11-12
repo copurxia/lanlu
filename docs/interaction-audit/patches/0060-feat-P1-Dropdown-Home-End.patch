@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:55:34 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Dropdown=20=E5=BC=B9=E5=B1=82?=
+ =?UTF-8?q?=E8=A1=A5=20Home/End=E2=80=94=E2=80=94=E6=B5=AE=E5=B1=82?=
+ =?UTF-8?q?=E9=94=AE=E7=9B=98=E5=AF=BC=E8=88=AA=E7=BA=A6=E5=AE=9A=E5=AE=8C?=
+ =?UTF-8?q?=E5=85=A8=E5=AF=B9=E9=BD=90?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ComboBox 补完 Home/End 后核对最后一个弹层：Dropdown 同样缺席。补齐：
+Home → 选中首项，End → 选中末项（moveHighlight 复用，reveal 跟随）。
+
+至此**全部列表型弹层/容器**（ListView/Table/TreeView/ComboBox/Dropdown）键盘键位一致：
+Down/Up 逐项、Home/End 跳首尾、Esc 关闭（弹层）、Enter 确认。
+
+测试：1 用例（End 选末项、Home 回首项；本地 DropdownNoopCanvas 处理软阴影绘制）。
+cjpm test：TOTAL 490 / PASSED 449，失败名册与基线一致，零回归。
+---
+ src/controls/dropdown.cj           | 11 ++++++
+ src/controls/dropdown_keys_test.cj | 62 ++++++++++++++++++++++++++++++
+ 2 files changed, 73 insertions(+)
+ create mode 100644 src/controls/dropdown_keys_test.cj
+
+diff --git a/src/controls/dropdown.cj b/src/controls/dropdown.cj
+index 3bdd736..df271cf 100644
+--- a/src/controls/dropdown.cj
++++ b/src/controls/dropdown.cj
+@@ -193,6 +193,17 @@ public class Dropdown <: Widget {
+             case UiEvent.KeyDown(Key.Up, _) =>
+                 moveHighlight(-1, popup)
+                 true
++            // Home/End 跳首/尾（与 ComboBox/ListView/Table 同一约定）。
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (items.size > 0) {
++                    moveHighlight(-selected.value, popup)
++                }
++                true
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (items.size > 0) {
++                    moveHighlight(items.size - 1 - selected.value, popup)
++                }
++                true
+             case UiEvent.KeyDown(Key.Tab, _) =>
+                 close(ctx) // commit and let the shell's Tab traversal move focus on
+                 false
+diff --git a/src/controls/dropdown_keys_test.cj b/src/controls/dropdown_keys_test.cj
+new file mode 100644
+index 0000000..098ef8f
+--- /dev/null
++++ b/src/controls/dropdown_keys_test.cj
+@@ -0,0 +1,62 @@
++package cui.controls
++
++import lgui.{Canvas, Color, Key, MouseButton, Pen, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/* 空记录画布：Dropdown 弹层绘制走软阴影，headless 无后端时会抛异常（同 40 条基线 ERROR 家族）。 */
++class DropdownNoopCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++/* Dropdown 弹层 Home/End 跳首/尾（与 ComboBox/ListView/Table 同一约定）。 */
++@Test
++func dropdownHomeEndJumpsSelection(): Unit {
++    let renderer = Renderer.headless()
++    renderer.useBackend(DropdownNoopCanvas())
++    let ctx = UiContext(renderer, Theme.light())
++    ctx.viewportWidth = 300.0
++    ctx.viewportHeight = 400.0
++    let selected = State<Int64>(0)
++    let dropdown = Dropdown(["A", "B", "C"], selected, key: "he.dd")
++    dropdown.layout(ctx, Rect(20.0, 40.0, 180.0, 34.0))
++
++    @Expect(dropdown.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 30.0, 50.0)))
++    dropdown.draw(ctx)
++    @Expect(ctx.hasOverlay())
++
++    // End → 选中末项（弹层仍开，等 Enter/点击确认或直接点外关闭）。
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.End, false)))
++    @Expect(selected.value, Int64(2))
++    // Home → 回到首项。
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Home, false)))
++    @Expect(selected.value, Int64(0))
++}
+\ No newline at end of file
+-- 
+2.47.3
+
