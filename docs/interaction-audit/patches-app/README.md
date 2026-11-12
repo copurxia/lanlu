@@ -64,6 +64,24 @@ WIP + 本分支 80 补丁做成 `packages/cangjie-gui`，其余兄弟包原样�
 即：应用层编译验证需要 **cjc 1.1.0 环境**，与 cargo 无关（此前记录有误，已修正）。
 请在具备该工具链的机器上编译确认；本次镜像（1.8 GB）已清理。
 
+## API 用法一致性审查（2026-11-12 02:26）
+
+应用层补丁无法在本机编译（见上：需 cjc 1.1.0），因此逐条把补丁里的新增调用与框架签名
+对照了一遍，确保不是"看着像"：
+
+| 补丁里的写法 | 框架签名 | 结论 |
+|---|---|---|
+| `TextField(..., onSubmit: {=> ...})` | `onSubmit!: ?() -> Unit = None` | ✓ |
+| `.autofocus()` | `Widget.autofocus()` 链式 | ✓ |
+| `FocusTarget(onClick: onClick) { ... }` | `init(onClick!: () -> Unit, key!: ?String = None, body!: () -> Unit)` | ✓（key 省略 → 按构建序派生身份，多实例各自唯一）|
+| `registerFocusStop(hoverId)` | `registerFocusStop(id: String)` | ✓ |
+| `drawFocusRing(ctx, frame, radius)` | `drawFocusRing(ctx, rect, radius)` | ✓ 位置参数顺序一致 |
+| 焦点环的判定 | —— | 两处都用 `ctx.showFocusRing(id)` 而非 `hasFocus` ✓（正是文档反复强调的那个坑）|
+| `Key.PageUp / Key.PageDown` | `Key` 枚举成员 | ✓ |
+
+结论：应用层补丁与框架 API **逐条对得上**，剩下唯一不确定项是"能否编译通过"，而那取决于
+工具链版本而非代码本身。
+
 ## 0002 ClickArea 与自绘图标钮接入焦点环
 
 依赖框架新增的公开 API `registerFocusStop`（gui 补丁 `c62b524`）与既有 `FocusTarget`。
