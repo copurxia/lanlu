@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:41:57 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20Binding=EF=BC=88=E5=8F=8C=E5=90=91?=
+ =?UTF-8?q?=E6=8A=95=E5=BD=B1=EF=BC=89=E9=A6=96=E6=AC=A1=E6=B5=8B=E8=AF=95?=
+ =?UTF-8?q?=E2=80=94=E2=80=94=E7=8A=B6=E6=80=81=E5=8E=9F=E8=AF=AD=E7=9A=84?=
+ =?UTF-8?q?=E6=A0=B8=E5=BF=83=E8=AF=AD=E4=B9=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+覆盖图显示 Binding 零测试。它不是边缘类：Bindable.project 是"表单组件绑定到整值"
+的唯一入口（读委托源、写回源重建整值 = 唯一真相源），应用的表单/设置页正依赖它。
+
+新增 binding_test.cj 两例：
+1. projectedBindingReadsAndWritesThroughSource：投影读翻倍、写折半回源，写后源与投影
+   两侧一致；
+2. projectedBindingObservesSourceChanges：写投影触发观察回调（20→42），close() 后
+   isClosed() 为真。
+
+写测试踩的三处 API 细节（一并记录）：observe 是位置参数回调、lambda 不能直接捕获可变
+局部变量（用 State 计数）、观察资源用 close() 不是 dispose()。
+
+cjpm test：TOTAL 501 / PASSED 494，失败名册与基线一致，零回归。
+
+覆盖图剩余：DerivedState（经 derive 间接覆盖）、Divider/Icon（纯展示）、CanvasWidget/
+PixelImageView/ZoomableImageView（纹理路径，需真后端）。
+---
+ src/core/binding_test.cj | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+ create mode 100644 src/core/binding_test.cj
+
+diff --git a/src/core/binding_test.cj b/src/core/binding_test.cj
+new file mode 100644
+index 0000000..aaf2327
+--- /dev/null
++++ b/src/core/binding_test.cj
+@@ -0,0 +1,29 @@
++package cui.core
++
++/*
++ * Binding（Bindable.project）此前无测试——它是双向投影的状态原语：读委托源、写回源
++ * 重建整值，保证"唯一真相源"。应用的表单/设置页正依赖这一语义。
++ */
++@Test
++func projectedBindingReadsAndWritesThroughSource(): Unit {
++    let source = State<Int64>(10)
++    // 投影：读时翻倍，写时折半回写源。
++    let doubled = source.project(get: {v => v * 2}, set: {_, v => v / 2})
++    @Expect(doubled.value, Int64(20))
++    doubled.value = 42
++    @Expect(source.value, Int64(21)) // 写回源
++    @Expect(doubled.value, Int64(42)) // 再读投影
++}
++
++@Test
++func projectedBindingObservesSourceChanges(): Unit {
++    let source = State<Int64>(10)
++    let doubled = source.project(get: {v => v * 2}, set: {_, v => v / 2})
++    let seen = State<Int64>(0)
++    let observation = doubled.observe({old, next => seen.value = next - old})
++    doubled.value = 42 // 源变 21 → 投影 20 → 42
++    @Expect(source.value, Int64(21))
++    @Expect(seen.value, Int64(22))
++    observation.close()
++    @Expect(observation.isClosed())
++}
+-- 
+2.47.3
+
