@@ -88,6 +88,15 @@ grep -E 'budgetDeny|uploadNative FAIL|noStaged|cooldown' ~/img_diag.txt | head -
    （不匹配时现在会被静默拒绝 → 表现为空白；可在 `stagePixelImage` 拒绝分支临时加一行诊断）；
 3. 若两者都正常，再把 `image.width/height` 与 `destination` 加进绘制诊断（见发现 3）。
 
+## 结论：适配几何本身是对的（`0091`）
+
+`fittedRect` / `scaledRect`（Cover/Contain/Stretch 的目标矩形计算）此前无测试，现已补四例
+（`image_fit_geometry_test`）：2:1 图进 1:1 框，Contain 得 100×50 + 垂直居中，Cover 得 200×100
++ 水平居中（溢出由 `pushClip` 裁掉），Stretch 直接用 frame，零尺寸退化空矩形。
+
+**含义**：封面"画不出来"时，几何不是嫌疑——问题必在**纹理获取**（上传被拒/冷却/预算）
+或**纹理本身无效**（尺寸为 0、已关闭）。可据此把排查范围从"绘制/裁切"收窄到"纹理"。
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
