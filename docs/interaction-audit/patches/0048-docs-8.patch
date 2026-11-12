@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:13:17 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E6=9E=B6=E6=9E=84=E6=96=87=E6=A1=A3?=
+ =?UTF-8?q?=E8=A1=A5=E6=B5=AE=E5=B1=82=E6=A0=88=E6=AC=A1=E5=BA=8F=E5=A5=91?=
+ =?UTF-8?q?=E7=BA=A6=EF=BC=888=20=E6=9D=A1=E8=A7=84=E5=88=99=E9=80=90?=
+ =?UTF-8?q?=E6=9D=A1=E5=AF=B9=E5=BA=94=E6=B5=8B=E8=AF=95=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对浮层叠加做了完整核查：注册/撤销/事件分发/绘制/Esc 归属/外壳优先级/Modal 全消费/
+Drawer 半消费——8 条规则全部有测试或明确的实现锚点，无缺陷。
+
+其中分发走快照（某层关闭后下层不再收到滞留事件）与外壳所有事件先给浮层栈再给树
+是两条纯实现细节支撑的行为，写明可防后人重构 dispatchOverlay 时丢掉。
+---
+ docs/architecture.md | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 9227a01..a94a36d 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -354,6 +354,22 @@ CUI 当前仍采用确定性的完整重建（每次重绘构建整棵树，仅
+ - **G.FUN.01（`Theme` 构造参数超限）**：主题是一次性构造的纯值记录，命名参数携带默认值；
+   拆分成多次调用反而弱化“一处声明完整配色”的可审阅性。
+ 
++
++### 浮层栈的次序契约
++
++多个浮层同时打开时（弹窗里的下拉、弹窗里的右键菜单）按以下规则，全部有测试固定：
++
++| 规则 | 行为 | 固定它的测试 |
++|---|---|---|
++| 注册 | 同 owner 替换原条目（同帧重绘不重复入栈），新 owner 追加到栈顶 | `contextMenuInsideModalStacksAboveDialog` |
++| 撤销 | `removeOverlay(owner)` 只摘自己——关掉弹窗里的菜单，弹窗的注册原样保留 | 同上 |
++| 事件分发 | `dispatchOverlay` **自栈顶向下**逐层询问，某层消费即止；分发走快照，某层关闭的下层不再收到滞留事件 | 同上 |
++| 绘制 | `drawActiveOverlay` 自底向上；绘制期间新注册的层（弹窗体内画出的下拉）同帧排到更上层 | 同上 |
++| Esc 归属 | 每层只关自己：按 Esc 先关最上层（菜单），再按才关弹窗 | 同上（末段断言）|
++| 事件优先级 | 外壳把**所有**事件先给浮层栈、再给树——焦点在弹窗背后也不会"隔窗打字" | `DesktopApp` 分发路径（每种事件类型都是 dispatchOverlay 在前）|
++| Modal 全消费 | Modal 处理后无条件返回 true：任何事件都不会穿到背景树（含滚轮）| `handleModal` 末行 |
++| Drawer 半消费 | 面板内滚轮路由给内容并消费，面板外返回 false 落回背景 | `drawer.cj` MouseMove/Wheel 分支 |
++
+ ## FFI 边界
+ 
+ C ABI 声明、原始结构和指针操作位于 `sdl` 模块内部。领域包将 `foreign` 调用转换为仓颉类型、
+-- 
+2.47.3
+
