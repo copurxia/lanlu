@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:32:47 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20TextArea=20=E8=A1=8C=E8=A1=A5=20editMen?=
+ =?UTF-8?q?uItems?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 149f071..f65eeca 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -245,7 +245,7 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+ | 类型 | 构造函数 | 链式 API/行为 |
+ |---|---|---|
+ | `TextField` | `TextField(text, key!: ?String = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true, masked!: Bool = false, onSubmit!: ?() -> Unit = None)` | `autofocus`；单行 UTF-8 编辑；Shift 扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；**`onSubmit`：聚焦且可编辑时按 Enter 触发（表单回车的标准入口）**；**按词编辑：Ctrl+Left/Right 跳词边界（Shift 扩展选区）、Ctrl+Backspace/Delete 删除整词**（词边界与双击选词同一套 Unicode 脚本分类）；**`editMenuItems(): Array<MenuItem>`：标准编辑菜单项（剪切/复制/粘贴/全选，按状态置灰，undo 一致）——`ContextMenu(items: field.editMenuItems()) { field }` 一行得到右键编辑菜单**；只读（`editable: false`）忽略编辑、不参与 Tab 遍历，仍可选择/复制；`masked: true` 时每个字素显示为 "•"（真实值不变，复制仍为真实文本） |
+-| `TextArea` | `TextArea(text, key!: ?String = None, scroll!: ?State<Float32> = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true)` | `autofocus`；多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；只读区（`editable: false`）不参与 Tab 遍历 |
++| `TextArea` | `TextArea(text, key!: ?String = None, scroll!: ?State<Float32> = None, cursor!: ?State<Int64> = None, anchor!: ?State<Int64> = None, editable!: Bool = true)` | `autofocus`；多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V；`undo`/`redo`（Ctrl+Z/Y）；**`editMenuItems()` 与 TextField 同一右键菜单入口（粘贴保留换行）**；只读区（`editable: false`）不参与 Tab 遍历 |
+ | `ComboBox` | `ComboBox(text: Bindable<String>, options, key!: ?String = None)` | 可编辑下拉：内嵌 `TextField`（完整编辑）+ 建议列表浮层；键入过滤（无匹配显示“—”占位）、点击/回车填入，自由文本亦保留。长建议列表在弹层内部滚动：滚轮、可拖动滑块、方向键揭示高亮 |
+ 
+ 外部状态（滚动、光标、锚点）均为可选命名参数；持有 `cursor!` 就应连同 `anchor!` 一并持有并
+-- 
+2.47.3
+

@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:27:34 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20TextArea=20=E8=A1=A5=E9=BD=90=20edi?=
+ =?UTF-8?q?tMenuItems()=E2=80=94=E2=80=94=E4=B8=8E=20TextField=20=E5=90=8C?=
+ =?UTF-8?q?=E4=B8=80=E5=8F=B3=E9=94=AE=E8=8F=9C=E5=8D=95=E5=85=A5=E5=8F=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一批只给 TextField 加了编辑菜单项，TextArea 留待"多行语义确认"。核对后唯一差异是
+粘贴处理：字段把换行拍平成空格（单行约束），文本区保留换行但规范化 CRLF（多行语义，
+pasteClipboard 已如此实现）。因此直接对齐，无新语义要发明。
+
+TextArea.editMenuItems() 与字段完全同一语义：剪切/复制/粘贴/全选、按状态置灰（无选区
+灰剪切/复制、只读灰剪切/粘贴）、undo 历史一致（before/after 快照提交）。
+
+测试：2 用例（置灰矩阵 + 全选剪切清空、只读置灰）。
+cjpm test：TOTAL 488 / PASSED 447，失败名册与基线一致，零回归。
+---
+ src/text/edit_menu_test.cj | 33 +++++++++++++++++++++++++++++++++
+ src/text/text_area.cj      | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+)
+
+diff --git a/src/text/edit_menu_test.cj b/src/text/edit_menu_test.cj
+index 568dc2f..6c84974 100644
+--- a/src/text/edit_menu_test.cj
++++ b/src/text/edit_menu_test.cj
+@@ -38,6 +38,39 @@ func editMenuCutRemovesSelection(): Unit {
+     @Expect(text.value, "")
+ }
+ 
++
++/* TextArea 编辑菜单项：与字段同一语义；粘贴保留换行（多行控件）。 */
++@Test
++func areaEditMenuItemsMatchFieldSemantics(): Unit {
++    let ctx = menuFieldContext()
++    let text = State<String>("line1\nline2")
++    let area = TextArea(text, key: "am.a")
++    area.layout(ctx, Rect(0.0, 0.0, 300.0, 100.0))
++    let items = area.editMenuItems()
++    @Expect(items.size, Int64(4))
++    // 无选区：剪切/复制灰。
++    @Expect(!items[0].isEnabled())
++    @Expect(!items[1].isEnabled())
++    @Expect(items[2].isEnabled())
++    // 全选 → 剪切可用 → 执行后清空。
++    items[3].invoke()
++    let after = area.editMenuItems()
++    @Expect(after[0].isEnabled())
++    after[0].invoke()
++    @Expect(text.value, "")
++}
++
++@Test
++func areaEditMenuReadOnlyGraysCutPaste(): Unit {
++    let ctx = menuFieldContext()
++    let text = State<String>("ro 多行")
++    let area = TextArea(text, key: "am.ro", editable: false)
++    area.layout(ctx, Rect(0.0, 0.0, 300.0, 100.0))
++    let items = area.editMenuItems()
++    @Expect(!items[0].isEnabled())
++    @Expect(!items[2].isEnabled())
++}
++
+ @Test
+ func editMenuReadOnlyGraysEditing(): Unit {
+     let ctx = menuFieldContext()
+diff --git a/src/text/text_area.cj b/src/text/text_area.cj
+index d417dee..36297b4 100644
+--- a/src/text/text_area.cj
++++ b/src/text/text_area.cj
+@@ -2,6 +2,7 @@ package cui.text
+ 
+ import lgui.{FontSizes, Key, MouseButton, Point, Rect, Size, UiEvent}
+ import lgui.input.{Clipboard, Keyboard}
++import cui.controls.MenuItem
+ import cui.core.{Bindable, CUI_SMALL_H, CursorShape, ScrollBar, State, UiContext, Widget, claimHoverIfInside, 
+     clampScrollOffset, drawFocusRing, drawSurface, drawVerticalScrollBar, emit, localState, registerFocusable, 
+     resolveControlKey, SmoothScroll, scrollLineIndex, scrollLineRemainder}
+@@ -364,6 +365,33 @@ public class TextArea <: Widget {
+         false
+     }
+ 
++    /*
++     * 标准编辑菜单项（与 TextField.editMenuItems 同一语义；粘贴保留换行——这是多行控件）。
++     * 用法：ContextMenu(items: area.editMenuItems()) { area }
++     */
++    public func editMenuItems(): Array<MenuItem> {
++        let edit = editState()
++        let hasSelection = edit.hasSelection()
++        let editable = isEditable
++        func recordedMenuEdit(action: () -> Unit): Unit {
++            let before = snapshot()
++            action()
++            if (text.value != before.text) {
++                history.commit(before, UInt64(0))
++            }
++        }
++        return [
++            MenuItem("剪切", {=> let _ = copySelection(edit); recordedMenuEdit({=> let _ = edit.deleteSelection()})},
++                shortcut: "Ctrl+X", enabled: hasSelection && editable),
++            MenuItem("复制", {=> let _ = copySelection(edit)},
++                shortcut: "Ctrl+C", enabled: hasSelection),
++            MenuItem("粘贴", {=> recordedMenuEdit({=> pasteClipboard(edit)})},
++                shortcut: "Ctrl+V", enabled: editable),
++            MenuItem("全选", {=> edit.selectAll()},
++                shortcut: "Ctrl+A"),
++        ]
++    }
++
+     // Clipboard access can fail without a desktop session; treat it as best-effort.
+     private func copySelection(edit: TextEditState): Bool {
+         if (!edit.hasSelection()) {
+-- 
+2.47.3
+
