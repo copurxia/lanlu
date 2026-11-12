@@ -155,6 +155,19 @@ if (pixels.size != expected) {
 对方的"封面空白"应优先查 `budgetDeny`；若空白的是**阅读页**，则预算不是原因，
 应查后端上传（`uploadNative FAIL` / `cooldown`）或 `hp.takeHtmlFrame()` 是否根本没有帧。
 
+## 复核：register 路径不受预算约束是**有意设计**（2026-11-12 04:33）
+
+担心过"burst 大图 register 会绕过帧预算"，核对后确认不构成问题：
+
+1. `registerPixelImage` 的设计场景是**视频逐帧**（注释引用 #5）：同 key 同尺寸走
+   `updateStreamingTextureRgba` **原地更新**，不重建纹理、不走上传预算——这是性能必需
+   （每帧都过预算会把视频卡成幻灯片）；
+2. 新建纹理的 register 只发生在"首次出现该 key"或"尺寸变化"——应用模式是每可见页 1–2 张
+   （`reader_stage` 的 left/right 两页），不构成 burst；
+3. 需要节流的场景（封面批量到达）走的是 `stage*` 路径，那里有预算。
+
+结论：**无需改动**。记录在此是为了防止后人"顺手统一"两条路径——那会把视频播放打坏。
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
