@@ -56,3 +56,18 @@
 
 > 结论：合并后真正需要人工盯的是**应用层接线**（回车、初始聚焦、自绘件布局）与**视觉/DPI/IME**，
 > 框架行为本身已被 60+ 个新用例覆盖。
+
+## 媒体路径（图像/封面/纹理）——本轮新增覆盖
+
+审计过程中在 media 路径发现 5 个真实缺陷并修复，每个都有测试兜底：
+
+| 项 | 缺陷 | 修复 | 自动化 |
+|---|---|---|---|
+| 帧上传预算 | 单张图 > 预算时每帧被拒 → **永久空白** | `0081` 超预算放行一次 | ✅ `oversizedSingleUploadIsAllowedOncePerWindow`、`unthrottledBudgetAllowsEverything` |
+| 两阶段登记 | 尺寸/字节数不校验 → 越界读（花屏/崩溃） | `0082` 拒绝 + 释放指针 | ✅ `stageRejectsByteCountMismatch`、`stageRejectsNonPositiveSize`、`stageAcceptsValidByteCount` |
+| 一步注册 | 同上（视频/流式路径） | `0083` 同校验 | ✅ `registerRejectsByteCountMismatch`、`registerRejectsNonPositiveSize` |
+| 可观测性 | 静默拒绝 → 只看到空白无线索 | `0086` `onPixelImageRejected(key, reason)` | ✅ `rejectionCallbackReportsReason` |
+| 巨量 memcpy | 荒唐尺寸在拷贝前未拦 → OOM/崩溃 | `0092` `pixelMaxImageSide`（默认 16384） | ✅ `oversizedSideIsRejectedBeforeCopy`、`oversizedSideOnRegisterIsRejected` |
+
+另有 4 个几何用例固定适配行为（Contain/Cover/Stretch/零尺寸），证明**裁切几何本身正确**
+——真机"封面空白"的嫌疑因此收窄到**纹理获取**（见 [12-findings-for-other-party.md](12-findings-for-other-party.md)）。
