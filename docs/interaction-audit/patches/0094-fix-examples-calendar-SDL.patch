@@ -1,0 +1,141 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:47:15 +0000
+Subject: [PATCH] =?UTF-8?q?fix(examples):=20calendar=20=E5=BE=BD=E6=A0=87?=
+ =?UTF-8?q?=E6=94=B9=E7=94=A8=E5=86=85=E5=AD=98=E5=83=8F=E7=B4=A0=E5=9B=BE?=
+ =?UTF-8?q?=E2=80=94=E2=80=94=E4=BF=AE=E5=A4=8D=E8=87=AA=20SDL=20=E7=A7=BB?=
+ =?UTF-8?q?=E9=99=A4=E5=90=8E=E4=B8=80=E7=9B=B4=E7=BC=96=E4=B8=8D=E8=BF=87?=
+ =?UTF-8?q?=E7=9A=84=E7=A4=BA=E4=BE=8B?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ 仍在用 （随 P5 改写移除），导致该示例自那时起就报
+——29/30 示例能编译，只有它是坏的。
+
+改为直接在内存里生成 RGBA（同一套矩形绘制逻辑，写入字节数组），经
+登记、 显示：不落盘、不走解码，正好演示内存像素图 API 的典型用法。
+main.cj 的  调用与视觉布局不变。
+
+验证：源级编译通过（仅链接期缺 SDL/vips 符号，与本机其他示例同一环境限制）。
+---
+ examples/calendar/src/badge.cj | 64 +++++++++++++++++++++-------------
+ examples/calendar/src/views.cj |  4 +--
+ 2 files changed, 42 insertions(+), 26 deletions(-)
+
+diff --git a/examples/calendar/src/badge.cj b/examples/calendar/src/badge.cj
+index 26489aa..4fadc68 100644
+--- a/examples/calendar/src/badge.cj
++++ b/examples/calendar/src/badge.cj
+@@ -1,12 +1,19 @@
+ /*
+- * 用 Surface 逐像素生成标题栏左侧的日历徽标，并存为 BMP 供 ImageView 加载。
+- * 以远高于显示尺寸的分辨率绘制（192×144，约为 40×30 vp 显示尺寸的数倍），ImageView 下采样后边缘更锐利。
++ * 生成标题栏左侧的日历徽标。
++ *
++ * 原实现用已随 SDL 一起移除的 `Surface` 逐像素画图并写 BMP；现在改为**直接在内存里生成
++ * RGBA 像素**，经 `stagePixelImage` 登记、用 `PixelImageView` 显示——不落盘、不走解码，
++ * 正是内存像素图 API 的典型用法。
++ *
++ * 以远高于显示尺寸的分辨率绘制（192×144，约为 40×30 vp 显示尺寸的数倍），下采样后边缘更锐利。
+  */
+ package cui_calendar
+ 
+-import cui.{Color, Surface}
++import cui.{Color, stagePixelImage}
+ 
+-let CALENDAR_BADGE = "cui-calendar-badge.bmp"
++let CALENDAR_BADGE = "cui-calendar-badge"
++let BADGE_WIDTH: Int32 = 192
++let BADGE_HEIGHT: Int32 = 144
+ 
+ struct PixelRect {
+     let x: Int32
+@@ -23,34 +30,43 @@ struct PixelRect {
+ }
+ 
+ func writeCalendarBadge(): Unit {
+-    try (surface = Surface.create(192, 144)) {
+-        surface.clear(Color.rgb(253, 251, 255))
+-        fillRect(surface, PixelRect(0, 0, 192, 44), CALENDAR_ACCENT)
+-        fillRect(surface, PixelRect(52, 8, 14, 12), Color.rgb(171, 143, 222))
+-        fillRect(surface, PixelRect(126, 8, 14, 12), Color.rgb(171, 143, 222))
+-        fillRect(surface, PixelRect(20, 74, 152, 3), Color.rgb(224, 215, 240))
+-        fillRect(surface, PixelRect(20, 106, 152, 3), Color.rgb(224, 215, 240))
+-        let cell = Color.rgb(236, 228, 250)
+-        drawBadgeCell(surface, 0, 0, cell)
+-        drawBadgeCell(surface, 1, 0, cell)
+-        drawBadgeCell(surface, 2, 0, CALENDAR_ACCENT)
+-        drawBadgeCell(surface, 0, 1, cell)
+-        drawBadgeCell(surface, 1, 1, cell)
+-        drawBadgeCell(surface, 2, 1, cell)
+-        surface.saveBmp(CALENDAR_BADGE)
+-    }
++    // RGBA 字节序与 registerPixelImage/stagePixelImage 一致（R,G,B,A）。
++    let pixels = Array<UInt8>(Int64(BADGE_WIDTH) * Int64(BADGE_HEIGHT) * 4, repeat: 0u8)
++    fillRect(pixels, PixelRect(0, 0, BADGE_WIDTH, BADGE_HEIGHT), Color.rgb(253, 251, 255))
++    fillRect(pixels, PixelRect(0, 0, BADGE_WIDTH, 44), CALENDAR_ACCENT)
++    fillRect(pixels, PixelRect(52, 8, 14, 12), Color.rgb(171, 143, 222))
++    fillRect(pixels, PixelRect(126, 8, 14, 12), Color.rgb(171, 143, 222))
++    fillRect(pixels, PixelRect(20, 74, 152, 3), Color.rgb(224, 215, 240))
++    fillRect(pixels, PixelRect(20, 106, 152, 3), Color.rgb(224, 215, 240))
++    let cell = Color.rgb(236, 228, 250)
++    drawBadgeCell(pixels, 0, 0, cell)
++    drawBadgeCell(pixels, 1, 0, cell)
++    drawBadgeCell(pixels, 2, 0, CALENDAR_ACCENT)
++    drawBadgeCell(pixels, 0, 1, cell)
++    drawBadgeCell(pixels, 1, 1, cell)
++    drawBadgeCell(pixels, 2, 1, cell)
++    stagePixelImage(CALENDAR_BADGE, BADGE_WIDTH, BADGE_HEIGHT, pixels)
+ }
+ 
+-func drawBadgeCell(surface: Surface, col: Int32, row: Int32, color: Color): Unit {
+-    fillRect(surface, PixelRect(44 + col * 40, 54 + row * 32, 30, 24), color)
++func drawBadgeCell(pixels: Array<UInt8>, col: Int32, row: Int32, color: Color): Unit {
++    fillRect(pixels, PixelRect(44 + col * 40, 54 + row * 32, 30, 24), color)
+ }
+ 
+-func fillRect(surface: Surface, rect: PixelRect, color: Color): Unit {
++func fillRect(pixels: Array<UInt8>, rect: PixelRect, color: Color): Unit {
++    let (r, g, b, a) = (color.r, color.g, color.b, color.a)
+     var row: Int32 = 0
+     while (row < rect.h) {
+         var col: Int32 = 0
+         while (col < rect.w) {
+-            surface.writePixel(rect.x + col, rect.y + row, color)
++            let x = rect.x + col
++            let y = rect.y + row
++            if (x >= 0 && x < BADGE_WIDTH && y >= 0 && y < BADGE_HEIGHT) {
++                let i = (Int64(y) * Int64(BADGE_WIDTH) + Int64(x)) * 4
++                pixels[i] = r
++                pixels[i + 1] = g
++                pixels[i + 2] = b
++                pixels[i + 3] = a
++            }
+             col += 1
+         }
+         row += 1
+diff --git a/examples/calendar/src/views.cj b/examples/calendar/src/views.cj
+index a6a8479..f6b2da9 100644
+--- a/examples/calendar/src/views.cj
++++ b/examples/calendar/src/views.cj
+@@ -8,14 +8,14 @@
+  */
+ package cui_calendar
+ 
+-import cui.{Button, ButtonRole, FontSizes, ForEachIndexed, HStack, IconButton, IconName, ImageView, Label,
++import cui.{Button, ButtonRole, FontSizes, ForEachIndexed, HStack, IconButton, PixelImageView, IconName, ImageFit, Label,
+     LengthUnits, Panel, Spacer, TabView, TextAlign, VStack}
+ 
+ func calendarView(model: CalendarModel): Unit {
+     VStack {
+         HStack {
+             // 逐帧内联声明即可：解码后的纹理按路径缓存在共享缓存里，重建不触碰磁盘。
+-            ImageView(CALENDAR_BADGE).width(40.vp).height(30.vp)
++            PixelImageView(CALENDAR_BADGE, 40.vp, 30.vp).fit(ImageFit.Contain)
+             Label(model.title.value).fontSize(FontSizes.TITLE)
+             Spacer()
+             IconButton(IconName.ChevronLeft) {
+-- 
+2.47.3
+
