@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:25:40 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E5=9B=9B=E4=BB=BD=E6=96=87=E6=A1=A3?=
+ =?UTF-8?q?=E5=86=8D=E7=BA=A0=20sdl=20=E2=86=92=20lgui=20=E6=9B=B4?=
+ =?UTF-8?q?=E5=90=8D=E6=AE=8B=E7=95=99=EF=BC=88=E6=A8=A1=E5=9D=97=E5=BC=95?=
+ =?UTF-8?q?=E7=94=A8=E4=B8=8E=E8=B5=84=E6=BA=90=E8=B7=AF=E5=BE=84=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一轮修了顶层 README，这轮扫完整个 docs/：docs/README、architecture（2 处）、
+getting-started 仍称底层模块为 sdl。改为 lgui 并标注原名，避免读者按旧名找目录。
+保留 .sdl3 资源目录名（真实路径）。内链自查 0 断链。
+---
+ docs/README.md          | 2 +-
+ docs/architecture.md    | 4 ++--
+ docs/getting-started.md | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/docs/README.md b/docs/README.md
+index af58633..17ddc6d 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -7,7 +7,7 @@
+ 3. [CUI API 参考](api-reference.md)：按包和功能查阅公开类型、构造参数与方法。
+ 4. [架构与设计说明](architecture.md)：理解包边界、帧调度与脏帧跳过、渲染管线和线程模型。
+ 
+-底层窗口、渲染、输入和系统 API 由独立 `sdl` 模块提供，参见
++底层窗口、渲染、输入和系统 API 由独立 `lgui` 模块提供（原名 `sdl`），参见
+ [SDL 文档中心](../lgui/docs/README.md)。
+ 
+ ## 适用范围
+diff --git a/docs/architecture.md b/docs/architecture.md
+index a94a36d..2d424e2 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -15,7 +15,7 @@ sdl ──► sdl.dialogs / sdl.displays / sdl.input / sdl.system / sdl.text
+ SDL3 + SDL3_ttf
+ ```
+ 
+-`cui` 对 `sdl` 是单向依赖。底层模块可以独立使用，不了解 GUI 控件或声明式构建机制。
++`cui` 对 `lgui`（原名 `sdl`）是单向依赖。底层模块可以独立使用，不了解 GUI 控件或声明式构建机制。
+ 
+ ## CUI 包职责
+ 
+@@ -372,6 +372,6 @@ CUI 当前仍采用确定性的完整重建（每次重绘构建整棵树，仅
+ 
+ ## FFI 边界
+ 
+-C ABI 声明、原始结构和指针操作位于 `sdl` 模块内部。领域包将 `foreign` 调用转换为仓颉类型、
++C ABI 声明、原始结构和指针操作位于 `lgui` 模块内部。领域包将 `foreign` 调用转换为仓颉类型、
+ `Option` 或 `CuiException`。应用 API 不暴露 `CPointer` 或 `CString`。由于仓颉 1.0.5 的静态链接
+ 限制，领域专属 ABI 声明与调用方保持同包，而不是集中到一个跨包调用的 raw 包中。
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 8b94f6c..d99acbb 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -6,7 +6,7 @@
+ - Windows x86_64，或具备兼容 SDL3/SDL3_ttf 动态库的目标平台。
+ - Windows 运行时需要 `SDL3.dll` 和 `SDL3_ttf.dll`。
+ 
+-仓库中的 `sdl/.sdl3/` 已包含 Windows 链接所需的 cjpm 名称与运行库名称。
++仓库中的 `lgui/.sdl3/`（原名 `sdl/.sdl3/`）已包含 Windows 链接所需的 cjpm 名称与运行库名称。
+ 
+ ## 创建应用
+ 
+-- 
+2.47.3
+
