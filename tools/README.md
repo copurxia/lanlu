@@ -46,6 +46,17 @@ python3 tools/check-platform-isolation.py --update-baseline
 - 平台包目录前缀固定为 `packages/lplatform-` 与 `packages/lpack-`；新增平台 = 新增两个包，
   不需要改这两个脚本（计划 §2 原则 10）。
 
+## 交互审计的三个脚本（cui 侧，中立）
+
+| 脚本 | 做什么 |
+|---|---|
+| `verify-cui-interactions.sh [main\|p0]` | 生成 SDL/vips 桩库跑 `cjpm test`，并把失败名册与 `docs/interaction-audit/test-baseline-names.txt` 逐条 diff；只有名单完全一致才返回 0。无需 GPU/SDL 设备。支持 `CJV/STUB/LOG/PKG_DIR` 环境覆盖。 |
+| `rehearse-merge.sh [--keep\|--no-test]` | 合并演练：主仓快照副本 → 应用 `docs/interaction-audit/patches/*.patch` → 跑测试比对基线 → 清理。带补丁新鲜度护栏（补丁数必须等于分支提交数）与 linked-worktree 提示。 |
+| `land-focus-interactions.sh [--check\|--emit-patches]` | 一把落地：脏树自检 → 合并/应用补丁 → 补宿主机 link-option → 跑测试 → cherry-pick 应用层。`--check` 只校验前置；`--emit-patches` 从分支重新生成补丁序列。 |
+
+三条护栏的设计来历（2026-11-11 误提交事故、11-12 补丁过期假失败）见
+[docs/interaction-audit/07-merge-runbook.md](../docs/interaction-audit/07-merge-runbook.md) §0-0。
+
 ## 另见
 
 - `sync-wgpu-hal.sh`：从 horizon 同步 vendored wgpu-hal（lgpu 用）
