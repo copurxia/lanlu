@@ -63,6 +63,11 @@ MATRIX="$ROOT/docs/interaction-audit/08-coverage-matrix.md"
 if [ -f "$MATRIX" ]; then
   miss=0
   for name in $(grep -oE '`[a-z][A-Za-z0-9]+`' "$MATRIX" | tr -d '`' | sort -u); do
+    # 若该标识符其实是源码里的类型/函数/变量（例如 pixelMaxImageSide），说明矩阵在叙述实现
+    # 而不是引用测试——跳过，避免把实现名当成测试名。
+    if grep -rqE "(func|class|struct|enum|interface|var|let|prop) $name\b" --include='*.cj' "$GUI/src" "$GUI/lgui" 2>/dev/null; then
+      continue
+    fi
     if ! grep -rq "func $name" --include='*_test.cj' "$GUI/src" "$GUI/lgui" 2>/dev/null; then
       [ "$name" = "readerHtmlPageTurn" ] && continue   # 应用侧，标注仅人工
       echo "✗ 覆盖矩阵引用了不存在的测试：$name"
