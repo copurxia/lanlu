@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:17:50 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E5=A4=96=E9=83=A8=E6=BB=9A?=
+ =?UTF-8?q?=E5=8A=A8=E5=81=8F=E7=A7=BB=E8=B6=8A=E7=95=8C=E7=9A=84=E9=92=B3?=
+ =?UTF-8?q?=E5=88=B6=E5=AE=9A=E7=BA=A6=EF=BC=882=20=E4=BE=8B=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+外部滚动状态可能越界（内容变短、切换列表后遗留旧偏移）。animate 每帧会把 targetOffset
+与 tween 输出都钳回 [0, content-viewport]，并把钳制结果写回外部状态——这条行为此前
+没有测试。补 2 例：远超上限 → 下一帧钳回；负值 → 归零。
+
+cjpm test：TOTAL 511 / PASSED 504，基线匹配零回归。
+---
+ src/core/scroll_offset_clamp_test.cj | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+ create mode 100644 src/core/scroll_offset_clamp_test.cj
+
+diff --git a/src/core/scroll_offset_clamp_test.cj b/src/core/scroll_offset_clamp_test.cj
+new file mode 100644
+index 0000000..1fb2a50
+--- /dev/null
++++ b/src/core/scroll_offset_clamp_test.cj
+@@ -0,0 +1,28 @@
++package cui.core
++
++/*
++ * 外部滚动状态越界（内容变短、切换列表后遗留旧偏移）必须在下一帧被钳回范围内，
++ * 否则容器会按越界偏移绘制一帧空白。这里固化 animate 的钳制行为。
++ */
++@Test
++func externalOffsetBeyondMaxIsClampedByAnimate(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(5000.0) // 远超内容长度
++    let motion = SmoothScroll(offset.value)
++    let content: Float32 = 400.0
++    let viewport: Float32 = 100.0
++    let next = motion.animate(ctx, offset, content, viewport)
++    let maxOffset = content - viewport
++    @Expect(next <= maxOffset)
++    @Expect(offset.value, next) // animate 会把钳制结果写回外部状态
++}
++
++@Test
++func negativeExternalOffsetIsClampedToZero(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(-120.0)
++    let motion = SmoothScroll(offset.value)
++    let next = motion.animate(ctx, offset, 400.0, 100.0)
++    @Expect(next >= 0.0)
++    @Expect(offset.value, next)
++}
+-- 
+2.47.3
+
