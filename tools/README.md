@@ -53,6 +53,8 @@ python3 tools/check-platform-isolation.py --update-baseline
 | `verify-cui-interactions.sh [main\|p0]` | 生成 SDL/vips 桩库跑 `cjpm test`，并把失败名册与 `docs/interaction-audit/test-baseline-names.txt` 逐条 diff；只有名单完全一致才返回 0。无需 GPU/SDL 设备。支持 `CJV/STUB/LOG/PKG_DIR` 环境覆盖。 |
 | `rehearse-merge.sh [--keep\|--no-test]` | 合并演练：主仓快照副本 → 应用 `docs/interaction-audit/patches/*.patch` → 跑测试比对基线 → 清理。带补丁新鲜度护栏（补丁数必须等于分支提交数）与 linked-worktree 提示。 |
 | `land-focus-interactions.sh [--check\|--emit-patches]` | 一把落地：脏树自检 → 合并/应用补丁 → 补宿主机 link-option → 跑测试 → cherry-pick 应用层。`--check` 只校验前置；`--emit-patches` 从分支重新生成补丁序列。 |
+| `verify-examples.sh [p0|<worktree>]` | 编译框架仓库全部示例，确认“示例即文档”没有腐坏。链接期缺 SDL/vips 原生符号视为通过（本机无真实渲染后端）；语义/类型错误才算失败。 |
+| `check-audit-numbers.sh` | 审计一致性：文档里的“当前数字”是否与实际提交/补丁数一致、两棵树文档内链是否可达、覆盖矩阵引用的测试名是否存在。 |
 
 三条护栏的设计来历（2026-11-11 误提交事故、11-12 补丁过期假失败）见
 [docs/interaction-audit/07-merge-runbook.md](../docs/interaction-audit/07-merge-runbook.md) §0-0。
