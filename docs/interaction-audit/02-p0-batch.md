@@ -223,7 +223,7 @@ ContextMenu 按 Tab 不关闭（焦点移到背后、菜单悬空）；其余 7 
 跳过分隔条与禁用项）。键盘导航约定至此覆盖全部列表类交互面。
 
 **验证（累计）**：桩库 `cjpm test` TOTAL 491，PASSED 450（累计新增 104 例 + 改写 1 例全过），
-失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
+失败名册与 7 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
 > `git commit --only -- <paths>`（或用 `git commit -- <paths>`），否则会把这批无关改动一并提交。
