@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:32:40 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20=E8=A1=A5=20gallery=20README?=
+ =?UTF-8?q?=EF=BC=8830=20=E4=B8=AA=E7=A4=BA=E4=BE=8B=20README=20=E9=BD=90?=
+ =?UTF-8?q?=E4=BA=86=EF=BC=89=E2=80=94=E2=80=94LazyGrid=20=E8=99=9A?=
+ =?UTF-8?q?=E6=8B=9F=E5=8C=96=E8=AF=B4=E6=98=8E=20+=20=E7=9B=B8=E5=85=B3?=
+ =?UTF-8?q?=E6=B5=8B=E8=AF=95=E6=8C=87=E9=92=88?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ examples/gallery/README.md | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+ create mode 100644 examples/gallery/README.md
+
+diff --git a/examples/gallery/README.md b/examples/gallery/README.md
+new file mode 100644
+index 0000000..eff8d75
+--- /dev/null
++++ b/examples/gallery/README.md
+@@ -0,0 +1,12 @@
++# gallery：LazyGrid 卡片墙
++
++作品画廊示例，演示 **LazyGrid**——数据驱动、按行虚拟化的等宽网格：
++
++- 几十张卡片只渲染视口附近的行：一行是一个 `Grid`，骑在纵向 `LazyColumn` 上，无需单独的横向滚动。
++- 构建方式即"数据 + 单元格构建器"，行数增长不增加构建成本。
++
++## 结构
++
++`main.cj` 只有入口（`DesktopApp` + 窗口规格）；`view.cj` 是全部视图。与其它示例同一拆分习惯。
++
++相关交互测试：`lazyGridBuildsVisibleCellsFromData`（虚拟化契约）与 `scrollViewRevealsFocusedRectBelowViewport`（键盘聚焦滚入视野），见 `src/core/lazy_column_test.cj`。
+-- 
+2.47.3
+
