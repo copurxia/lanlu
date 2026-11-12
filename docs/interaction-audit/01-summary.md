@@ -1,6 +1,7 @@
 # 基础交互审计 · 总账与修复优先级
 
-> 审计口径：只读静态取证（本机无 cjc/cjpm，未编译、未真机复跑）。三份分报告：
+> 审计口径：**初轮**为只读静态取证；后续已在真实工具链上编译并跑通全部用例（现况见
+> [11-rc-report.md](11-rc-report.md) 与 [08-coverage-matrix.md](08-coverage-matrix.md)）。三份分报告：
 > [framework-controls.md](framework-controls.md)（框架基础控件）、
 > [framework-text-overlays.md](framework-text-overlays.md)（文本族 + 浮层）、
 > [app-layer.md](app-layer.md)（client-next 应用层）。
@@ -155,7 +156,7 @@ tools/land-focus-interactions.sh           # 合并 + 补 link-option + 跑测�
 ## 六、审计方法与局限
 
 - 方法：逐控件读 `handle`/`draw`/`registerFocusable`；用全仓 grep **反证**"确实没有"（`isHovered`、`ctx.press(`、`MouseWheel`、`KeyDown`、`registerFocusable`、`MouseButton.Right` 等）；再以脚本按类体扫描出第四节的覆盖率矩阵。
-- 局限：本机没有 Cangjie 工具链，**未编译、未真机复跑**；所有"用户可感知"均为源码推断。真机待验证项已单列在各报告的「待查」里（IME 组词中间态、禁用蒙版观感、MenuBar 焦点归属）。
+- ~~局限：本机没有 Cangjie 工具链，未编译、未真机复跑~~ **已解决**：后续装上了工具链（cjc 1.0.5 + 桩库），全部框架用例已编译并跑通（531 例，见 RC 报告）。仍待真机的只剩环境项：真机 GPU 渲染、IME 组词中间态、禁用蒙版观感、MenuBar 焦点归属。
 - 未改动任何源码。框架 `packages/cangjie-gui` 是独立 git 仓库，修复需在其中单独提交；`docs/interaction-audit/` 为本次新增。
 
 ### 审计期间工作区变动（提醒）

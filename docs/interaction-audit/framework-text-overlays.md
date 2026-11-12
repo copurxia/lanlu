@@ -1,6 +1,6 @@
 # cui 框架：文本输入族 + 浮层控件 交互缺口审计
 
-> 审计员：audit-text-overlays　任务：task-1　基线：/workspace/lanlu/lanlu（只读，未编译、未真机复跑）
+> 审计员：audit-text-overlays　任务：task-1　基线：/workspace/lanlu/lanlu（审计时只读静态取证；后续已在真实工具链编译验证）
 > 范围：`packages/cangjie-gui/src/text/*`（TextField / TextArea / ComboBox / RichText / text_edit_state /
 > text_input_cursor / text_history）与浮层类控件（modal / drawer / context_menu / menu_bar / dropdown /
 > date_picker / time_picker / toast / core/tooltip）。
