@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:25:39 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E4=B8=A4=E5=A4=84=E5=AA=92=E4=BD=93?=
+ =?UTF-8?q?=E6=96=87=E6=A1=A3=E8=A1=A5=20pixelMaxImageSide=EF=BC=88?=
+ =?UTF-8?q?=E5=90=AB"=E6=8B=B7=E8=B4=9D=E5=89=8D=E6=8B=92=E7=BB=9D"?=
+ =?UTF-8?q?=E7=9A=84=E7=90=86=E7=94=B1=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 1 +
+ docs/components.md    | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 93ba722..63a2c90 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -295,6 +295,7 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+   （登记被拒时回调——**静默拒绝会让调用方只看到封面空白**，用它记录日志或触发重解码）。
+   **输入校验**：`width/height` 必须为正且 `pixels.size == width*height*4`，否则拒绝登记（解码输出不可信，
+   尺寸不符会越界读）；`stageNativePixelImage` 拒绝时会自行调用 `releaser.release()`。
++  **尺寸上限**：`pixelMaxImageSide`（默认 16384，单边超过即在**拷贝像素前**拒绝——否则巨量 memcpy 会 OOM）。
+   **字节预算**：`pixelCacheMaxBytes`（LRU 上限）与 `pixelUploadBudgetBytes`（每 16ms 帧窗口的上传字节上限，
+   默认 16 MiB；**单张超过预算的图仍会放行一次**，否则会被永久拒绝而永远画不出来）。
+ - `EventHandler(onEvent) { ... }`：在子树前截获事件。
+diff --git a/docs/components.md b/docs/components.md
+index 86d424f..28ac47d 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -534,6 +534,8 @@ stageNativePixelImage(key, width, height, pointer, releaser)   // 原生指针
+ 
+ - **输入校验**：`width/height` 必须为正且 `pixels.size == width*height*4`，否则**拒绝登记**
+   （解码输出不可信，尺寸不符会越界读 → 花屏或崩溃）。原生路径拒绝时会自行调用 `releaser.release()`。
++- **尺寸上限**：`pixelMaxImageSide`（默认 16384）——单边超限会在**拷贝像素之前**拒绝，
++  避免解码器给出荒唐尺寸时触发巨量 memcpy（那会 OOM/崩溃，而不是走正常的创建失败路径）。
+ - **内存策略**：`pixelCacheMaxBytes` 控 LRU 上限；`pixelUploadBudgetBytes` 控每 16ms 窗口的
+   上传字节（默认 16 MiB，防同帧集中上传卡顿）——**单张超过预算的图仍会放行一次**，
+   否则会被永久拒绝、永远画不出来。
+-- 
+2.47.3
+
