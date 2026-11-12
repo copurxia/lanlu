@@ -162,6 +162,13 @@ Summary: TOTAL: 450
 
 > 演练副本已清理（每个约 165M，脚本可随时重建）。
 >
+> **状态更新（2026-11-12 05:25）**：**发现并消除一次真实冲突**。`0106 pixelFailureCounts` 起初把
+> 计数器加在"预算拒绝分支"与 `uploadNativePixelTexture` 的 `catch` 里——正是对方 WIP 加诊断代码
+> 的两处，`git am --3way` 冲突（rehearsal exit=1）。改法：预算拒绝计在 `pixelUploadAllowed` 内部、
+> 原生上传失败用 `uploadNativePixelTextureCounted` 包装在调用侧累加——两处都不在对方改动范围。
+> 重新生成补丁后演练恢复 **零冲突**（531 例 / 524 通过）。
+> 教训：**在别人正在调试的文件里加代码，要把改动放在他们不会碰的函数里**。
+>
 > **状态更新（2026-11-12 05:02）**：集合控件激活补齐（TreeView/Table 的 `onActivate` + Table.of
 > 转发）后，105 补丁对对方最新 WIP 仍**零冲突全绿**：**531 例 / 524 通过 / 基线匹配**。
 >
