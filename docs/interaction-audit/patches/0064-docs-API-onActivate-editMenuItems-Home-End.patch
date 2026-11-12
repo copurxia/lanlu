@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:04:11 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E7=BB=84=E4=BB=B6=E6=96=87=E6=A1=A3?=
+ =?UTF-8?q?=E4=B8=8E=E4=BD=BF=E7=94=A8=E6=8C=87=E5=8D=97=E8=A1=A5=E6=9C=80?=
+ =?UTF-8?q?=E6=96=B0=20API=EF=BC=88onActivate/editMenuItems/Home-End?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- components.md：TextField/TextArea 补 onSubmit 与 editMenuItems（含组合示例一句话）；
+  ListView 补 onActivate 与 selectionRange、构造签名同步。
+- user-guide.md §12.3：新增三条——双击/Enter·Space 激活、右键编辑菜单、
+  Home/End 全列表类约定（含菜单跳分隔/禁用的说明）。
+
+此前这批 API 只在 api-reference.md（权威）里，指南与组件页落下了——补齐三处一致。
+---
+ docs/components.md | 12 +++++++-----
+ docs/user-guide.md |  3 +++
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/docs/components.md b/docs/components.md
+index d8355ce..998aa9b 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -784,7 +784,7 @@ Rating(value: Bindable<Int64>, count!: Int64 = 5, readonly!: Bool = false, key!:
+ 
+ ### TextField
+ 
+-单行文本框。Shift 扩选、拖选、Ctrl+A/C/X/V、撤销/重做（Ctrl+Z/Y）；光标始终水平滚入可见。
++单行文本框。Shift 扩选、拖选、Ctrl+A/C/X/V、撤销/重做（Ctrl+Z/Y）；`onSubmit!`（聚焦且可编辑时回车提交）；`editMenuItems()` 给出标准编辑菜单项（剪切/复制/粘贴/全选按状态置灰、undo 一致）——`ContextMenu(items: field.editMenuItems()) { field }` 一行得到右键编辑菜单；光标始终水平滚入可见。
+ 
+ ```cangjie
+ TextField(text: Bindable<String>, key!: ?String = None, cursor!: ?State<Int64> = None,
+@@ -807,7 +807,7 @@ TextField(text: Bindable<String>, key!: ?String = None, cursor!: ?State<Int64> =
+ 
+ ### TextArea
+ 
+-多行文本区。多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V、撤销/重做；编辑后光标行滚入视口。
++多行文本区。多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V、撤销/重做；`editMenuItems()` 与 TextField 同一右键编辑菜单入口（粘贴保留换行）；编辑后光标行滚入视口。
+ 
+ ```cangjie
+ TextArea(text: Bindable<String>, key!: ?String = None, scroll!: ?State<Float32> = None,
+@@ -835,15 +835,17 @@ ComboBox(text: Bindable<String>, options: Array<String>, key!: ?String = None)
+ 
+ ### ListView
+ 
+-字符串单选列表。点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区。
++字符串单选列表。点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区；
++Shift+点击/方向键区间选择（`selectionRange()` 查询）；设了 `onActivate!` 时**双击行或聚焦后
++Enter/Space 激活**（桌面"打开"语义的键盘等价物，未设置时行为不变）。
+ 
+ ```cangjie
+ ListView(items: Array<String>, selected: Bindable<Int64>, scroll!: ?State<Float32> = None,
+-    key!: ?String = None)
++    key!: ?String = None, onActivate!: ?(Int64) -> Unit = None)
+ ```
+ 
+ - items：条目文字；selected 选中索引。
+-- scroll!：可选外部滚动状态（缺省按身份保留偏移）；key! 可选身份。
++- scroll!：可选外部滚动状态（缺省按身份保留偏移）；key! 可选身份；onActivate! 可选激活回调。
+ 
+ 修饰符：`scrollState(State<Float32>)`。
+ 
+diff --git a/docs/user-guide.md b/docs/user-guide.md
+index 5f06ec1..70629ff 100644
+--- a/docs/user-guide.md
++++ b/docs/user-guide.md
+@@ -540,6 +540,9 @@ cjpm run --run-args "--snapshot output.bmp"
+ | 按键 | 行为 |
+ |---|---|
+ | `Alt+Up/Down` | `ReorderableList`：把持焦行上移/下移 |
++| **双击行 / 聚焦后 Enter·Space** | `ListView`（设了 `onActivate` 时）：激活"打开"——双击与键盘同一回调 |
++| **右键输入框** | `TextField`/`TextArea`（组合 `ContextMenu(items: field.editMenuItems())`）：剪切/复制/粘贴/全选，按状态置灰 |
++| **Home / End** | 全部列表类弹层与容器（ListView/Table/TreeView/ComboBox/Dropdown/ContextMenu）跳首/尾；菜单版跳过分隔条与禁用项 |
+ | `Shift+点击` / `Shift+方向键` | `ListView`/`Table`：区间选择（`selectionRange()` 查询）|
+ | `Shift+Left/Right` + `Enter` | `Table`：切换排序列 / 翻转升降序 |
+ 
+-- 
+2.47.3
+
