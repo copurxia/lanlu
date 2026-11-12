@@ -80,7 +80,7 @@ grep -E 'budgetDeny|uploadNative FAIL|noStaged|cooldown' ~/img_diag.txt | head -
 
 三条各带测试（`pixel_upload_budget_test` / `pixel_stage_validation_test` /
 `pixel_register_validation_test`），共 7 个用例。合并演练对对方最新 WIP 零冲突：
-**514 例 / 507 通过 / 基线匹配**。
+**518 例 / 511 通过 / 基线匹配**。
 
 **建议对方的排查顺序**：
 1. 先 grep `~/img_diag.txt` 里的 `budgetDeny`（确认是否"大图永久被拒"）；

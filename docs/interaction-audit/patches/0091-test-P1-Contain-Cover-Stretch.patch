@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:21:40 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E5=9B=BE=E5=83=8F=E9=80=82?=
+ =?UTF-8?q?=E9=85=8D=E5=87=A0=E4=BD=95=E5=9B=9B=E4=BE=8B=EF=BC=88Contain/C?=
+ =?UTF-8?q?over/Stretch/=E9=9B=B6=E5=B0=BA=E5=AF=B8=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+封面裁切是否正确全看 fittedRect——此前无直接测试。补四条：
+- Contain 完整容纳并居中（2:1 图进 1:1 框 → 100×50，y=25）；
+- Cover 铺满裁切并居中（→ 200×100，x=-50，溢出由 clip 裁掉）；
+- Stretch 直接用 frame；
+- 零尺寸图/零尺寸框 → 空矩形（不产生无效目标矩形）。
+
+cjpm test：TOTAL 518 / PASSED 511，基线匹配零回归。
+---
+ src/media/image_fit_geometry_test.cj | 51 ++++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
+ create mode 100644 src/media/image_fit_geometry_test.cj
+
+diff --git a/src/media/image_fit_geometry_test.cj b/src/media/image_fit_geometry_test.cj
+new file mode 100644
+index 0000000..ff2553e
+--- /dev/null
++++ b/src/media/image_fit_geometry_test.cj
+@@ -0,0 +1,51 @@
++package cui.media
++
++import lgui.{Rect, Size}
++
++/*
++ * 图像适配几何（fittedRect / scaledRect）此前无直接测试——而封面裁切是否正确全看它。
++ * 三条契约：Stretch 填满、Contain 完整容纳并居中、Cover 铺满裁切并居中；零尺寸退化。
++ */
++@Test
++func containFitsWholeImageAndCenters(): Unit {
++    let image = Size(200.0, 100.0) // 2:1
++    let frame = Rect(0.0, 0.0, 100.0, 100.0) // 1:1
++    let r = fittedRect(image, frame, ImageFit.Contain)
++    // 完整容纳：宽度受限于 frame 宽 → 100×50，垂直居中（y = (100-50)/2 = 25）。
++    @Expect(r.w, Float32(100.0))
++    @Expect(r.h, Float32(50.0))
++    @Expect(r.y, Float32(25.0))
++    @Expect(r.x, Float32(0.0))
++}
++
++@Test
++func coverFillsFrameAndCropsTheOverflow(): Unit {
++    let image = Size(200.0, 100.0)
++    let frame = Rect(0.0, 0.0, 100.0, 100.0)
++    let r = fittedRect(image, frame, ImageFit.Cover)
++    // 铺满：高度受限于 frame 高 → 200×100（超出宽度，由 clip 裁掉），水平居中（x = -50）。
++    @Expect(r.h, Float32(100.0))
++    @Expect(r.w, Float32(200.0))
++    @Expect(r.x, Float32(-50.0))
++    @Expect(r.y, Float32(0.0))
++}
++
++@Test
++func stretchUsesTheFrameVerbatim(): Unit {
++    let image = Size(200.0, 100.0)
++    let frame = Rect(10.0, 20.0, 100.0, 40.0)
++    let r = fittedRect(image, frame, ImageFit.Stretch)
++    @Expect(r.x, Float32(10.0))
++    @Expect(r.y, Float32(20.0))
++    @Expect(r.w, Float32(100.0))
++    @Expect(r.h, Float32(40.0))
++}
++
++@Test
++func zeroSizesDegenerateToEmptyRect(): Unit {
++    let zeroImage = fittedRect(Size(0.0, 100.0), Rect(5.0, 6.0, 80.0, 60.0), ImageFit.Cover)
++    @Expect(zeroImage.w, Float32(0.0))
++    @Expect(zeroImage.h, Float32(0.0))
++    let zeroFrame = fittedRect(Size(200.0, 100.0), Rect(0.0, 0.0, 0.0, 50.0), ImageFit.Contain)
++    @Expect(zeroFrame.w, Float32(0.0))
++}
+-- 
+2.47.3
+
