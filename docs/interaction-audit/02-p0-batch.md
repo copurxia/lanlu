@@ -48,6 +48,7 @@
 | TextArea 菜单 | P1 TextArea.editMenuItems() 对齐（粘贴保留换行）|
 | ComboBox Home/End | P1 弹层键盘跳首/尾 |
 | Dropdown Home/End | P1 弹层键盘跳首/尾（浮层键盘约定完全对齐）|
+| ContextMenu Home/End | P1 菜单键盘跳首/尾（跳过分隔/禁用条目）|
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -218,7 +219,10 @@ ContextMenu 按 Tab 不关闭（焦点移到背后、菜单悬空）；其余 7 
 **第三十五批**：Dropdown 补 Home/End——至此全部列表型弹层/容器键盘键位一致
 （Down/Up 逐项、Home/End 跳首尾、Esc 关闭、Enter 确认）。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 490，PASSED 449（累计新增 103 例 + 改写 1 例全过），
+**第三十六批**：ContextMenu 补 Home/End（menuFirstSelectable / 新增 menuLastSelectable，
+跳过分隔条与禁用项）。键盘导航约定至此覆盖全部列表类交互面。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 491，PASSED 450（累计新增 104 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用

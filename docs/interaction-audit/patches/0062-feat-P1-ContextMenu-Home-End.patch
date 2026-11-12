@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:58:36 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ContextMenu=20=E9=94=AE=E7=9B=98=20?=
+ =?UTF-8?q?Home/End=20=E8=B7=B3=E9=A6=96/=E5=B0=BE=E5=8F=AF=E9=80=89?=
+ =?UTF-8?q?=E6=9D=A1=E7=9B=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+列表类弹层键盘约定对齐的收尾：ContextMenu 的 Up/Down 用 menuNextSelectable（已跳过
+分隔条与禁用项），但 Home/End 缺席。
+
+补齐：Home → menuFirstSelectable，End → 新增 menuLastSelectable（同样语义：跳过分隔条
+与禁用项——直接落到底再回扫，分隔条在末尾时也能回到最后一个真条目）。
+
+至此键盘导航约定覆盖全部列表类交互面：ListView/Table/TreeView/ComboBox/Dropdown/
+ContextMenu。
+
+测试：1 用例（End 跳过分隔条+禁用条目激活末项；重开后 Home 激活首个可选条目）。
+cjpm test：TOTAL 491 / PASSED 450，失败名册与基线一致，零回归。
+---
+ src/controls/context_menu.cj               |  7 +++++
+ src/controls/context_menu_keyboard_test.cj | 33 ++++++++++++++++++++++
+ src/controls/menu_popup.cj                 | 12 ++++++++
+ 3 files changed, 52 insertions(+)
+
+diff --git a/src/controls/context_menu.cj b/src/controls/context_menu.cj
+index cb29d77..2c94ea7 100644
+--- a/src/controls/context_menu.cj
++++ b/src/controls/context_menu.cj
+@@ -177,6 +177,13 @@ public class ContextMenu <: Widget {
+             case UiEvent.KeyDown(Key.Up, _) =>
+                 highlight.value = menuNextSelectable(items, highlight.value, -1)
+                 true
++            // Home/End 跳到首个/最后一个可选条目（跳过分隔条与禁用项；与列表类弹层同一约定）。
++            case UiEvent.KeyDown(Key.Home, _) =>
++                highlight.value = menuFirstSelectable(items)
++                true
++            case UiEvent.KeyDown(Key.End, _) =>
++                highlight.value = menuLastSelectable(items)
++                true
+             // Tab 关闭菜单但不消费事件：随后由外壳的焦点遍历把焦点移到下一个停靠点。
+             // 与 Dropdown/MenuBar 的行为一致；此前这里落到 `case _ => false`，菜单会留在
+             // 屏幕上而焦点已跑到它背后（悬空浮层）。
+diff --git a/src/controls/context_menu_keyboard_test.cj b/src/controls/context_menu_keyboard_test.cj
+index 48b8dc6..335c2f5 100644
+--- a/src/controls/context_menu_keyboard_test.cj
++++ b/src/controls/context_menu_keyboard_test.cj
+@@ -99,6 +99,39 @@ func contextMenuShiftF10NotInterceptedWithoutFocus(): Unit {
+     @Expect(!menu.handle(ctx, UiEvent.KeyDown(Key.RawScancode(68), false)))
+ }
+ 
++
++/* Home/End 跳过分隔条与禁用项（菜单专属语义）。 */
++@Test
++func contextMenuHomeEndSkipDisabledAndSeparators(): Unit {
++    let ctx = kbdMenuContext(300.0, 400.0)
++    let ran = State<Int64>(0)
++    let menu = ContextMenu(items: [
++        MenuItem("禁用", {=> ()}, enabled: false),
++        MenuItem("甲", {=> ran.value = 1}),
++        MenuItem.separator(),
++        MenuItem("乙", {=> ran.value = 2})
++    ]) {
++        Button("目标", {=> ()}).key("he.target")
++    }
++    menu.layout(ctx, Rect(20.0, 20.0, 200.0, 60.0))
++    ctx.focus("he.target", viaKeyboard: true)
++    @Expect(menu.handle(ctx, UiEvent.KeyDown(Key.Menu, false)))
++    menu.draw(ctx)
++    @Expect(ctx.hasOverlay())
++
++    // End → 最后一个可选条目（乙，索引 3；分隔条 2 与禁用 0 跳过）。
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.End, false)))
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(ran.value, Int64(2))
++
++    // 重开 → Home → 第一个可选条目（甲，索引 1；禁用 0 跳过）。
++    ctx.focus("he.target", viaKeyboard: true)
++    @Expect(menu.handle(ctx, UiEvent.KeyDown(Key.Menu, false)))
++    menu.draw(ctx)
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Home, false)))
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(ran.value, Int64(1))
++}
+ /*
+  * Tab 关闭上下文菜单但不消费事件（与 Dropdown/MenuBar 一致）：此前落到 `case _ => false`，
+  * 菜单留在屏幕上而焦点已移到背后，形成悬空浮层。
+diff --git a/src/controls/menu_popup.cj b/src/controls/menu_popup.cj
+index 580deba..568bc92 100644
+--- a/src/controls/menu_popup.cj
++++ b/src/controls/menu_popup.cj
+@@ -120,6 +120,18 @@ internal func menuFirstSelectable(items: Array<MenuItem>): Int64 {
+     0
+ }
+ 
++/** The last selectable index, or 0 when the menu holds none (all separators/disabled). */
++internal func menuLastSelectable(items: Array<MenuItem>): Int64 {
++    var i = items.size - 1
++    while (i >= 0) {
++        if (items[i].isSelectable()) {
++            return i
++        }
++        i -= 1
++    }
++    0
++}
++
+ /** Draws the menu surface and its rows: labels, right-aligned shortcuts, separators, dimmed disables. */
+ internal func drawMenuPopup(ctx: UiContext, menu: Rect, items: Array<MenuItem>, highlight: Int64): Unit {
+     drawSurface(ctx, menu, menuPopupSurface(ctx))
+-- 
+2.47.3
+
