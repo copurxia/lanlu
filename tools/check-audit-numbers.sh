@@ -59,6 +59,21 @@ if bad:
 PY
 }
 check_links "$ROOT/packages/cangjie-gui-p0/docs" || fail=1
+# 5b) 示例 README 不得提及已从框架移除的 API（目前黑名单：Surface——随 SDL 移除）。
+# 示例自有类型（CalcModel 等）定义在示例 src 里，不在此检查范围。
+EXDIR="$GUI/examples"
+REMOVED_APIS="Surface"
+if [ -d "$EXDIR" ]; then
+  while IFS= read -r f; do
+    for name in $REMOVED_APIS; do
+      if grep -qE "\`$name\`" "$f" 2>/dev/null; then
+        echo "✗ 示例 README 提及已移除的 API：$name（$f）"
+        fail=1
+      fi
+    done
+  done < <(find "$EXDIR" -name 'README.md' -maxdepth 2)
+fi
+
 check_links "$ROOT/docs/interaction-audit" || fail=1
 
 # 6) 覆盖矩阵里引用的测试名必须能在 src/ 或 lgui/ 的 *_test.cj 里找到。
