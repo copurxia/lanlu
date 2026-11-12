@@ -73,7 +73,7 @@
 |---|---|---|
 | 原始问题（为什么点输入框没描边） | **已解答并修复** | [00-root-cause.md](00-root-cause.md)；`drawTextBoxChrome` 按 `hasFocus` 上激活边 + 键盘外环 |
 | 20 类交互缺口 | **全部落地**（+3 项审计外补充） | [09-gap-final-status.md](09-gap-final-status.md) |
-| 实现 | **98 个提交（66 代码 + 32 文档）**，108 文件 +5681/−224 | 分支 `p0-focus-visible` |
+| 实现 | **99 个提交（66 代码 + 33 文档）**，108 文件 +5681/−224 | 分支 `p0-focus-visible` |
 | 测试 | **523 例 / 516 通过 / 失败名册与基线逐条一致**（7 条豁免均有据，见 [test-baseline-notes.md](test-baseline-notes.md)） | `tools/verify-cui-interactions.sh p0` |
 | 新增测试 | 92 个用例 | 见 [02-p0-batch.md](02-p0-batch.md) |
 | 文档 | 框架 5 份 + 审计 11 份，内链 0 断链，签名与源码逐字一致 | `docs/`、`docs/interaction-audit/` |
