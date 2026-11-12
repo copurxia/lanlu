@@ -51,9 +51,18 @@ git apply docs/interaction-audit/patches-app/0001-*.patch
 detail_dialogs 共 6 个），接线上下文标记在两侧均存在且数量一致（login_view 6、widgets 4、
 reader_dock 3、reader_view 3、add_to_tank_dialog 1、detail_dialogs 2）。任选其一落地即可。
 
-**未验证**：整包 `cjpm build`。本机缺少 `cargo`（应用 `build.cj` 的 pre-build 需要构建
-fontkit 原生库），`--skip-script` 又会因依赖树里同时存在 `lcodec` 与演练副本而冲突；
-请在具备完整构建环境的机器上编译确认。
+**未验证**：整包 `cjpm build`。2026-11-12 做了一次彻底尝试（搭完整目录镜像：把主仓
+WIP + 本分支 80 补丁做成 `packages/cangjie-gui`，其余兄弟包原样照搬，绕开相对路径限制），
+结论是**本机工具链版本不匹配**：
+
+| 障碍 | 详情 |
+|---|---|
+| **cjc 版本** | 应用 `cjpm.toml` 要求 `cjc-version = "1.1.0"`，本机是 **1.0.5**（框架/主仓用 1.0.5）|
+| stdx 二进制依赖 | `[target.x86_64-unknown-linux-gnu.bin-dependencies] path-option` 在 1.0.5 下不生效 → 报 `stdx.crypto.common` 等未声明依赖 |
+| cargo | 原生库**不是**障碍——`webview/libwebview_native.a` 等预构建产物已存在，直接拷进镜像即可 |
+
+即：应用层编译验证需要 **cjc 1.1.0 环境**，与 cargo 无关（此前记录有误，已修正）。
+请在具备该工具链的机器上编译确认；本次镜像（1.8 GB）已清理。
 
 ## 0002 ClickArea 与自绘图标钮接入焦点环
 
