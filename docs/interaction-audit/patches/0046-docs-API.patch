@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:09:18 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20API=20=E5=8F=82=E8=80=83=E8=A1=A5?=
+ =?UTF-8?q?=E5=85=89=E6=A0=87=E5=BD=A2=E7=8A=B6=E7=BA=A6=E5=AE=9A=EF=BC=88?=
+ =?UTF-8?q?=E5=90=AB=E7=A6=81=E7=94=A8=E5=AD=90=E6=A0=91=E4=B8=8D=E8=AE=A4?=
+ =?UTF-8?q?=E9=A2=86=E5=85=89=E6=A0=87=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对全部控件的 claimHover 形状做了核查，结论一致：Interactive/Text/ResizeH-ResizeV/
+Default 四类分工明确；同时核实 .enabled(false) 的抑制路径——它摘除焦点停靠点并让
+handle 抑制除 Frame 外的全部事件，因此禁用子树既不可 Tab 也不会出现手型光标。
+
+文档里写明同一次移动第一个认领者胜出的协议，以及 Table 行保持箭头、弹层内部压回箭头
+这两处刻意的例外。
+---
+ docs/api-reference.md | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 4c9800d..fa93095 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -347,6 +347,23 @@ KeyRepeat(delayMs!: Int64 = 400, intervalMs!: Int64 = 60)
+ 补发一个 `repeat=true` 的 `KeyDown`。用途是**没有原生 repeat 的后端**（OHOS 的 LWP 输入桥只带
+ key+pressed）；后端自带 repeat（SDL）时会顺延计时，两者不双发。`enable(false)` 可整体关闭。
+ 
++
++### 光标形状约定
++
++悬停认领用 `ctx.claimHover(id, shape)`；**同一次移动里第一个认领者胜出**（与焦点按压的
++"单赢家"协议一致），因此重叠层级里只有最上面那个控件改光标。约定如下：
++
++| 控件类别 | 形状 | 说明 |
++|---|---|---|
++| 按钮、图标钮、卡片、可点行、标签、链接、自绘点击件 | `Interactive` | 手型：任何"点一下会做事"的元素 |
++| `TextField` / `TextArea` | `Text` | 工字光标；只读字段也是 `Text`（仍可选中复制）|
++| `SplitView` 分隔条 | `ResizeH` / `ResizeV` | 按轴向 |
++| `Table` 行 | `Default` | 数据网格保持箭头（电子表格式），行悬停仍有底色反馈 |
++| 弹层内部（ContextMenu/Dropdown/DatePicker 等） | `Default` | 浮层盖住底层控件时统一压回箭头，避免"下面那个是手型"的误导 |
++
++**禁用子树不认领任何光标**：`.enabled(false)` 会摘掉焦点停靠点，并让 `handle` 抑制除 `Frame`
++外的全部事件——所以灰色控件既不会被 Tab 到达，鼠标划过也不会出现手型（否则会暗示"还能点"）。
++
+ ### 焦点语义速查
+ 
+ | 概念 | 入口 | 说明 |
+-- 
+2.47.3
+
