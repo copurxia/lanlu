@@ -63,6 +63,6 @@
 
 ## 已知非缺陷（无需报告）
 
-- 桌面环境跑测试会有 40 ERROR + 1 FAILED：headless 画布无渲染后端、`pushWakeEvent` 需要真实 SDL wake 事件；
+- 桌面环境跑测试会有 7 条环境失败（6 ERROR + 1 FAILED）：headless 缺渲染后端/文本度量、`pushWakeEvent` 需要真实 SDL wake 事件；逐条依据见 [test-baseline-notes.md](test-baseline-notes.md)；
   名单固化在 [test-baseline-names.txt](test-baseline-names.txt)，脚本对整份名单做 diff。
 - 应用整包 `cjpm build` 在本机不可用（缺 `cargo`/原依赖条件），需在完整环境验证。
