@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:08:31 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20onPixelImageRejected=20=E5=9B=9E?=
+ =?UTF-8?q?=E8=B0=83=E2=80=94=E2=80=94=E7=99=BB=E8=AE=B0=E8=A2=AB=E6=8B=92?=
+ =?UTF-8?q?=E6=97=B6=E7=BB=99=E5=87=BA=E5=8E=9F=E5=9B=A0=EF=BC=8C=E4=B8=8D?=
+ =?UTF-8?q?=E5=86=8D=E9=9D=99=E9=BB=98=E5=A4=B1=E8=B4=A5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+0082/0083 引入了输入校验，但静默拒绝会让调用方只看到封面空白、毫无线索。补一个
+公开回调 onPixelImageRejected(key, reason)：尺寸/字节数不符时回调（应用可记录日志或
+触发一次重解码），默认 None 保持原行为。
+
+三处拒绝点统一走 notifyRejected（stage 两条 + register 一条）。
+测试：1 例（回调收到 key 与"needs 16 bytes, got 4"原因；无回调时不崩）。
+cjpm test：TOTAL 509 / PASSED 502，基线匹配零回归。
+---
+ src/media/pixel_rejection_callback_test.cj | 27 ++++++++++++++++++++++
+ src/media/pixel_texture_cache.cj           | 18 +++++++++++++++
+ 2 files changed, 45 insertions(+)
+ create mode 100644 src/media/pixel_rejection_callback_test.cj
+
+diff --git a/src/media/pixel_rejection_callback_test.cj b/src/media/pixel_rejection_callback_test.cj
+new file mode 100644
+index 0000000..70f6abd
+--- /dev/null
++++ b/src/media/pixel_rejection_callback_test.cj
+@@ -0,0 +1,27 @@
++package cui.media
++
++import cui.core.State
++
++/*
++ * 拒绝登记必须**说出原因**：静默拒绝会让调用方只看到封面空白。回调给出 key + 具体原因
++ * （尺寸/字节数），应用层可记录或触发重解码。
++ */
++@Test
++func rejectionCallbackReportsReason(): Unit {
++    clearPixelImages()
++    let seenKey = State<String>("")
++    let seenReason = State<String>("")
++    onPixelImageRejected = {k, r => seenKey.value = k
++        seenReason.value = r}
++    stagePixelImage("rej.mismatch", 2, 2, Array<UInt8>(4, repeat: 0))
++    @Expect(seenKey.value, "rej.mismatch")
++    @Expect(seenReason.value.contains("needs 16 bytes, got 4"))
++
++    stagePixelImage("rej.zero", 0, 3, Array<UInt8>(0, repeat: 0))
++    @Expect(seenReason.value.contains("needs 0 bytes") || seenReason.value.contains("got 0"))
++
++    onPixelImageRejected = None
++    // 无回调时拒绝照旧、不崩。
++    stagePixelImage("rej.silent", 3, 3, Array<UInt8>(1, repeat: 0))
++    clearPixelImages()
++}
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index 36625dd..ef51ade 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -137,6 +137,11 @@ private var pixelLruSize: Int64 = 0
+ private let pixelLruIndex = HashMap<String, PixelLruNode>()
+ public var onPixelImageEvicted: ?(String) -> Unit = None
+ 
++// 登记被拒绝时的回调（key, 原因）。解码输出不可信——尺寸/字节数不符时拒绝登记，
++// 但"静默拒绝"会让调用方只看到封面空白而没有任何线索：把原因交出去，应用层可记录或
++// 触发一次重解码。默认 None（不回调）。
++public var onPixelImageRejected: ?(String, String) -> Unit = None
++
+ // UI 每帧纹理上传预算（P1.6 流水线第 3 级）：以 16ms 时间窗近似一帧，超预算的上传
+ // 顺延下一帧，避免多张图同时到货在同一帧集中上传导致卡顿。0 = 不限额。
+ public var pixelUploadBudgetBytes: Int64 = 16 * 1024 * 1024
+@@ -148,6 +153,14 @@ private var uploadWindowStart = MonoTime.now()
+ // 单张图大于整帧预算时必须放行一次：窗口重置后 uploadedThisWindow 归零，"0 + bytes > 预算"
+ // 恒为真，会让这张图**每帧都被拒**——表现为该图永远空白（高清封面就是这种尺寸）。
+ // 放行后照常累加，同一窗口内的其余上传仍被节流到下一帧。
++// 拒绝登记时统一回调（见 onPixelImageRejected）。
++private func notifyRejected(key: String, reason: String): Unit {
++    match (onPixelImageRejected) {
++        case Some(callback) => callback(key, reason)
++        case None => ()
++    }
++}
++
+ internal func pixelUploadAllowed(bytes: Int64): Bool {
+     if (pixelUploadBudgetBytes <= 0) {
+         return true
+@@ -303,6 +316,8 @@ public func stagePixelImage(key: String, width: Int32, height: Int32, pixels: Ar
+     // 直接拒绝登记。否则上传路径会按 width*height*4 读取像素数组，越界读产出花屏/崩溃——
+     // 表现为"封面空白或花块"而非明确报错。
+     if (width <= 0 || height <= 0 || Int64(pixels.size) != pixelBytesOf(width, height)) {
++        notifyRejected(key, "size " + width.toString() + "x" + height.toString() + " needs " +
++            pixelBytesOf(width, height).toString() + " bytes, got " + pixels.size.toString())
+         return
+     }
+     // 同 key 已有纹理时先关闭并移除：否则 pixelTexture 会优先返回旧纹理，新 staged
+@@ -326,6 +341,7 @@ public func stageNativePixelImage(key: String, width: Int32, height: Int32, poin
+     // 尺寸校验：非正尺寸的原生图登记后会在上传时建 0 尺寸纹理（永远画不出来）。
+     // 所有权已随调用转移到这里，因此拒绝时必须**自己**用 releaser 释放，否则泄漏。
+     if (width <= 0 || height <= 0) {
++        notifyRejected(key, "non-positive size " + width.toString() + "x" + height.toString())
+         releaser.release()
+         return
+     }
+@@ -349,6 +365,8 @@ public func registerPixelImage(renderer: Renderer, key: String, width: Int32, he
+     // 与 stagePixelImage 同一道校验：登记/原地更新都会按 width*height*4 读像素数组，
+     // 长度不符即越界读（解码输入不可信）。非正尺寸还会建 0 尺寸纹理。
+     if (width <= 0 || height <= 0 || Int64(pixels.size) != pixelBytesOf(width, height)) {
++        notifyRejected(key, "size " + width.toString() + "x" + height.toString() + " needs " +
++            pixelBytesOf(width, height).toString() + " bytes, got " + pixels.size.toString())
+         return
+     }
+     adoptPixelRenderer(renderer)
+-- 
+2.47.3
+
