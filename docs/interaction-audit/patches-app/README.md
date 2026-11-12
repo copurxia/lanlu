@@ -55,14 +55,20 @@ reader_dock 3、reader_view 3、add_to_tank_dialog 1、detail_dialogs 2）。任
 WIP + 本分支 80 补丁做成 `packages/cangjie-gui`，其余兄弟包原样照搬，绕开相对路径限制），
 结论是**本机工具链版本不匹配**：
 
-| 障碍 | 详情 |
-|---|---|
-| **cjc 版本** | 应用 `cjpm.toml` 要求 `cjc-version = "1.1.0"`，本机是 **1.0.5**（框架/主仓用 1.0.5）|
-| stdx 二进制依赖 | `[target.x86_64-unknown-linux-gnu.bin-dependencies] path-option` 在 1.0.5 下不生效 → 报 `stdx.crypto.common` 等未声明依赖 |
-| cargo | 原生库**不是**障碍——`webview/libwebview_native.a` 等预构建产物已存在，直接拷进镜像即可 |
+第二轮假设逐个排除（2026-11-12 02:35）：
 
-即：应用层编译验证需要 **cjc 1.1.0 环境**，与 cargo 无关（此前记录有误，已修正）。
-请在具备该工具链的机器上编译确认；本次镜像（1.8 GB）已清理。
+| 试验 | 结果 |
+|---|---|
+| 换 stdx 树：`CANGJIE_STDX_PATH=/workspace/.cjv/stdx/sts-1.2.0/static`（含 `stdx.crypto.common`/`stdx.net.tls.common`）| stdx 解析通过（不再报 "can not find dependencies"），但仍报 **imports ... not added as a dependency** |
+| 把 `cjc-version` 临时降为 1.0.5 | 同样的错 → 与版本声明无关 |
+| 改用 cjc **1.2.0**（`/workspace/.cjv/toolchains/sts-1.2.0/bin`，机器上确实存在）| 同样的错 → 与 cjc 版本也无关 |
+| 对照 `packages/lcodec`（同样声明 `bin-dependencies`）| 它能构建，但它的 stdx 只在**测试文件**里 import，构建期不触发解析——不能作为反例 |
+
+**结论（修正前两版记录）**：卡点是 **cjpm 包管理器版本**——本机 `cjpm 1.0.5` 不认
+`[target.<triple>.bin-dependencies] path-option` 这种 stdx 二进制依赖声明（该能力随 1.1.0 引入）；
+机器上只有 cjpm 1.0.5（`cjpm` 是独立二进制，1.2.0 工具链目录里只有 `cjc`）。
+即：**应用层编译验证需要 cjpm ≥ 1.1.0**，与 cargo、cjc 版本、stdx 树都无关。
+请在具备该版本 cjpm 的机器上编译确认；两次镜像（各约 1.8 GB）均已清理。
 
 ## API 用法一致性审查（2026-11-12 02:26）
 
