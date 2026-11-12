@@ -21,6 +21,7 @@
 | A6 打开即聚焦 | 🟡 | 框架：`modalOpenFocusesFirstStop`、`autofocusClaimsFocusOnceOnFirstFrame`；应用各处需人工 |
 | A7 关闭弹窗焦点回原位 | ✅ | `modalDismissRestoresPriorFocus`、`modalTabCyclesDialogFocusOnly`、`modalEscapeDismissesAndHiddenRegistersNothing` |
 | A8 只读字段不抢焦 | ✅ | `editableTextAreaJoinsFocusRingButReadOnlyDoesNot`、`editableTextAreaRequestsTextCursorButReadOnlyDoesNot` |
+| A8c 树叶子激活 | ✅ | `treeEnterOnLeafActivates`、`treeEnterOnParentExpandsWithoutActivating`（TreeView onActivate：叶子 Enter 激活、父节点 Enter 只展开/折叠）|
 | A8b 按词编辑（缺口 #18 后半） | ✅ | TextField 原有；TextArea 本轮补齐——`textAreaCtrlBackspaceDeletesPreviousWord`、`textAreaWordMotionMethodsExistOnEditState`（词边界 UTF-8 字节偏移逐跳验证：标点/汉字/单词各自成词）|
 | B1 自绘件可 Tab | 🟡 | 框架：`registerFocusStopPutsSelfDrawnWidgetInTabRing`、`registerFocusStopIsNoOpOutsideBuildRoot`、`focusTargetReportsOwnStopBeforeChildStops`；应用 40+ 处需人工 |
 | B2 Enter/Space 激活 | ✅ | `focusTargetRegistersAndActivatesByKeyboard`、`focusTargetReleaseOutsideCancelsActivation` |
