@@ -1,19 +1,20 @@
 # 发布候选（RC）证据快照
 
-> 生成时间：2026-11-12 01:28 · 分支 `p0-focus-visible` @ `72 提交`
+> 生成时间：**2026-11-12 01:47（第 3 版）** · 分支 `p0-focus-visible` @ `77 提交`
 > 本文件只记录**当次实测输出**，不做推断；数字若与其它文档不同，以本文件时间戳为准。
+> 前版（01:28，72 提交，491/484）已被本版取代。
 
 ## 1. 分支内测试（无需 GPU/SDL）
 
 ```
 $ tools/verify-cui-interactions.sh p0
-Summary: TOTAL: 491
-    PASSED: 484, SKIPPED: 0, ERROR: 6
+Summary: TOTAL: 501
+    PASSED: 494, SKIPPED: 0, ERROR: 6
     FAILED: 1
 == 基线匹配：失败名册与 headless 基线完全一致（cjpm exit=1）
 ```
 
-- 484 条真实通过（起点 450 → 基线削减工程把它提到 484）。
+- 494 条真实通过（起点 450 → 基线削减 + 覆盖补齐把它提到 494）。
 - 7 条豁免：6 ERROR + 1 FAILED，逐条定性见 [test-baseline-notes.md](test-baseline-notes.md)
   （2 条需真实 SDL 窗口、3 条需真实文本度量、1 条需真实跨线程唤醒、1 条成本不值）。
 
@@ -21,17 +22,19 @@ Summary: TOTAL: 491
 
 ```
 $ tools/rehearse-merge.sh
-Summary: TOTAL: 491
-    PASSED: 484, SKIPPED: 0, ERROR: 6
+Summary: TOTAL: 501
+    PASSED: 494, SKIPPED: 0, ERROR: 6
     FAILED: 1
 == 基线匹配：失败名册与 headless 基线完全一致（cjpm exit=1）
 == 完成；清理副本
 EXIT=0
 ```
 
-- 72 个补丁 `git am --3way` **零冲突**全部应用。
-- 合并后测试结果与分支内**完全一致**（同 484 通过 / 同 7 条豁免）。
-- 演练前的补丁新鲜度护栏生效（补丁数 72 == 分支提交数 72）。
+- **77 个补丁** `git am --3way` **零冲突**全部应用。
+- 合并后测试结果与分支内**完全一致**（同 494 通过 / 同 7 条豁免）。
+- 演练前的补丁新鲜度护栏生效（补丁数 77 == 分支提交数 77）。
+- 排障记录：主仓 WIP 曾有 2 分钟的编译中间态（MonoTime 插值），对方修复后演练即全绿——
+  演练失败先查主仓能否编译。
 
 ## 3. 文档与出口一致性（同轮自查）
 
