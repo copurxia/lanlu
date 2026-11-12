@@ -97,6 +97,28 @@ grep -E 'budgetDeny|uploadNative FAIL|noStaged|cooldown' ~/img_diag.txt | head -
 **含义**：封面"画不出来"时，几何不是嫌疑——问题必在**纹理获取**（上传被拒/冷却/预算）
 或**纹理本身无效**（尺寸为 0、已关闭）。可据此把排查范围从"绘制/裁切"收窄到"纹理"。
 
+## 顺带发现：`streamingTextureFromPixelsRgba` 少一道校验（未改，附建议）
+
+`lgui/src/texture.cj`：
+
+- `textureFromPixelsRgba`、`updateStreamingTextureRgba` 都会先校验
+  `pixels.size == width*height*4` 并抛 `CuiException`；
+- **`streamingTextureFromPixelsRgba` 没有这道校验**，直接把尺寸与数组交给后端
+  `canvas.uploadTexture`——长度不符时后端会按 `width*height*4` 读数组，越界读。
+
+框架的 `registerPixelImage` 已在调用前校验（`0083`），所以**经由框架的路径是安全的**；
+只有直接调 lgui 这个 API 的代码会踩到。
+
+**没改的原因**：`lgui/src/texture.cj` 正是对方当前未提交的 WIP 文件之一（纹理上传相关），
+在其中加校验的冲突风险高于收益。建议对方顺手加同一道校验（两行）：
+
+```cangjie
+let expected = Int64(width) * Int64(height) * 4
+if (pixels.size != expected) {
+    throw CuiException("streamingTextureFromPixelsRgba: pixel buffer size ...")
+}
+```
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
