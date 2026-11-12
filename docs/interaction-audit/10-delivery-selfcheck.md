@@ -11,6 +11,7 @@
 | 补丁分组表覆盖 | 程序化解析 README 的区间标记（如 0003–0004）对照实际补丁号 | **1–30 无缺失、无多余** |
 | 基线名册 | 行数与测试输出对照 | **7 条环境失败**（逐条定性见 test-baseline-notes.md），脚本逐条 diff |
 | 工具脚本 | `verify-cui-interactions.sh`（含 SDL 符号内置清单）、`rehearse-merge.sh` 实跑 | 均按文档输出预期结果 |
+| 示例与 bench 可编译 | `tools/verify-examples.sh p0` | **36/36 通过**（30 示例 + 6 bench；链接期缺原生符号视为环境限制）——曾抓到 calendar 示例自 SDL 移除后一直编不过 |
 | 测试 | `tools/verify-cui-interactions.sh p0` | **TOTAL 501 / PASSED 494 / 基线匹配**（7 条豁免均有据）|
 
 > 已知未验证项（非缺陷，环境限制）：应用层补丁的整包 `cjpm build`（本机缺 cargo）；
