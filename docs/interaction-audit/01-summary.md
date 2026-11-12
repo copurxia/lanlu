@@ -79,7 +79,7 @@
 | 文档 | 框架 5 份 + 审计 11 份，内链 0 断链，签名与源码逐字一致 | `docs/`、`docs/interaction-audit/` |
 | 工具 | 验证 / 演练 / 落地 3 个脚本 | `tools/verify-cui-interactions.sh`、`rehearse-merge.sh`、`land-focus-interactions.sh` |
 | 应用层接线 | 3 个补丁已备并在合并副本上验证应用；改动保留在分支 `app-focus-wiring` | [patches-app/](patches-app/README.md) |
-| 合并演练 | 43 补丁对主仓最新 WIP **零冲突 + 合并后 479/438 基线匹配** | [05-merge-rehearsal.md](05-merge-rehearsal.md) |
+| 合并演练 | 56 补丁对主仓最新 WIP **零冲突 + 合并后 488/447 基线匹配** | [05-merge-rehearsal.md](05-merge-rehearsal.md) |
 | **合并本身** | **阻塞**：`packages/cangjie-gui` 有他人 11 个未提交文件（最新改动停在 16:26，已停笔约 3 小时）| `tools/land-focus-interactions.sh --check` 会拒绝执行 |
 | 真机验收 | 待合并后执行 | [06-acceptance-checklist.md](06-acceptance-checklist.md)（31 条，其中 20 条有自动化兜底）|
 
