@@ -11,7 +11,8 @@
 #
 # 可移植性：默认路径（工具链 /workspace/.cjv、桩库 /workspace/tmp、日志 /workspace/tmp）
 # 都可用环境变量覆盖——CJV / STUB / LOG / PKG_DIR，脚本内全部写作 ${VAR:-默认} 形式。
-# 基线名册见 docs/interaction-audit/test-baseline-names.txt：40 个 headless 绘制/SDL 依赖 ERROR，
+# 基线名册见 docs/interaction-audit/test-baseline-names.txt（每条的豁免依据见 test-baseline-notes.md）：
+# 7 条 headless 绘制/SDL 依赖 ERROR，
 # 另有 pushWakeEventWakesWaitingLoopFromAnotherThread 1 个真实 wake 事件 FAILED。
 # 本脚本会比对完整失败名册；只有名单与基线完全一致才返回 0，新增/消失测试失败都会报错。
 set -euo pipefail
