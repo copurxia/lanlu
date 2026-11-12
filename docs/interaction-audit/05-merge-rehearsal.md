@@ -162,6 +162,14 @@ Summary: TOTAL: 450
 
 > 演练副本已清理（每个约 165M，脚本可随时重建）。
 >
+> **状态更新（2026-11-12 01:44）**：演练本轮**无法完成**——不是本分支的问题，而是主仓
+> `packages/cangjie-gui` 的最新 WIP **编译不通过**：`src/media/pixel_texture_cache.cj:437`
+> （对方 01:39 编辑中的真机诊断代码）用了 `MonoTime` 的 ToString，`cjpm test` 直接报
+> `the type 'Struct-MonoTime' should implement interface 'ToString'`。基准分支自身仍全绿
+> （`verify-cui-interactions.sh p0` → 501 例 / 494 通过 / 基线匹配）。
+> 这也说明"演练失败"不等于"我方有回归"——**先看主仓能否编译**。演练脚本目前会在
+> 补丁应用后用 `cjpm test` 暴露这类问题，报错信息即定位。
+>
 > **就绪心跳（滚动更新）**：2026-11-12 01:00——全量演练复验：**63 个补丁零冲突 + 491/450 基线匹配**
 > （对主仓最新 WIP 快照）。合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 或一条命令
 > `tools/land-focus-interactions.sh` 执行。
