@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:07:24 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E6=98=8E=E7=A1=AE=E6=96=B9=E5=90=91?=
+ =?UTF-8?q?=E9=94=AE=E8=BE=B9=E7=95=8C=E8=AF=AD=E4=B9=89=E7=9A=84=E4=B8=A4?=
+ =?UTF-8?q?=E6=9D=A1=E7=BA=A6=E5=AE=9A=EF=BC=88=E9=92=B3=E5=88=B6=20vs=20?=
+ =?UTF-8?q?=E5=9B=9E=E7=BB=95=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对全部选择类控件做了边界行为核查，确认框架实际是两条刻意约定（各有既有测试固定）：
+- 位置/有界值 → 钳制：ListView/Table/TreeView/SegmentedControl/TabView/RadioButton/Pagination/
+  Rating/Slider/数值 Stepper（stepperClampsRangeWithoutIntegerOverflow）
+- 周期值/枚举循环 → 回绕：Picker（pickerWrapsSelectionAndRespondsToArrowKeys）、
+  TimePicker 小时分钟、DatePicker 月内翻页
+
+过程中我曾把 Picker 的回绕修正为钳制，被既有测试 pickerWrapsSelectionAndRespondsToArrowKeys
+当场拦下——已回退代码，改为在 API 参考写清两条约定与对应测试，避免后人误改。
+---
+ docs/api-reference.md | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 89d0341..4c9800d 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -197,12 +197,22 @@ Enter/Space，悬停与按压有主题化的视觉反馈。
+ 
+ 交互控件的状态参数为 `Bindable<T>`（可传 `State`、`Binding`），展示控件为 `Observable<T>`。
+ 
++**方向键边界语义（两条约定，按"值的性质"区分）**：
++
++| 类别 | 边界行为 | 控件 |
++|---|---|---|
++| 位置/有界值 | **钳制**（到端点停住）| ListView、Table、TreeView、SegmentedControl、TabView、RadioButton 组、Pagination、Rating、Slider、**数值 Stepper** |
++| 周期值/枚举循环 | **回绕**（到端点回到另一端）| **Picker**（枚举选择，如密度三档：末项再 Right 回到首项）、TimePicker 的小时/分钟（01 → 00 → 59）、DatePicker 的月内翻页 |
++
++两条都由既有测试固定：`pickerWrapsSelectionAndRespondsToArrowKeys`（回绕）对比
++`stepperClampsRangeWithoutIntegerOverflow`（钳制）。键盘长按由 `KeyRepeat` 统一合成，所有控件一致。
++
+ | 类型 | 构造函数 | 补充 API/行为 |
+ |---|---|---|
+ | `Checkbox` | `Checkbox(label, Bindable<Bool>)` | `key`；鼠标释放或 Enter/Space 切换 |
+ | `Switch` | `Switch(label, Bindable<Bool>)` | `key`；二态开关 |
+ | `RadioButton` | `RadioButton(label, selected, value)` | `key`；多个实例共享同一 `Bindable<Int64>`；**`groupRange(lower, upper)`（opt-in）让组内方向键在区间内移动选中**（未设置时方向键不拦截，交给外层） |
+-| `Picker` | `Picker(items, selected, key!)` | 点击前后区域或 Left/Right 循环选择；宽度按最长选项自适应（切换选项不抖动） |
++| `Picker` | `Picker(items, selected, key!)` | 点击前后区域或 Left/Right 逐项选择，**到达首尾时回绕**（枚举循环语义，见下文边界约定表）；宽度按最长选项自适应（切换选项不抖动） |
+ | `Stepper` | `Stepper(Bindable<Int64>, key!, lower!, upper!, step!)` | 范围/步长可经构造参或链式 `range(lower, upper)`、`step(value)` 设置（构造参对齐 Slider/ProgressBar）；宽度按数值内容自适应（一至两位数稳定） |
+ | `SegmentedControl` | `SegmentedControl(items, selected, key!: ?String = None)` | 分段单选；选中指示器弹簧滑动到新段；`Tab` 聚焦后 Left/Right 切换（端点钳制）；`key` 可选，缺省按构建序自动派生 |
+ | `TabView` | `TabView(labels, selected, key!: ?String = None) { pages }` | 页面按标签顺序声明；活动标签指示器弹簧滑动；页签条为焦点停靠点（先于页内控件），聚焦后 Left/Right 切换页签；`key` 可选 |
+-- 
+2.47.3
+
