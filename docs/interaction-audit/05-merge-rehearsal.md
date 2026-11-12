@@ -162,11 +162,9 @@ Summary: TOTAL: 450
 
 > 演练副本已清理（每个约 165M，脚本可随时重建）。
 >
-> **就绪心跳（滚动更新）**：2026-11-11 19:45——全量演练复验：**43 个补丁零冲突 + 479/438 基线匹配**
-> （对主仓最新 WIP 快照）。合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 执行。
-> 同时核对：`api-reference.md` §12 里列出的每个签名都与源码逐字一致（FocusTarget 构造、
-> registerFocusStop、drawFocusRing、KeyRepeat 默认值、selectionRange 两种形态、onSubmit、
-> groupRange、RichSpan.link）。
+> **就绪心跳（滚动更新）**：2026-11-12 00:30——全量演练复验：**56 个补丁零冲突 + 488/447 基线匹配**
+> （对主仓最新 WIP 快照）。合并窗口一开即可照 [07-merge-runbook.md](07-merge-runbook.md) 或一条命令
+> `tools/land-focus-interactions.sh` 执行。
 >
 > **阻塞现状（19:25 实测时间戳）**：`packages/cangjie-gui` 的 11 个未提交文件里，最新改动停在
 > **16:26**（`cjpm.toml`/`bench`/`examples` 三处链接配置），其余更早（06:00–14:10）——即对方的
