@@ -73,8 +73,8 @@
 |---|---|---|
 | 原始问题（为什么点输入框没描边） | **已解答并修复** | [00-root-cause.md](00-root-cause.md)；`drawTextBoxChrome` 按 `hasFocus` 上激活边 + 键盘外环 |
 | 20 类交互缺口 | **全部落地**（+3 项审计外补充） | [09-gap-final-status.md](09-gap-final-status.md) |
-| 实现 | 44 个提交（40 代码 + 4 文档） | 分支 `p0-focus-visible` |
-| 测试 | **480 例 / 439 通过 / 失败名册与基线逐条一致** | `tools/verify-cui-interactions.sh p0` |
+| 实现 | 49 个提交（41 代码 + 8 文档） | 分支 `p0-focus-visible` |
+| 测试 | **483 例 / 442 通过 / 失败名册与基线逐条一致** | `tools/verify-cui-interactions.sh p0` |
 | 新增测试 | 92 个用例 | 见 [02-p0-batch.md](02-p0-batch.md) |
 | 文档 | 框架 5 份 + 审计 11 份，内链 0 断链，签名与源码逐字一致 | `docs/`、`docs/interaction-audit/` |
 | 工具 | 验证 / 演练 / 落地 3 个脚本 | `tools/verify-cui-interactions.sh`、`rehearse-merge.sh`、`land-focus-interactions.sh` |
@@ -111,7 +111,7 @@ tools/land-focus-interactions.sh           # 合并 + 补 link-option + 跑测�
 > 框架级按键长按连发 `KeyRepeat`（OHOS 无原生 repeat 也能连发）；Picker/Stepper
 > Home/End 与 Table 键盘排序（#20 收尾）；按词编辑 Ctrl+跳词/删词（#18 收尾）；
 > ListView Shift 区间选择（#9 收尾）——**20 类缺口全部落地**。
-> 本机桩库测试 480 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
+> 本机桩库测试 483 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
 > （失败名册自动 diff，见 [test-baseline-names.txt](test-baseline-names.txt)）；
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
 > 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行（A/B 两批已做成补丁：

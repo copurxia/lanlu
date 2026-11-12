@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:16:35 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ListView=20=E6=BF=80=E6=B4=BB?=
+ =?UTF-8?q?=E8=AF=AD=E4=B9=89=E2=80=94=E2=80=94=E5=8F=8C=E5=87=BB=E8=A1=8C?=
+ =?UTF-8?q?=20/=20Enter=20/=20Space=20=E5=90=8C=E8=B5=B0=20onActivate?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计外新维度（指针细节）发现的缺口：框架有 clickCount（双击/三击计数，字段族的双击选词
+在用），但 ListView/Table/TreeView **没有任何激活入口**——桌面列表的"双击打开"语义无处安放。
+
+ListView 现支持 onActivate!（构造参，可选）：
+- 双击行（ctx.clickCount == 2 且按在有效行上）→ onActivate(行索引)
+- 聚焦后 Enter / Space → onActivate(selected)——键盘用户获得相同的"打开"能力
+- 未设置回调时行为与从前完全一致（Enter 不被消费），存量用法零影响
+
+Table/TreeView 未在本提交加：它们的行结构（列/树层级）激活语义需与应用约定（如表格双击
+进编辑、树双击折叠），等真实用例出现再定，避免做出没人要的语义。
+
+测试：3 用例（双击激活、Enter/Space 激活选中项、无回调时 Enter 不拦截）。
+cjpm test：TOTAL 483 / PASSED 442，失败名册与基线一致，零回归。
+---
+ src/controls/list_activate_test.cj | 57 ++++++++++++++++++++++++++++++
+ src/controls/selection_widgets.cj  | 33 ++++++++++++++++-
+ 2 files changed, 89 insertions(+), 1 deletion(-)
+ create mode 100644 src/controls/list_activate_test.cj
+
+diff --git a/src/controls/list_activate_test.cj b/src/controls/list_activate_test.cj
+new file mode 100644
+index 0000000..4820ed3
+--- /dev/null
++++ b/src/controls/list_activate_test.cj
+@@ -0,0 +1,57 @@
++// 激活语义（onActivate）：双击 / Enter / Space。
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++private func actContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* 激活语义：双击行 = 打开；聚焦后 Enter/Space = 同一回调；未设置回调时行为不变。 */
++@Test
++func doubleClickRowFiresActivate(): Unit {
++    let ctx = actContext()
++    let selected = State<Int64>(0)
++    let fired = State<Int64>(-1)
++    let list = ListView(["a", "b", "c"], selected, key: "ac.dbl", onActivate: {i => fired.value = i})
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++
++    // 第一次按下（clickCount=1）：只选中。
++    ctx.recordPress(100.0, Float32(1.5 * 28.0))
++    @Expect(list.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, Float32(1.5 * 28.0))))
++    @Expect(fired.value, Int64(-1))
++
++    // 第二次按下（clickCount=2）：选中 + 激活第 1 行。
++    ctx.recordPress(100.0, Float32(1.5 * 28.0))
++    let _ = list.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, Float32(1.5 * 28.0)))
++    @Expect(fired.value, Int64(1))
++}
++
++@Test
++func enterKeyFiresActivateOnSelected(): Unit {
++    let ctx = actContext()
++    let selected = State<Int64>(2)
++    let fired = State<Int64>(-1)
++    let list = ListView(["a", "b", "c"], selected, key: "ac.kbd", onActivate: {i => fired.value = i})
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    ctx.focus("ac.kbd", viaKeyboard: true)
++
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(fired.value, Int64(2))
++
++    // Space 同样激活。
++    @Expect(list.handle(ctx, UiEvent.KeyDown(Key.Space, false)))
++    @Expect(fired.value, Int64(2))
++}
++
++@Test
++func listWithoutActivateCallbackIgnoresEnter(): Unit {
++    let ctx = actContext()
++    let selected = State<Int64>(0)
++    let list = ListView(["a", "b"], selected, key: "ac.none")
++    list.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    ctx.focus("ac.none", viaKeyboard: true)
++    // 未设置回调：Enter 不被消费（与既有行为一致）。
++    @Expect(!list.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++}
+diff --git a/src/controls/selection_widgets.cj b/src/controls/selection_widgets.cj
+index 6748489..fc4d8f8 100644
+--- a/src/controls/selection_widgets.cj
++++ b/src/controls/selection_widgets.cj
+@@ -127,13 +127,16 @@ public class ListView <: Widget {
+     private let lastRevealed: State<Int64>
+     // Shift 区间选择锚点（Int64.Min = 无锚点，即无区间）。
+     private let selectionAnchor: State<Int64>
++    // 激活回调（双击行或聚焦后 Enter/Space）：None = 未启用。行索引为参数。
++    private let onActivate: ?(Int64) -> Unit
+     private var frame = Rect.zero()
+ 
+     public init(
+         items: Array<String>,
+         selected: Bindable<Int64>,
+         scroll!: ?State<Float32> = None,
+-        key!: ?String = None
++        key!: ?String = None,
++        onActivate!: ?(Int64) -> Unit = None
+     ) {
+         this.items = items
+         this.selected = selected
+@@ -164,9 +167,21 @@ public class ListView <: Widget {
+         // Shift 区间选择的锚点（缺口 #9）：普通点击时重置为点击项，Shift+点击时保持——
+         // 两次的区间即选中范围。localState 保证跨重建保留。
+         this.selectionAnchor = localState<Int64>("${cid}:anchor") {Int64.Min}
++        this.onActivate = onActivate
+         emit(this)
+     }
+ 
++    // 触发激活回调（索引钳到有效范围；无回调或空列表时是 no-op）。
++    private func fireActivate(index: Int64): Unit {
++        match (onActivate) {
++            case Some(action) =>
++                if (index >= 0 && index < items.size) {
++                    action(index)
++                }
++            case None => ()
++        }
++    }
++
+     /** Uses an externally owned scroll offset, enabling restoration and coordination. */
+     public func scrollState(value: State<Float32>): ListView {
+         scrollStateValue = value
+@@ -230,6 +245,10 @@ public class ListView <: Widget {
+                         let idx = Int64((y - viewport.y + scrollMotion.value) / CUI_SMALL_H)
+                         if (idx >= 0 && idx < items.size) {
+                             applySelection(idx, Keyboard.modifiers().shift)
++                            // 双击行 = 激活（打开/进入）：桌面列表的通行语义。
++                            if (ctx.clickCount == 2) {
++                                fireActivate(idx)
++                            }
+                         }
+                     }
+                     return true
+@@ -248,6 +267,18 @@ public class ListView <: Widget {
+             case UiEvent.KeyDown(Key.Down, shift) => return extendOrMove(ctx, 1, shift)
+             case UiEvent.KeyDown(Key.Home, shift) => return extendOrJump(ctx, 0, shift)
+             case UiEvent.KeyDown(Key.End, shift) => return extendOrJump(ctx, items.size - 1, shift)
++            // 激活（键盘等价物）：聚焦后 Enter/Space 触发当前选中项的 onActivate——
++            // 与双击同一回调，键盘用户获得相同的"打开"能力。
++            case UiEvent.KeyDown(Key.Enter, _) =>
++                if (ctx.hasFocus(controlId) && onActivate.isSome()) {
++                    fireActivate(selected.value)
++                    return true
++                }
++            case UiEvent.KeyDown(Key.Space, _) =>
++                if (ctx.hasFocus(controlId) && onActivate.isSome()) {
++                    fireActivate(selected.value)
++                    return true
++                }
+             case _ => ()
+         }
+         false
+-- 
+2.47.3
+

@@ -43,6 +43,7 @@
 | `92680c2` | P1 RichText 链接键盘可达（审计外补充） |
 | `52ce6bb` | P1 ComboBox 箭头悬停反馈（#10 收尾） |
 | `bf2ad42` | fix ContextMenu 按 Tab 未关闭（悬空浮层）|
+| `dbd931d` | P1 ListView 激活语义（双击/Enter/Space → onActivate）|
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -195,7 +196,11 @@ SplitView 这类先解构键的写法误判为无键盘支持。
 **第二十九批（`bf2ad42`）**：浮层关闭路径一致性核查（Esc / 点击外部 / Tab 三路），发现并修复
 ContextMenu 按 Tab 不关闭（焦点移到背后、菜单悬空）；其余 7 类浮层三路齐备。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 480，PASSED 439（累计新增 93 例 + 改写 1 例全过），
+**第三十批（`dbd931d`）**：指针细节审计（clickCount 支持面）发现 ListView/Table/TreeView 无任何
+激活入口——"双击打开"无处安放。ListView 补 `onActivate`（双击行 / Enter / Space 同一回调，
+键盘等价物；未设置零影响）。Table/TreeView 等真实用例再定语义。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 483，PASSED 442（累计新增 96 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
