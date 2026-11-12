@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: lead <lead@lanlu.local>
-Date: Thu, 12 Nov 2026 05:05:21 +0000
+Date: Thu, 12 Nov 2026 05:24:44 +0000
 Subject: [PATCH] =?UTF-8?q?feat(P1):=20pixelFailureCounts()=20=E4=B8=89?=
  =?UTF-8?q?=E4=B8=AA=E5=A4=B1=E8=B4=A5=E8=AE=A1=E6=95=B0=E2=80=94=E2=80=94?=
  =?UTF-8?q?=E5=B0=81=E9=9D=A2=E6=8E=92=E6=9F=A5=E4=B8=8D=E5=BF=85=E5=86=8D?=
@@ -18,13 +18,15 @@ Content-Transfer-Encoding: 8bit
 - rejected：登记被拒次数（尺寸/字节数/上限；原因仍可从 onPixelImageRejected 拿）
 - uploadFailed：后端建纹理失败次数（>0 = 渲染后端问题，与预算无关）
 
-三个上传辅助函数（数组/原生/流式）的 catch 都计入 uploadFailed。
+计数点刻意避开对方正在改的两处（预算拒绝分支、uploadNative 的 catch）：
+预算拒绝计在 pixelUploadAllowed 内部，原生上传失败用 counted 包装在调用侧累加——
+这样补丁与对方 WIP 不再冲突（此前 am 在该文件上冲突过一次）。
+
 测试 3 例：拒绝计数、预算拒绝计数、headless 后端失败计数。
-cjpm test：TOTAL 531 / PASSED 524，基线匹配零回归。
 ---
  src/media/pixel_failure_counts_test.cj | 49 ++++++++++++++++++++++++++
- src/media/pixel_texture_cache.cj       | 24 +++++++++++++
- 2 files changed, 73 insertions(+)
+ src/media/pixel_texture_cache.cj       | 36 ++++++++++++++++++-
+ 2 files changed, 84 insertions(+), 1 deletion(-)
  create mode 100644 src/media/pixel_failure_counts_test.cj
 
 diff --git a/src/media/pixel_failure_counts_test.cj b/src/media/pixel_failure_counts_test.cj
@@ -83,7 +85,7 @@ index 0000000..a64da8c
 +    resetPixelFailureCounts()
 +}
 diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
-index b2f9fc2..ba4a9e0 100644
+index b2f9fc2..13fcab2 100644
 --- a/src/media/pixel_texture_cache.cj
 +++ b/src/media/pixel_texture_cache.cj
 @@ -120,6 +120,13 @@ public var pixelCacheTextureMaxBytes: Int64 = 256 * 1024 * 1024 // GPU texture 
@@ -108,7 +110,15 @@ index b2f9fc2..ba4a9e0 100644
      match (onPixelImageRejected) {
          case Some(callback) => callback(key, reason)
          case None => ()
-@@ -208,6 +216,18 @@ internal func pixelCacheDiagnostics(): (Int64, Int64, Int64, Int64) {
+@@ -182,6 +190,7 @@ internal func pixelUploadAllowed(bytes: Int64): Bool {
+     }
+     let oversized = bytes > pixelUploadBudgetBytes
+     if (!oversized && uploadedThisWindow + bytes > pixelUploadBudgetBytes) {
++        budgetDeniedCount++
+         return false
+     }
+     uploadedThisWindow += bytes
+@@ -208,6 +217,18 @@ internal func pixelCacheDiagnostics(): (Int64, Int64, Int64, Int64) {
      (stagedBytes, textureBytes, pixelLruSize, evictCount)
  }
  
@@ -127,15 +137,16 @@ index b2f9fc2..ba4a9e0 100644
  // 公开导出（性能诊断用）：外部包（client-next 基准）经 cui 引用读取。
  public func pixelCacheDiagnosticsPublic(): (Int64, Int64, Int64, Int64) {
      pixelCacheDiagnostics()
-@@ -460,6 +480,7 @@ public func pixelTexture(renderer: Renderer, key: String): ?Texture {
-             // 帧上传预算：超限顺延下一帧（先于两种上传路径统一检查）。
-             let bytes = pixelBytesOf(staged.width, staged.height)
-             if (!pixelUploadAllowed(bytes)) {
-+                budgetDeniedCount++
-                 return None
-             }
-             // 原生形态：从指针直接建纹理（SDL 同步拷贝像素），成功即释放 staged 所有权；
-@@ -548,6 +569,7 @@ private func uploadPixelTexture(renderer: Renderer, width: Int32, height: Int32,
+@@ -474,7 +495,7 @@ public func pixelTexture(renderer: Renderer, key: String): ?Texture {
+                         case None => ()
+                     }
+                     let upT0 = MonoTime.now()
+-                    let uploadedNative = uploadNativePixelTexture(renderer, staged.width, staged.height, ptr)
++                    let uploadedNative = uploadNativePixelTextureCounted(renderer, staged.width, staged.height, ptr)
+                     pixelUploadPerfMark(upT0)
+                     match (uploadedNative) {
+                         case Some(texture) =>
+@@ -548,11 +569,23 @@ private func uploadPixelTexture(renderer: Renderer, width: Int32, height: Int32,
          texture.setScaleMode(TextureScaleMode.Linear)
          Some(texture)
      } catch (_: Exception) {
@@ -143,15 +154,23 @@ index b2f9fc2..ba4a9e0 100644
          None
      }
  }
-@@ -561,6 +583,7 @@ private func uploadNativePixelTexture(renderer: Renderer, width: Int32, height:
-         texture.setScaleMode(TextureScaleMode.Linear)
-         Some(texture)
-     } catch (_: Exception) {
+ 
+ // 原生指针上传：textureFromNativeRgba（STATIC 纹理，SDL 同步拷贝），失败返回 None。
++// 原生上传的计数包装：失败时累加 uploadFailed（不侵入上传函数自身的异常处理，
++// 避免与另一任务方在该 catch 里的诊断改动冲突）。
++private func uploadNativePixelTextureCounted(renderer: Renderer, width: Int32, height: Int32,
++    pointer: CPointer<UInt8>): ?Texture {
++    let result = uploadNativePixelTexture(renderer, width, height, pointer)
++    if (result.isNone()) {
 +        uploadFailedCount++
-         None
-     }
- }
-@@ -574,6 +597,7 @@ private func uploadStreamingPixelTexture(renderer: Renderer, width: Int32, heigh
++    }
++    result
++}
++
+ private func uploadNativePixelTexture(renderer: Renderer, width: Int32, height: Int32,
+     pointer: CPointer<UInt8>): ?Texture {
+     try {
+@@ -574,6 +607,7 @@ private func uploadStreamingPixelTexture(renderer: Renderer, width: Int32, heigh
          texture.setScaleMode(TextureScaleMode.Linear)
          Some(texture)
      } catch (_: Exception) {

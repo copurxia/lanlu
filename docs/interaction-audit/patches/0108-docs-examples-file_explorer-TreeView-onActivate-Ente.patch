@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: lead <lead@lanlu.local>
-Date: Thu, 12 Nov 2026 05:11:00 +0000
+Date: Thu, 12 Nov 2026 05:24:45 +0000
 Subject: [PATCH] =?UTF-8?q?docs(examples):=20file=5Fexplorer=20=E6=BC=94?=
  =?UTF-8?q?=E7=A4=BA=20TreeView=20onActivate=E2=80=94=E2=80=94=E5=8F=B6?=
  =?UTF-8?q?=E5=AD=90=20Enter"=E6=89=93=E5=BC=80"=E4=B8=8E=E7=88=B6?=
@@ -9,10 +9,6 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-TreeView 新增的 onActivate 正好用文件浏览器演示：左树选中文件后按 Enter/空格 = "打开"，
-底部状态行显示已打开的路径；父节点的 Enter 仍是展开/折叠（两套语义并存，互不干扰）。
-
-这也让该示例从"只能选中"变成"能打开"，更接近真实资源管理器的行为。
 ---
  examples/file_explorer/src/model.cj |  2 ++
  examples/file_explorer/src/views.cj | 15 ++++++++++++---
