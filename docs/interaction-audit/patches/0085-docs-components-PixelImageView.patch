@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:02:16 +0000
+Subject: [PATCH] =?UTF-8?q?docs(components):=20=E6=96=B0=E5=A2=9E=20PixelI?=
+ =?UTF-8?q?mageView=20=E6=AE=B5=E2=80=94=E2=80=94=E5=86=85=E5=AD=98?=
+ =?UTF-8?q?=E5=83=8F=E7=B4=A0=E5=9B=BE=E7=9A=84=E7=94=A8=E6=B3=95=E3=80=81?=
+ =?UTF-8?q?=E6=A0=A1=E9=AA=8C=E4=B8=8E=E5=86=85=E5=AD=98=E7=AD=96=E7=95=A5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+组件文档只有 ImageView（磁盘路径），内存像素图（封面/缩略图/视频帧）整段缺失。补上：
+一步注册 vs 两阶段登记的取舍、PixelImageView 链式用法（fit/rounded）、输入校验拒绝语义、
+两个预算旋钮与"单张超预算仍放行一次"的契约、LRU 淘汰回调的用途。
+---
+ docs/components.md | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/docs/components.md b/docs/components.md
+index 998aa9b..86d424f 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -518,6 +518,28 @@ ImageView(path: String, fit!: ImageFit = ImageFit.Contain, preferredWidth!: ?Len
+ 
+ 相关函数：`invalidateImage(path)` 使单个路径失效并下帧重载；`clearImageCache()` 清空全部缓存。
+ 
++### PixelImageView（内存像素图 / 封面与缩略图）
++
++显示**已解码**的 RGBA 内存数据（不经文件路径），用于封面、缩略图、视频帧等场景。
++
++```cangjie
++// 一步注册（最简单）：同 key 同尺寸会走 streaming 原地更新（视频逐帧友好）
++registerPixelImage(renderer, key, width, height, pixels)   // pixels 长度必须 = width*height*4
++PixelImageView(key, width: 120.vp, height: 160.vp).fit(ImageFit.Cover).rounded(12.0)
++
++// 两阶段（解码在别的线程、本帧只登记）：本帧登记，下帧按帧预算上传
++stagePixelImage(key, width, height, pixels)
++stageNativePixelImage(key, width, height, pointer, releaser)   // 原生指针，所有权转移
++```
++
++- **输入校验**：`width/height` 必须为正且 `pixels.size == width*height*4`，否则**拒绝登记**
++  （解码输出不可信，尺寸不符会越界读 → 花屏或崩溃）。原生路径拒绝时会自行调用 `releaser.release()`。
++- **内存策略**：`pixelCacheMaxBytes` 控 LRU 上限；`pixelUploadBudgetBytes` 控每 16ms 窗口的
++  上传字节（默认 16 MiB，防同帧集中上传卡顿）——**单张超过预算的图仍会放行一次**，
++  否则会被永久拒绝、永远画不出来。
++- 其它：`invalidatePixelImage(key)`、`clearPixelImages()`、`onPixelImageEvicted` 回调
++  （按 LRU 淘汰时触发，可用于决定是否重解码）。
++
+ ### CanvasWidget
+ 
+ 自定义绘制区域，直接以 `Renderer` 在给定矩形内绘制，并可处理该区域事件。
+-- 
+2.47.3
+
