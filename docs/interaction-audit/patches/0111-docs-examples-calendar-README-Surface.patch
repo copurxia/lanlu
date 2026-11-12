@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:29:04 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20=E6=B8=85=E9=99=A4=20calendar?=
+ =?UTF-8?q?/=E6=80=BB=E7=B4=A2=E5=BC=95=20README=20=E9=87=8C=E5=AF=B9?=
+ =?UTF-8?q?=E5=B7=B2=E7=A7=BB=E9=99=A4=20Surface=20=E7=9A=84=E5=BC=95?=
+ =?UTF-8?q?=E7=94=A8?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+0094 已把 calendar 徽标改为内存像素图，但两处 README 仍写着"用 Surface 生成 BMP"——
+读者照着找 Surface 会找不到。统一改为 stagePixelImage/PixelImageView 的说法。
+calculator 的 "SurfaceStyle" 是另一类型，不受影响。
+---
+ examples/README.md          | 2 +-
+ examples/calendar/README.md | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/examples/README.md b/examples/README.md
+index d22ce5f..fcb9015 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -26,7 +26,7 @@
+ ### [`calendar`](calendar/README.md)：日历
+ 
+ 展示七列权重布局、年月状态导航、`derive` 派生的标题、`Time.currentDateTime` 日期信息、
+-当前日期高亮，以及运行时生成 `Surface` 后由 `ImageView` 展示图像资源。
++当前日期高亮，以及运行时生成内存像素图（`stagePixelImage`）后由 `PixelImageView` 展示图像资源。
+ 
+ ### [`notepad`](notepad/README.md)：记事本
+ 
+diff --git a/examples/calendar/README.md b/examples/calendar/README.md
+index b5bcfc2..d44f850 100644
+--- a/examples/calendar/README.md
++++ b/examples/calendar/README.md
+@@ -1,6 +1,6 @@
+ # calendar：月历
+ 
+-一个紫色主题的月历应用，演示状态驱动导航、派生标题与七列网格节奏，以及用 `Surface`
++一个紫色主题的月历应用，演示状态驱动导航、派生标题与七列网格节奏，以及用内存像素图 API
+ 在运行时生成图片资产。
+ 
+ ## 演示要点
+@@ -9,7 +9,7 @@
+ - 年与月是两个 `State`，箭头改写状态后整个网格随下一帧自动重建
+ - `derive` 派生标题：仅在年或月变化时才重新拼接字符串
+ - 无 label 的成对 `IconButton` 依靠构建期唯一身份各自响应，无需手写 `.id`
+-- 用 `Surface` 逐像素生成 BMP 徽标并交给 `ImageView` 展示：`ImageView` 逐帧内联声明即可，
++- 在内存里生成 RGBA 徽标并经 `stagePixelImage` 登记、`PixelImageView` 展示：逐帧内联声明即可，
+   解码纹理由按路径键控的共享缓存持有，无需提升实例或 `manage`
+ 
+ ## 文件结构
+-- 
+2.47.3
+
