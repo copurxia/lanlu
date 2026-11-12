@@ -111,7 +111,7 @@ tools/land-focus-interactions.sh           # 合并 + 补 link-option + 跑测�
 > 框架级按键长按连发 `KeyRepeat`（OHOS 无原生 repeat 也能连发）；Picker/Stepper
 > Home/End 与 Table 键盘排序（#20 收尾）；按词编辑 Ctrl+跳词/删词（#18 收尾）；
 > ListView Shift 区间选择（#9 收尾）——**20 类缺口全部落地**。
-> 本机桩库测试 491 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
+> 本机桩库测试 501 例零回归；一条命令复现：`tools/verify-cui-interactions.sh p0`
 > （失败名册自动 diff，见 [test-baseline-names.txt](test-baseline-names.txt)）；
 > 明细见 [02-p0-batch.md](02-p0-batch.md)；
 > 应用层接线按 [03-app-wiring-plan.md](03-app-wiring-plan.md) 执行（A/B 两批已做成补丁：
