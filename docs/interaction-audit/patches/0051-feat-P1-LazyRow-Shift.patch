@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:18:56 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20LazyRow=20=E6=94=AF=E6=8C=81=20Shif?=
+ =?UTF-8?q?t+=E6=BB=9A=E8=BD=AE=E6=A8=AA=E5=90=91=E6=BB=9A=E5=8A=A8?=
+ =?UTF-8?q?=EF=BC=88=E6=A1=8C=E9=9D=A2=E6=83=AF=E4=BE=8B=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+指针审计的下一个发现：Shift+Wheel 在框架里完全无人处理（grep modifiers().shift 只命中文本
+编辑、菜单、Tab 遍历）。而"按住 Shift 把竖轮转成横向滚动"是桌面惯例——用户在横排书架上
+用普通鼠标 + Shift 期望能横向滚。
+
+实现：LazyRow 的 MouseWheel 分支在无横向 delta 且 Shift 按下时，把竖直 delta 取反驱动横向
+滚动（方向与"向下滚 = 内容右移"一致）。触控板横滚/斜轮（wheelX ≠ 0）优先级不变；普通竖滚
+行为不变（既有 2 个滚轮测试全过）。
+
+修饰键是全局状态、单测无法伪造——Shift 路径靠代码审查 + 真机验收（检查表已含此项）。
+
+cjpm test：TOTAL 483 / PASSED 442，失败名册与基线一致，零回归。
+---
+ src/core/lazy_row.cj | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/lazy_row.cj b/src/core/lazy_row.cj
+index 98d0350..c8069d8 100644
+--- a/src/core/lazy_row.cj
++++ b/src/core/lazy_row.cj
+@@ -2,6 +2,7 @@ package cui.core
+ 
+ import std.collection.ArrayList
+ import lgui.{Key, Rect, Size, UiEvent}
++import lgui.input.Keyboard
+ 
+ private let LAZY_ROW_SCROLLBAR_FADE_MS: Int64 = 180
+ 
+@@ -217,11 +218,18 @@ public class LazyRow <: Widget {
+                 // The wheel scrolls the strip along its axis. A horizontal delta (trackpad pan, tilt
+                 // wheel) drives it directly; otherwise the vertical wheel is remapped so a plain mouse
+                 // scrolls too — wheel toward the user (scroll down) advances the strip right.
++                // Shift+Wheel（桌面惯例）：竖轮在按住 Shift 时也应驱动横向内容——竖直 delta
++                // 转横向，方向与"向下滚动 = 内容右移"一致。
+                 if (frame.contains(pointerX, pointerY)) {
++                    let shiftHeld = Keyboard.modifiers().shift
+                     let delta = if (wheelX != 0.0) {
+                         -wheelX
+                     } else {
+-                        wheelY
++                        if (shiftHeld) {
++                            -wheelY
++                        } else {
++                            wheelY
++                        }
+                     }
+                     return scrollMotion.wheel(ctx, scrollStateValue, delta, content, viewportW)
+                 }
+-- 
+2.47.3
+

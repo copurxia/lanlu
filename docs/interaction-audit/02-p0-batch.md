@@ -196,6 +196,8 @@ SplitView 这类先解构键的写法误判为无键盘支持。
 **第二十九批（`bf2ad42`）**：浮层关闭路径一致性核查（Esc / 点击外部 / Tab 三路），发现并修复
 ContextMenu 按 Tab 不关闭（焦点移到背后、菜单悬空）；其余 7 类浮层三路齐备。
 
+**第三十一批**：LazyRow 补 Shift+滚轮横向滚动（桌面惯例；此前框架完全无人处理 Shift+Wheel）。
+
 **第三十批（`dbd931d`）**：指针细节审计（clickCount 支持面）发现 ListView/Table/TreeView 无任何
 激活入口——"双击打开"无处安放。ListView 补 `onActivate`（双击行 / Enter / Space 同一回调，
 键盘等价物；未设置零影响）。Table/TreeView 等真实用例再定语义。

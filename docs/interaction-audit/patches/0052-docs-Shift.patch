@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:19:29 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20=E6=BB=9A=E5=8A=A8=E5=A5=91=E7=BA=A6?=
+ =?UTF-8?q?=E8=A1=A8=E8=A1=A5=20Shift+=E6=BB=9A=E8=BD=AE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 3c7d933..385ad8c 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -357,7 +357,7 @@ key+pressed）；后端自带 repeat（SDL）时会顺延计时，两者不双
+ |---|---|---|
+ | 滑块拖动 | 按下滑块 → 拖动 → 释放；跨出容器边界仍跟随 | `ScrollView`、`LazyColumn`、`LazyRow`、`ListView`、`Table`、`TreeView`、`TextArea`、`ComboBox` 弹层、`Dropdown` 弹层 |
+ | 轨道点击 | 点轨道空白翻一页 | 同上 |
+-| 滚轮 | `SmoothScroll.wheel`：滚轮增量 × `CUI_SCROLL_WHEEL_STEP`，带缓动 | 同上（`LazyRow` 还支持触控板横滚与竖向重映射）|
++| 滚轮 | `SmoothScroll.wheel`：滚轮增量 × `CUI_SCROLL_WHEEL_STEP`，带缓动 | 同上（`LazyRow` 支持触控板横滚、竖向重映射与 **Shift+滚轮转横向**）|
+ | 到边界后穿透 | 已到顶/底时 `wheel` 返回 `false`，事件继续冒泡给外层滚动容器 | 同上（`lazyColumnWheelFallsThroughAtVerticalEdges`、`lazyListWheelFallsThroughAtVerticalEdges` 固定了这一契约）|
+ | 滚动条显隐 | 内容溢出才画；交互时高亮，静置后淡出 | 同上 |
+ 
+-- 
+2.47.3
+
