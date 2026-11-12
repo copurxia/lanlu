@@ -1,8 +1,13 @@
 # 验收项 ↔ 自动化覆盖矩阵
 
 > 目的：交接/验收时一眼看出某条检查项是"测试兜底"还是"必须人工看"。
-> 测试名均可 grep 到：`grep -rn "func <名字>" packages/cangjie-gui-p0`。基线见
-> [test-baseline-names.txt](test-baseline-names.txt)（40 ERROR + 1 FAILED 属环境）。
+> 测试名均可 grep 到：`grep -rn "func <名字>" packages/cangjie-gui-p0/src packages/cangjie-gui-p0/lgui`。
+> 基线见 [test-baseline-names.txt](test-baseline-names.txt)（**7 条**属环境，逐条定性见
+> [test-baseline-notes.md](test-baseline-notes.md)）。
+>
+> **本表的测试名已全量核对**（2026-11-12 02:13）：表内 79 个测试名中，78 个可在 `src/` 或
+> `lgui/` 的 `*_test.cj` 里 grep 到；唯一例外是应用侧的 `readerHtmlPageTurn`——它本就标注为
+> ❌「仅人工」，符合预期。
 
 图例：✅ 有自动化覆盖；🟡 框架侧有覆盖、应用侧需人工；❌ 仅人工验收；⛔ 已知未实现。
 
