@@ -15,6 +15,10 @@
 | 想了解某个缺口怎么修的 | [09-gap-final-status.md](09-gap-final-status.md)（20 类逐条落点）|
 | 要判断"现在能不能交付" | [11-rc-report.md](11-rc-report.md)（时间戳 + 四条实测输出）|
 | 接手纹理/封面调试 | [12-findings-for-other-party.md](12-findings-for-other-party.md)（3 项已修 + 排查顺序）|
+| 看全貌与批次明细 | [01-summary.md](01-summary.md)、[02-p0-batch.md](02-p0-batch.md)（逐批提交与验证）|
+| 看应用层接线方案 | [03-app-wiring-plan.md](03-app-wiring-plan.md)、[app-layer.md](app-layer.md) |
+| 看框架控件/浮层的实测清单 | [framework-controls.md](framework-controls.md)、[framework-text-overlays.md](framework-text-overlays.md) |
+| 看交付自检与覆盖矩阵 | [10-delivery-selfcheck.md](10-delivery-selfcheck.md)、[08-coverage-matrix.md](08-coverage-matrix.md) |
 | 想知道哪些豁免是环境而非回归 | [test-baseline-notes.md](test-baseline-notes.md)（7 条逐条定性）|
 | 想复现测试 | `tools/verify-cui-interactions.sh p0`（无需 GPU/SDL）|
 
