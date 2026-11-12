@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:41:21 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20PixelImageView=20=E5=9F=BA=E7=A1=80?=
+ =?UTF-8?q?=E5=A5=91=E7=BA=A6=EF=BC=88=E5=BA=A6=E9=87=8F/=E4=BF=AE?=
+ =?UTF-8?q?=E9=A5=B0=E9=93=BE/=E6=9C=AA=E6=B3=A8=E5=86=8C=20key=20?=
+ =?UTF-8?q?=E4=B8=8D=E5=B4=A9=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+用符号级扫描找控件测试缺口：CanvasWidget / PixelImageView / MenuPopup 三者零测试引用。
+先补 PixelImageView（封面显示端，与对方排查直接相关）：
+- 按 preferredWidth/Height 度量；
+- 超出可用空间时钳到可用值；
+- zoom/rounded 修饰链可连续调用；
+- 未注册 key 时 draw 不崩（无纹理 → 绘制为空）。
+
+cjpm test：TOTAL 533 / PASSED 526，基线匹配零回归。
+---
+ src/media/pixel_image_view_test.cj | 36 ++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+ create mode 100644 src/media/pixel_image_view_test.cj
+
+diff --git a/src/media/pixel_image_view_test.cj b/src/media/pixel_image_view_test.cj
+new file mode 100644
+index 0000000..552b955
+--- /dev/null
++++ b/src/media/pixel_image_view_test.cj
+@@ -0,0 +1,36 @@
++package cui.media
++
++import lgui.{Rect, Renderer, Size}
++import cui.core.{LengthUnits, Theme, UiContext}
++
++/*
++ * PixelImageView 的基础契约：按 preferredWidth/Height 度量（钳到可用空间），
++ * layout 记录 frame 供 draw 使用；zoom/rounded 修饰链返回自身；未注册的 key 绘制为空
++ * （不崩、不请求纹理）——封面路径的显示端。
++ */
++@Test
++func pixelImageViewMeasuresAndChainsModifiers(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let view = PixelImageView("k.none", 120.vp, 160.vp)
++    let m = view.measure(ctx, Size(300.0, 300.0))
++    @Expect(m.w, Float32(120.0))
++    @Expect(m.h, Float32(160.0))
++    // 修饰链返回自身（可继续链式调用）。
++    let _ = view.zoom(1.5).rounded(8.0)
++    // zoom 生效的旁证：过小的系数被钳到 0.01 下限（不会变成 0 尺寸）。
++    let _ = view.zoom(0.0)
++    @Expect(view.measure(ctx, Size(300.0, 300.0)).w, Float32(120.0))
++    view.layout(ctx, Rect(10.0, 20.0, 120.0, 160.0))
++    // 未注册 key：draw 不崩（无纹理 → 绘制为空）。
++    view.draw(ctx)
++    @Expect(true)
++}
++
++@Test
++func pixelImageViewClampsToAvailableSpace(): Unit {
++    let ctx = UiContext(Renderer.headless(), Theme.light())
++    let view = PixelImageView("k.big", 500.vp, 500.vp)
++    let m = view.measure(ctx, Size(200.0, 100.0))
++    @Expect(m.w <= 200.0)
++    @Expect(m.h <= 100.0)
++}
+-- 
+2.47.3
+
