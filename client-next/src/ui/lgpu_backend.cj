@@ -730,15 +730,26 @@ func discardMotionForDnd(x: UInt32, y: UInt32): Unit {
     let _ = y
 }
 
+/// 协议指针 button 码（OH InputMouseButton：0=左 1=中 2=右）→ MouseButton。
+/// 此前硬编码 Left：右键菜单在 OHOS 上从未弹出过（真机验证卡在这）。
+func mouseButtonFrom(code: Int32): MouseButton {
+    if (code == 2) {
+        return MouseButton.Right
+    } else if (code == 1) {
+        return MouseButton.Middle
+    }
+    return MouseButton.Left
+}
+
 func lwpEventToUi(ev: lwindow.LWindowEvent): UiEvent {
     // 诊断：按下时打印 UI 实际收到的逻辑坐标（与期望位置对比可算出偏移）
     if (ev.kind == lwindow.LWindowEventType.PointerDown) {
         probeTrace("ui down logical=${Int64(ev.x)},${Int64(ev.y)} uiScale=${g_ui_scale} winLogical=${g_win_w}x${g_win_h}")
     }
     match (ev.kind) {
-        case lwindow.LWindowEventType.PointerDown => UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y)
+        case lwindow.LWindowEventType.PointerDown => UiEvent.MouseDown(mouseButtonFrom(ev.key), ev.x, ev.y)
         case lwindow.LWindowEventType.PointerMove => UiEvent.MouseMove(ev.x, ev.y)
-        case lwindow.LWindowEventType.PointerUp => UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y)
+        case lwindow.LWindowEventType.PointerUp => UiEvent.MouseUp(mouseButtonFrom(ev.key), ev.x, ev.y)
         case lwindow.LWindowEventType.PointerAxis => UiEvent.MouseWheel(ev.x, ev.y, 0.0f32, 0.0f32)
         case lwindow.LWindowEventType.TextInput => UiEvent.TextInput(ev.text)
         case lwindow.LWindowEventType.Key =>
