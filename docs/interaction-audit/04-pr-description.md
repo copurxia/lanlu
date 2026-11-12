@@ -57,6 +57,13 @@
 - `5e308c7` Table Shift 区间选择（按显示序返回原始行索引，排序后仍连续）
 - `9c3c04e` **主题对比度下限守卫**：accent 与 field/panel 亮度差 ≥0.18（双主题），调色退化即失败
 - `70d5be3` **焦点环契约测试**：只在键盘到达时绘制（防止有人用 `hasFocus` 画描边——正是顶栏搜索框当初的不一致）
+- `bf2ad42` 右键菜单 Tab 关闭（浮层三路关闭一致性；此前留悬空浮层）
+- `dbd931d` **ListView 激活语义**：双击行 / Enter / Space 同走 `onActivate`（"打开"的键盘等价物）
+- LazyRow **Shift+滚轮横向滚动**（桌面惯例；此前框架不处理 Shift+Wheel）
+- `e4061ae` **`editMenuItems()`**：TextField/TextArea 标准编辑菜单项（剪切/复制/粘贴/全选按状态置灰、undo 一致），`ContextMenu(items: field.editMenuItems()) { field }` 一行得到右键编辑菜单；MenuItem 顺带暴露 `isEnabled()`/`invoke()`
+- `daeef09` ReorderableList 键盘重排（Alt+Up/Down 移动持焦行）
+- `92680c2` RichText 链接键盘可达（Left/Right 切换、Enter 触发）
+- `52ce6bb` ComboBox 箭头悬停反馈
 
 **G. 文档**：`8bc83a7`、`e5b26b1`、`19daf09`、`d51919b`（architecture / components / api-reference / user-guide）
 
@@ -158,6 +165,10 @@ grep -rn "hasFocus(" src | grep -v _test      # 均为行为门控，无绘制�
 | 19 | 表格可用键盘排序（Shift+方向换列、Enter 翻转） | `7e7de10` | `tableKeyboardSort*` | — |
 | 20 | 书架横排可用方向键/PgUp/PgDn 滚动 | `8671b44` | `lazyRow*` 3 例 | 横向滚动手感 |
 | 21 | 焦点指示色在两套主题下都够醒目（有测试兜底） | `9c3c04e` | `focusAccent*`/`hoverFieldActive*` 3 例 | 视觉风格仍人工 |
+| 22 | 右键输入框可剪切/复制/粘贴/全选（组合式：`ContextMenu(items: field.editMenuItems())`） | `e4061ae` | `editMenu*` 3 例 | 剪贴板真机行为 |
+| 23 | 列表双击行"打开"；键盘 Enter/Space 等价 | `dbd931d` | `doubleClick*`/`enterKey*` 3 例 | — |
+| 24 | 横排书架按住 Shift 滚滚轮横向滚动 | 本轮 | 无（修饰键不可伪造）| 方向与手感 |
+| 25 | 右键菜单打开时按 Tab 会关闭（不再悬空） | `bf2ad42` | `contextMenuTab*` 1 例 | — |
 
 > 验收建议顺序：先按 §三 跑一次 `tools/verify-cui-interactions.sh`（应有 450/409 与基线匹配），
 > 再按 §六 应用层补丁顺序落地，最后真机逐条对照本表。
