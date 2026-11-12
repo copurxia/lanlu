@@ -68,6 +68,26 @@ grep -E 'budgetDeny|uploadNative FAIL|noStaged|cooldown' ~/img_diag.txt | head -
 
 三者各加一个字段，就能把"有纹理但零尺寸"和"纹理本身没上传"彻底区分开。
 
+## 追加修复（`0082` / `0083`）：像素登记不校验尺寸与字节数
+
+同一文件里还有一处**同类缺陷**，也已在分支内修好：
+
+| 入口 | 问题 | 修复 |
+|---|---|---|
+| `stagePixelImage(key, w, h, pixels)` | 不校验 `w/h` 与 `pixels.size`；上传按 `w*h*4` 读数组 → 越界读（花屏/崩溃，表现为"封面空白或花块"）| 非正尺寸或长度不符一律拒绝登记（不污染 LRU 记账），`0082` |
+| `stageNativePixelImage(...)` | 同上（无字节数可验，只校尺寸）；**且拒绝时必须自己调 `releaser.release()`**（所有权已随调用转移）| `0082` |
+| `registerPixelImage(renderer, ...)` | 视频/流式路径，同样按 `w*h*4` 读数组且不校验 | 同一道校验，且在**建纹理之前**拒绝，`0083` |
+
+三条各带测试（`pixel_upload_budget_test` / `pixel_stage_validation_test` /
+`pixel_register_validation_test`），共 7 个用例。合并演练对对方最新 WIP 零冲突：
+**508 例 / 501 通过 / 基线匹配**。
+
+**建议对方的排查顺序**：
+1. 先 grep `~/img_diag.txt` 里的 `budgetDeny`（确认是否"大图永久被拒"）；
+2. 若没有 budgetDeny，检查解码器给出的 `width/height` 与像素数组长度是否匹配
+   （不匹配时现在会被静默拒绝 → 表现为空白；可在 `stagePixelImage` 拒绝分支临时加一行诊断）；
+3. 若两者都正常，再把 `image.width/height` 与 `destination` 加进绘制诊断（见发现 3）。
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
