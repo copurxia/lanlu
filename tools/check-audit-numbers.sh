@@ -28,6 +28,10 @@ rc=$(grep -oE '\*\*[0-9]+ 个补丁\*\*' "$ROOT/docs/interaction-audit/11-rc-rep
 sm=$(grep -oE '\*\*[0-9]+ 个提交（' "$ROOT/docs/interaction-audit/01-summary.md" | head -1 | grep -oE '[0-9]+')
 [ "${sm:-x}" = "$COMMITS" ] || { echo "✗ 01-summary.md 写的是 ${sm:-?} 个提交，实际 $COMMITS"; fail=1; }
 
+# 4b) 交付索引头部与摘要测试行（叙述性状态，最容易过期）。
+readme_hdr=$(grep -oE '[0-9]+ 提交 / [0-9]+ 测试通过' "$ROOT/docs/interaction-audit/README.md" | head -1 | grep -oE '^[0-9]+')
+[ "${readme_hdr:-x}" = "$COMMITS" ] || { echo "✗ 审计 README 头部写的是 ${readme_hdr:-?} 提交，实际 $COMMITS"; fail=1; }
+grep -q '例 / [0-9]* 通过' "$ROOT/docs/interaction-audit/01-summary.md" || { echo "✗ 01-summary 缺测试行"; fail=1; }
 # 5) 文档内链：两棵树全部 .md 的相对链接必须可达（http 除外）。
 check_links() {
   local dir="$1"
