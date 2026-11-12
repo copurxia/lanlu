@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:38:00 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20Drawer=20=E9=A6=96=E6=AC=A1?=
+ =?UTF-8?q?=E8=8E=B7=E5=BE=97=E6=B5=8B=E8=AF=95=E8=A6=86=E7=9B=96=EF=BC=88?=
+ =?UTF-8?q?3=20=E4=BE=8B=EF=BC=8C=E6=AD=A4=E5=89=8D=200=20=E4=BE=8B?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+按"扫文档承诺、查是否有测试兜底"的办法盘点，发现 **Drawer 完全没有测试**——270 行交互
+代码（浮层注册、弹簧滑入滑出、半消费事件、焦点记忆与恢复）零覆盖，而文档写了它三条行为。
+
+新增 drawer_test.cj 三例：
+1. drawerEscapeDismissesAndCallsBack：Esc 关闭并触发 onDismiss；
+2. drawerScrimClickDismissesButPanelClickDoesNot：点遮罩关闭、点面板不关闭（非模态的
+   "只认自己那一半"语义）；
+3. drawerCloseRestoresPriorFocus：关闭后恢复打开前的焦点。
+
+写测试过程记录了两个实现细节（对后来者有用）：
+- Drawer 的 content 在**构建期**建立，构造时 presented=false 时之后改状态不会凭空出现内容
+  → 测试要构造即打开；
+- claimInitialFocus 在 **layout** 里调用（与弹簧/内容布局同帧一致），不在 draw → 状态变化后
+  必须重新 layout 才会恢复焦点。
+
+cjpm test：TOTAL 496 / PASSED 489，失败名册与基线一致，零回归。
+---
+ src/controls/drawer_test.cj | 89 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 89 insertions(+)
+ create mode 100644 src/controls/drawer_test.cj
+
+diff --git a/src/controls/drawer_test.cj b/src/controls/drawer_test.cj
+new file mode 100644
+index 0000000..ef5608f
+--- /dev/null
++++ b/src/controls/drawer_test.cj
+@@ -0,0 +1,89 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, Size, UiEvent}
++import cui.core.{State, StateStore, Theme, UiContext, Widget, emit}
++
++/* 空记录画布（同 controls 包共享件）：抽屉绘制走表面/阴影，headless 无后端会抛异常。 */
++private func drawerContext(w: Float32, h: Float32): UiContext {
++    let renderer = Renderer.headless()
++    renderer.useBackend(NoopTestCanvas())
++    let ctx = UiContext(renderer, Theme.light())
++    ctx.viewportWidth = w
++    ctx.viewportHeight = h
++    ctx
++}
++
++private class DrawerProbe <: Widget {
++    public func measure(_: UiContext, _: Size): Size {
++        Size(100.0, 40.0)
++    }
++    public func layout(_: UiContext, _: Rect): Unit {}
++    public func draw(_: UiContext): Unit {}
++    public func handle(_: UiContext, _: UiEvent): Bool {
++        false
++    }
++}
++
++/*
++ * Drawer 此前**没有任何测试**（270 行交互代码）：这里固化三条文档承诺——
++ * Esc 关闭并回调、点遮罩关闭而点面板不关闭、关闭后恢复打开前的焦点。
++ */
++@Test
++func drawerEscapeDismissesAndCallsBack(): Unit {
++    let ctx = drawerContext(800.0, 600.0)
++    let presented = State<Bool>(true)
++    let dismissed = State<Int64>(0)
++    let drawer = Drawer(presented, width: 240.0, onDismiss: {=> dismissed.value += 1}) {
++        emit(DrawerProbe())
++    }
++    drawer.layout(ctx, Rect.zero())
++    drawer.draw(ctx)
++    @Expect(ctx.hasOverlay())
++
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Escape, false)))
++    @Expect(dismissed.value, Int64(1))
++    @Expect(!presented.value)
++}
++
++@Test
++func drawerScrimClickDismissesButPanelClickDoesNot(): Unit {
++    let ctx = drawerContext(800.0, 600.0)
++    let presented = State<Bool>(true)
++    let drawer = Drawer(presented, width: 240.0) {
++        emit(DrawerProbe())
++    }
++    drawer.layout(ctx, Rect.zero())
++    drawer.draw(ctx)
++
++    // 面板宽 240 贴左边：点面板内（x=100）不应关闭。
++    let _ = ctx.dispatchOverlay(UiEvent.MouseDown(MouseButton.Left, 100.0, 300.0))
++    @Expect(presented.value)
++
++    // 点遮罩（x=500，面板外）→ 关闭。
++    let _ = ctx.dispatchOverlay(UiEvent.MouseDown(MouseButton.Left, 500.0, 300.0))
++    @Expect(!presented.value)
++}
++
++@Test
++func drawerCloseRestoresPriorFocus(): Unit {
++    let ctx = drawerContext(800.0, 600.0)
++    let presented = State<Bool>(true) // 构造时就打开：content 在构建期建立
++    // 打开前的焦点：面板外的停靠点。
++    ctx.focus("outside.stop", viaKeyboard: true)
++    let drawer = Drawer(presented, width: 240.0) {
++        emit(DrawerProbe())
++    }
++    drawer.layout(ctx, Rect.zero())
++    drawer.draw(ctx) // 注册浮层
++    ctx.drawActiveOverlay() // 渲染浮层 → claimInitialFocus 记住打开前的焦点
++    @Expect(ctx.hasOverlay())
++
++    // 焦点移进面板（模拟用户 Tab 进入），然后关闭：应恢复到 outside.stop。
++    ctx.focus("inside.stop", viaKeyboard: true)
++    presented.value = false
++    drawer.layout(ctx, Rect.zero()) // claimInitialFocus 在 layout 里（弹簧与内容布局同帧一致）
++    drawer.draw(ctx) // 关闭滑出期仍注册
++    @Expect(ctx.hasOverlay())
++    ctx.drawActiveOverlay()
++    @Expect(ctx.hasFocus("outside.stop"))
++}
+-- 
+2.47.3
+
