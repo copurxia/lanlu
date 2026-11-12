@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:39:17 +0000
+Subject: [PATCH] =?UTF-8?q?fix(docs/API):=20KeyRepeat=20=E8=A1=A5=E8=BF=9B?=
+ =?UTF-8?q?=20cui.cj=20=E5=85=AC=E5=BC=80=E5=86=8D=E5=AF=BC=E5=87=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计公开 API 出口（cui.cj 的 public import 清单，238 条）发现：FocusTarget /
+registerFocusStop / drawFocusStop / MenuItem 等新 API 都在，唯独 **KeyRepeat 缺席**——
+它在 cui.core 包内，直接 import cui.core.KeyRepeat 可用，但从包根 `import cui.*` 的使用者
+看不到，与其它新 API 的暴露方式不一致。
+
+补一行 public import cui.core.KeyRepeat。
+
+cjpm test：TOTAL 488 / PASSED 447，失败名册与基线一致，零回归（纯出口变更）。
+---
+ src/cui.cj | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/cui.cj b/src/cui.cj
+index 5575760..b04e92a 100644
+--- a/src/cui.cj
++++ b/src/cui.cj
+@@ -59,6 +59,7 @@ public import cui.core.Divider
+ public import cui.core.EventHandler
+ public import cui.core.Flexible
+ public import cui.core.FocusTarget
++public import cui.core.KeyRepeat
+ public import cui.core.registerFocusStop
+ public import cui.core.reregisterFocusStop
+ public import cui.core.drawFocusRing
+-- 
+2.47.3
+
