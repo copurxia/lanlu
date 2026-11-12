@@ -1,0 +1,134 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:53:02 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20TreeView=20=E6=96=B0=E5=A2=9E=20onA?=
+ =?UTF-8?q?ctivate=E2=80=94=E2=80=94=E5=8F=B6=E5=AD=90=E8=8A=82=E7=82=B9?=
+ =?UTF-8?q?=20Enter/=E7=A9=BA=E6=A0=BC=E6=BF=80=E6=B4=BB=EF=BC=88=E4=B8=8E?=
+ =?UTF-8?q?=20ListView=20=E5=AF=B9=E9=BD=90=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+TreeView 此前没有任何应用回调：应用只能观察 selected 状态，导航树/文件浏览器无法在
+Enter 时"打开该项"。补 onActivate!: ?(String) -> Unit（缺省 None 保持原行为）：
+
+- 叶子节点（无子级）的 Enter/空格触发回调——与文件浏览器的直觉一致；
+- 有子级节点的 Enter 语义仍是展开/折叠，不触发激活；
+- 与 ListView(onActivate:) 同名同形，两套集合控件能力对齐。
+
+测试 2 例：叶子 Enter 激活（含展开态下 ↓ 选到子级）；父节点 Enter 收起且不激活、
+折叠后 ↓ 到下一叶子再 Enter 激活。
+cjpm test：TOTAL 525 / PASSED 518，基线匹配零回归。
+---
+ src/controls/tree_view.cj               | 13 +++++-
+ src/controls/tree_view_activate_test.cj | 57 +++++++++++++++++++++++++
+ 2 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 src/controls/tree_view_activate_test.cj
+
+diff --git a/src/controls/tree_view.cj b/src/controls/tree_view.cj
+index 7e42847..64a3def 100644
+--- a/src/controls/tree_view.cj
++++ b/src/controls/tree_view.cj
+@@ -75,6 +75,7 @@ struct TreeRow {
+  * and Enter/Space toggle the current node. Clicking a row selects it; clicking its chevron toggles it.
+  */
+ public class TreeView <: Widget {
++    private let onActivate: ?(String) -> Unit
+     private let roots: Array<TreeNode>
+     private let selected: Bindable<String>
+     private let expandedState: State<HashSet<String>>
+@@ -95,10 +96,12 @@ public class TreeView <: Widget {
+         scroll!: ?State<Float32> = None,
+         expanded!: ?State<HashSet<String>> = None,
+         initiallyExpanded!: Array<String> = [],
+-        key!: ?String = None
++        key!: ?String = None,
++        onActivate!: ?(String) -> Unit = None
+     ) {
+         this.roots = roots
+         this.selected = selected
++        this.onActivate = onActivate
+         // Identity is optional and auto-derived by build order (like ListView); pass `key` to keep
+         // scroll/expansion/selection state across a structural change or to coordinate them externally.
+         let base = match (key) {
+@@ -301,6 +304,14 @@ public class TreeView <: Widget {
+         if (current >= 0 && rows[current].hasChildren) {
+             toggleExpanded(rows[current].id)
+         }
++        // 叶子节点（无子级）的 Enter/空格是"激活"：通知应用（如导航树打开该项）。
++        // 有子级时 Enter 语义是展开/折叠，不触发激活——与文件浏览器的直觉一致。
++        if (current >= 0 && !rows[current].hasChildren) {
++            match (onActivate) {
++                case Some(activate) => activate(rows[current].id)
++                case None => ()
++            }
++        }
+         true
+     }
+ 
+diff --git a/src/controls/tree_view_activate_test.cj b/src/controls/tree_view_activate_test.cj
+new file mode 100644
+index 0000000..15ef2d8
+--- /dev/null
++++ b/src/controls/tree_view_activate_test.cj
+@@ -0,0 +1,57 @@
++package cui.controls
++
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
++import cui.core.{State, Theme, UiContext}
++
++/*
++ * TreeView 叶子激活（onActivate）：Enter/空格在**叶子**上触发回调（导航树打开该项）；
++ * 有子级的节点 Enter 语义是展开/折叠，不触发激活——与文件浏览器的直觉一致。
++ */
++private func treeCtx(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++private func sampleTree(): Array<TreeNode> {
++    [
++        TreeNode("books", "书库", children: [
++            TreeNode("b1", "第一卷"),
++            TreeNode("b2", "第二卷")
++        ]),
++        TreeNode("settings", "设置")
++    ]
++}
++
++@Test
++func treeEnterOnLeafActivates(): Unit {
++    let ctx = treeCtx()
++    let sel = State<String>("")
++    let activated = State<String>("")
++    let tree = TreeView(sampleTree(), sel, key: "t.tree", initiallyExpanded: ["books"],
++        onActivate: {id => activated.value = id})
++    tree.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    // 选中叶子 b1（第 2 行）后按 Enter：应激活 b1。
++    let _ = tree.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, 10.0)) // 第一行
++    @Expect(sel.value, "books")
++    let _ = tree.handle(ctx, UiEvent.KeyDown(Key.Down, false)) // ↓ 到第一卷（已展开）
++    @Expect(sel.value, "b1")
++    @Expect(tree.handle(ctx, UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(activated.value, "b1")
++}
++
++@Test
++func treeEnterOnParentExpandsWithoutActivating(): Unit {
++    let ctx = treeCtx()
++    let sel = State<String>("")
++    let activated = State<String>("(none)")
++    let tree = TreeView(sampleTree(), sel, key: "p.tree",
++        onActivate: {id => activated.value = id})
++    tree.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    let _ = tree.handle(ctx, UiEvent.MouseDown(MouseButton.Left, 100.0, 10.0)) // 第一行
++    @Expect(sel.value, "books")
++    @Expect(tree.handle(ctx, UiEvent.KeyDown(Key.Enter, false))) // 收起子级（展开态→折叠）
++    @Expect(activated.value, "(none)") // 不触发激活
++    let _ = tree.handle(ctx, UiEvent.KeyDown(Key.Down, false)) // ↓（已折叠）到设置
++    @Expect(sel.value, "settings")
++    @Expect(tree.handle(ctx, UiEvent.KeyDown(Key.Enter, false))) // 叶子：激活
++    @Expect(activated.value, "settings")
++}
+-- 
+2.47.3
+
