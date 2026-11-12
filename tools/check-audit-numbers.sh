@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# 校验审计文档里的"当前数字"是否与实际一致（提交数、测试数、补丁数）。
-# 历史叙述（"当时 N 个"）不参与校验；本脚本只读，不改文件。
+# 审计一致性校验（只读，不修改任何文件）：
+#   1) 当前面向文档的数字（提交数 / 补丁数）是否与实际一致——历史叙述（"当时 N 个"）不参与；
+#   2) 框架文档树与审计文档树的相对内链是否全部可达。
+# 一条命令确认"文档没有说谎、也没有死链"。
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUI="$ROOT/packages/cangjie-gui-p0"
@@ -25,5 +27,34 @@ rc=$(grep -oE '\*\*[0-9]+ 个补丁\*\*' "$ROOT/docs/interaction-audit/11-rc-rep
 sm=$(grep -oE '\*\*[0-9]+ 个提交（' "$ROOT/docs/interaction-audit/01-summary.md" | head -1 | grep -oE '[0-9]+')
 [ "${sm:-x}" = "$COMMITS" ] || { echo "✗ 01-summary.md 写的是 ${sm:-?} 个提交，实际 $COMMITS"; fail=1; }
 
-[ "$fail" -eq 0 ] && echo "== 文档当前数字与实际一致（提交 $COMMITS / 补丁 $PATCHES）"
+# 5) 文档内链：两棵树全部 .md 的相对链接必须可达（http 除外）。
+check_links() {
+  local dir="$1"
+  python3 - "$dir" <<'PY'
+import os, re, sys
+root = sys.argv[1]
+bad = []
+for sub, _, files in os.walk(root):
+    for f in files:
+        if not f.endswith('.md'):
+            continue
+        p = os.path.join(sub, f)
+        t = open(p, encoding='utf-8').read()
+        for m in re.finditer(r'\[[^\]]+\]\(([^)#\s]+)(?:#[^)]*)?\)', t):
+            u = m.group(1)
+            if u.startswith('http'):
+                continue
+            target = os.path.normpath(os.path.join(sub, u))
+            if not os.path.exists(target):
+                bad.append((os.path.relpath(p, root), u))
+if bad:
+    for b in bad[:10]:
+        print("✗ 断链 %s → %s" % b)
+    sys.exit(1)
+PY
+}
+check_links "$ROOT/packages/cangjie-gui-p0/docs" || fail=1
+check_links "$ROOT/docs/interaction-audit" || fail=1
+
+[ "$fail" -eq 0 ] && echo "== 审计一致性通过：数字（提交 $COMMITS / 补丁 $PATCHES）+ 两棵树文档内链"
 exit "$fail"
