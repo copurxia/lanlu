@@ -73,7 +73,7 @@
 |---|---|---|
 | 原始问题（为什么点输入框没描边） | **已解答并修复** | [00-root-cause.md](00-root-cause.md)；`drawTextBoxChrome` 按 `hasFocus` 上激活边 + 键盘外环 |
 | 20 类交互缺口 | **全部落地**（+3 项审计外补充） | [09-gap-final-status.md](09-gap-final-status.md) |
-| 实现 | 49 个提交（41 代码 + 8 文档） | 分支 `p0-focus-visible` |
+| 实现 | **70 个提交（50 代码 + 20 文档）**，92 文件 +5173/−202 | 分支 `p0-focus-visible` |
 | 测试 | **491 例 / 484 通过 / 失败名册与基线逐条一致**（7 条豁免均有据，见 [test-baseline-notes.md](test-baseline-notes.md)） | `tools/verify-cui-interactions.sh p0` |
 | 新增测试 | 92 个用例 | 见 [02-p0-batch.md](02-p0-batch.md) |
 | 文档 | 框架 5 份 + 审计 11 份，内链 0 断链，签名与源码逐字一致 | `docs/`、`docs/interaction-audit/` |
@@ -96,7 +96,7 @@ tools/land-focus-interactions.sh           # 合并 + 补 link-option + 跑测�
 
 > **进度 2026-11-11（十一轮）**：**P0 与框架侧审计缺口全部完成**（20 类缺口中框架可独立
 > 落地的均已落地），应用层接线清单已备好——分支 `p0-focus-visible`
-> （工作树 `packages/cangjie-gui-p0`，39 个提交，最新 `52ce6bb`；应用层 A/B/D 在独立分支
+> （工作树 `packages/cangjie-gui-p0`，70 个提交，最新 `0ca58b3`；应用层 A/B/D 在独立分支
 > `app-focus-wiring` 待 cherry-pick，见下）：
 > 字段族点击聚焦可见 + 键盘外环；Pagination/Breadcrumb/StepIndicator/WordCloud 键盘化（四个
 > 漏登记控件全部收尾）；Slider 焦点可见性 + Up/Down/Home/End；Modal 打开即聚焦/关闭恢复
