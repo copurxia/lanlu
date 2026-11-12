@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:39:42 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20ScrollBar=20=E9=A6=96=E6=AC=A1?=
+ =?UTF-8?q?=E7=9B=B4=E6=8E=A5=E6=B5=8B=E8=AF=95=EF=BC=883=20=E4=BE=8B?=
+ =?UTF-8?q?=EF=BC=89=E2=80=94=E2=80=94=E6=BB=9A=E5=8A=A8=E5=87=A0=E4=BD=95?=
+ =?UTF-8?q?=E5=A5=91=E7=BA=A6?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+按"公开类 → 测试引用"做覆盖图，发现 8 个公开类零测试。按交互重要性排序，
+ScrollBar 最该先补：它是所有滚动容器共用的滑块几何实现（press 抓取 / 轨道翻页 /
+drag 映射），容器级测试只验证了"能滚"，几何契约本身没人管。
+
+新增 scroll_bar_test.cj：
+1. scrollBarPressGrabsThumbAndDragTracksPointer：按滑块 → 抓取且不跳变；拖到中部 →
+   偏移随指针增大且不越界；拖出底端 → 钳制在最大偏移；
+2. scrollBarTrackClickPagesTowardPointer：点滑块下方轨道 → 向后翻约一页（≤ 视口）；
+3. scrollBarPressOutsideTrackIsNotClaimed：点内容区不被滚动条认领。
+
+cjpm test：TOTAL 499 / PASSED 492，失败名册与基线一致，零回归。
+
+覆盖图剩余 7 个零测试类（Binding/DerivedState/Divider/Icon/CanvasWidget/PixelImageView/
+ZoomableImageView），下轮按"有交互逻辑"优先级继续。
+---
+ src/core/scroll_bar_test.cj | 58 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 58 insertions(+)
+ create mode 100644 src/core/scroll_bar_test.cj
+
+diff --git a/src/core/scroll_bar_test.cj b/src/core/scroll_bar_test.cj
+new file mode 100644
+index 0000000..3a381b1
+--- /dev/null
++++ b/src/core/scroll_bar_test.cj
+@@ -0,0 +1,58 @@
++package cui.core
++
++import lgui.{MouseButton, Rect, UiEvent}
++
++/*
++ * ScrollBar 此前无直接测试——但它是所有滚动容器共用的滑块/轨道/拖动几何实现
++ * （press 抓取、轨道翻页、drag 映射）。容器级测试覆盖了"能滚"，这里验证几何契约本身。
++ */
++@Test
++func scrollBarPressGrabsThumbAndDragTracksPointer(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let bar = ScrollBar("test.bar.grab")
++    let frame = Rect(0.0, 0.0, 200.0, 100.0) // 视口 100，内容 400 → 滑块约 1/4 高
++    let contentH: Float32 = 400.0
++    let viewportH: Float32 = 100.0
++
++    // 滑块在顶部附近；按在滑块上 → 抓取成功，右边界不跳变。
++    @Expect(bar.press(ctx, frame, offset, contentH, viewportH, 197.0, 5.0))
++    @Expect(bar.dragging(ctx))
++    @Expect(offset.value, Float32(0.0))
++
++    // 拖动到轨道中部：偏移随指针移动（与滑块几何一致，非零且被钳制）。
++    ctx.leftMouseDown = true
++    @Expect(bar.drag(ctx, frame, offset, contentH, viewportH, 50.0))
++    let dragged = offset.value
++    @Expect(dragged > 0.0)
++    @Expect(dragged <= contentH - viewportH)
++
++    // 拖到底部再往下：钳制在最大偏移，不越界。
++    let _ = bar.drag(ctx, frame, offset, contentH, viewportH, 500.0)
++    @Expect(offset.value <= contentH - viewportH)
++    ctx.leftMouseDown = false
++}
++
++@Test
++func scrollBarTrackClickPagesTowardPointer(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let bar = ScrollBar("test.bar.page")
++    let frame = Rect(0.0, 0.0, 200.0, 100.0)
++
++    // 点在滑块下方（轨道空白）→ 向后翻约 90% 视口。
++    @Expect(bar.press(ctx, frame, offset, 400.0, 100.0, 197.0, 90.0))
++    @Expect(offset.value > 0.0)
++    @Expect(offset.value <= 100.0) // 一页以内
++}
++
++@Test
++func scrollBarPressOutsideTrackIsNotClaimed(): Unit {
++    let ctx = testContext()
++    let offset = State<Float32>(0.0)
++    let bar = ScrollBar("test.bar.miss")
++    let frame = Rect(0.0, 0.0, 200.0, 100.0)
++    // 点在内容区左上（不在滚动条轨道上）。
++    @Expect(!bar.press(ctx, frame, offset, 400.0, 100.0, 20.0, 50.0))
++    @Expect(!bar.dragging(ctx))
++}
+-- 
+2.47.3
+
