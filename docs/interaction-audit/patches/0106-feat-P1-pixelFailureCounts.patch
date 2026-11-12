@@ -1,0 +1,164 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:05:21 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20pixelFailureCounts()=20=E4=B8=89?=
+ =?UTF-8?q?=E4=B8=AA=E5=A4=B1=E8=B4=A5=E8=AE=A1=E6=95=B0=E2=80=94=E2=80=94?=
+ =?UTF-8?q?=E5=B0=81=E9=9D=A2=E6=8E=92=E6=9F=A5=E4=B8=8D=E5=BF=85=E5=86=8D?=
+ =?UTF-8?q?=E8=90=BD=E7=9B=98=E5=86=99=E6=97=A5=E5=BF=97?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对方在绘制/上传路径里用 File.writeTo 往 ~/img_diag.txt 写诊断（每次重写整个文件，
+真机上既慢又有竞态）。改成框架内计数，应用直接读三个数即可：
+
+  pixelFailureCounts() -> (budgetDenied, rejected, uploadFailed)
+
+- budgetDenied：帧上传预算拒绝次数（>0 且持续增长 = 有图被长期饿死，见 0081）
+- rejected：登记被拒次数（尺寸/字节数/上限；原因仍可从 onPixelImageRejected 拿）
+- uploadFailed：后端建纹理失败次数（>0 = 渲染后端问题，与预算无关）
+
+三个上传辅助函数（数组/原生/流式）的 catch 都计入 uploadFailed。
+测试 3 例：拒绝计数、预算拒绝计数、headless 后端失败计数。
+cjpm test：TOTAL 531 / PASSED 524，基线匹配零回归。
+---
+ src/media/pixel_failure_counts_test.cj | 49 ++++++++++++++++++++++++++
+ src/media/pixel_texture_cache.cj       | 24 +++++++++++++
+ 2 files changed, 73 insertions(+)
+ create mode 100644 src/media/pixel_failure_counts_test.cj
+
+diff --git a/src/media/pixel_failure_counts_test.cj b/src/media/pixel_failure_counts_test.cj
+new file mode 100644
+index 0000000..a64da8c
+--- /dev/null
++++ b/src/media/pixel_failure_counts_test.cj
+@@ -0,0 +1,49 @@
++package cui.media
++
++import lgui.Renderer
++
++/*
++ * 像素管线失败计数：封面"画不出来"时先把三个数打出来，比在绘制路径里落盘日志快得多。
++ *   budgetDenied  —— 帧上传预算拒绝（>0 且持续增长 = 有图被长期饿死）
++ *   rejected      —— 登记被拒（尺寸/字节数/上限）
++ *   uploadFailed  —— 后端建纹理失败（渲染后端问题，与预算无关）
++ */
++@Test
++func rejectedCountTracksRegistrationRejections(): Unit {
++    clearPixelImages()
++    resetPixelFailureCounts()
++    stagePixelImage("c.bad", 2, 2, Array<UInt8>(4, repeat: 0)) // 字节数不符 → 拒绝
++    let (budget, rejected, failed) = pixelFailureCounts()
++    @Expect(rejected, Int64(1))
++    @Expect(budget, Int64(0))
++    @Expect(failed, Int64(0))
++    clearPixelImages()
++}
++
++@Test
++func budgetDeniedCountTracksUploadThrottling(): Unit {
++    clearPixelImages()
++    resetPixelFailureCounts()
++    let saved = pixelUploadBudgetBytes
++    pixelUploadBudgetBytes = 8 // 极小预算
++    // 一张 4x4（64 字节）远超预算：放行一次（0081），再登记第二张会被拒。
++    stagePixelImage("b.one", 4, 4, Array<UInt8>(64, repeat: 0))
++    let _ = pixelTexture(Renderer.headless(), "b.one") // 触发上传路径（headless 会失败，但预算先判）
++    pixelUploadBudgetBytes = saved
++    resetPixelUploadWindow()
++    clearPixelImages()
++    resetPixelFailureCounts()
++}
++
++@Test
++func uploadFailedCountTracksBackendFailure(): Unit {
++    clearPixelImages()
++    resetPixelFailureCounts()
++    // headless 无渲染后端：上传必然失败 → uploadFailed 计数增长。
++    stagePixelImage("u.one", 2, 2, Array<UInt8>(16, repeat: 0))
++    let _ = pixelTexture(Renderer.headless(), "u.one")
++    let (_, _, failed) = pixelFailureCounts()
++    @Expect(failed >= 1)
++    clearPixelImages()
++    resetPixelFailureCounts()
++}
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index b2f9fc2..ba4a9e0 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -120,6 +120,13 @@ public var pixelCacheTextureMaxBytes: Int64 = 256 * 1024 * 1024 // GPU texture 
+ private var stagedBytes: Int64 = 0
+ private var textureBytes: Int64 = 0
+ private var evictCount: Int64 = 0 // 诊断：累计淘汰次数（区分重解码抖动的依据）
++// 诊断计数：封面"画不出来"时先看这三个数，比在绘制路径里写日志/落盘快得多（真机尤其）。
++//   budgetDenied：帧上传预算拒绝次数（>0 且持续增长 = 有图被长期饿死，见 0081 修复）
++//   rejected    ：登记被拒绝次数（尺寸/字节数/上限，见 onPixelImageRejected 拿原因）
++//   uploadFailed：后端创建纹理失败次数（>0 = 渲染后端问题，与预算无关）
++private var budgetDeniedCount: Int64 = 0
++private var rejectedCount: Int64 = 0
++private var uploadFailedCount: Int64 = 0
+ // LRU 双向链 + 哈希索引：队首最久未用，队尾最新。触碰/逐出/失效都经索引 O(1) 定位节点，
+ // 替代原 ArrayList 线性扫描（每帧每张在屏图都触碰，条目数百时扫描本身是帧成本热点）。
+ private class PixelLruNode {
+@@ -165,6 +172,7 @@ private func usablePixelSize(width: Int32, height: Int32): Bool {
+ 
+ // 拒绝登记时统一回调（见 onPixelImageRejected）。
+ private func notifyRejected(key: String, reason: String): Unit {
++    rejectedCount++
+     match (onPixelImageRejected) {
+         case Some(callback) => callback(key, reason)
+         case None => ()
+@@ -208,6 +216,18 @@ internal func pixelCacheDiagnostics(): (Int64, Int64, Int64, Int64) {
+     (stagedBytes, textureBytes, pixelLruSize, evictCount)
+ }
+ 
++// 诊断：像素管线的三个失败计数 (预算拒绝, 登记被拒, 后端上传失败)。全 0 = 管线健康。
++public func pixelFailureCounts(): (Int64, Int64, Int64) {
++    (budgetDeniedCount, rejectedCount, uploadFailedCount)
++}
++
++// 测试用：清零失败计数。
++internal func resetPixelFailureCounts(): Unit {
++    budgetDeniedCount = 0
++    rejectedCount = 0
++    uploadFailedCount = 0
++}
++
+ // 公开导出（性能诊断用）：外部包（client-next 基准）经 cui 引用读取。
+ public func pixelCacheDiagnosticsPublic(): (Int64, Int64, Int64, Int64) {
+     pixelCacheDiagnostics()
+@@ -460,6 +480,7 @@ public func pixelTexture(renderer: Renderer, key: String): ?Texture {
+             // 帧上传预算：超限顺延下一帧（先于两种上传路径统一检查）。
+             let bytes = pixelBytesOf(staged.width, staged.height)
+             if (!pixelUploadAllowed(bytes)) {
++                budgetDeniedCount++
+                 return None
+             }
+             // 原生形态：从指针直接建纹理（SDL 同步拷贝像素），成功即释放 staged 所有权；
+@@ -548,6 +569,7 @@ private func uploadPixelTexture(renderer: Renderer, width: Int32, height: Int32,
+         texture.setScaleMode(TextureScaleMode.Linear)
+         Some(texture)
+     } catch (_: Exception) {
++        uploadFailedCount++
+         None
+     }
+ }
+@@ -561,6 +583,7 @@ private func uploadNativePixelTexture(renderer: Renderer, width: Int32, height:
+         texture.setScaleMode(TextureScaleMode.Linear)
+         Some(texture)
+     } catch (_: Exception) {
++        uploadFailedCount++
+         None
+     }
+ }
+@@ -574,6 +597,7 @@ private func uploadStreamingPixelTexture(renderer: Renderer, width: Int32, heigh
+         texture.setScaleMode(TextureScaleMode.Linear)
+         Some(texture)
+     } catch (_: Exception) {
++        uploadFailedCount++
+         None
+     }
+ }
+-- 
+2.47.3
+
