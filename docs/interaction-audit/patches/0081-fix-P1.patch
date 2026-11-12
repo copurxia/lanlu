@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:42:35 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20=E5=B8=A7=E4=B8=8A=E4=BC=A0=E9=A2=84?=
+ =?UTF-8?q?=E7=AE=97=E2=80=94=E2=80=94=E5=8D=95=E5=BC=A0=E8=B6=85=E9=A2=84?=
+ =?UTF-8?q?=E7=AE=97=E5=9B=BE=E4=B8=8D=E5=86=8D=E8=A2=AB=E6=B0=B8=E4=B9=85?=
+ =?UTF-8?q?=E6=8B=92=E7=BB=9D=EF=BC=88=E5=B0=81=E9=9D=A2=E7=A9=BA=E7=99=BD?=
+ =?UTF-8?q?=E7=9A=84=E7=96=91=E4=BC=BC=E6=A0=B9=E5=9B=A0=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+pixelUploadAllowed 判定：窗口重置后 uploadedThisWindow 归零，单张 bytes > 预算 时
+"0 + bytes > 预算" 恒真——该图每帧都被拒、永远画不出来。真机高清封面正是这种尺寸
+（3000×3000×4 = 36 MB 远超默认 16 MiB），与对方正在排查的封面空白吻合。
+
+改法：单张超预算放行一次并照常累加，同窗口其余上传仍节流到下一帧（保住流水线意图，
+不让任何一张图永久饥饿）。
+
+配套：pixelUploadAllowed 改 internal（跨文件测试需要）、新增 resetPixelUploadWindow()；
+2 用例（超预算放行一次/同窗口第二张被节流、不限额全放行）。
+
+cjpm test：TOTAL 503 / PASSED 496，基线匹配零回归。
+---
+ src/media/pixel_texture_cache.cj      | 15 +++++++++--
+ src/media/pixel_upload_budget_test.cj | 37 +++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 2 deletions(-)
+ create mode 100644 src/media/pixel_upload_budget_test.cj
+
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index edbca19..406b80d 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -144,7 +144,11 @@ private var uploadedThisWindow: Int64 = 0
+ private var uploadWindowStart = MonoTime.now()
+ 
+ // pixelTexture 上传前的帧预算检查：超预算返回 false（调用方顺延到下一帧）。
+-private func pixelUploadAllowed(bytes: Int64): Bool {
++//
++// 单张图大于整帧预算时必须放行一次：窗口重置后 uploadedThisWindow 归零，"0 + bytes > 预算"
++// 恒为真，会让这张图**每帧都被拒**——表现为该图永远空白（高清封面就是这种尺寸）。
++// 放行后照常累加，同一窗口内的其余上传仍被节流到下一帧。
++internal func pixelUploadAllowed(bytes: Int64): Bool {
+     if (pixelUploadBudgetBytes <= 0) {
+         return true
+     }
+@@ -153,13 +157,20 @@ private func pixelUploadAllowed(bytes: Int64): Bool {
+         uploadWindowStart = now
+         uploadedThisWindow = 0
+     }
+-    if (uploadedThisWindow + bytes > pixelUploadBudgetBytes) {
++    let oversized = bytes > pixelUploadBudgetBytes
++    if (!oversized && uploadedThisWindow + bytes > pixelUploadBudgetBytes) {
+         return false
+     }
+     uploadedThisWindow += bytes
+     true
+ }
+ 
++// 测试用：把帧预算窗口复位（让"本窗口已上传"归零），便于构造跨窗口场景。
++internal func resetPixelUploadWindow(): Unit {
++    uploadWindowStart = MonoTime.now()
++    uploadedThisWindow = 0
++}
++
+ private func pixelBytesOf(width: Int32, height: Int32): Int64 {
+     Int64(width) * Int64(height) * 4
+ }
+diff --git a/src/media/pixel_upload_budget_test.cj b/src/media/pixel_upload_budget_test.cj
+new file mode 100644
+index 0000000..6c8e90f
+--- /dev/null
++++ b/src/media/pixel_upload_budget_test.cj
+@@ -0,0 +1,37 @@
++package cui.media
++
++/*
++ * 帧上传预算的边界：单张图大于整帧预算时必须放行一次，否则它会每帧都被拒、永远画不出来
++ * （高清封面正是这种尺寸）。这里直接验证 pixelUploadAllowed 的判定。
++ */
++@Test
++func oversizedSingleUploadIsAllowedOncePerWindow(): Unit {
++    let saved = pixelUploadBudgetBytes
++    pixelUploadBudgetBytes = 1024 // 故意设小，方便构造"单张超预算"
++    resetPixelUploadWindow()
++
++    // 单张 4KB > 预算 1KB：放行（否则该图永远空白）。
++    @Expect(pixelUploadAllowed(4096))
++    // 同一窗口内的第二张：被节流到下一窗口。
++    @Expect(!pixelUploadAllowed(512))
++
++    // 下一个窗口：再次放行一张超预算图。
++    resetPixelUploadWindow()
++    @Expect(pixelUploadAllowed(4096))
++
++    // 预算内的小图连续两张：第一张过后超预算 → 第二张被拒。
++    resetPixelUploadWindow()
++    @Expect(pixelUploadAllowed(600))
++    @Expect(!pixelUploadAllowed(600))
++
++    pixelUploadBudgetBytes = saved
++    resetPixelUploadWindow()
++}
++
++@Test
++func unthrottledBudgetAllowsEverything(): Unit {
++    let saved = pixelUploadBudgetBytes
++    pixelUploadBudgetBytes = 0 // 0 = 不限额
++    @Expect(pixelUploadAllowed(1 << 30))
++    pixelUploadBudgetBytes = saved
++}
+-- 
+2.47.3
+
