@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:12:40 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20data=5Ftable=20=E6=BC=94?=
+ =?UTF-8?q?=E7=A4=BA=20Table.of=20=E7=9A=84=20onActivate=E2=80=94=E2=80=94?=
+ =?UTF-8?q?=E5=8F=8C=E5=87=BB/Space"=E6=89=93=E5=BC=80"=E6=9C=8D=E5=8A=A1?=
+ =?UTF-8?q?=E5=99=A8?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+机群监控示例接上新能力：双击行或聚焦后 Space = "打开"该服务器（详情栏显示已打开的主机名），
+Enter 仍是表头排序。与 file_explorer 的 TreeView 演示一起，三个集合控件的激活语义各有现场。
+---
+ examples/data_table/src/model.cj |  2 ++
+ examples/data_table/src/views.cj | 10 ++++++++--
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/examples/data_table/src/model.cj b/examples/data_table/src/model.cj
+index 8e9c49e..2cae2b0 100644
+--- a/examples/data_table/src/model.cj
++++ b/examples/data_table/src/model.cj
+@@ -9,6 +9,8 @@ import cui.{DerivedState, State}
+ class FleetModel {
+     let servers = seedServers()
+     let selected = State<Int64>(0)
++    // 最近一次"打开"的行（双击或聚焦后 Space 激活）；-1 = 尚未打开。
++    let opened = State<Int64>(-1)
+     let summary: DerivedState<String>
+ 
+     init() {
+diff --git a/examples/data_table/src/views.cj b/examples/data_table/src/views.cj
+index 071e108..5c9fe9d 100644
+--- a/examples/data_table/src/views.cj
++++ b/examples/data_table/src/views.cj
+@@ -12,7 +12,9 @@ func fleetView(model: FleetModel): Unit {
+     VStack {
+         header()
+         // Typed data table: rows stay `Array<Server>`, columns extract fields — no string matrix.
+-        Table.of(model.servers, serverColumns(), model.selected).flex()
++        // 双击行 / 聚焦后 Space = "打开"该服务器（onActivate）；Enter 仍是表头排序。
++        Table.of(model.servers, serverColumns(), model.selected,
++            onActivate: {row => model.opened.value = row}).flex()
+         detailBar(model)
+     }.spacing(14.vp).padding(18.vp)
+ }
+@@ -27,7 +29,11 @@ func header(): Unit {
+ func detailBar(model: FleetModel): Unit {
+     Panel {
+         HStack {
+-            Label(model.summary.value)
++            Label(if (model.opened.value >= 0) {
++                "已打开：" + model.servers[model.opened.value].host
++            } else {
++                model.summary.value
++            })
+             Spacer()
+             Label("共 ${model.servers.size} 台").muted().fontSize(FontSizes.CAPTION)
+         }.crossAxisAlignment(CrossAxisAlignment.Center)
+-- 
+2.47.3
+
