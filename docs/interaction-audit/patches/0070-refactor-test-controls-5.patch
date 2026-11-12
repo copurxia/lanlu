@@ -1,0 +1,193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:23:17 +0000
+Subject: [PATCH] =?UTF-8?q?refactor(test):=20=E7=A9=BA=E8=AE=B0=E5=BD=95?=
+ =?UTF-8?q?=E7=94=BB=E5=B8=83=E6=8A=BD=E6=88=90=E5=85=B1=E4=BA=AB=E6=B5=8B?=
+ =?UTF-8?q?=E8=AF=95=E4=BB=B6=EF=BC=88controls=20=E5=8C=85=205=20=E5=A4=84?=
+ =?UTF-8?q?=E5=BC=95=E7=94=A8=E7=BB=9F=E4=B8=80=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+此前 DropdownNoopCanvas 定义在 dropdown_keys_test.cj 里，却被 controls_test / date_picker_test /
+time_picker_test / context_menu_test 四个文件引用——一个测试用的类长在无关测试文件里，
+发现成本高、改接口时容易漏。
+
+抽出 src/controls/noop_canvas_test.cj（_test.cj 保证不进库产物），命名 NoopTestCanvas，
+五处引用统一。文件头写明它做什么、为什么需要，以及**不会掩盖回归**：绘制逻辑照常执行，
+任何真实异常仍会抛、断言仍会跑，只免掉"没有 SDL 设备"这一类失败。
+
+cjpm test：TOTAL 491 / PASSED 484，失败名册与 7 条基线一致，零回归。
+---
+ src/controls/context_menu_test.cj  |  2 +-
+ src/controls/controls_test.cj      |  2 +-
+ src/controls/date_picker_test.cj   |  2 +-
+ src/controls/dropdown_keys_test.cj | 40 +++--------------------------
+ src/controls/noop_canvas_test.cj   | 41 ++++++++++++++++++++++++++++++
+ src/controls/time_picker_test.cj   |  2 +-
+ 6 files changed, 48 insertions(+), 41 deletions(-)
+ create mode 100644 src/controls/noop_canvas_test.cj
+
+diff --git a/src/controls/context_menu_test.cj b/src/controls/context_menu_test.cj
+index bc22b4a..785e091 100644
+--- a/src/controls/context_menu_test.cj
++++ b/src/controls/context_menu_test.cj
+@@ -6,7 +6,7 @@ import cui.core.{State, Theme, UiContext, Widget, emit}
+ private func menuTestContext(w: Float32, h: Float32): UiContext {
+     // 空记录画布：弹窗/菜单绘制路径在 headless 无后端会抛异常（基线 ERROR 家族削减）。
+     let renderer = Renderer.headless()
+-    renderer.useBackend(DropdownNoopCanvas())
++    renderer.useBackend(NoopTestCanvas())
+     let ctx = UiContext(renderer, Theme.light())
+     ctx.viewportWidth = w
+     ctx.viewportHeight = h
+diff --git a/src/controls/controls_test.cj b/src/controls/controls_test.cj
+index 0afcd70..379feec 100644
+--- a/src/controls/controls_test.cj
++++ b/src/controls/controls_test.cj
+@@ -7,7 +7,7 @@ private func controlTestContext(): UiContext {
+     // 统一装空记录画布：绘制路径（软阴影等）在 headless 无后端会抛异常。装上后
+     // 依赖绘制的用例（dropdown 弹层等）真实通过，不依赖绘制的用例不受影响。
+     let renderer = Renderer.headless()
+-    renderer.useBackend(DropdownNoopCanvas())
++    renderer.useBackend(NoopTestCanvas())
+     UiContext(renderer, Theme.light())
+ }
+ 
+diff --git a/src/controls/date_picker_test.cj b/src/controls/date_picker_test.cj
+index 53d2110..587108c 100644
+--- a/src/controls/date_picker_test.cj
++++ b/src/controls/date_picker_test.cj
+@@ -14,7 +14,7 @@ func datePickerLocalizationFormatsChineseAndEnglish(): Unit {
+ private func dpTestContext(): UiContext {
+     // 统一装空记录画布：绘制路径在 headless 无后端会抛异常（基线 ERROR 家族）。
+     let renderer = Renderer.headless()
+-    renderer.useBackend(DropdownNoopCanvas())
++    renderer.useBackend(NoopTestCanvas())
+     let ctx = UiContext(renderer, Theme.light())
+     ctx.viewportWidth = 800.0
+     ctx.viewportHeight = 600.0
+diff --git a/src/controls/dropdown_keys_test.cj b/src/controls/dropdown_keys_test.cj
+index 098ef8f..9d4c298 100644
+--- a/src/controls/dropdown_keys_test.cj
++++ b/src/controls/dropdown_keys_test.cj
+@@ -1,47 +1,13 @@
+ package cui.controls
+ 
+-import lgui.{Canvas, Color, Key, MouseButton, Pen, Rect, Renderer, UiEvent}
++import lgui.{Key, MouseButton, Rect, Renderer, UiEvent}
+ import cui.core.{State, Theme, UiContext}
+ 
+-/* 空记录画布：Dropdown 弹层绘制走软阴影，headless 无后端时会抛异常（同 40 条基线 ERROR 家族）。 */
+-class DropdownNoopCanvas <: Canvas {
+-    public func beginFrame(clear: Color): Unit {}
+-    public func present(): Unit {}
+-    public func captureTo(path: String): Int32 {
+-        0
+-    }
+-    public func fill(rect: Rect, color: Color): Unit {}
+-    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
+-    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
+-    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
+-    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
+-    public func strokeRect(rect: Rect, pen: Pen): Unit {}
+-    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
+-    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
+-    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
+-    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
+-    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
+-    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
+-    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
+-    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
+-    public func releaseTexture(id: Int64): Unit {}
+-    public func pushClip(rect: Rect): Unit {}
+-    public func popClip(): Unit {}
+-    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
+-    public func textWidth(text: String, pointSize!: Float32): Float32 {
+-        0.0
+-    }
+-    public func textHeight(pointSize!: Float32): Float32 {
+-        0.0
+-    }
+-    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
+-}
+-
+ /* Dropdown 弹层 Home/End 跳首/尾（与 ComboBox/ListView/Table 同一约定）。 */
+ @Test
+ func dropdownHomeEndJumpsSelection(): Unit {
+     let renderer = Renderer.headless()
+-    renderer.useBackend(DropdownNoopCanvas())
++    renderer.useBackend(NoopTestCanvas())
+     let ctx = UiContext(renderer, Theme.light())
+     ctx.viewportWidth = 300.0
+     ctx.viewportHeight = 400.0
+@@ -59,4 +25,4 @@ func dropdownHomeEndJumpsSelection(): Unit {
+     // Home → 回到首项。
+     @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Home, false)))
+     @Expect(selected.value, Int64(0))
+-}
+\ No newline at end of file
++}
+diff --git a/src/controls/noop_canvas_test.cj b/src/controls/noop_canvas_test.cj
+new file mode 100644
+index 0000000..b501681
+--- /dev/null
++++ b/src/controls/noop_canvas_test.cj
+@@ -0,0 +1,41 @@
++// 测试共享：空记录画布（不产出任何像素，但让绘制路径完整跑完）。
++//
++// 为什么需要：headless 渲染器没有后端，绘制里任何 fillRoundedRectSoft/fill 都会抛
++// "无渲染后端"；装了它之后绘制逻辑照常执行（异常仍会抛、断言仍会跑），只是不再因为
++// "没有 SDL 设备"而失败。放在 _test.cj 里保证不进库产物。
++package cui.controls
++
++import lgui.{Canvas, Color, Pen, Rect}
++
++class NoopTestCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
+diff --git a/src/controls/time_picker_test.cj b/src/controls/time_picker_test.cj
+index ef24809..5d2a907 100644
+--- a/src/controls/time_picker_test.cj
++++ b/src/controls/time_picker_test.cj
+@@ -16,7 +16,7 @@ func timePickerLocalizationProvidesChineseAndEnglishLabels(): Unit {
+ private func tpTestContext(): UiContext {
+     // 统一装空记录画布：绘制路径在 headless 无后端会抛异常（基线 ERROR 家族）。
+     let renderer = Renderer.headless()
+-    renderer.useBackend(DropdownNoopCanvas())
++    renderer.useBackend(NoopTestCanvas())
+     let ctx = UiContext(renderer, Theme.light())
+     ctx.viewportWidth = 800.0
+     ctx.viewportHeight = 600.0
+-- 
+2.47.3
+
