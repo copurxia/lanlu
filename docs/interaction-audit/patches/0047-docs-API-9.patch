@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:10:43 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20API=20=E5=8F=82=E8=80=83=E8=A1=A5?=
+ =?UTF-8?q?=E6=BB=9A=E5=8A=A8=E4=BA=A4=E4=BA=92=E7=BB=9F=E4=B8=80=E5=A5=91?=
+ =?UTF-8?q?=E7=BA=A6=EF=BC=889=20=E4=B8=AA=E5=8F=AF=E6=BB=9A=E5=8A=A8?=
+ =?UTF-8?q?=E8=A1=A8=E9=9D=A2=E9=80=90=E9=A1=B9=E4=B8=80=E8=87=B4=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对 9 个可滚动表面（ScrollView/LazyColumn/LazyRow/ListView/Table/TreeView/TextArea/
+ComboBox 弹层/Dropdown 弹层）逐项核对：滑块拖动、轨道翻页、滚轮缓动、到边界穿透、
+滚动条显隐——全部共用同一组 ScrollBar+SmoothScroll 原语，行为一致。
+
+其中到边界穿透依赖 SmoothScroll.wheel 在无法滚动时返回 false，容器再 return 而非
+无条件 return true——文档把这条写成契约，避免后人把 return 改成 return true 而让嵌套滚动失效。
+---
+ docs/api-reference.md | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index fa93095..b4aa0d0 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -348,6 +348,22 @@ KeyRepeat(delayMs!: Int64 = 400, intervalMs!: Int64 = 60)
+ key+pressed）；后端自带 repeat（SDL）时会顺延计时，两者不双发。`enable(false)` 可整体关闭。
+ 
+ 
++
++### 滚动交互的统一契约
++
++所有可滚动容器共用同一组原语（`ScrollBar` + `SmoothScroll`），因此交互逐项一致：
++
++| 能力 | 行为 | 覆盖容器 |
++|---|---|---|
++| 滑块拖动 | 按下滑块 → 拖动 → 释放；跨出容器边界仍跟随 | `ScrollView`、`LazyColumn`、`LazyRow`、`ListView`、`Table`、`TreeView`、`TextArea`、`ComboBox` 弹层、`Dropdown` 弹层 |
++| 轨道点击 | 点轨道空白翻一页 | 同上 |
++| 滚轮 | `SmoothScroll.wheel`：滚轮增量 × `CUI_SCROLL_WHEEL_STEP`，带缓动 | 同上（`LazyRow` 还支持触控板横滚与竖向重映射）|
++| 到边界后穿透 | 已到顶/底时 `wheel` 返回 `false`，事件继续冒泡给外层滚动容器 | 同上（`lazyColumnWheelFallsThroughAtVerticalEdges`、`lazyListWheelFallsThroughAtVerticalEdges` 固定了这一契约）|
++| 滚动条显隐 | 内容溢出才画；交互时高亮，静置后淡出 | 同上 |
++
++这条"到边界就交还事件"的约定让嵌套滚动（弹窗里的长列表、表单里的长文本区）不会"吃掉"外层的
++滚轮——实现上只需 `return scrollMotion.wheel(...)` 而不是无条件 `return true`。
++
+ ### 光标形状约定
+ 
+ 悬停认领用 `ctx.claimHover(id, shape)`；**同一次移动里第一个认领者胜出**（与焦点按压的
+-- 
+2.47.3
+
