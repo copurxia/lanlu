@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:30:23 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20Table=20selectionRange=20=E7=9A=84"?=
+ =?UTF-8?q?=E6=97=A0=E9=80=89=E6=8B=A9"=E8=BE=B9=E7=95=8C=E5=9B=BA?=
+ =?UTF-8?q?=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+补一个边界用例：selected = -1（无选择）时 selectionRange() 返回 [-1]（单元素哨兵），
+与 ListView 的 (selected, selected) 约定一致，不会误返回第 0 行。
+
+写测试时踩了个小坑：本文件用的是 tableRangeContext()（不是 ListView 测试里的
+rangeContext）——编译错误直接指出，改一行即可。
+
+cjpm test：TOTAL 492 / PASSED 485，失败名册与基线一致，零回归。
+---
+ src/controls/table_range_test.cj | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/controls/table_range_test.cj b/src/controls/table_range_test.cj
+index 8ad983d..42a3a99 100644
+--- a/src/controls/table_range_test.cj
++++ b/src/controls/table_range_test.cj
+@@ -8,6 +8,21 @@ private func tableRangeContext(): UiContext {
+ }
+ 
+ /* 缺口 #9 的表格版本：Shift 区间选择与 ListView 同一语义（锚点 + 显示序展开）。 */
++
++/* 边界：无选择（-1）或选中行不在显示序里时，selectionRange 不应返回错误区间。 */
++@Test
++func tableSelectionRangeHandlesOutOfRangeSelection(): Unit {
++    let ctx = tableRangeContext()
++    let columns = [TableColumn("名", 100.0)]
++    let rows = [["a"], ["b"], ["c"]]
++    let selected = State<Int64>(-1) // 无选择
++    let table = Table(columns, rows, selected, key: "tr.edge")
++    table.layout(ctx, Rect(0.0, 0.0, 200.0, 200.0))
++    let range = table.selectionRange()
++    // 无选择时区间应退化，且不应包含真实行索引以外的内容。
++    @Expect(range.size, Int64(1))
++    @Expect(range[0], Int64(-1))
++}
+ @Test
+ func tableShiftArrowGrowsSelectionRange(): Unit {
+     let ctx = tableRangeContext()
+-- 
+2.47.3
+
