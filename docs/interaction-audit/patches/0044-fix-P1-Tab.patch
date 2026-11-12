@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:04:56 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20=E5=8F=B3=E9=94=AE=E8=8F=9C=E5=8D=95?=
+ =?UTF-8?q?=E6=8C=89=20Tab=20=E7=8E=B0=E5=9C=A8=E4=BC=9A=E5=85=B3=E9=97=AD?=
+ =?UTF-8?q?=EF=BC=88=E6=AD=A4=E5=89=8D=E7=95=99=E4=B8=8B=E6=82=AC=E7=A9=BA?=
+ =?UTF-8?q?=E6=B5=AE=E5=B1=82=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对浮层做了一次系统性一致性核查（Esc / 点击外部 / Tab 三类关闭路径）。Esc 在 8 类浮层
+（Modal/Drawer/Dropdown/ContextMenu/MenuBar/ComboBox/DatePicker/TimePicker）全部齐备；
+但 Tab 只有 Dropdown/MenuBar 处理——ContextMenu 落到 `case _ => false`，于是按 Tab 时
+外壳的焦点遍历把焦点移到菜单背后，菜单却还留在屏幕上。
+
+现在 ContextMenu 与 Dropdown 行为一致：Tab 关闭菜单、不消费事件（让焦点继续走）。
+
+测试：1 用例（Menu 键弹出 → Tab 关闭且事件未被消费）。修正测试写法：菜单打开后键盘事件
+走浮层处理器，须用 ctx.dispatchOverlay 而非 menu.handle（既有测试同款写法）。
+
+cjpm test：TOTAL 480 / PASSED 439，失败名册与基线一致，零回归。
+---
+ src/controls/context_menu.cj               |  6 ++++++
+ src/controls/context_menu_keyboard_test.cj | 23 ++++++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/src/controls/context_menu.cj b/src/controls/context_menu.cj
+index f6de91d..cb29d77 100644
+--- a/src/controls/context_menu.cj
++++ b/src/controls/context_menu.cj
+@@ -177,6 +177,12 @@ public class ContextMenu <: Widget {
+             case UiEvent.KeyDown(Key.Up, _) =>
+                 highlight.value = menuNextSelectable(items, highlight.value, -1)
+                 true
++            // Tab 关闭菜单但不消费事件：随后由外壳的焦点遍历把焦点移到下一个停靠点。
++            // 与 Dropdown/MenuBar 的行为一致；此前这里落到 `case _ => false`，菜单会留在
++            // 屏幕上而焦点已跑到它背后（悬空浮层）。
++            case UiEvent.KeyDown(Key.Tab, _) =>
++                close(ctx)
++                false
+             case _ => false
+         }
+     }
+diff --git a/src/controls/context_menu_keyboard_test.cj b/src/controls/context_menu_keyboard_test.cj
+index 01beb14..48b8dc6 100644
+--- a/src/controls/context_menu_keyboard_test.cj
++++ b/src/controls/context_menu_keyboard_test.cj
+@@ -98,3 +98,26 @@ func contextMenuShiftF10NotInterceptedWithoutFocus(): Unit {
+     ctx.clearFocus()
+     @Expect(!menu.handle(ctx, UiEvent.KeyDown(Key.RawScancode(68), false)))
+ }
++
++/*
++ * Tab 关闭上下文菜单但不消费事件（与 Dropdown/MenuBar 一致）：此前落到 `case _ => false`，
++ * 菜单留在屏幕上而焦点已移到背后，形成悬空浮层。
++ */
++@Test
++func contextMenuTabClosesAndLetsFocusMoveOn(): Unit {
++    let ctx = kbdMenuContext(300.0, 400.0)
++    let menu = ContextMenu(items: [MenuItem("复制", {=> ()})]) {
++        Button("目标", {=> ()}).key("tab.target")
++    }
++    menu.layout(ctx, Rect(20.0, 20.0, 200.0, 60.0))
++    ctx.focus("tab.target", viaKeyboard: true)
++
++    // 先用 Menu 键弹出菜单。
++    @Expect(menu.handle(ctx, UiEvent.KeyDown(Key.Menu, false)))
++    menu.draw(ctx)
++    @Expect(ctx.hasOverlay())
++
++    // Tab 由浮层处理器接收：菜单关闭，且事件不被消费（交给外壳的焦点遍历）。
++    @Expect(!ctx.dispatchOverlay(UiEvent.KeyDown(Key.Tab, false)))
++    @Expect(!ctx.hasOverlay())
++}
+-- 
+2.47.3
+

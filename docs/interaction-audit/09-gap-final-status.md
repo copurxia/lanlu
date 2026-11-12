@@ -41,6 +41,17 @@
 
 ### 设计取舍说明（#9）
 
+### 浮层关闭路径一致性核查（第 57 轮）
+
+对 8 类浮层（Modal/Drawer/Dropdown/ContextMenu/MenuBar/ComboBox/DatePicker/TimePicker）逐条核对
+三种关闭方式：
+
+| 关闭方式 | 结果 |
+|---|---|
+| `Esc` | 8/8 齐备 |
+| 点击外部 | 8/8 齐备 |
+| `Tab`（焦点离开） | **7/8 —— ContextMenu 缺失**：Tab 落到 `case _ => false`，外壳遍历把焦点移到菜单背后而菜单仍留在屏幕上 → 已补 `bf2ad42`（Tab 关闭且不消费事件，与 Dropdown 一致，带 1 个用例） |
+
 ### 审计之外的补充发现（第 47–48 轮）
 
 - **RichText 链接只有鼠标可用**（第 48 轮）：上一批做的 `RichSpan.link` 可点但焦点不可达。已补
