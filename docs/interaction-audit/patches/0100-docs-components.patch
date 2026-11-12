@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:44:03 +0000
+Subject: [PATCH] =?UTF-8?q?docs(components):=20=E4=BF=AE=E4=B8=80=E5=A4=84?=
+ =?UTF-8?q?=E5=A4=9A=E4=BD=99=E6=8B=AC=E5=8F=B7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/components.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/components.md b/docs/components.md
+index 776da77..ebf57f4 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -831,7 +831,7 @@ TextField(text: Bindable<String>, key!: ?String = None, cursor!: ?State<Int64> =
+ 
+ ### TextArea
+ 
+-多行文本区。多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V、撤销/重做）、**按词操作**（Ctrl+←/→ 按词跳、Ctrl+Shift+←/→ 按词扩选、Ctrl+Backspace/Delete 按词删，与 TextField 同一约定）；`editMenuItems()` 与 TextField 同一右键编辑菜单入口（粘贴保留换行）；编辑后光标行滚入视口。
++多行文本区。多行选区、Shift+↑↓ 跨行扩选、拖选、Ctrl+A/C/X/V、撤销/重做、**按词操作**（Ctrl+←/→ 按词跳、Ctrl+Shift+←/→ 按词扩选、Ctrl+Backspace/Delete 按词删，与 TextField 同一约定）；`editMenuItems()` 与 TextField 同一右键编辑菜单入口（粘贴保留换行）；编辑后光标行滚入视口。
+ 
+ ```cangjie
+ TextArea(text: Bindable<String>, key!: ?String = None, scroll!: ?State<Float32> = None,
+-- 
+2.47.3
+
