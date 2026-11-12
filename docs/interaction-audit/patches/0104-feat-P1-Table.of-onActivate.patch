@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:59:29 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20Table.of=20=E5=B7=A5=E5=8E=82?=
+ =?UTF-8?q?=E5=87=BD=E6=95=B0=E4=B9=9F=E6=8E=A5=E5=8F=97=20onActivate?=
+ =?UTF-8?q?=EF=BC=88=E4=B8=8E=E4=B8=BB=E6=9E=84=E9=80=A0=E5=87=BD=E6=95=B0?=
+ =?UTF-8?q?=E4=B8=80=E8=87=B4=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一提交给 Table 加了 onActivate，但强类型工厂 Table.of<T> 没转发——用工厂的调用方
+拿不到行激活能力，两条构造路径能力不一致。补上形参并转发到主构造函数。
+
+（文档同步：components.md 的 Table/Table.of 两处签名与语义说明。）
+---
+ docs/components.md    | 7 +++++--
+ src/controls/table.cj | 5 +++--
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/docs/components.md b/docs/components.md
+index dfe0251..16659ed 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -914,15 +914,18 @@ TreeView(roots, selected, initiallyExpanded: ["src", "src/core"])
+ 
+ ```cangjie
+ Table(columns: Array<TableColumn>, rows: Array<Array<String>>, selected: Bindable<Int64>,
+-    key!: ?String = None)
++    key!: ?String = None, onActivate!: ?(Int64) -> Unit = None)
+ ```
+ 
+ - columns：列定义；rows 按列索引的单元格字符串矩阵；selected 选中的原始行索引；key! 可选身份。
++- onActivate!：行激活回调（参数为**原始行索引**，排序后跟随）。**双击行**触发；聚焦后 **Space**
++  触发当前选中行（键盘等价物）。Enter 仍是表头排序切换；未启用激活时 Space 也退回排序。
+ 
+ 强类型工厂（以抽取器从行取值，免搭字符串矩阵）：
+ 
+ ```cangjie
+-Table.of<T>(data: Array<T>, columns: Array<DataColumn<T>>, selected: Bindable<Int64>, key!: ?String = None)
++Table.of<T>(data: Array<T>, columns: Array<DataColumn<T>>, selected: Bindable<Int64>, key!: ?String = None,
++    onActivate!: ?(Int64) -> Unit = None)
+ ```
+ 
+ ### TableColumn
+diff --git a/src/controls/table.cj b/src/controls/table.cj
+index 3300a14..5dcfdcd 100644
+--- a/src/controls/table.cj
++++ b/src/controls/table.cj
+@@ -150,7 +150,8 @@ public class Table <: Widget {
+         data: Array<T>,
+         columns: Array<DataColumn<T>>,
+         selected: Bindable<Int64>,
+-        key!: ?String = None
++        key!: ?String = None,
++        onActivate!: ?(Int64) -> Unit = None
+     ): Table {
+         let tableColumns = Array<TableColumn>(columns.size) {
+             i => TableColumn(columns[i].title, columns[i].width, numeric: columns[i].numeric, cell: columns[i].cell)
+@@ -158,7 +159,7 @@ public class Table <: Widget {
+         let rows = Array<Array<String>>(data.size) {
+             r => Array<String>(columns.size) {c => columns[c].value(data[r])}
+         }
+-        Table(tableColumns, rows, selected, key: key)
++        Table(tableColumns, rows, selected, key: key, onActivate: onActivate)
+     }
+ 
+     public func measure(_: UiContext, available: Size): Size {
+-- 
+2.47.3
+
