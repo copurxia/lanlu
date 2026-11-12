@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 05:28:27 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20keyboard=20README=20=E8=A1=A5?=
+ =?UTF-8?q?=E6=8C=89=E8=AF=8D=E6=93=8D=E4=BD=9C=E4=B8=80=E8=A1=8C=EF=BC=88?=
+ =?UTF-8?q?=E4=B8=8E=E7=95=8C=E9=9D=A2=E6=8F=90=E7=A4=BA=E5=90=8C=E6=BA=90?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ examples/keyboard/README.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/examples/keyboard/README.md b/examples/keyboard/README.md
+index cc9e8f5..de73bbe 100644
+--- a/examples/keyboard/README.md
++++ b/examples/keyboard/README.md
+@@ -8,6 +8,7 @@
+ | `ListView(onActivate:)` | 选中条目后按 Enter，或**双击**条目——同一回调 |
+ | `editMenuItems()` | **右键**输入框 → 剪切/复制/粘贴/全选（无选区时前两项置灰，只读时剪切/粘贴置灰）|
+ | Shift 区间选择 | 列表聚焦后 **Shift+方向键** 扩展区间 |
++| 按词编辑 | 输入框聚焦后 **Ctrl+←/→** 按词跳、**Ctrl+Shift+←/→** 按词扩选、**Ctrl+Backspace/Delete** 按词删（词边界与双击选词同一套脚本分类）|
+ 
+ ## 为什么值得一看
+ 
+-- 
+2.47.3
+
