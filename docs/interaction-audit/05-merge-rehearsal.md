@@ -168,6 +168,12 @@ Summary: TOTAL: 450
 > 键盘导航约定本轮（第 72–74 轮）补齐了 ComboBox/Dropdown/ContextMenu 的 Home/End，
 > 至此覆盖全部列表类交互面；MenuBar 未加（条目少、收益低，避免镀金）。
 >
+> **同文件改动核查（01:02）**：对方的 gui WIP 与本分支存在一处**同文件改动**——
+> `src/controls/modal.cj`（对方加诊断 sink，改遮罩尺寸记录；本分支 `3426fb5` 改焦点初始
+> 聚焦/恢复）。两处 hunk 不重叠，01:00 的全量演练（对方 modal.cj 改动已在快照内）以
+> `git am --3way` 干净合入 63 个补丁——**该冲突风险已实测为零**。另 `src/media/pixel_texture_cache.cj`
+>（00:59 新脏，真机纹理诊断）与本分支无交集。
+>
 > **阻塞现状（19:25 实测时间戳）**：`packages/cangjie-gui` 的 11 个未提交文件里，最新改动停在
 > **16:26**（`cjpm.toml`/`bench`/`examples` 三处链接配置），其余更早（06:00–14:10）——即对方的
 > gui 层改动已**停笔约 3 小时**；但父仓库仍有活跃改动（`client-next/src/main.cj`、ArkTS
