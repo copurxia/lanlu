@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:39:19 +0000
+Subject: [PATCH] =?UTF-8?q?docs(components):=20TextField=20=E6=AE=B5?=
+ =?UTF-8?q?=E8=A1=A5=E6=8C=89=E8=AF=8D=E6=93=8D=E4=BD=9C=EF=BC=88Ctrl+?=
+ =?UTF-8?q?=E6=96=B9=E5=90=91=E9=94=AE/Backspace/Delete=EF=BC=89=E2=80=94?=
+ =?UTF-8?q?=E2=80=94=E4=B8=8E=E7=A4=BA=E4=BE=8B=E6=8F=90=E7=A4=BA=E5=90=8C?=
+ =?UTF-8?q?=E6=BA=90?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/components.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/components.md b/docs/components.md
+index 28ac47d..24e92e7 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -808,7 +808,7 @@ Rating(value: Bindable<Int64>, count!: Int64 = 5, readonly!: Bool = false, key!:
+ 
+ ### TextField
+ 
+-单行文本框。Shift 扩选、拖选、Ctrl+A/C/X/V、撤销/重做（Ctrl+Z/Y）；`onSubmit!`（聚焦且可编辑时回车提交）；`editMenuItems()` 给出标准编辑菜单项（剪切/复制/粘贴/全选按状态置灰、undo 一致）——`ContextMenu(items: field.editMenuItems()) { field }` 一行得到右键编辑菜单；光标始终水平滚入可见。
++单行文本框。Shift 扩选、拖选、Ctrl+A/C/X/V、撤销/重做（Ctrl+Z/Y）、**按词操作**（Ctrl+←/→ 按词跳、Ctrl+Shift+←/→ 按词扩选、Ctrl+Backspace/Delete 按词删，词边界与双击选词同一套脚本分类）；`onSubmit!`（聚焦且可编辑时回车提交）；`editMenuItems()` 给出标准编辑菜单项（剪切/复制/粘贴/全选按状态置灰、undo 一致）——`ContextMenu(items: field.editMenuItems()) { field }` 一行得到右键编辑菜单；光标始终水平滚入可见。
+ 
+ ```cangjie
+ TextField(text: Bindable<String>, key!: ?String = None, cursor!: ?State<Int64> = None,
+-- 
+2.47.3
+
