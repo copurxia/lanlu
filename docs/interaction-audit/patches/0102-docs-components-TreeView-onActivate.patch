@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:53:40 +0000
+Subject: [PATCH] =?UTF-8?q?docs(components):=20TreeView=20=E6=AE=B5?=
+ =?UTF-8?q?=E8=A1=A5=20onActivate=20=E7=AD=BE=E5=90=8D=E4=B8=8E=E5=8F=B6?=
+ =?UTF-8?q?=E5=AD=90/=E7=88=B6=E8=8A=82=E7=82=B9=E8=AF=AD=E4=B9=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/components.md | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/docs/components.md b/docs/components.md
+index ebf57f4..dfe0251 100644
+--- a/docs/components.md
++++ b/docs/components.md
+@@ -880,7 +880,8 @@ ListView(items: Array<String>, selected: Bindable<Int64>, scroll!: ?State<Float3
+ 
+ ```cangjie
+ TreeView(roots: Array<TreeNode>, selected: Bindable<String>, scroll!: ?State<Float32> = None,
+-    expanded!: ?State<HashSet<String>> = None, initiallyExpanded!: Array<String> = [], key!: ?String = None)
++    expanded!: ?State<HashSet<String>> = None, initiallyExpanded!: Array<String> = [], key!: ?String = None,
++    onActivate!: ?(String) -> Unit = None)
+ ```
+ 
+ - roots：树的根节点数组。
+@@ -888,6 +889,8 @@ TreeView(roots: Array<TreeNode>, selected: Bindable<String>, scroll!: ?State<Flo
+ - scroll!：可选外部滚动状态（缺省按身份保留偏移）。
+ - expanded!：可选外部展开集（一组已展开的节点 id）；缺省由视图身份内部保留。
+ - initiallyExpanded!：初始展开的节点 id（仅在内部保留展开集时作为初值）。
++- onActivate!：叶子节点（无子级）Enter/空格时回调（参数为节点 id）；有子级节点的 Enter
++  语义仍是展开/折叠、不触发——与文件浏览器的直觉一致。缺省 None。
+ - key!：可选身份，缺省按构建序派生。
+ 
+ 键盘（聚焦后）：↑↓ 在可见行间移动、Home/End 到两端、→ 展开折叠节点并步入、← 折叠展开节点并步出到父级、
+-- 
+2.47.3
+
