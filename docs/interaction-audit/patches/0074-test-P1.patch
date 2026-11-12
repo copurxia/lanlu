@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 01:32:19 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20=E5=9B=BA=E5=8C=96"=E7=A6=81?=
+ =?UTF-8?q?=E7=94=A8=E6=8E=A7=E4=BB=B6=E4=B8=8D=E8=AE=A4=E9=A2=86=E6=82=AC?=
+ =?UTF-8?q?=E5=81=9C=E5=85=89=E6=A0=87"=E8=BF=99=E6=9D=A1=E5=B7=B2?=
+ =?UTF-8?q?=E5=86=99=E8=BF=9B=E6=96=87=E6=A1=A3=E7=9A=84=E4=B8=8D=E5=8F=98?=
+ =?UTF-8?q?=E9=87=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+API 参考与组件文档都写了"禁用子树既不会被 Tab 到达、鼠标划过也不会出现手型"，但此前
+只有前半句有测试（disabledControlLeavesFocusRing）。补上后半句：
+
+- 悬停在可用按钮上 → desiredCursor() == Interactive
+- 移到禁用按钮上 → desiredCursor() == Default（不认领）
+
+依据：.enabled(false) 摘除焦点停靠点，并让 handle 抑制除 Frame 之外的全部事件，因此
+claimHover 根本不会被调用——测试把这个实现细节固定成契约，避免将来有人放宽抑制范围
+而不自知。
+
+cjpm test：TOTAL 493 / PASSED 486，失败名册与基线一致，零回归。
+---
+ src/core/widget_test.cj | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/core/widget_test.cj b/src/core/widget_test.cj
+index 43f345f..6622168 100644
+--- a/src/core/widget_test.cj
++++ b/src/core/widget_test.cj
+@@ -918,6 +918,36 @@ func disabledControlLeavesFocusRing(): Unit {
+     @Expect(ring[1], "c")
+ }
+ 
++
++// 禁用子树不认领悬停光标：否则灰色控件出现手型会暗示"还能点"。
++@Test
++func disabledControlClaimsNoHoverCursor(): Unit {
++    let ctx = testContext()
++    let store = StateStore()
++    let root = buildRoot(
++        {
++            =>
++                Button("可用", {=> ()}).key("hov.on")
++                Button("禁用", {=> ()}).key("hov.off").enabled(false)
++        },
++        store
++    )
++    root.layout(ctx, Rect(0.0, 0.0, 200.0, 160.0))
++    @Expect(ctx.desiredCursor() == CursorShape.Default) // 初始为箭头
++
++    // 悬停在可用按钮上：认领手型。
++    ctx.beginHoverTest()
++    let _ = root.handle(ctx, UiEvent.MouseMove(40.0, 20.0))
++    ctx.settleHover()
++    @Expect(ctx.desiredCursor() == CursorShape.Interactive)
++
++    // 移到禁用按钮上：不再认领（保持箭头）。
++    ctx.beginHoverTest()
++    let _ = root.handle(ctx, UiEvent.MouseMove(40.0, 90.0))
++    ctx.settleHover()
++    @Expect(ctx.desiredCursor() == CursorShape.Default)
++}
++
+ // A pointer press focuses without a ring; keyboard focus (autofocus/Tab) shows one — the
+ // :focus-visible convention. `hasFocus` is unaffected: only the ring gates on the source.
+ @Test
+-- 
+2.47.3
+
