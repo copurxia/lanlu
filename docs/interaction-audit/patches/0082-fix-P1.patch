@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:48:34 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20=E5=83=8F=E7=B4=A0=E7=99=BB=E8=AE=B0?=
+ =?UTF-8?q?=E6=A0=A1=E9=AA=8C=E2=80=94=E2=80=94=E5=B0=BA=E5=AF=B8/?=
+ =?UTF-8?q?=E5=AD=97=E8=8A=82=E6=95=B0=E4=B8=8D=E7=AC=A6=E7=9B=B4=E6=8E=A5?=
+ =?UTF-8?q?=E6=8B=92=E7=BB=9D=EF=BC=88=E8=A7=A3=E7=A0=81=E8=BE=93=E5=85=A5?=
+ =?UTF-8?q?=E4=B8=8D=E5=8F=AF=E4=BF=A1=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+stagePixelImage 此前不校验：width*height*4 与像素数组长度不符时照常登记，上传路径按尺寸
+读取数组 → 越界读产出花屏/崩溃，真机表现是封面空白或花块而不是明确报错。
+现在非正尺寸或长度不符一律拒绝登记（不污染 LRU 记账）。
+
+stageNativePixelImage 同样校验非正尺寸；拒绝时**用 releaser 释放**（所有权已随调用转移，
+不释放就泄漏）。
+
+测试：3 例（长度不符被拒、非正尺寸被拒、合法长度正常登记并按字节记账）。
+cjpm test：TOTAL 506 / PASSED 499，基线匹配零回归。
+---
+ src/media/pixel_stage_validation_test.cj | 41 ++++++++++++++++++++++++
+ src/media/pixel_texture_cache.cj         | 12 +++++++
+ 2 files changed, 53 insertions(+)
+ create mode 100644 src/media/pixel_stage_validation_test.cj
+
+diff --git a/src/media/pixel_stage_validation_test.cj b/src/media/pixel_stage_validation_test.cj
+new file mode 100644
+index 0000000..33da363
+--- /dev/null
++++ b/src/media/pixel_stage_validation_test.cj
+@@ -0,0 +1,41 @@
++package cui.media
++
++/*
++ * 解码输入不可信：width*height*4 与像素长度不符时若照常登记，上传路径会按尺寸读取数组，
++ * 越界读 → 花屏/崩溃（表现为"封面空白或花块"）。这里固化两道校验。
++ */
++private func clearForStageTest(): Unit {
++    clearPixelImages()
++    pixelCacheMaxBytes = 512 * 1024 * 1024
++    onPixelImageEvicted = None
++}
++
++private func stagedBytesNow(): Int64 {
++    let (staged, _, _, _) = pixelCacheDiagnostics()
++    staged
++}
++
++@Test
++func stageRejectsByteCountMismatch(): Unit {
++    clearForStageTest()
++    // 2x2 需要 16 字节；给 4 字节 → 拒绝登记（staged 字节数不增加）。
++    stagePixelImage("bad.bytes", 2, 2, Array<UInt8>(4, repeat: 0))
++    @Expect(stagedBytesNow(), Int64(0))
++}
++
++@Test
++func stageRejectsNonPositiveSize(): Unit {
++    clearForStageTest()
++    stagePixelImage("bad.zero", 0, 0, Array<UInt8>(0, repeat: 0))
++    @Expect(stagedBytesNow(), Int64(0))
++    stagePixelImage("bad.neg", -3, 5, Array<UInt8>(0, repeat: 0))
++    @Expect(stagedBytesNow(), Int64(0))
++}
++
++@Test
++func stageAcceptsValidByteCount(): Unit {
++    clearForStageTest()
++    stagePixelImage("ok.bytes", 2, 2, Array<UInt8>(16, repeat: 0))
++    @Expect(stagedBytesNow(), Int64(16))
++    clearForStageTest()
++}
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index 406b80d..1ca5ef1 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -299,6 +299,12 @@ private func evictPixelLruIfNeeded(): Unit {
+  * （字节记账随之替换，旧 staged 占用立即释放）。
+  */
+ public func stagePixelImage(key: String, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {
++    // 尺寸与字节数校验（解码输入不可信）：width/height 非正、或长度不等于 width*height*4 时
++    // 直接拒绝登记。否则上传路径会按 width*height*4 读取像素数组，越界读产出花屏/崩溃——
++    // 表现为"封面空白或花块"而非明确报错。
++    if (width <= 0 || height <= 0 || Int64(pixels.size) != pixelBytesOf(width, height)) {
++        return
++    }
+     // 同 key 已有纹理时先关闭并移除：否则 pixelTexture 会优先返回旧纹理，新 staged
+     // 像素永远得不到上传（切服后同 asset id 串图场景）。新像素下帧经 staged 重新上传。
+     removeTextureEntry(key)
+@@ -317,6 +323,12 @@ public func stagePixelImage(key: String, width: Int32, height: Int32, pixels: Ar
+  */
+ public func stageNativePixelImage(key: String, width: Int32, height: Int32, pointer: CPointer<UInt8>,
+     releaser: PixelReleaser): Unit {
++    // 尺寸校验：非正尺寸的原生图登记后会在上传时建 0 尺寸纹理（永远画不出来）。
++    // 所有权已随调用转移到这里，因此拒绝时必须**自己**用 releaser 释放，否则泄漏。
++    if (width <= 0 || height <= 0) {
++        releaser.release()
++        return
++    }
+     removeTextureEntry(key)
+     removeStagedEntry(key)
+     stagedPixels[key] = StagedPixels(width, height, pointer, releaser)
+-- 
+2.47.3
+
