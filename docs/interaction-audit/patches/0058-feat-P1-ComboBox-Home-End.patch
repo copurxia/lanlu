@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:51:18 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20ComboBox=20=E5=BC=B9=E5=B1=82?=
+ =?UTF-8?q?=E8=A1=A5=20Home/End=20=E8=B7=B3=E9=A6=96/=E5=B0=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+浮层键盘覆盖核对时发现的最后一个小缺口：ComboBox 弹层有 Esc/Enter/Down/Up/Tab（含
+revealRow 跟随），但 Home/End 缺席——长列表（30+ 建议）要按 30 次 Down 才到末尾。
+
+补上：Home → 高亮第一项，End → 高亮最后一项，revealRow 跟随滚动，与 ListView/Table
+的键盘导航约定一致。Enter 照常提交高亮项。
+
+测试：1 用例（End→Enter 提交末项；重开（清空字段避免过滤）→ End→Home→Enter 提交首项）。
+写测试时踩的两个坑，如实记录：弹层绘制需空记录画布（本文件新增 ComboNoopCanvas，与
+cui.controls 键盘用例同款）；重开前必须清空字段——否则旧文本会过滤建议列表，Home 后
+唯一可提交项就是它自己。
+
+cjpm test：TOTAL 489 / PASSED 448，失败名册与基线一致，零回归。
+---
+ src/text/combo_box.cj      | 13 +++++++
+ src/text/combo_box_test.cj | 72 +++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 84 insertions(+), 1 deletion(-)
+
+diff --git a/src/text/combo_box.cj b/src/text/combo_box.cj
+index 0702325..e1ddf39 100644
+--- a/src/text/combo_box.cj
++++ b/src/text/combo_box.cj
+@@ -191,6 +191,19 @@ public class ComboBox <: Widget {
+             case UiEvent.KeyDown(Key.Up, _) =>
+                 moveHighlight(-1, filtered, popup)
+                 true
++            // Home/End 跳首/尾（与 ListView/Table 键盘导航同一约定；长列表过滤后尤其有用）。
++            case UiEvent.KeyDown(Key.Home, _) =>
++                if (filtered.size > 0) {
++                    highlight.value = 0
++                    revealRow(0, filtered, popup)
++                }
++                true
++            case UiEvent.KeyDown(Key.End, _) =>
++                if (filtered.size > 0) {
++                    highlight.value = clampComboIndex(filtered.size - 1, filtered.size)
++                    revealRow(highlight.value, filtered, popup)
++                }
++                true
+             case UiEvent.KeyDown(Key.Tab, _) =>
+                 close(ctx) // commit the typed text and let the shell's Tab traversal move on
+                 false
+diff --git a/src/text/combo_box_test.cj b/src/text/combo_box_test.cj
+index 84467e6..2595cb2 100644
+--- a/src/text/combo_box_test.cj
++++ b/src/text/combo_box_test.cj
+@@ -1,6 +1,6 @@
+ package cui.text
+ 
+-import lgui.{FrameInfo, Key, MouseButton, Rect, Renderer, UiEvent}
++import lgui.{Canvas, Color, FrameInfo, Key, MouseButton, Pen, Rect, Renderer, UiEvent}
+ import cui.controls.Modal
+ import cui.core.{State, Theme, UiContext}
+ 
+@@ -31,6 +31,76 @@ func comboBoxChevronOpensAndClickSelects(): Unit {
+     @Expect(!ctx.hasOverlay())
+ }
+ 
++
++/* 空记录画布：软阴影路径在无后端时会抛异常，键盘用例只关心高亮与提交。 */
++class ComboNoopCanvas <: Canvas {
++    public func beginFrame(clear: Color): Unit {}
++    public func present(): Unit {}
++    public func captureTo(path: String): Int32 {
++        0
++    }
++    public func fill(rect: Rect, color: Color): Unit {}
++    public func fillRoundedRect(rect: Rect, radius: Float32, color: Color): Unit {}
++    public func fillRectGradient(rect: Rect, from: Color, to: Color, vertical: Bool): Unit {}
++    public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32, alpha: Float32): Unit {}
++    public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {}
++    public func strokeRect(rect: Rect, pen: Pen): Unit {}
++    public func strokeRoundedRect(rect: Rect, radius: Float32, pen: Pen): Unit {}
++    public func strokeLine(x1: Float32, y1: Float32, x2: Float32, y2: Float32, pen: Pen): Unit {}
++    public func line(x1: Float32, y1: Float32, x2: Float32, y2: Float32, color: Color): Unit {}
++    public func fillCircle(cx: Float32, cy: Float32, radius: Float32, color: Color): Unit {}
++    public func strokeCircle(cx: Float32, cy: Float32, radius: Float32, pen: Pen, segments!: Int64): Unit {}
++    public func drawTexture(id: Int64, destination: Rect, source: ?Rect, alpha: Float32): Unit {}
++    public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {}
++    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {}
++    public func releaseTexture(id: Int64): Unit {}
++    public func pushClip(rect: Rect): Unit {}
++    public func popClip(): Unit {}
++    public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32): Unit {}
++    public func textWidth(text: String, pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textHeight(pointSize!: Float32): Float32 {
++        0.0
++    }
++    public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32): Unit {}
++}
++
++/* Home/End 跳首/尾（与 ListView/Table 键盘导航同一约定）。 */
++@Test
++func comboBoxHomeEndJumpHighlight(): Unit {
++    // 本用例会重复 draw 弹层与字段（软阴影路径），需要空记录画布
++    // （同 cui.controls/context_menu_keyboard_test 的 NoopCanvas 模式）。
++    let renderer = Renderer.headless()
++    renderer.useBackend(ComboNoopCanvas())
++    let ctx = UiContext(renderer, Theme.light())
++    ctx.viewportWidth = 300.0
++    ctx.viewportHeight = 400.0
++    let text = State<String>("")
++    let combo = ComboBox(text, ["北京", "上海", "广州", "深圳"], key: "city3")
++    combo.layout(ctx, Rect(0.0, 0.0, 200.0, 38.0))
++    ctx.focus("city3")
++
++    // Down 聚焦时打开弹层（高亮 0）。
++    @Expect(combo.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    combo.draw(ctx)
++    @Expect(ctx.hasOverlay())
++
++    // End → 高亮最后一项；Enter 提交为最后一项。
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.End, false)))
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(text.value, "深圳")
++    @Expect(!ctx.hasOverlay())
++
++    // 再开（先清空字段，否则 "深圳" 会过滤得只剩一项）：End→Home 证明 Home 把高亮带回首项。
++    text.value = ""
++    @Expect(combo.handle(ctx, UiEvent.KeyDown(Key.Down, false)))
++    combo.draw(ctx)
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.End, false)))
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Home, false)))
++    @Expect(ctx.dispatchOverlay(UiEvent.KeyDown(Key.Enter, false)))
++    @Expect(text.value, "北京")
++}
+ // Typed text filters the list; Enter commits the highlighted (only) match.
+ @Test
+ func comboBoxFiltersAndEnterCommits(): Unit {
+-- 
+2.47.3
+

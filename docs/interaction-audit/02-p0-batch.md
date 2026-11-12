@@ -46,6 +46,7 @@
 | `dbd931d` | P1 ListView 激活语义（双击/Enter/Space → onActivate）|
 | `e4061ae` | P1 TextField 编辑菜单项（右键菜单组合入口）|
 | TextArea 菜单 | P1 TextArea.editMenuItems() 对齐（粘贴保留换行）|
+| ComboBox Home/End | P1 弹层键盘跳首/尾 |
 | `33913285` | （主仓）可复现基线验证脚本 `tools/verify-cui-interactions.sh` + 失败名册 |
 
 ## 改动清单（首个提交，7 文件 +512/−50）
@@ -210,7 +211,10 @@ ContextMenu 按 Tab 不关闭（焦点移到背后、菜单悬空）；其余 7 
 激活入口——"双击打开"无处安放。ListView 补 `onActivate`（双击行 / Enter / Space 同一回调，
 键盘等价物；未设置零影响）。Table/TreeView 等真实用例再定语义。
 
-**验证（累计）**：桩库 `cjpm test` TOTAL 488，PASSED 447（累计新增 101 例 + 改写 1 例全过），
+**第三十四批**：ComboBox 弹层补 Home/End（键盘覆盖核对发现的最后缺口；30+ 建议的长列表
+不再需要按 30 次 Down）。
+
+**验证（累计）**：桩库 `cjpm test` TOTAL 489，PASSED 448（累计新增 102 例 + 改写 1 例全过），
 失败名册与 41 条基线完全一致——零回归；`tools/verify-cui-interactions.sh` 自动做这条判断。
 
 > ⚠️ 仓库卫生：主仓 `lanlu` 有另一任务方的**暂存**改动（125 条）。在其上提交必须用
