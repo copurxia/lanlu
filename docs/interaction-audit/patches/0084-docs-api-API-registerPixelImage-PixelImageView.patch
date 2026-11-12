@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:01:09 +0000
+Subject: [PATCH] =?UTF-8?q?docs(api):=20=E8=A1=A5=E5=86=85=E5=AD=98?=
+ =?UTF-8?q?=E5=83=8F=E7=B4=A0=E5=9B=BE=20API=20=E6=AE=B5=EF=BC=88registerP?=
+ =?UTF-8?q?ixelImage/PixelImageView/=E9=A2=84=E7=AE=97=E4=B8=8E=E8=BE=93?=
+ =?UTF-8?q?=E5=85=A5=E6=A0=A1=E9=AA=8C=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+媒体段的公开 API 此前完全没有文档——而应用层封面/缩略图正是走这条路。补上三阶段入口、
+两个预算旋钮，以及 0081-0083 三项修复带来的**可见契约**：非正尺寸或字节数不符会被拒绝、
+单张超预算图仍会放行一次（否则永久画不出来）。
+---
+ docs/api-reference.md | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 68c61e3..d4913e1 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -287,6 +287,15 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+   一样逐帧内联声明；`invalidateImage(path)` 使单个路径失效并在下帧重载（覆盖图片文件后调用），
+   `clearImageCache()` 清空全部。仍实现 `Resource` 以兼容旧的提升 + `manage` 写法（`close` 仅
+   停用该视图，纹理归缓存所有）。
++- **内存像素图**（封面/缩略图等已解码 RGBA 数据，不落盘）：`stagePixelImage(key, width, height, pixels)`
++  / `stageNativePixelImage(key, width, height, pointer, releaser)`（两阶段：本帧登记、下帧按帧预算上传）
++  / `registerPixelImage(renderer, key, width, height, pixels)`（一步注册，同 key 同尺寸走 streaming 原地更新，
++  适合视频逐帧）。配套：`PixelImageView(key, width, height)` 显示、`invalidatePixelImage(key)`、
++  `clearPixelImages()`、`onPixelImageEvicted` 回调。
++  **输入校验**：`width/height` 必须为正且 `pixels.size == width*height*4`，否则拒绝登记（解码输出不可信，
++  尺寸不符会越界读）；`stageNativePixelImage` 拒绝时会自行调用 `releaser.release()`。
++  **字节预算**：`pixelCacheMaxBytes`（LRU 上限）与 `pixelUploadBudgetBytes`（每 16ms 帧窗口的上传字节上限，
++  默认 16 MiB；**单张超过预算的图仍会放行一次**，否则会被永久拒绝而永远画不出来）。
+ - `EventHandler(onEvent) { ... }`：在子树前截获事件。
+ - `FrameHandler(onFrame) { ... }`：接收每帧 `FrameInfo`。
+ 
+-- 
+2.47.3
+
