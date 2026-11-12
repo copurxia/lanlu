@@ -81,8 +81,8 @@ tools/verify-cui-interactions.sh
 期望结尾：
 
 ```
-Summary: TOTAL: 479
-    PASSED: 438, SKIPPED: 0, ERROR: 40
+Summary: TOTAL: 488
+    PASSED: 447, SKIPPED: 0, ERROR: 40
     FAILED: 1
 == 基线匹配：失败名册与 headless 基线完全一致
 ```
