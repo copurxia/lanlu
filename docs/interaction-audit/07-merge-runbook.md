@@ -88,7 +88,7 @@ Summary: TOTAL: 479
 ```
 
 本节已按原文**逐字实跑验证**（2026-11-11，含对方 WIP 快照的演练副本）：步骤 0/1B/2/4 全部
-按文档产出预期结果；步骤 3 在补上 `CANGJIE_STDX_PATH` 后输出 479/438 与基线匹配。
+按文档产出预期结果；步骤 3 在补上 `CANGJIE_STDX_PATH` 后输出 488/447 与基线匹配。
 若打出 diff：对比 [test-baseline-names.txt](test-baseline-names.txt)，
 新增失败即回归；消失的失败通常是环境变化（例如某个 headless 用例碰巧通过），也要留意。
 
