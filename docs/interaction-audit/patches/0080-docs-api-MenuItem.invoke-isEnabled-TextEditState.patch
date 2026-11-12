@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:16:17 +0000
+Subject: [PATCH] =?UTF-8?q?docs(api):=20=E8=A1=A5=20MenuItem.invoke/isEnab?=
+ =?UTF-8?q?led=20=E4=B8=8E=20TextEditState=20=E6=8C=89=E8=AF=8D=E6=96=B9?=
+ =?UTF-8?q?=E6=B3=95?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+审计公开 API 出口时发现三处只在源码里：MenuItem.invoke()（应用自定义菜单要触发项）、
+TextEditState 的按词移动/删除方法（moveWordLeft 等 6 个）。后者是自定义文本编辑的
+必需入口，前者是组合标准编辑菜单的条件。
+---
+ docs/api-reference.md | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 00ae09d..68c61e3 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -170,7 +170,9 @@
+ `flexible(false)` 的语义化别名——沿父主轴按内容收缩（而非填充），用于卡片、工具栏等应恰好包住内容的
+ 容器；跨轴仍按 `crossAxisAlignment` 拉伸。实践中收缩远多于填充，`hug()` 令这一常见意图一目了然。
+ 
+-`ContextMenu` 的条目为 `MenuItem(label: String, action: () -> Unit)`。`Dropdown` 弹出列表、
++`ContextMenu` 的条目为 `MenuItem(label: String, action: () -> Unit, shortcut!: String = "", enabled!: Bool = true)`；
++读取状态用 `isEnabled()`，触发用 `invoke()`（置灰项与分隔条上是 no-op）——应用可用它做自定义菜单或
++把标准编辑项（见 `TextField.editMenuItems()`）嵌入自己的菜单。`Dropdown` 弹出列表、
+ `ContextMenu` 菜单与 `Modal` 对话框都由**浮层栈**承载：控件在 `draw` 中经
+ `UiContext.setOverlay(Overlay(handleEvent:, render:, owner:))` 登记一层浮层（登记顺序即 z 序，
+ 同 `owner` 重复登记原位替换），关闭时以 `removeOverlay(owner)` 精确撤下自己那一层；外壳在派发树
+@@ -262,6 +264,9 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+ - `insert`、`backspace`、`deleteForward`（均替换/删除当前选区）。
+ - `moveLeft`、`moveRight`、`moveToStart`、`moveToEnd`（折叠选区）。
+ - `extendLeft`、`extendRight`、`extendToStart`、`extendToEnd`（保持锚点扩选）。
++- **按词**：`moveWordLeft`、`moveWordRight`、`extendWordLeft`、`extendWordRight`（跳到/扩选到词边界）、
++  `deleteWordBackward`、`deleteWordForward`（删整词）。词边界与双击选词同一套 Unicode 脚本分类
++  （ASCII 单词、汉字、假名、空白、标点各自成词）。
+ - `moveToLineStart`、`moveToLineEnd`、`moveLineUp`、`moveLineDown`（折叠）。
+ - `extendToLineStart`、`extendToLineEnd`、`extendLineUp`、`extendLineDown`（按列跨行扩选）。
+ - 选区：`hasSelection`、`selectionStart`、`selectionEnd`、`selectedText`、`selectAll`、`deleteSelection`、`clearSelection`。
+-- 
+2.47.3
+
