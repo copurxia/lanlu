@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:56:50 +0000
+Subject: [PATCH] =?UTF-8?q?fix(P1):=20registerPixelImage=20=E5=90=8C?=
+ =?UTF-8?q?=E6=AD=A5=E6=A0=A1=E9=AA=8C=E2=80=94=E2=80=94=E4=B8=80=E6=AD=A5?=
+ =?UTF-8?q?=E6=B3=A8=E5=86=8C/streaming=20=E5=8E=9F=E5=9C=B0=E6=9B=B4?=
+ =?UTF-8?q?=E6=96=B0=E4=B9=9F=E4=BC=9A=E8=B6=8A=E7=95=8C=E8=AF=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一提交只补了 stagePixelImage 的校验；核对发现 registerPixelImage（视频播放每帧注册的
+那条路径）同样直接按 width*height*4 读数组，长度不符即越界读。补同一道校验：非正尺寸或
+长度不符直接返回（在**建纹理之前**拒绝，不产生半成品纹理）。
+
+测试：2 例（长度不符不产生纹理字节、非正尺寸不产生纹理字节）。
+cjpm test：TOTAL 508 / PASSED 501，基线匹配零回归。
+---
+ src/media/pixel_register_validation_test.cj | 32 +++++++++++++++++++++
+ src/media/pixel_texture_cache.cj            |  5 ++++
+ 2 files changed, 37 insertions(+)
+ create mode 100644 src/media/pixel_register_validation_test.cj
+
+diff --git a/src/media/pixel_register_validation_test.cj b/src/media/pixel_register_validation_test.cj
+new file mode 100644
+index 0000000..a22b72f
+--- /dev/null
++++ b/src/media/pixel_register_validation_test.cj
+@@ -0,0 +1,32 @@
++package cui.media
++
++import lgui.Renderer
++
++/*
++ * registerPixelImage（一步注册 / streaming 原地更新）同样必须校验尺寸与字节数：
++ * 它按 width*height*4 读取像素数组，长度不符即越界读。
++ */
++@Test
++func registerRejectsByteCountMismatch(): Unit {
++    clearPixelImages()
++    pixelCacheMaxBytes = 512 * 1024 * 1024
++    onPixelImageEvicted = None
++    // headless 渲染器下注册本身会失败（无后端），但校验应在**建纹理之前**先拒绝——
++    // 因此这里断言"没有新增纹理字节"，而不是断言纹理存在。
++    let renderer = Renderer.headless()
++    registerPixelImage(renderer, "reg.bad", 4, 4, Array<UInt8>(8, repeat: 0)) // 应需 64 字节
++    let (staged, texture, _, _) = pixelCacheDiagnostics()
++    @Expect(staged, Int64(0))
++    @Expect(texture, Int64(0))
++    clearPixelImages()
++}
++
++@Test
++func registerRejectsNonPositiveSize(): Unit {
++    clearPixelImages()
++    let renderer = Renderer.headless()
++    registerPixelImage(renderer, "reg.zero", 0, 5, Array<UInt8>(0, repeat: 0))
++    let (_, texture, _, _) = pixelCacheDiagnostics()
++    @Expect(texture, Int64(0))
++    clearPixelImages()
++}
+diff --git a/src/media/pixel_texture_cache.cj b/src/media/pixel_texture_cache.cj
+index 1ca5ef1..36625dd 100644
+--- a/src/media/pixel_texture_cache.cj
++++ b/src/media/pixel_texture_cache.cj
+@@ -346,6 +346,11 @@ public func stageNativePixelImage(key: String, width: Int32, height: Int32, poin
+  */
+ public func registerPixelImage(renderer: Renderer, key: String, width: Int32, height: Int32,
+     pixels: Array<UInt8>): Unit {
++    // 与 stagePixelImage 同一道校验：登记/原地更新都会按 width*height*4 读像素数组，
++    // 长度不符即越界读（解码输入不可信）。非正尺寸还会建 0 尺寸纹理。
++    if (width <= 0 || height <= 0 || Int64(pixels.size) != pixelBytesOf(width, height)) {
++        return
++    }
+     adoptPixelRenderer(renderer)
+     // 一步注册顶替两阶段登记：清掉同 key 可能残留的 staged 像素，防止日后被误上传。
+     removeStagedEntry(key)
+-- 
+2.47.3
+
