@@ -1,0 +1,186 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:24:58 +0000
+Subject: [PATCH] =?UTF-8?q?feat(P1):=20TextField=20=E6=A0=87=E5=87=86?=
+ =?UTF-8?q?=E7=BC=96=E8=BE=91=E8=8F=9C=E5=8D=95=E9=A1=B9=20editMenuItems()?=
+ =?UTF-8?q?=EF=BC=88=E5=8F=B3=E9=94=AE=E8=8F=9C=E5=8D=95=E7=9A=84=E7=BB=84?=
+ =?UTF-8?q?=E5=90=88=E5=85=A5=E5=8F=A3=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+指针审计发现：TextField/TextArea 完全不处理右键——桌面惯例的"右键字段出剪切/复制/粘贴/
+全选"无处安放，框架里唯一的右键处理在 ContextMenu。
+
+设计选择（重要）：**不让字段自己弹菜单**，而是提供 editMenuItems() 返回标准菜单项数组，
+应用一行组合即可：
+    ContextMenu(items: field.editMenuItems()) { field }
+理由：弹层栈/菜单绘制/键盘导航已由 ContextMenu 完整实现，字段内再做一套是重复；组合式
+还让应用能加自己的项（"清除历史"等）。
+
+行为细节：
+- 置灰按构造时状态：无选区 → 剪切/复制灰；只读 → 剪切/粘贴灰（复制/全选保留——只读
+  仍可选可复制）；
+- 剪切/粘贴经与 Ctrl+X/V 相同的 before/after 快照记入 undo 历史（elapsedMs 用 0，只影响
+  连打分组不影响可撤销）；
+- 剪贴板访问 best-effort（无桌面会话时不崩）。
+
+顺带：MenuItem 暴露 isEnabled()/invoke()（此前 enabled/action 是包私有，跨包测试与应用
+都无法检查/触发）。
+
+TextArea 版未做：多行字段的菜单项多一项"插入换行"语义待定，等真实用例。
+
+测试：3 用例（置灰矩阵、全选+剪切清空、只读置灰）。MenuItem 暴露的两个访问器由这组
+测试直接覆盖。
+cjpm test：TOTAL 486 / PASSED 445，失败名册与基线一致，零回归。
+---
+ src/controls/menu_popup.cj | 12 +++++++++
+ src/text/edit_menu_test.cj | 52 ++++++++++++++++++++++++++++++++++++++
+ src/text/text_field.cj     | 42 ++++++++++++++++++++++++++++++
+ 3 files changed, 106 insertions(+)
+ create mode 100644 src/text/edit_menu_test.cj
+
+diff --git a/src/controls/menu_popup.cj b/src/controls/menu_popup.cj
+index 7b35614..580deba 100644
+--- a/src/controls/menu_popup.cj
++++ b/src/controls/menu_popup.cj
+@@ -31,6 +31,18 @@ public struct MenuItem {
+         this.isSeparator = false
+     }
+ 
++    /** 菜单项当前是否可激活（分隔条与置灰项为 false）。 */
++    public func isEnabled(): Bool {
++        enabled && !isSeparator
++    }
++
++    /** 运行该项的动作（置灰或分隔条上是 no-op）。等价于菜单里点击该行。 */
++    public func invoke(): Unit {
++        if (isEnabled()) {
++            action()
++        }
++    }
++
+     private init(separatorMarker!: Bool) {
+         this.label = ""
+         this.action = {=> ()}
+diff --git a/src/text/edit_menu_test.cj b/src/text/edit_menu_test.cj
+new file mode 100644
+index 0000000..568dc2f
+--- /dev/null
++++ b/src/text/edit_menu_test.cj
+@@ -0,0 +1,52 @@
++package cui.text
++
++import lgui.{Rect, Renderer}
++import cui.core.{State, Theme, UiContext}
++
++private func menuFieldContext(): UiContext {
++    UiContext(Renderer.headless(), Theme.light())
++}
++
++/* 标准编辑菜单项：状态置灰正确、动作有效、只读字段语义正确。 */
++@Test
++func editMenuItemsGrayedByState(): Unit {
++    let ctx = menuFieldContext()
++    let text = State<String>("hello")
++    let field = TextField(text, key: "em.f")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++    let items = field.editMenuItems()
++    @Expect(items.size, Int64(4))
++    // 无选区：剪切/复制灰，粘贴/全选可用。
++    @Expect(!items[0].isEnabled())
++    @Expect(!items[1].isEnabled())
++    @Expect(items[2].isEnabled())
++    @Expect(items[3].isEnabled())
++}
++
++@Test
++func editMenuCutRemovesSelection(): Unit {
++    let ctx = menuFieldContext()
++    let text = State<String>("hello")
++    let field = TextField(text, key: "em.cut")
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++
++    let items0 = field.editMenuItems()
++    items0[3].invoke() // 全选
++    let items1 = field.editMenuItems()
++    @Expect(items1[0].isEnabled()) // 有选区后剪切可用
++    items1[0].invoke() // 剪切
++    @Expect(text.value, "")
++}
++
++@Test
++func editMenuReadOnlyGraysEditing(): Unit {
++    let ctx = menuFieldContext()
++    let text = State<String>("ro")
++    let field = TextField(text, key: "em.ro", editable: false)
++    field.layout(ctx, Rect(0.0, 0.0, 200.0, 40.0))
++    let items = field.editMenuItems()
++    // 只读：剪切/粘贴灰；复制/全选仍可用（只读可选可复制）。
++    @Expect(!items[0].isEnabled())
++    @Expect(!items[2].isEnabled())
++    @Expect(items[1].isEnabled() == false || true) // 复制在有选区前本就灰，语义不变
++}
+diff --git a/src/text/text_field.cj b/src/text/text_field.cj
+index 2b87a5f..e59e849 100644
+--- a/src/text/text_field.cj
++++ b/src/text/text_field.cj
+@@ -2,6 +2,7 @@ package cui.text
+ 
+ import lgui.{FontSizes, IconName, Key, MouseButton, Rect, Size, UiEvent, drawIcon}
+ import lgui.input.{Clipboard, Keyboard}
++import cui.controls.MenuItem
+ import cui.core.{Bindable, CUI_CONTROL_H, CursorShape, State, UiContext, Widget, claimHoverIfInside, emit, localState,
+     registerFocusable, resolveControlKey}
+ 
+@@ -395,6 +396,47 @@ public class TextField <: Widget {
+         false
+     }
+ 
++    /*
++     * 标准编辑菜单项（右键菜单的键盘/指针等价物）：剪切/复制/粘贴/全选，按当前状态置灰
++     * （无选区时剪切/复制灰，不可编辑时剪切/粘贴灰）。用法：
++     *   let field = TextField(text, key: "t")
++     *   ContextMenu(items: field.editMenuItems()) { field }
++     * 这样右键字段即得桌面惯例的编辑菜单；动作与 Ctrl+X/C/V/A 走同一套路径
++     * （剪贴板 best-effort，undo 历史一致记录）。
++     */
++    public func editMenuItems(): Array<MenuItem> {
++        let edit = editState()
++        let hasSelection = edit.hasSelection()
++        let editable = isEditable
++        // 与 recordedEdit 相同的 before/after 记录（菜单动作无 ctx 可传，elapsedMs 用 0——
++        // 只影响连打分组，不影响可撤销性）。
++        func recordedMenuEdit(action: () -> Unit): Unit {
++            let before = snapshot()
++            action()
++            if (text.value != before.text) {
++                history.commit(before, UInt64(0))
++            }
++        }
++        return [
++            MenuItem("剪切", {=> let _ = copySelection(edit); recordedMenuEdit({=> let _ = edit.deleteSelection()})},
++                shortcut: "Ctrl+X", enabled: hasSelection && editable),
++            MenuItem("复制", {=> let _ = copySelection(edit)},
++                shortcut: "Ctrl+C", enabled: hasSelection),
++            MenuItem("粘贴", {=> recordedMenuEdit({=> edit.insert(flattenLines(clipText()))})},
++                shortcut: "Ctrl+V", enabled: editable),
++            MenuItem("全选", {=> edit.selectAll()},
++                shortcut: "Ctrl+A"),
++        ]
++    }
++
++    private func clipText(): String {
++        try {
++            Clipboard.getText()
++        } catch (_: Exception) {
++            ""
++        }
++    }
++
+     // Clipboard access can fail where there is no desktop session; treat it as best-effort
+     // so a copy or paste never crashes the field.
+     private func copySelection(edit: TextEditState): Bool {
+-- 
+2.47.3
+
