@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 00:17:05 +0000
+Subject: [PATCH] =?UTF-8?q?docs:=20API=20=E5=8F=82=E8=80=83=20ListView=20?=
+ =?UTF-8?q?=E8=A1=8C=E8=A1=A5=20onActivate=20=E7=AD=BE=E5=90=8D=E4=B8=8E?=
+ =?UTF-8?q?=E8=A1=8C=E4=B8=BA=E8=AF=B4=E6=98=8E?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index b4aa0d0..3c7d933 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -216,7 +216,7 @@ Enter/Space，悬停与按压有主题化的视觉反馈。
+ | `Stepper` | `Stepper(Bindable<Int64>, key!, lower!, upper!, step!)` | 范围/步长可经构造参或链式 `range(lower, upper)`、`step(value)` 设置（构造参对齐 Slider/ProgressBar）；宽度按数值内容自适应（一至两位数稳定） |
+ | `SegmentedControl` | `SegmentedControl(items, selected, key!: ?String = None)` | 分段单选；选中指示器弹簧滑动到新段；`Tab` 聚焦后 Left/Right 切换（端点钳制）；`key` 可选，缺省按构建序自动派生 |
+ | `TabView` | `TabView(labels, selected, key!: ?String = None) { pages }` | 页面按标签顺序声明；活动标签指示器弹簧滑动；页签条为焦点停靠点（先于页内控件），聚焦后 Left/Right 切换页签；`key` 可选 |
+-| `ListView` | `ListView(items, selected, scroll!: ?State<Float32> = None, key!: ?String = None)` | `scrollState`；点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区（含应用层改选），无外部滚动态时偏移按身份保留；滑块可拖动；`key` 可选，给定则身份稳定可寻址；**`selectionRange(): (Int64, Int64)`：Shift+点击/方向键的区间选择（锚点 + 当前选中项，普通点击/方向键把区间收敛为单点）** |
++| `ListView` | `ListView(items, selected, scroll!: ?State<Float32> = None, key!: ?String = None, onActivate!: ?(Int64) -> Unit = None)` | `scrollState`；点击选择、滚轮滚动，`Tab` 聚焦 + 方向键导航；选择变化即滚入可视区（含应用层改选），无外部滚动态时偏移按身份保留；滑块可拖动；`key` 可选，给定则身份稳定可寻址；**`selectionRange(): (Int64, Int64)`：Shift+点击/方向键的区间选择（锚点 + 当前选中项，普通点击/方向键把区间收敛为单点）**；**`onActivate`：双击行或聚焦后 Enter/Space 触发（桌面列表"打开"语义的键盘等价物；未设置时行为不变）** |
+ | `Table` | `Table(columns, rows, selected, key!)` / `Table.of(data, columns, selected, key!)` | 多列数据表：固定表头、窗口化滚动；点击列头排序（再次反向、数值列按数值），行选择存原始行索引故排序后跟随，`Tab` + 方向键/Home/End 导航；**`selectionRange(): Array<Int64>`：Shift 区间选择，按当前显示序展开为原始行索引（排序后区间仍连续）**；**键盘排序：聚焦后 Shift+Left/Right 换排序列、Enter/Space 翻转升降序**；悬停保持默认箭头光标 |
+ | `LazyColumn` | `LazyColumn(count, itemHeight, id!) { i => 行 }` / `LazyColumn.of(data, itemHeight, key!, id!) { item => 行 }` | 定高行、按索引或数据惰性构建的纵向列表：只物化视口附近的行，成本恒为一屏；数据形免去 `count` 与 `data[i]` 回查，`key` 令行局部状态随项走 |
+ | `LazyRow` | `LazyRow(count, itemWidth, spacing!, scroll!, key!, id!) { i => 列 }` / `LazyRow.of(data, itemWidth, ...)` | `LazyColumn` 的横向 counterpart：定宽列、只物化视口附近；滚轮（dy 重映射/触控板 dx 直驱）横向滚动，溢出时底部出滚动条（滑块可拖、轨道翻页），`scroll` 可外部接管偏移 |
+-- 
+2.47.3
+
