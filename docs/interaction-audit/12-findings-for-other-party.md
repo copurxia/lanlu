@@ -134,6 +134,27 @@ if (pixels.size != expected) {
 **给对方的一句话**：先 grep `budgetDeny`，有 → 拉 0081 补丁即愈；没有 → 看
 `uploadNative FAIL`/`cooldown`，那就是后端上传路径的问题（不在我的改动范围内）。
 
+## 具体触发算例（阅读器 HTML 页舞台，2026-11-12 04:32）
+
+`reader_stage.drawHtmlStage` 的帧尺寸 = `paper 物理像素 × displayScale`（`ensureViewport`），
+每页一张 RGBA 流式纹理。以常见阅读纸面 **800×1000 vp** 为例：
+
+| displayScale | 帧尺寸 | 字节 | 对 16 MiB 预算 |
+|---|---|---|---|
+| 1.0 | 800×1000 | 3.2 MB | 通过 |
+| 2.0 | 1600×2000 | **12.8 MB** | 通过（接近）|
+| 2.5 | 2000×2500 | **20 MB** | **超 → 每帧被拒 → 整页空白** |
+| 3.0（高分屏） | 2400×3000 | 28.8 MB | **超 → 同上** |
+
+`registerPixelImage` 走的是"建纹理成功即缓存"路径（**不经 staged 上传预算**）——但它每次
+重建纹理都会走 `pixelUploadAllowed`？不：**预算只拦 staged 上传**。重新核对 `registerPixelImage`
+的实现：它**不受帧预算约束**，只有 `stage*` 路径受限。因此本算例适用于**封面路径**
+（`model.cj:5535` 的 `stageNativePixelImage`），而阅读器 HTML 舞台不受此影响。
+
+**修正后的结论**：封面上限 16 MiB ≈ 2048×2048；阅读器 HTML 舞台走 register 路径不受预算限制。
+对方的"封面空白"应优先查 `budgetDeny`；若空白的是**阅读页**，则预算不是原因，
+应查后端上传（`uploadNative FAIL` / `cooldown`）或 `hp.takeHtmlFrame()` 是否根本没有帧。
+
 ## 我这边没做的事
 
 - **没有**修改上面任何文件（它们是对方未提交的 WIP，改会造成合并冲突）。
