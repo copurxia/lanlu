@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 03:10:11 +0000
+Subject: [PATCH] =?UTF-8?q?docs(api):=20=E5=AA=92=E4=BD=93=E6=AE=B5?=
+ =?UTF-8?q?=E8=A1=A5=20onPixelImageRejected=20=E5=9B=9E=E8=B0=83=EF=BC=88?=
+ =?UTF-8?q?=E6=8B=92=E7=BB=9D=E5=8E=9F=E5=9B=A0=E5=8F=AF=E8=A7=82=E6=B5=8B?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ docs/api-reference.md | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index d4913e1..93ba722 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -291,7 +291,8 @@ Rect) -> Unit = None)`，行为 `Array<Array<String>>`（按列索引的单元
+   / `stageNativePixelImage(key, width, height, pointer, releaser)`（两阶段：本帧登记、下帧按帧预算上传）
+   / `registerPixelImage(renderer, key, width, height, pixels)`（一步注册，同 key 同尺寸走 streaming 原地更新，
+   适合视频逐帧）。配套：`PixelImageView(key, width, height)` 显示、`invalidatePixelImage(key)`、
+-  `clearPixelImages()`、`onPixelImageEvicted` 回调。
++  `clearPixelImages()`、`onPixelImageEvicted`（LRU 淘汰时回调）、`onPixelImageRejected(key, reason)`
++  （登记被拒时回调——**静默拒绝会让调用方只看到封面空白**，用它记录日志或触发重解码）。
+   **输入校验**：`width/height` 必须为正且 `pixels.size == width*height*4`，否则拒绝登记（解码输出不可信，
+   尺寸不符会越界读）；`stageNativePixelImage` 拒绝时会自行调用 `releaser.release()`。
+   **字节预算**：`pixelCacheMaxBytes`（LRU 上限）与 `pixelUploadBudgetBytes`（每 16ms 帧窗口的上传字节上限，
+-- 
+2.47.3
+
