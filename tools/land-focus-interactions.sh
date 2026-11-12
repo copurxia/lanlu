@@ -22,10 +22,20 @@ MODE="apply"
 for a in "$@"; do
   case "$a" in
     --check) MODE="check" ;;
+    --emit-patches) MODE="emit" ;;
     -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "未知参数：$a" >&2; exit 2 ;;
   esac
 done
+
+# --emit-patches：从 gui 工作树的分支重新生成补丁序列（提交后忘了 format-patch 的自救入口）。
+if [ "$MODE" = "emit" ]; then
+  git -C "$GUI" rev-parse -q --verify p0-focus-visible >/dev/null 2>&1 || fail "gui 仓库里没有 p0-focus-visible 分支"
+  rm -f "$PATCHES"/*.patch
+  ( cd "$GUI" && git format-patch --no-numbered --zero-commit -o "$PATCHES" c39458f..p0-focus-visible >/dev/null )
+  echo "已生成 $(ls "$PATCHES"/*.patch | wc -l) 个补丁 → $PATCHES"
+  exit 0
+fi
 
 fail() { echo "✗ $*" >&2; exit 1; }
 ok()   { echo "✓ $*"; }
@@ -44,6 +54,18 @@ git -C "$GUI" rev-parse -q --verify p0-focus-visible >/dev/null 2>&1 && has_bran
 [ -d "$PATCHES" ] && patch_count=$(ls "$PATCHES"/*.patch 2>/dev/null | wc -l) || patch_count=0
 if [ "$has_branch" -eq 0 ] && [ "$patch_count" -eq 0 ]; then
   fail "既没有 p0-focus-visible 分支，也没有补丁序列（$PATCHES）"
+fi
+
+# 补丁新鲜度（2026-11-12 教训）：用补丁落地时，数量必须与分支提交数一致；不一致说明
+# 补丁目录过期，落地会静默丢掉最后几次修复。
+if [ "$has_branch" -eq 1 ] && [ "$patch_count" -gt 0 ]; then
+  base=$(git -C "$GUI" rev-parse -q --verify c39458f^{commit} 2>/dev/null || true)
+  if [ -n "$base" ]; then
+    branch_count=$(git -C "$GUI" rev-list --count "$base"..p0-focus-visible)
+    if [ "$patch_count" -ne "$branch_count" ]; then
+      fail "补丁过期：$patch_count 个补丁 vs 分支 $branch_count 个提交——先重新 format-patch"
+    fi
+  fi
 fi
 ok "落地来源：$([ "$has_branch" -eq 1 ] && echo "分支 p0-focus-visible" || echo "$patch_count 个补丁")"
 
