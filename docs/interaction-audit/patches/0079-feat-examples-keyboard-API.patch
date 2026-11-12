@@ -1,0 +1,171 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:06:54 +0000
+Subject: [PATCH] =?UTF-8?q?feat(examples):=20=E6=96=B0=E5=A2=9E=20keyboard?=
+ =?UTF-8?q?=20=E7=A4=BA=E4=BE=8B=E2=80=94=E2=80=94=E4=BA=A4=E4=BA=92=20API?=
+ =?UTF-8?q?=20=E7=9A=84=E7=8E=B0=E5=9C=BA=E9=AA=8C=E8=AF=81=E5=9C=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+把本轮补齐的四项交互能力放进一个可操作界面：FocusTarget（自绘卡片进 Tab 环 + Enter
+激活）、ListView(onActivate:)（双击/Enter 同一回调）、TextField.editMenuItems()（右键
+编辑菜单，按状态置灰）、Shift 区间选择。
+
+价值：这些语义在单测里是断言，在示例里是手感——真机验收清单 A/B/D 多数条目可直接在此
+过一遍。
+
+编译验证：源码级零错误；停在链接阶段仅因本机缺真实 SDL/vips 共享库（19 个 SDL_ +
+22 个 vips_ 未定义符号），与其它 28 个示例同源。写示例时踩到的 API 形状问题（Label 取
+String 而非 Observable、.flex() 无 weight 参数、spacing/padding 用 .vp 修饰器而非构造参）
+已按既有示例的惯用法修正。
+---
+ examples/README.md            |  6 +++++
+ examples/keyboard/README.md   | 20 ++++++++++++++
+ examples/keyboard/cjpm.toml   |  9 +++++++
+ examples/keyboard/src/main.cj | 15 +++++++++++
+ examples/keyboard/src/view.cj | 49 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 99 insertions(+)
+ create mode 100644 examples/keyboard/README.md
+ create mode 100644 examples/keyboard/cjpm.toml
+ create mode 100644 examples/keyboard/src/main.cj
+ create mode 100644 examples/keyboard/src/view.cj
+
+diff --git a/examples/README.md b/examples/README.md
+index c2a0dd4..d22ce5f 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -11,6 +11,12 @@
+ 
+ ## 示例清单
+ 
++### [`keyboard`](keyboard/README.md)：键盘与指针交互一览
++
++集中演示本轮补齐的交互 API：`FocusTarget`（自绘件进 Tab 环）、`ListView(onActivate:)`
++（双击/Enter 激活）、`TextField.editMenuItems()`（右键编辑菜单）、Shift 区间选择。
++是验收清单里 A/B/D 类条目的现场验证场。
++
+ ### [`calculator`](calculator/README.md)：计算器
+ 
+ 展示由链式 `.flex(weight)` 构成的等宽按键网格、跨两列按键、枚举化按键与集中样式映射、
+diff --git a/examples/keyboard/README.md b/examples/keyboard/README.md
+new file mode 100644
+index 0000000..cc9e8f5
+--- /dev/null
++++ b/examples/keyboard/README.md
+@@ -0,0 +1,20 @@
++# keyboard：键盘与指针交互一览
++
++本示例把框架的交互 API 放进一个可操作界面，每项都能现场验证：
++
++| 交互 | 怎么试 |
++|---|---|
++| `FocusTarget`（自绘卡片进 Tab 环） | Tab 走到卡片（出现焦点环）→ Enter/Space 或单击激活 |
++| `ListView(onActivate:)` | 选中条目后按 Enter，或**双击**条目——同一回调 |
++| `editMenuItems()` | **右键**输入框 → 剪切/复制/粘贴/全选（无选区时前两项置灰，只读时剪切/粘贴置灰）|
++| Shift 区间选择 | 列表聚焦后 **Shift+方向键** 扩展区间 |
++
++## 为什么值得一看
++
++这些语义在单测里是断言（`focus_ring_contract_test`、`list_activate_test`、`edit_menu_test`），
++在这里是**手感**。真机验收清单（`docs/interaction-audit/06-acceptance-checklist.md`）里的
++A/B/D 多数条目可直接在本示例上过一遍。
++
++## 结构
++
++`main.cj` 只有入口（`DesktopApp` + 窗口规格）；`view.cj` 是全部视图。与其它示例同一拆分习惯。
+diff --git a/examples/keyboard/cjpm.toml b/examples/keyboard/cjpm.toml
+new file mode 100644
+index 0000000..bc9210b
+--- /dev/null
++++ b/examples/keyboard/cjpm.toml
+@@ -0,0 +1,9 @@
++[package]
++cjc-version = "1.0.5"
++name = "cui_keyboard"
++version = "0.1.0"
++output-type = "executable"
++description = "CUI keyboard interaction showcase."
++
++[dependencies]
++cui = { path = "../.." }
+diff --git a/examples/keyboard/src/main.cj b/examples/keyboard/src/main.cj
+new file mode 100644
+index 0000000..9111934
+--- /dev/null
++++ b/examples/keyboard/src/main.cj
+@@ -0,0 +1,15 @@
++/*
++ * CUI 示例：键盘交互一览。
++ */
++package cui_keyboard
++
++import cui.{DesktopApp, WindowSpec}
++
++main(): Int64 {
++    let app = DesktopApp(WindowSpec("CUI 键盘交互一览", 760, 520, scale: 1.5))
++    app.setMinimumSize(600, 420)
++    app.run {
++        keyboardView()
++    }
++    return 0
++}
+diff --git a/examples/keyboard/src/view.cj b/examples/keyboard/src/view.cj
+new file mode 100644
+index 0000000..5cd15bb
+--- /dev/null
++++ b/examples/keyboard/src/view.cj
+@@ -0,0 +1,49 @@
++/*
++ * 键盘交互一览：FocusTarget / ListView(onActivate) / editMenuItems / Shift 区间选择。
++ */
++package cui_keyboard
++
++import cui.{FocusTarget, HStack, Label, LengthUnits, ListView, Observable, Panel, State, TextField, VStack}
++import cui.controls.ContextMenu
++
++func keyboardView(): Unit {
++    let picked = State<String>("（未选择）")
++    let query = State<String>("")
++    let selected = State<Int64>(0)
++    let fruits = ["苹果 Apple", "香蕉 Banana", "樱桃 Cherry", "榴莲 Durian", "无花果 Fig", "葡萄 Grape"]
++
++    VStack {
++        Label("键盘交互一览").fontSize(19.0)
++        Label("Tab 遍历全部停靠点；方向键移动；Shift+方向键区间选择；双击或 Enter 激活").muted().wrap()
++
++        HStack {
++            Panel {
++                VStack {
++                    Label("列表（双击 / Enter 激活）").muted()
++                    ListView(fruits, selected, key: "fruit.list", onActivate: {i => picked.value = fruits[i]})
++                        .flex()
++                }.spacing(6.vp)
++            }.contentPadding(12.vp).flex()
++
++            VStack {
++                Label("自绘卡片（FocusTarget 包裹）").muted()
++                FocusTarget(onClick: {=> picked.value = "卡片被激活"}, key: "card.target") {
++                    VStack {
++                        Label("整块可点").fontSize(14.0)
++                        Label("Tab 到这里按 Enter").muted().fontSize(12.0)
++                    }.spacing(2.vp)
++                }
++                Label("已选择：").muted()
++                Label(picked.value).wrap() // 立即模式：每帧重建时读取当前值
++            }.spacing(8.vp).flex()
++        }.flex()
++
++        HStack {
++            Label("搜索：").muted()
++            ContextMenu(items: TextField(query, key: "q.field").editMenuItems()) {
++                TextField(query, key: "q.field")
++            }.flex()
++        }
++        Label("右键输入框：剪切/复制/粘贴/全选（按状态置灰）").muted().fontSize(12.0)
++    }.spacing(12.vp).padding(16.vp)
++}
+\ No newline at end of file
+-- 
+2.47.3
+

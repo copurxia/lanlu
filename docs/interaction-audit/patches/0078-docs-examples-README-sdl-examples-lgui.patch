@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 02:00:23 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20README=20=E7=9A=84=20sdl/exam?=
+ =?UTF-8?q?ples=20=E6=9B=B4=E5=90=8D=E7=BA=A0=E6=AD=A3=EF=BC=88=E5=AF=B9?=
+ =?UTF-8?q?=E9=BD=90=20lgui=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ examples/README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/examples/README.md b/examples/README.md
+index 85fc9e7..c2a0dd4 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -3,7 +3,7 @@
+ 本目录中的每个示例都是独立的仓颉可执行项目，并通过本地路径依赖仓库根目录的 `cui` 模块。
+ 示例既用于功能演示，也用于验证布局、字体、桌面集成和公开 API 的实际可用性。
+ 
+-所有示例遵循统一的工程结构（对齐 `sdl/examples` 的拆分习惯）：`main.cj` 只含入口；数据与
++所有示例遵循统一的工程结构（对齐 `lgui/examples`（原名 `sdl/examples`）的拆分习惯）：`main.cj` 只含入口；数据与
+ 状态在 `model.cj`/`state.cj`/`data.cj`；配色与表面样式在 `theme.cj`；视图在 `views.cj`；
+ 纯逻辑、后台任务、键盘映射等各占一个文件。尺寸一律使用 `vp`/`fp` 单位书写。
+ 
+-- 
+2.47.3
+
