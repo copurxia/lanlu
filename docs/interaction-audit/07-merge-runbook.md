@@ -3,6 +3,18 @@
 > 目标：把 `p0-focus-visible`（29 个提交）与应用层 3 个补丁落到主仓，并确认没有回归。
 > 全程预计 10–20 分钟（含一次全量测试）。
 
+## 0-0. 工具护栏一览（每一步都有自动拦截，不靠记忆）
+
+| 护栏 | 在哪 | 拦什么 |
+|---|---|---|
+| 脏树自检 | `land-focus-interactions.sh` | `packages/cangjie-gui` 有未提交文件 → 拒绝落地（防在他人 WIP 上误合并）|
+| 补丁新鲜度 | `land-focus-interactions.sh` + `rehearse-merge.sh` | 补丁数 ≠ 分支提交数 → 拒绝（防用旧补丁落地，静默丢修复）|
+| linked-worktree 提示 | `rehearse-merge.sh` | 源目录是共享主仓对象的 worktree → 打印警告，避免在副本里误提交到主仓 |
+| 基线名册 diff | `verify-cui-interactions.sh` | 失败名册与 7 条豁免名册不完全一致 → 非零退出（任何新增失败都会亮）|
+| 补丁自救 | `land-focus-interactions.sh --emit-patches` | 忘了 format-patch 时一条命令重新生成并核对数量 |
+
+这五条是 2026-11-11 事故与 11-12 假失败的直接产物——**每次踩坑都固化成脚本而不是提醒自己**。
+
 ## 0a. 无分支环境的可复现性（2026-11-12 00:40 实测）
 
 `p0-focus-visible` 分支只存在于嵌套仓库的本地 .git；但交付**不依赖它**——已实测：
