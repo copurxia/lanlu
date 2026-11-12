@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:35:09 +0000
+Subject: [PATCH] =?UTF-8?q?test(P1):=20staged=20=E6=9D=A1=E7=9B=AE?=
+ =?UTF-8?q?=E8=A2=AB=20LRU=20=E6=B7=98=E6=B1=B0=E6=97=B6=E7=9A=84=E5=9B=9E?=
+ =?UTF-8?q?=E8=B0=83=E5=A5=91=E7=BA=A6=EF=BC=88=E5=BA=94=E7=94=A8=E4=BE=9D?=
+ =?UTF-8?q?=E8=B5=96=E5=AE=83=E5=A4=8D=E4=BD=8D=E5=B0=B1=E7=BB=AA=E6=80=81?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ src/media/pixel_staged_eviction_test.cj | 28 +++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+ create mode 100644 src/media/pixel_staged_eviction_test.cj
+
+diff --git a/src/media/pixel_staged_eviction_test.cj b/src/media/pixel_staged_eviction_test.cj
+new file mode 100644
+index 0000000..e4fd5e1
+--- /dev/null
++++ b/src/media/pixel_staged_eviction_test.cj
+@@ -0,0 +1,28 @@
++package cui.media
++
++import std.collection.ArrayList
++
++/*
++ * LRU 淘汰回调必须覆盖 staged 条目（不只是已上传纹理）：应用依赖它把"就绪"状态复位，
++ * 否则被淘汰的 staged 像素永远不会再上传（状态说 ready、像素已没了 → 空白）。
++ */
++@Test
++func evictedStagedEntryNotifiesCallbackAndFreesBytes(): Unit {
++    clearPixelImages()
++    let evicted = ArrayList<String>()
++    onPixelImageEvicted = {k => evicted.add(k)}
++    // 把 CPU staged 分项预算压小，强制淘汰 staged 条目。
++    pixelCacheStagedMaxBytes = 64 // 只够一张 4x4（64 字节）
++    stagePixelImage("evict.a", 4, 4, Array<UInt8>(64, repeat: 0))
++    let (s1, _, _, _) = pixelCacheDiagnostics()
++    @Expect(s1, Int64(64))
++    // 再登记一张同尺寸 → 超过分项预算 → 最旧的 staged 被淘汰并回调。
++    stagePixelImage("evict.b", 4, 4, Array<UInt8>(64, repeat: 0))
++    @Expect(evicted.contains("evict.a"))
++    // 队尾（最新登记）始终保留：B 还在。
++    let (s2, _, _, _) = pixelCacheDiagnostics()
++    @Expect(s2, Int64(64))
++    pixelCacheStagedMaxBytes = 96 * 1024 * 1024
++    onPixelImageEvicted = None
++    clearPixelImages()
++}
+-- 
+2.47.3
+
