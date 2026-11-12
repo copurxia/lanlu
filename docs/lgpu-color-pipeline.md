@@ -29,3 +29,22 @@
 > 说明：先前几次点标题栏主题按钮未生效（按钮命中的是窗口拖拽区），
 > 因此加了 `LANLU_FORCE_THEME=light|dark` 测试钩子（`theme.cj::forcedThemeMode`
 > + `AppModel.isLight`），让自动化能稳定验证两套配色。
+
+## 11. 追踪最新主干（2026-11-12 08:14）
+
+主干推进到 `ebaaf2c1`（46 个 gui 补丁），其 `lib.rs` 又新增 `rect_runs` 统计等改动。
+本分支四个提交已 rebase 到该 HEAD：
+
+```
+f49d606b feat(lgpu): 方案C
+4d97424e feat(theme): LANLU_FORCE_THEME
+3eddff61 fix(modal): 模糊 48px
+6969b0a6 tools: apply-color-pipeline.sh
+```
+
+- 构建：`BUILD SUCCESSFUL` + 静态验证全过
+- 真机：深色页面底 (11,11,13)、面板 (22,22,26) —— 逐字节正确
+
+**合并状态不变**：主干 `lib.rs` 的未提交改动（rect_runs 等）仍与补丁 0001 冲突
+（`does not match index`）。由于主干改动方向与补丁正交（统计字段 vs 渲染路径），
+预计冲突可手工解决；但按"先提交后合并"的约定，仍等主干落盘。
