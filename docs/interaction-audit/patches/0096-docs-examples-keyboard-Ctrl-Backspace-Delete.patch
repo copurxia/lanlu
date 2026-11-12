@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lead <lead@lanlu.local>
+Date: Thu, 12 Nov 2026 04:38:31 +0000
+Subject: [PATCH] =?UTF-8?q?docs(examples):=20keyboard=20=E7=A4=BA=E4=BE=8B?=
+ =?UTF-8?q?=E8=A1=A5=E6=8C=89=E8=AF=8D=E6=93=8D=E4=BD=9C=E6=8F=90=E7=A4=BA?=
+ =?UTF-8?q?=E2=80=94=E2=80=94Ctrl+=E6=96=B9=E5=90=91=E9=94=AE/Backspace/De?=
+ =?UTF-8?q?lete=20=E4=B8=8E=E8=AF=8D=E8=BE=B9=E7=95=8C=E8=A7=84=E5=88=99?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ examples/keyboard/src/view.cj | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/examples/keyboard/src/view.cj b/examples/keyboard/src/view.cj
+index 5cd15bb..cdb4231 100644
+--- a/examples/keyboard/src/view.cj
++++ b/examples/keyboard/src/view.cj
+@@ -45,5 +45,7 @@ func keyboardView(): Unit {
+             }.flex()
+         }
+         Label("右键输入框：剪切/复制/粘贴/全选（按状态置灰）").muted().fontSize(12.0)
++        Label("Ctrl+←/→ 按词跳；Ctrl+Shift+←/→ 按词选；Ctrl+Backspace/Delete 按词删；Home/End 行首尾").muted().fontSize(12.0)
++        Label("词边界与双击选词同一套：英文单词、汉字、假名、标点各自成词").muted().fontSize(12.0)
+     }.spacing(12.vp).padding(16.vp)
+ }
+\ No newline at end of file
+-- 
+2.47.3
+
