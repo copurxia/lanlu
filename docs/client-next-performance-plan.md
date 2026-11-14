@@ -7,9 +7,29 @@
 
 ---
 
-## 落地进度（2026-11-11）
+## 落地进度
 
-只读审计 → 计划 → 第一批实现。已落到代码并经编译/单测验证的条目：
+只读审计 → 计划 → 分批实现。下表按批次记录已落实到代码并验证的条目。
+
+### 第 4 批（2026-11-12）：整段排版缓存 + 空闲阻塞唤醒
+
+| 条目 | 改动 | 验证 |
+|---|---|---|
+| **R5.2 整段排版缓存** | `lgpu/native/src/lib.rs`：新增 `text_runs`（键 = 字体+字号档+文本哈希，值 = **相对起笔点**的字形四边形 + 前进宽度）。命中时跳过 char→glyph 映射、图集槽查找与 Vec 重建，直接平移后追加实例；段内任一图集页被淘汰则整段失效重排；上限 4096 条整表清空 | 7 个 Rust 单测通过（新增哈希确定性与区分度用例）；`cjpm build`（lgpu）通过 |
+| **R5.2 计数** | `run_hits` / `run_miss` 进入 M0 统计行，可直接看缓存命中率 | 同上 |
+| **R6 空闲不再忙轮询** | `lwindow` 导出 `lwpWaitForEvents(ms)` / `lwpWakeEventWaiter()`（复用 LWP 通道已有的 `wait`/`wake`）；`lgui` 的 `waitEventTimeout` 改为**阻塞**在注入的等待原语上，未注入时回退旧的 4ms 短轮询；`pushWakeEvent` 走注入的 wake。`client-next` 在两个事件源安装点按 `lwpInputEnabled()` 条件注入 | `cjpm build`（lwindow / lgui）通过；client-next 全量源码编译通过 |
+| | 兜底：注入的等待方若立即返回 false（通道未就绪），`waitEventTimeout` 至少让出 1ms，避免退化为 100% CPU 空转 | 同上 |
+
+### 第 3 批（2026-11-12）：图集正确性 + 书架派生缓存
+
+| 条目 | 改动 | 验证 |
+|---|---|---|
+| **R5.3 图集不再丢字** | `lgpu/native/src/{lib.rs,text.rs}`：图集改**多页**（满页开新页，上限 8 页≈32MB，超出 FIFO 淘汰最旧页）；淘汰页经全局延迟销毁队列在帧末释放；新增 `glyph_index` 做 O(1) 字形查找（否则多页后每字形 O(页数)）；不再上传 4MB 空白页（wgpu 新纹理本就零初始化） | 6 个 Rust 单测通过（含「满页返回 None 而非重叠分配」「字号不串位」）；`cjpm build`（lgui/lgpu/cui）通过 |
+| **溢出/批次计数** | `glyph_overflow`、`atlas_page_evict`、`rect_runs` 进入 M0 统计行 | 同上 |
+| **M0 上屏打点** | `client-next/src/main.cj`：每 120 帧（`LANLU_PERF`/`LANLU_PROBE_LGPU` 开时）输出 `lgpu stats …` + 文字测量命中率；`perfStatsEnabled()` 只读一次环境变量 | 全量源码编译通过 |
+| **D1 书架派生缓存** | `app/model.cj` 新增 `ShelfDerived` + `shelfDerived(key, compute)` 缓存与 `invalidateShelfDerived()`（挂在收藏/历史加载与 4 处就地刷新点）；`ui/shelf_view.cj` 把「侧栏历史计数 + 可见列表 + 最近在读」三次全量扫描合并为**一次**遍历并缓存 | 全量源码编译通过；新增 `app/shelf_derived_test.cj`（3 个用例，见下方说明） |
+
+### 第 1~2 批（2026-11-11）
 
 | 条目 | 改动 | 验证 |
 |---|---|---|
@@ -23,6 +43,7 @@
 说明：
 
 - **编译验证口径**：宿主机缺 libass/rocksdb/vlc 开发包，`client-next` 的 `build.cj` 预构建（C 桥接）失败——这是环境限制，与本次改动无关。验证方式是临时跳过 `client-next/build.cj`、`packages/libass_ffi/build.cj`、`packages/rocksdb_ffi/build.cj` 三个预构建脚本，让 Cangjie 编译器完整编译 `client-next` 全部源码；结果**编译通过、只在最终链接阶段因宿主缺原生库失败**。CI（`client-next.yml`）才是全链路验证口径。
+- **client-next 单测无法在宿主执行**：测试二进制要链接 `-lvlc` / `-lrocksdb` / `libass.so.9`，宿主没有这些库；且并行分支此刻正在重构 `html_page_model_test.cj` / `settings_test.cj` 等文件。因此新增的 `shelf_derived_test.cj` 目前只做了源码级校验，实际执行交给 CI。Rust 侧单测可在宿主运行（不依赖上述库）。
 - 工作区在实现期间出现了另一路并行改动（`lgpu_layer_mark` / `lgpu_snapshot_texture` / `draw_recorded` 录制顺序与层断点，对应本计划的 R2 绘制顺序问题），已与其合并而非覆盖：帧末统一走 `draw_recorded`。
 - 尚未开始：R5.2/R5.3（run 缓存、可淘汰多页图集）、R5.4（command buffer 合并 FFI）、R6（空闲阻塞等待）、R8（截图不落盘）、R9（子树记忆化）、R10（mipmap/分片上传）、D1~D8（书架视图、worker 优先级、压缩、图片管线、JSON 写放大、启动路径）。
 
@@ -292,3 +313,18 @@ lgpu 已经有 `lgpu_capture_offscreen`（commit 76599a3b/adc5bc69），改造�
 | [Neko：阅读器使用 hardware bitmap](https://github.com/nekomangaorg/Neko/pull/2654) | 上传后释放 CPU 像素副本 | R10 D4.4 |
 | [Android 位图优化（下采样）](https://developer.android.com/develop/ui/compose/graphics/images/optimization) / Coil、Glide | 三级缓存、按目标尺寸解码、请求随视图取消 | D4 |
 | [libvips developer checklist](https://www.libvips.org/API/8.17/developer-checklist.html) | 首选 `thumbnail`、shrink-on-load、sequential | D4.1 |
+
+## 附录 C：真机帧率实测（MOR-M1 2in1，2026-11-14）
+
+采样方法：壳层 `lwpAttachStats()` 的 frames 计数（每 ~5s 打一行 hilog），相邻样本差 / 间隔秒 = fps。
+窗口 2090×1394（scale 1.9）；build = a8f851d7（交换链取帧修复 + 离屏容量复用之后）。
+
+| 操作 | fps | 说明 |
+|---|---|---|
+| 首页空闲 | 0（偶发 1 帧定时器） | 零渲染生效：无请求帧时主循环阻塞等待 |
+| 首页滚动（连续 fling） | 平均 59.7（窗口 46–64） | 接近满帧；低谷来自 fling 起步的整树重建 |
+| 详情页打开/返回 | 转场 50–53 | 转场结束后回 0 |
+| 主题切换 | 2 帧 | 瞬时全量重绘一次（无涟漪动画时的正确行为） |
+| 窗口缩放（连续边缘拖拽） | 66.8 | 见 a8f851d7：修复取帧 SIGABRT + 离屏容量复用 |
+
+已知剩余项：滚动低谷（fling 起步全树重建）与缩放时的 swapchain 重配开销，见 R9/R6。
