@@ -349,6 +349,8 @@ pub struct SurfaceCtx {
     blit_pipeline: Option<wgpu::RenderPipeline>,
     blit_bgl: Option<wgpu::BindGroupLayout>,
     blit_sampler: Option<wgpu::Sampler>,
+    /// blit 的 UV 缩放 uniform（vec2<f32>），每帧按 窗口/容量 更新。
+    blit_uv_buffer: Option<wgpu::Buffer>,
 }
 
 /// 离屏目标：纹理 + 视图 + blit 采样用的 bind group（尺寸变化时整体重建）。
@@ -356,6 +358,10 @@ struct Offscreen {
     tex: wgpu::Texture,
     view: wgpu::TextureView,
     bind: wgpu::BindGroup,
+    /// 纹理容量（像素）。窗口缩小时复用旧纹理，只把 blit 的 UV 缩到实际窗口区域，
+    /// 避免每次尺寸变化都重新分配 ~11MB 的全屏 RGBA8 纹理 + 重建 bind group。
+    cap_w: u32,
+    cap_h: u32,
 }
 
 /// 一段文本的排版结果：四边形均为**相对起笔点**的偏移，绘制时整体平移。
@@ -507,6 +513,7 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             blit_pipeline: None,
             blit_bgl: None,
             blit_sampler: None,
+            blit_uv_buffer: None,
         })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
@@ -616,6 +623,39 @@ fn tex_run_bounds(instances: &[(gpu::TexInstance, *mut c_void)]) -> Vec<(usize, 
     out
 }
 
+/// 取当前帧的交换链纹理。
+///
+/// 三种"非致命"状态必须吞掉，否则会把整个进程带走：
+///   - Occluded：窗口被遮挡/最小化（点最大化、切前台时常发生）；
+///   - Timeout：合成器这一拍没给 buffer；
+///   - Outdated/Lost：尺寸刚变、或 surface 需要重建 —— 用当前 config 重配一次后重试。
+/// 历史上这三类都走到 `set_error + E_NO_DEVICE`，Cangjie 侧 checkRc 抛异常后无捕获，
+/// 真机表现为**点最大化/拖边缩放直接 SIGABRT**（第 16 轮复现）。
+fn acquire_frame(ctx: &mut SurfaceCtx, device: &wgpu::Device) -> Option<wgpu::SurfaceTexture> {
+    for _ in 0..2 {
+        match ctx.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
+                return Some(f)
+            }
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                // 尺寸变化后交换链过期：按当前 config 重配再试一次。
+                if let Some(config) = ctx.config.clone() {
+                    ctx.surface.configure(device, &config);
+                }
+            }
+            wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout => {
+                // 遮挡/超时：本帧跳过，不置错误、不中止进程。
+                return None;
+            }
+            other => {
+                set_error(format!("get_current_texture: {other:?}"));
+                return None;
+            }
+        }
+    }
+    None
+}
+
 /// 把 clip 矩形（像素，命中测试用 top-left 原点）转成 scissor（整数、裁到 surface 内）。
 fn apply_scissor(pass: &mut wgpu::RenderPass<'_>, clip: [f32; 4], width: u32, height: u32) {
     if clip[2] <= 0.0 || clip[3] <= 0.0 {
@@ -708,6 +748,8 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
 
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
+// uv_scale = (窗口宽/离屏容量宽, 窗口高/离屏容量高)：离屏纹理复用容量时只采样左上角有效区。
+@group(0) @binding(2) var<uniform> uv_scale: vec2<f32>;
 
 fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
     let lo = c / 12.92;
@@ -717,7 +759,7 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let c = textureSample(src, samp, in.uv);
+    let c = textureSample(src, samp, clamp(in.uv * uv_scale, vec2<f32>(0.0), vec2<f32>(1.0)));
     return vec4<f32>(srgb_to_linear(c.rgb), 1.0);
 }
 "#;
@@ -726,8 +768,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: wgpu::TextureFormat) {
     let Some(cfg) = ctx.config.as_ref() else { return };
     let (w, h) = (cfg.width.max(1), cfg.height.max(1));
+    // 容量策略：向上取 256 的整数倍，且只在当前窗口**超过**已有容量时才重建。
+    // 拖拽缩放时窗口尺寸会连续变化，旧实现每次都重建全屏纹理（2090×1394×4 ≈ 11.7MB）
+    // 并重建 bind group，是缩放掉帧的主要来源之一。
+    let cap_w = (w + 255) / 256 * 256;
+    let cap_h = (h + 255) / 256 * 256;
     let need_new_tex = match &ctx.offscreen {
-        Some(o) => o.tex.width() != w || o.tex.height() != h,
+        Some(o) => o.cap_w < cap_w || o.cap_h < cap_h,
         None => true,
     };
 
@@ -753,6 +800,16 @@ fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: 
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],
@@ -789,6 +846,15 @@ fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: 
         });
         ctx.blit_pipeline = Some(pipeline);
         ctx.blit_bgl = Some(bgl);
+        // blit 的 UV 缩放 uniform：必须在建 bind group 之前就存在（binding 2 引用它）。
+        if ctx.blit_uv_buffer.is_none() {
+            ctx.blit_uv_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("lgpu-blit-uv"),
+                size: 8,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
         ctx.blit_sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("lgpu-blit-sampler"),
             mag_filter: wgpu::FilterMode::Nearest,
@@ -798,9 +864,14 @@ fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: 
     }
 
     if need_new_tex {
+        let (tw, th) = match &ctx.offscreen {
+            // 已够大就沿用旧纹理（never shrink）
+            Some(o) => (o.cap_w.max(cap_w), o.cap_h.max(cap_h)),
+            None => (cap_w, cap_h),
+        };
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("lgpu-offscreen"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d { width: tw, height: th, depth_or_array_layers: 1 },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -818,9 +889,18 @@ fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: 
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(ctx.blit_sampler.as_ref().expect("blit sampler")),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: ctx.blit_uv_buffer.as_ref().expect("blit uv buffer"),
+                        offset: 0,
+                        size: None,
+                    }),
+                },
             ],
         });
-        ctx.offscreen = Some(Offscreen { tex, view, bind });
+        ctx.offscreen = Some(Offscreen { tex, view, bind, cap_w: tw, cap_h: th });
+
     }
 }
 
@@ -921,17 +1001,19 @@ pub extern "C" fn lgpu_present_clear(surface: *mut c_void, r: f32, g: f32, b: f3
     // SAFETY: 同上，句柄有效且线程由调用方保证（L 层主线程）。
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let (Some(device), Some(queue), Some(config)) = (&ctx.device, &ctx.queue, &ctx.config) else {
+    // 与 frame_end 同款：克隆句柄，避免 acquire_frame(&mut ctx) 与不可变借用冲突。
+    let (Some(device), Some(queue), Some(config)) = (
+        ctx.device.clone(),
+        ctx.queue.clone(),
+        ctx.config.clone(),
+    ) else {
         set_error("surface not initialised");
         return E_BAD_ARG;
     };
 
-    let frame = match ctx.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-        other => {
-            set_error(format!("get_current_texture: {other:?}"));
-            return E_NO_DEVICE;
-        }
+    // 遮挡/超时/短暂过期都不是错误：跳帧返回 0，别把异常抛回 Cangjie（会 SIGABRT）。
+    let Some(frame) = acquire_frame(ctx, &device) else {
+        return 0;
     };
     let view = frame
         .texture
@@ -1447,12 +1529,9 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     }
 
-    let frame = match ctx.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-        other => {
-            set_error(format!("get_current_texture: {other:?}"));
-            return E_NO_DEVICE;
-        }
+    // 遮挡/超时/短暂过期都不是错误：跳帧返回 0，别把异常抛回 Cangjie（会 SIGABRT）。
+    let Some(frame) = acquire_frame(ctx, &device) else {
+        return 0;
     };
     let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
     // 方案C：UI 全部画进 Rgba8Unorm 离屏目标（gamma 空间混合），随后 blit 上屏。
@@ -1506,6 +1585,14 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
             fh,
         );
         STATS.draw_calls.fetch_add(calls, Ordering::Relaxed);
+    }
+    // 离屏容量可能大于当前窗口（缩小时复用旧纹理）：blit 只采样左上角有效区域。
+    if let (Some(buf), Some(off)) = (&ctx.blit_uv_buffer, &ctx.offscreen) {
+        let uv = [
+            cfg.width.max(1) as f32 / off.cap_w as f32,
+            cfg.height.max(1) as f32 / off.cap_h as f32,
+        ];
+        queue.write_buffer(buf, 0, bytemuck::cast_slice(&uv));
     }
     {
         // blit 上屏：离屏 gamma 值 → srgb_to_linear → sRGB 交换链（硬件编码还原原值）。
