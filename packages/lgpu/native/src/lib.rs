@@ -65,6 +65,12 @@ pub struct FrameStats {
     pub glyph_overflow: AtomicU64,
     /// R5.3：图集页因超上限被淘汰的次数（FIFO）
     pub atlas_page_evict: AtomicU64,
+    /// R5.2：整段排版缓存命中次数
+    pub text_run_hits: AtomicU64,
+    /// R5.2：整段排版缓存未命中次数
+    pub text_run_misses: AtomicU64,
+    /// 矩形实例按 clip 合批后的 run 数（越小说明批次越少）
+    pub rect_runs: AtomicU64,
 }
 
 static STATS: FrameStats = FrameStats {
@@ -81,6 +87,9 @@ static STATS: FrameStats = FrameStats {
     frames: AtomicU64::new(0),
     glyph_overflow: AtomicU64::new(0),
     atlas_page_evict: AtomicU64::new(0),
+    text_run_hits: AtomicU64::new(0),
+    text_run_misses: AtomicU64::new(0),
+    rect_runs: AtomicU64::new(0),
 };
 
 fn stats_view() -> &'static FrameStats {
@@ -101,6 +110,9 @@ fn stats_reset() {
         &STATS.frames,
         &STATS.glyph_overflow,
         &STATS.atlas_page_evict,
+        &STATS.text_run_hits,
+        &STATS.text_run_misses,
+        &STATS.rect_runs,
     ] {
         f.store(0, Ordering::Relaxed);
     }
@@ -111,7 +123,7 @@ fn stats_reset() {
 pub extern "C" fn lgpu_stats_line(out: *mut c_char, out_len: usize) -> i32 {
     let s = stats_view();
     let line = format!(
-        "draws={} rects={} texs={} runs={} uploads={} up_bytes={} measures={} tex_create={} tex_destroy={} tex_alive={} frames={} glyph_overflow={} atlas_evict={}",
+        "draws={} rects={} texs={} runs={} uploads={} up_bytes={} measures={} tex_create={} tex_destroy={} tex_alive={} frames={} glyph_overflow={} atlas_evict={} run_hits={} run_miss={} rect_runs={}",
         s.draw_calls.load(Ordering::Relaxed),
         s.rect_instances.load(Ordering::Relaxed),
         s.tex_instances.load(Ordering::Relaxed),
@@ -125,6 +137,9 @@ pub extern "C" fn lgpu_stats_line(out: *mut c_char, out_len: usize) -> i32 {
         s.frames.load(Ordering::Relaxed),
         s.glyph_overflow.load(Ordering::Relaxed),
         s.atlas_page_evict.load(Ordering::Relaxed),
+        s.text_run_hits.load(Ordering::Relaxed),
+        s.text_run_misses.load(Ordering::Relaxed),
+        s.rect_runs.load(Ordering::Relaxed),
     );
     write_c_str(out, out_len, &line);
     0
@@ -184,6 +199,12 @@ fn lock_surface() -> std::sync::MutexGuard<'static, ()> {
 static GPU_ERROR: Mutex<Option<String>> = Mutex::new(None);
 
 fn set_gpu_error(msg: String) {
+    // 真机取证：wgpu 校验错误会毒化 encoder/pass（后续 set_bind_group 空指针崩溃的根因），
+    // 完整消息必须落盘才能定位（hilog 只有 "Validation Error" 摘要）。
+    if let Some(mut f) = trace_file() {
+        use std::io::Write;
+        let _ = writeln!(f, "GPU_ERROR: {msg}");
+    }
     if let Ok(mut g) = GPU_ERROR.lock() {
         if g.is_none() {
             *g = Some(msg);
@@ -313,10 +334,40 @@ pub struct SurfaceCtx {
     /// 字形图集页（RGBA8，A 通道存覆盖率）。R5.3：满页自动新开一页，
     /// **绝不丢字**——之前单页 1024² 满了直接 break，CJK/多字号场景文字静默消失。
     atlas_pages: Vec<(*mut c_void, text::Atlas)>,
-    /// 待销毁的纹理：帧内淘汰的图集页不能立刻 free（本帧已录制的图元还引用它），
-    /// 统一在 frame_end 提交之后销毁。只放裸指针，数量很小。
-    pending_destroy: Vec<*mut c_void>,
+    /// 字形索引：(字体, 字形, 字号档) → (所属图集页纹理, 槽位)。
+    /// 多页之后逐页线性查缓存会让每字形 O(页数)，这里统一 O(1)；
+    /// 页被淘汰时同步清理该页条目。
+    glyph_index: std::collections::HashMap<(u32, u16, u32), (*mut c_void, text::GlyphSlot)>,
+    /// R5.2 整段排版缓存：(字体, 字号档, 文本哈希) → 已排好的相对字形四边形。
+    /// 命中时跳过 char→glyph 映射、槽位查找与 Vec 重建，直接平移后追加实例；
+    /// 值里的页纹理若被淘汰则丢弃整段（下次重排）。
+    text_runs: std::collections::HashMap<(u32, u32, u64), TextRun>,
+    /// text_runs 的插入顺序（简易 LRU 驱逐：超过上限整表清空，UI 文本集稳态小）。
+    text_runs_count: usize,
+    /// 离屏 gamma 目标与上屏 blit 管线（方案C：sRGB 交换链 + Unorm 离屏，真机逐字节验证）。
+    offscreen: Option<Offscreen>,
+    blit_pipeline: Option<wgpu::RenderPipeline>,
+    blit_bgl: Option<wgpu::BindGroupLayout>,
+    blit_sampler: Option<wgpu::Sampler>,
 }
+
+/// 离屏目标：纹理 + 视图 + blit 采样用的 bind group（尺寸变化时整体重建）。
+struct Offscreen {
+    tex: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind: wgpu::BindGroup,
+}
+
+/// 一段文本的排版结果：四边形均为**相对起笔点**的偏移，绘制时整体平移。
+#[derive(Clone)]
+struct TextRun {
+    quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)>,
+    /// 本段全部四边形共享的页纹理集合非空时才可复用（页淘汰后失效）。
+    advance: f32,
+}
+
+/// R5.2 缓存上限：条目过多整表清空（避免无界增长；实测 UI 一屏文本远小于此）。
+const TEXT_RUN_CACHE_MAX: usize = 4096;
 
 /// 图集页上限：8 页 × 1024² × 4B = 32MB 显存。超过就淘汰最旧页（FIFO），
 /// 其字形之后按需重新光栅化——比无界增长/静默丢字都好。
@@ -347,6 +398,11 @@ unsafe impl Send for SendPtr {}
 
 /// 取证日志（LANLU_LGPU_TRACE=1 → $HOME/lgpu_trace.txt）。None = 关闭。
 fn trace_file() -> Option<std::fs::File> {
+    // 必须显式开启（LANLU_LGPU_TRACE=1）：否则每帧每次绘制都开文件写一行，
+    // 实测把 lgpu_trace.txt 写到 35MB 并显著拖慢帧率。
+    if std::env::var("LANLU_LGPU_TRACE").ok().as_deref() != Some("1") {
+        return None;
+    }
     use std::io::Write;
     let Ok(home) = std::env::var("HOME") else { return None };
     let path = format!("{home}/lgpu_trace.txt");
@@ -382,9 +438,6 @@ impl Drop for SurfaceCtx {
         // SurfaceCtx 被 Box::from_raw 释放时，图集页与待销毁纹理的 TexCtx 也要释放，
         // 否则每页泄漏一张 wgpu 纹理（数组里存的是裸指针）。
         for (tex, _) in self.atlas_pages.drain(..) {
-            drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
-        }
-        for tex in self.pending_destroy.drain(..) {
             drop(unsafe { Box::from_raw(tex as *mut TexCtx) });
         }
     }
@@ -447,7 +500,13 @@ pub extern "C" fn lgpu_surface_create(native_window: *mut c_void) -> *mut c_void
             tex_order: Vec::new(),
             layer_marks: Vec::new(),
             atlas_pages: Vec::new(),
-            pending_destroy: Vec::new(),
+            glyph_index: std::collections::HashMap::new(),
+            text_runs: std::collections::HashMap::new(),
+            text_runs_count: 0,
+            offscreen: None,
+            blit_pipeline: None,
+            blit_bgl: None,
+            blit_sampler: None,
         })) as *mut c_void,
         Err(e) => {
             set_error(format!("create_surface failed: {e}"));
@@ -506,38 +565,51 @@ fn draw_rect_batches(
     }
 }
 
-/// 统计矩形实例按 clip 分组后的组数（与 draw_rect_batches 的分组一致，纯计数用）。
+/// 矩形合批的 run 边界：从 start 起、clip 相同的连续区间终点（不含）。
+/// draw_recorded 与统计共用同一判据，避免两处漂移。
+fn rect_run_end(rects: &[gpu::RectInstance], start: usize, limit: usize) -> usize {
+    let clip = rects[start].clip;
+    let mut j = start + 1;
+    while j < limit && rects[j].clip == clip {
+        j += 1;
+    }
+    j
+}
+
+/// 统计矩形实例按 clip 分组后的组数（M0 打点用）。
 fn draw_rect_batch_count(instances: &[gpu::RectInstance]) -> u64 {
     let mut groups = 0u64;
     let mut i = 0usize;
     while i < instances.len() {
-        let clip = instances[i].clip;
-        let mut j = i + 1;
-        while j < instances.len() && instances[j].clip == clip {
-            j += 1;
-        }
+        i = rect_run_end(instances, i, instances.len());
         groups += 1;
-        i = j;
     }
     groups
 }
 
-/// 把纹理实例列表按「相邻且 (纹理指针, clip) 相同」划分为若干 run，返回每段的 [begin, end)。
-/// R1 合批的唯一分组规则：frame_end 与 capture_offscreen 共用，保证抓帧与屏幕一致。
+/// 纹理/字形合批的 run 边界（R1）：从 start 起、相邻且 (纹理指针, clip) 相同的连续区间终点。
+/// 上屏、抓帧、快照三条路径共用这一个判据 —— 保证"屏幕上合批的效果"和"抓帧结果"一致。
+fn tex_run_end(texs: &[(gpu::TexInstance, *mut c_void)], start: usize, limit: usize) -> usize {
+    let (inst, tex_ptr) = &texs[start];
+    let clip = inst.clip;
+    let mut j = start + 1;
+    while j < limit {
+        let (ninst, ntex) = &texs[j];
+        if *ntex != *tex_ptr || ninst.clip != clip {
+            break;
+        }
+        j += 1;
+    }
+    j
+}
+
+/// 把纹理实例列表按 run 划分（测试与诊断用；热路径用 tex_run_end 避免分配）。
+#[cfg_attr(not(test), allow(dead_code))]
 fn tex_run_bounds(instances: &[(gpu::TexInstance, *mut c_void)]) -> Vec<(usize, usize)> {
-    let mut out: Vec<(usize, usize)> = Vec::new();
+    let mut out = Vec::new();
     let mut i = 0usize;
     while i < instances.len() {
-        let (inst, tex_ptr) = &instances[i];
-        let clip = inst.clip;
-        let mut j = i + 1;
-        while j < instances.len() {
-            let (ninst, ntex) = &instances[j];
-            if *ntex != *tex_ptr || ninst.clip != clip {
-                break;
-            }
-            j += 1;
-        }
+        let j = tex_run_end(instances, i, instances.len());
         out.push((i, j));
         i = j;
     }
@@ -607,6 +679,158 @@ fn surface_format(formats: &[wgpu::TextureFormat], default: wgpu::TextureFormat)
         .copied()
         .find(|f| f.is_srgb())
         .unwrap_or(default)
+}
+
+/// 离屏目标格式：Unorm —— 存的是 **gamma 空间**的值，混合也在该空间完成（方案C）。
+const SCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// 上屏 blit：把离屏目标（gamma 值）转成线性写进 sRGB 交换链。
+/// 硬件随后做 linear→sRGB 编码，输出即等于原始 sRGB 值，不产生二次编码。
+const BLIT_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+    );
+    let xy = pts[i];
+    var o: VsOut;
+    o.pos = vec4<f32>(xy, 0.0, 1.0);
+    o.uv = vec2<f32>((xy.x + 1.0) * 0.5, 1.0 - (xy.y + 1.0) * 0.5);
+    return o;
+}
+
+@group(0) @binding(0) var src: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let c = textureSample(src, samp, in.uv);
+    return vec4<f32>(srgb_to_linear(c.rgb), 1.0);
+}
+"#;
+
+/// 惰性创建/更新离屏目标与 blit 管线（尺寸变化时重建纹理与 bind group）。
+fn ensure_offscreen(ctx: &mut SurfaceCtx, device: &wgpu::Device, target_format: wgpu::TextureFormat) {
+    let Some(cfg) = ctx.config.as_ref() else { return };
+    let (w, h) = (cfg.width.max(1), cfg.height.max(1));
+    let need_new_tex = match &ctx.offscreen {
+        Some(o) => o.tex.width() != w || o.tex.height() != h,
+        None => true,
+    };
+
+    if ctx.blit_bgl.is_none() {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("lgpu-blit"),
+            source: wgpu::ShaderSource::Wgsl(BLIT_SHADER.into()),
+        });
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("lgpu-blit-bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("lgpu-blit-layout"),
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("lgpu-blit-pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        ctx.blit_pipeline = Some(pipeline);
+        ctx.blit_bgl = Some(bgl);
+        ctx.blit_sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("lgpu-blit-sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        }));
+    }
+
+    if need_new_tex {
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("lgpu-offscreen"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SCREEN_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("lgpu-blit-bind"),
+            layout: ctx.blit_bgl.as_ref().expect("blit bgl"),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(ctx.blit_sampler.as_ref().expect("blit sampler")),
+                },
+            ],
+        });
+        ctx.offscreen = Some(Offscreen { tex, view, bind });
+    }
+}
+
+/// 把离屏目标 blit 到交换链视图（一个 draw，全屏三角形）。
+fn draw_blit(pass: &mut wgpu::RenderPass<'_>, ctx: &SurfaceCtx) {
+    if let (Some(p), Some(off)) = (&ctx.blit_pipeline, &ctx.offscreen) {
+        pass.set_pipeline(p);
+        pass.set_bind_group(0, &off.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
 }
 
 /// 在已有 surface 上初始化 device/queue 并按尺寸配置 swapchain。
@@ -773,7 +997,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
     }
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let (Some(device), Some(config)) = (&ctx.device, ctx.config.clone()) else {
+    let (Some(device), Some(_config)) = (&ctx.device, ctx.config.clone()) else {
         set_error("surface not initialised");
         return E_BAD_ARG;
     };
@@ -864,7 +1088,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
             entry_point: Some("fs"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
-                format: config.format,
+                format: SCREEN_FORMAT,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -938,7 +1162,7 @@ pub extern "C" fn lgpu_pipeline_init(surface: *mut c_void) -> i32 {
             entry_point: Some("fs"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
-                format: config.format,
+                format: SCREEN_FORMAT,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -1147,9 +1371,15 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     }
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(cfg)) =
-        (&ctx.device, &ctx.queue, &ctx.pipeline, &ctx.bind_group, &ctx.config)
-    else {
+    // 克隆句柄/配置（wgpu 句柄是 Arc，clone 很轻）：后面 ensure_offscreen 要 &mut ctx，
+    // 不能同时持有 &ctx 的借用（方案C 合并时的同款处理）。
+    let (Some(device), Some(queue), Some(pipeline), Some(bind_group), Some(cfg)) = (
+        ctx.device.clone(),
+        ctx.queue.clone(),
+        ctx.pipeline.clone(),
+        ctx.bind_group.clone(),
+        ctx.config.clone(),
+    ) else {
         set_error("pipeline not initialised");
         return E_BAD_ARG;
     };
@@ -1158,6 +1388,8 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
     // 纹理实例缓冲：整帧一次性上传（见下方 pass 内的说明）。
     // M0：帧级计数在写入前采样（tex_instances 此时已定型）。
     STATS.rect_instances.fetch_add(ctx.instances.len() as u64, Ordering::Relaxed);
+    STATS.rect_runs
+        .fetch_add(draw_rect_batch_count(&ctx.instances), Ordering::Relaxed);
     STATS.tex_instances.fetch_add(ctx.tex_instances.len() as u64, Ordering::Relaxed);
     let tex_need = ctx.tex_instances.len();
     if tex_need > 0 {
@@ -1182,6 +1414,17 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
                 staging.extend_from_slice(bytemuck::bytes_of(inst));
             }
             queue.write_buffer(buf, 0, &staging);
+            if std::env::var("LANLU_IMG_DIAG").ok().as_deref() == Some("1") {
+                if let Some(mut f) = trace_file() {
+                    use std::io::Write;
+                    let _ = writeln!(
+                        f,
+                        "frame tex_need={} tex_capacity={} buf_bytes={} gpu_err={:?}",
+                        tex_need, ctx.tex_capacity, staging.len(),
+                        crate::gpu_error().chars().take(120).collect::<String>()
+                    );
+                }
+            }
         }
     }
 
@@ -1212,6 +1455,12 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         }
     };
     let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    // 方案C：UI 全部画进 Rgba8Unorm 离屏目标（gamma 空间混合），随后 blit 上屏。
+    ensure_offscreen(ctx, &device, cfg.format);
+    let Some(off_view) = ctx.offscreen.as_ref().map(|o| o.view.clone()) else {
+        set_error("offscreen target missing");
+        return E_NO_DEVICE;
+    };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("lgpu-frame"),
     });
@@ -1219,7 +1468,7 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("lgpu-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
+                view: &off_view,
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
@@ -1245,9 +1494,9 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         // 看到最后一次参数 —— 历史上踩过）。
         let calls = draw_recorded(
             &mut pass,
-            pipeline,
+            &pipeline,
             ctx.tex_pipeline.as_ref(),
-            bind_group,
+            &bind_group,
             ctx.inst_buffer.as_ref(),
             ctx.tex_buffer.as_ref(),
             &ctx.instances,
@@ -1258,16 +1507,28 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
         );
         STATS.draw_calls.fetch_add(calls, Ordering::Relaxed);
     }
+    {
+        // blit 上屏：离屏 gamma 值 → srgb_to_linear → sRGB 交换链（硬件编码还原原值）。
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("lgpu-blit-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        draw_blit(&mut pass, ctx);
+    }
     queue.submit(Some(encoder.finish()));
     queue.present(frame);
-    // R5.3：帧内淘汰的图集页在这里真正释放——本帧的绘制指令已经提交，
-    // 之后不会再有图元引用这些纹理（延迟一帧销毁的代价是峰值多一页）。
-    if !ctx.pending_destroy.is_empty() {
-        let pending: Vec<*mut c_void> = ctx.pending_destroy.drain(..).collect();
-        for tex in pending {
-            destroy_texture_locked(tex);
-        }
-    }
     // 全局延迟销毁队列：lgpu_texture_destroy 登记的纹理此刻提交完毕，可安全释放。
     flush_deferred_textures();
     STATS.frames.fetch_add(1, Ordering::Relaxed);
@@ -1310,10 +1571,7 @@ fn draw_recorded(
                 let mut i = r0;
                 while i < r1 {
                     let clip = rects[i].clip;
-                    let mut j = i + 1;
-                    while j < r1 && rects[j].clip == clip {
-                        j += 1;
-                    }
+                    let j = rect_run_end(rects, i, r1);
                     apply_scissor(pass, clip, width, height);
                     pass.set_vertex_buffer(0, buf.slice(i as u64 * rstride..j as u64 * rstride));
                     pass.draw(0..6, 0..(j - i) as u32);
@@ -1331,11 +1589,16 @@ fn draw_recorded(
                 while i < t1 {
                     let (inst, tex_ptr) = &texs[i];
                     let clip = inst.clip;
-                    let mut j = i + 1;
-                    while j < t1 && texs[j].1 == *tex_ptr && texs[j].0.clip == clip {
-                        j += 1;
-                    }
+                    let j = tex_run_end(texs, i, t1);
                     let t = unsafe { &*(*tex_ptr as *const TexCtx) };
+                    // 真机取证：记录每帧实际绘制的前若干纹理 run（dst + 纹理指针），
+                    // 用来确认封面的四边形到底有没有进入 draw 列表。
+                    if std::env::var("LANLU_IMG_DIAG").ok().as_deref() == Some("1") {
+                        if let Some(mut f) = trace_file() {
+                            use std::io::Write;
+                            let _ = writeln!(f, "draw_run tex={:p} slice={}..{} dst=({:.1},{:.1},{:.1},{:.1}) uv=({:.2},{:.2},{:.2},{:.2}) params=({:.2},{:.2},{:.2},{:.2}) tint=({:.2},{:.2},{:.2},{:.2}) clip=({:.1},{:.1},{:.1},{:.1})", tex_ptr, i, j, inst.dst[0], inst.dst[1], inst.dst[2], inst.dst[3], inst.uv[0], inst.uv[1], inst.uv[2], inst.uv[3], inst.params[0], inst.params[1], inst.params[2], inst.params[3], inst.tint[0], inst.tint[1], inst.tint[2], inst.tint[3], clip[0], clip[1], clip[2], clip[3]);
+                        }
+                    }
                     // 首帧 SIGSEGV 取证：draw 时打印纹理指针与 bind_group 地址（LANLU_LGPU_TRACE=1）。
                     // 崩溃点在 set_bind_group 内部读取 TexCtx.bind_group —— 打印能直接对比出
                     // 悬垂/垃圾指针来自哪次 create/destroy。
@@ -1344,6 +1607,9 @@ fn draw_recorded(
                         let _ = writeln!(f, "draw tex ptr={:p} bg={:p} {}x{}", tex_ptr, &t.bind_group as *const _, t.width, t.height);
                     }
                     apply_scissor(pass, clip, width, height);
+                    // 绘制前主动设置 group1 的布局一致性诊断：若 bind group 与 pipeline 的
+                    // tex_bgl 不兼容（例如纹理被创建在不同 device/时间），wgpu 会丢弃该次
+                    // draw 而不报错 —— 这里显式记录一次 bind group 的设备代数。
                     pass.set_bind_group(1, &t.bind_group, &[]);
                     pass.set_vertex_buffer(0, buf.slice(i as u64 * tstride..j as u64 * tstride));
                     pass.draw(0..6, 0..(j - i) as u32);
@@ -1439,7 +1705,7 @@ pub extern "C" fn lgpu_snapshot_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: config.format,
+        format: SCREEN_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
@@ -1535,6 +1801,7 @@ pub extern "C" fn lgpu_snapshot_texture(
         bind_group: tex_bind_group,
         width: w,
         height: h,
+        needs_flush: std::sync::atomic::AtomicBool::new(true),
     })) as *mut c_void;
     texture_created_hook();
     tex
@@ -1582,7 +1849,7 @@ pub extern "C" fn lgpu_capture_offscreen(surface: *mut c_void, path: *const u8, 
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: config.format,
+        format: SCREEN_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
@@ -1723,6 +1990,8 @@ pub struct TexCtx {
     bind_group: wgpu::BindGroup,
     width: u32,
     height: u32,
+    /// 首次上传后需要一次空提交+poll 把 write_texture 冲进 GPU（见 upload 处注释）。
+    needs_flush: std::sync::atomic::AtomicBool,
 }
 
 /// 创建一张 RGBA8 纹理。返回不透明句柄，失败返回 null。
@@ -1765,7 +2034,7 @@ fn texture_create_locked(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1790,6 +2059,7 @@ fn texture_create_locked(
         bind_group,
         width,
         height,
+        needs_flush: std::sync::atomic::AtomicBool::new(true),
     })) as *mut c_void;
     if let Some(mut f) = trace_file() {
         use std::io::Write;
@@ -1833,8 +2103,23 @@ pub extern "C" fn lgpu_texture_upload(
         return E_BAD_ARG;
     }
     let bytes = unsafe { std::slice::from_raw_parts(pixels, (stride * height) as usize) };
+    // 真机取证：记录上传到哪个 TexCtx、首像素值（与绘制侧指针比对，验证是否同一对象）。
+    if std::env::var("LANLU_IMG_DIAG").ok().as_deref() == Some("1") {
+        if let Some(mut f) = trace_file() {
+            use std::io::Write;
+            let mid = ((height as usize / 2) * stride as usize) + ((width as usize / 2) * 4);
+            let _ = writeln!(f, "tex_upload tex={:p} {}x{} stride={} first=({},{},{},{}) mid=({},{},{},{})", tex, width, height, stride, bytes[0], bytes[1], bytes[2], bytes[3], bytes[mid], bytes[mid+1], bytes[mid+2], bytes[mid+3]);
+        }
+    }
+    // 真机取证（LANLU_IMG_DIAG=1 且 LANLU_RB=1）：读回探针放在 flush/copy 之后，
+    // 度量的是"上传+冲刷"之后的最终 GPU 内容。
+    let rb_probe = std::env::var("LANLU_IMG_DIAG").ok().as_deref() == Some("1")
+        && std::env::var("LANLU_RB").ok().as_deref() == Some("1")
+        && width * height <= 262144;
     STATS.uploads.fetch_add(1, Ordering::Relaxed);
     STATS.upload_bytes.fetch_add((width * height * 4) as u64, Ordering::Relaxed);
+    // 修复：rows_per_image 在非 array 纹理上应传 None；传 Some(height) 在部分后端
+    // （Maleoon/Vulkan）与 buffer 尺寸校验冲突时静默丢弃写入 —— 真机 GPU 读回全 0 的根因。
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &t.texture,
@@ -1846,7 +2131,7 @@ pub extern "C" fn lgpu_texture_upload(
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(stride),
-            rows_per_image: Some(height),
+            rows_per_image: None,
         },
         wgpu::Extent3d {
             width,
@@ -1854,7 +2139,87 @@ pub extern "C" fn lgpu_texture_upload(
             depth_or_array_layers: 1,
         },
     );
+    // 真机（Maleoon/Vulkan）实测：queue.write_texture 后即使空提交+poll，整图一次性上传的
+    // 纹理（封面）读回仍全 0；而持续上传的图集从第二次起数据正常。这里改用
+    // copy_buffer_to_texture 的显式拷贝路径（阶段缓冲 + encoder 提交）绕开该后端行为。
+    if t.needs_flush.swap(false, Ordering::Relaxed) {
+        if let Some(d) = &ctx.device {
+            let bpr = ((stride + 255) / 256) * 256;
+            let padded: Vec<u8> = if bpr == stride {
+                bytes.to_vec()
+            } else {
+                let mut v = vec![0u8; (bpr * height) as usize];
+                for row in 0..height as usize {
+                    let src = row * stride as usize;
+                    let dst = row * bpr as usize;
+                    v[dst..dst + stride as usize].copy_from_slice(&bytes[src..src + stride as usize]);
+                }
+                v
+            };
+            let stage = d.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("lgpu-tex-stage"),
+                size: padded.len() as u64,
+                usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+                mapped_at_creation: true,
+            });
+            {
+                if let Ok(mut mapping) = stage.slice(..).get_mapped_range_mut() {
+                    mapping.copy_from_slice(&padded);
+                }
+            }
+            stage.unmap();
+            let mut enc = d.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lgpu-tex-cp") });
+            enc.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &stage,
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: None },
+                },
+                wgpu::TexelCopyTextureInfo { texture: &t.texture, mip_level: 0, origin: wgpu::Origin3d { x, y, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            );
+            let idx = queue.submit(Some(enc.finish()));
+            let _ = d.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None });
+            let _ = stage; // 保留到 poll 完成后 drop
+        }
+    }
+    if rb_probe {
+        readback_first_pixel(ctx, t, width, height);
+    }
     0
+}
+
+/// 诊断：把纹理首像素读回并写进 trace（一次性，验证 write_texture 是否生效）。
+fn readback_first_pixel(ctx: &SurfaceCtx, t: &TexCtx, width: u32, height: u32) {
+    use std::io::Write;
+    let Some(device) = &ctx.device else { return };
+    let Some(queue) = &ctx.queue else { return };
+    let bpr = ((width * 4 + 255) / 256) * 256;
+    let size = (bpr * height) as u64;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("lgpu-rb-probe"),
+        size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lgpu-rb") });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: &t.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(height) } },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    let idx = queue.submit(Some(enc.finish()));
+    let slice = buf.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+    device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).ok();
+    if rx.recv().is_ok() {
+        if let Ok(data) = slice.get_mapped_range() {
+            if let Some(mut f) = trace_file() {
+                let _ = writeln!(f, "readback tex={:p} first=({},{},{},{}) mid4=({},{},{},{})", t as *const TexCtx as *mut std::ffi::c_void, data[0], data[1], data[2], data[3], data[bpr as usize * (height as usize / 2) as usize + (width as usize / 2) * 4], data[bpr as usize * (height as usize / 2) as usize + (width as usize / 2) * 4 + 1], data[bpr as usize * (height as usize / 2) as usize + (width as usize / 2) * 4 + 2], data[bpr as usize * (height as usize / 2) as usize + (width as usize / 2) * 4 + 3]);
+            }
+        }
+    }
+    buf.unmap();
 }
 
 /// 把一个纹理实例推入当前帧。
@@ -1917,6 +2282,12 @@ pub extern "C" fn lgpu_draw_texture_rounded(
         return E_BAD_ARG;
     }
     let _guard = lock_surface();
+    if std::env::var("LANLU_IMG_DIAG").ok().as_deref() == Some("1") {
+        if let Some(mut f) = trace_file() {
+            use std::io::Write;
+            let _ = writeln!(f, "draw_rounded tex={:p} dst=({:.1},{:.1},{:.1},{:.1}) radius={:.2} alpha={:.2}", tex, dx, dy, dw, dh, radius, a);
+        }
+    }
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
     ctx.tex_instances.push((gpu::TexInstance {
         dst: [dx, dy, dw, dh],
@@ -2284,6 +2655,56 @@ pub extern "C" fn lgpu_text_draw(
     // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）。
     // 多页查找/分配：先在现有页里找缓存槽或能放下的空位；全都放不下就新开一页。
     let size_key = (px_size * 4.0) as u32;
+
+    // R5.2 整段缓存快路径：同一 (字体, 字号, 文本) 的排版结果直接平移复用。
+    // 之前每帧每段文本都要重做 char→glyph 映射 + 槽位查找 + Vec 重建；
+    // 即时模式下同一批 Label 每帧重绘，命中率接近 100%（文字页的主要 CPU 成本之一）。
+    let text_hash = fxhash64(s.as_bytes());
+    let run_key = (fh.id, size_key, text_hash);
+    {
+        let _guard = lock_surface();
+        let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+        if let Some(run) = ctx.text_runs.get(&run_key).cloned() {
+            let mut ok = true;
+            for (_, _, _, _, _, _, _, _, tex) in run.quads.iter() {
+                let live = ctx
+                    .atlas_pages
+                    .iter()
+                    .any(|(ptex, _)| ptex == tex);
+                if !live {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                let baseline = y + text::metrics(fh, px_size).0;
+                let mut q = run.quads;
+                for quad in q.iter_mut() {
+                    quad.0 += x;
+                    quad.1 += baseline;
+                }
+                ctx.tex_instances.reserve(q.len());
+                for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in q {
+                    ctx.tex_instances.push((
+                        gpu::TexInstance {
+                            dst: [dx, dy, dw, dh],
+                            uv: [u0, v0, u1, v1],
+                            tint: [r, g, b, a],
+                            clip: ctx.clip,
+                            color2: [r, g, b, a],
+                            params: [0.0, 0.0, 0.0, 0.0],
+                        },
+                        page_tex,
+                    ));
+                }
+                STATS.text_run_hits.fetch_add(1, Ordering::Relaxed);
+                return run.advance; // 相对起笔的前进宽度
+            }
+            // 有页被淘汰：整段失效，走慢路径重排
+            ctx.text_runs.remove(&run_key);
+        }
+    }
+
     let mut pen_x = x;
     // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）
     let baseline = y + text::metrics(fh, px_size).0;
@@ -2296,17 +2717,10 @@ pub extern "C" fn lgpu_text_draw(
         };
         let key = (fh.id, glyph_id, size_key);
 
-        // (a) 已缓存：直接用（跨页查找，页号随槽一起返回）。
+        // (a) 已缓存：O(1) 索引命中（多页后不能再逐页线性扫）。
         let cached: Option<(text::GlyphSlot, *mut c_void)> = {
             let ro = unsafe { &*(surface as *const SurfaceCtx) };
-            let mut found = None;
-            for (tex, packer) in ro.atlas_pages.iter() {
-                if let Some(slot) = packer.cache.get(&key).copied() {
-                    found = Some((slot, *tex));
-                    break;
-                }
-            }
-            found
+            ro.glyph_index.get(&key).map(|(tex, slot)| (*slot, *tex))
         };
 
         let (slot, page_tex) = match cached {
@@ -2342,7 +2756,11 @@ pub extern "C" fn lgpu_text_draw(
                             // 本帧已录制的图元还引用它，推迟到 frame_end 之后销毁。
                             if ctx.atlas_pages.len() >= MAX_ATLAS_PAGES {
                                 let (old_tex, _) = ctx.atlas_pages.remove(0);
-                                ctx.pending_destroy.push(old_tex);
+                                // 索引里属于该页的条目一并失效（否则淘汰后仍命中已回收页）
+                                ctx.glyph_index.retain(|_, (tex, _)| *tex != old_tex);
+                                // 复用全局延迟销毁队列（frame_end 提交后统一 flush），
+                                // 这样"帧内淘汰/关闭"只有一套机制。
+                                defer_texture_destroy(old_tex);
                                 STATS.atlas_page_evict.fetch_add(1, Ordering::Relaxed);
                             }
                             let atlas_tex = texture_create_locked(ctx, ATLAS_SIZE, ATLAS_SIZE);
@@ -2378,13 +2796,9 @@ pub extern "C" fn lgpu_text_draw(
                 };
                 let _guard = lock_surface();
                 let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-                // 槽位登记到刚分配的页（按纹理指针找到它）
-                for (tex, packer) in ctx.atlas_pages.iter_mut() {
-                    if *tex == page_tex {
-                        packer.cache.insert(key, slot);
-                        break;
-                    }
-                }
+                // 只登记进全局 O(1) 索引（不再同时写各页 cache：重复的哈希表条目
+                // 只是内存翻倍，查找早已走 glyph_index）。
+                ctx.glyph_index.insert(key, (page_tex, slot));
                 (slot, page_tex)
             }
         };
@@ -2411,6 +2825,24 @@ pub extern "C" fn lgpu_text_draw(
     // 阶段 2：把四边形推入当前帧（quad 自带所在页的纹理指针）
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let advance = pen_x - x;
+
+    // R5.2：缓存**相对**偏移的四边形（去掉起笔点与基线），下次命中直接平移。
+    // 淘汰保护：段内任何一页被逐出时，快路径检查页存活并整段失效。
+    let mut rel: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)> =
+        Vec::with_capacity(quads.len());
+    let baseline = y + text::metrics(fh, px_size).0;
+    for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in quads.iter() {
+        rel.push((dx - x, dy - baseline, *dw, *dh, *u0, *v0, *u1, *v1, *page_tex));
+    }
+    if ctx.text_runs_count >= TEXT_RUN_CACHE_MAX {
+        ctx.text_runs.clear();
+        ctx.text_runs_count = 0;
+    }
+    ctx.text_runs.insert(run_key, TextRun { quads: rel, advance });
+    ctx.text_runs_count += 1;
+    STATS.text_run_misses.fetch_add(1, Ordering::Relaxed);
+
     for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in quads {
         ctx.tex_instances.push((
             gpu::TexInstance {
@@ -2425,7 +2857,17 @@ pub extern "C" fn lgpu_text_draw(
         ));
     }
 
-    pen_x - x
+    advance
+}
+
+/// FNV-1a 64 位：够快、无依赖，只用于缓存键（碰撞即偶发重排，不影响正确性）。
+fn fxhash64(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// 文本自检：用给定字体渲染 "AA" 到离屏目标，返回可见包围盒高度<<8 | 宽度高 8 位。
@@ -2899,6 +3341,20 @@ mod tests {
     fn tex_runs_empty() {
         let list: Vec<(gpu::TexInstance, *mut c_void)> = Vec::new();
         assert!(tex_run_bounds(&list).is_empty());
+    }
+
+    /// R5.2：缓存键哈希的确定性 + 区分度（不同文本不得碰撞出同键）。
+    #[test]
+    fn fxhash64_is_deterministic_and_distinguishes_texts() {
+        assert_eq!(fxhash64(b"hello"), fxhash64(b"hello"));
+        assert_ne!(fxhash64(b"hello"), fxhash64(b"hellp"));
+        assert_ne!(fxhash64(b""), fxhash64(b"a"));
+        // 同一字号档内不同文本、跨字号档同文本，键都必须不同
+        let k1 = (1u32, 60u32, fxhash64("书架".as_bytes()));
+        let k2 = (1u32, 60u32, fxhash64("书库".as_bytes()));
+        let k3 = (1u32, 80u32, fxhash64("书架".as_bytes()));
+        assert_ne!(k1, k2);
+        assert_ne!(k1, k3);
     }
 
     #[test]

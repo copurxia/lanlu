@@ -392,6 +392,11 @@ public class Texture {
         handle
     }
 
+    /// 诊断用：后端句柄地址（真机排查纹理 id → 句柄映射）。
+    public func debugHandle(): CPointer<UInt8> {
+        handle
+    }
+
     /// 上传 RGBA8 像素（支持子区域；stride 为每行字节数）。
     public func upload(rgba: Array<UInt8>, x: Int64, y: Int64, w: Int64, h: Int64, stride: Int64): Unit {
         let handlePtr = unsafe { acquireArrayRawData(rgba) }
