@@ -35,12 +35,29 @@ extern "C" int lanlu_lwp_take_ime_cursor_rect(int* x, int* y, int* w, int* h);
 extern "C" int lanlu_lwp_take_cursor_shape(void);
 extern "C" int lanlu_lwp_take_resize(int* w, int* h);
 extern "C" int lanlu_lwp_take_ime_want(void);
+extern "C" void lanlu_set_ime_active(int active);   // IME 活动门禁（字母重复输入修复）
 
 /* 文本输入开关：-1=无变化 0=关 1=开 */
 static napi_value LwpTakeImeWant(napi_env env, napi_callback_info info) {
     (void)info;
     napi_value out;
     napi_create_int32(env, lanlu_lwp_take_ime_want(), &out);
+    return out;
+}
+
+// IME attach/detach 时由 ArkTS 调用：拨动键盘过滤器的 IME 门禁。
+// attach 后 IME 的 insertText 是文本唯一入口，过滤器不再发键码（防字母重复）。
+static napi_value SetImeActive(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool active = false;
+    if (argc >= 1) {
+        napi_get_value_bool(env, argv[0], &active);
+    }
+    lanlu_set_ime_active(active ? 1 : 0);
+    napi_value out;
+    napi_create_int32(env, 0, &out);
     return out;
 }
 
@@ -994,6 +1011,7 @@ static napi_value ShellInit(napi_env env, napi_value exports) {
         { "lwpTestCapture", nullptr, LwpTestCapture, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpSurfaceChanged", nullptr, LwpSurfaceChanged, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTakeImeWant", nullptr, LwpTakeImeWant, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "setImeActive", nullptr, SetImeActive, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTakeWindowTitle", nullptr, LwpTakeWindowTitle, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTakeWindowLimits", nullptr, LwpTakeWindowLimits, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpAttachStats", nullptr, LwpAttachStats, nullptr, nullptr, nullptr, napi_default, nullptr },

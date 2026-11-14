@@ -25,6 +25,10 @@ struct Index {
   private ime: inputMethod.InputMethodController | undefined = undefined;
   private imeAttached: boolean = false;
   private imeBusy: boolean = false;
+  // IME 监听器只绑定一次：HarmonyOS 的 InputMethodController.on() 在 detach 后
+  // 不会自动解绑，重复 attach 再 listenIme 会叠加 N 个 insertText 回调 ——
+  // 真机表现为敲 1 个 s 上屏 2~3 个（监听器被注册了多次）。
+  private imeListenersBound: boolean = false;
   private winId: number = -1;
   // L 层渲染器上屏自检：一块独立小 XComponent，由 lgpu(wgpu) 清屏 present，
   // 验证 "wgpu → VK_OHOS_surface → 上屏"（不影响 SDL 主表面）。
@@ -373,6 +377,8 @@ struct Index {
         } else if (want === 0 && this.ime !== undefined) {
           this.ime.detach().then(() => {
             this.imeAttached = false;
+            // IME 已分离：恢复键盘过滤器的键码投递（功能键/方向键走过滤器路径）。
+            try { shell.setImeActive(false); } catch (eImeOff) {}
             console.info('[LANLU-SHELL] ime want=off');
           }).catch((e: Error) => {
             console.warn('[LANLU-SHELL] ime detach 失败: ' + JSON.stringify(e));
@@ -678,6 +684,10 @@ struct Index {
       }
       this.listenIme();
       this.imeAttached = true;
+      // IME 接管后 insertText 是文本唯一入口：关掉原生键盘过滤器的键码投递，
+      // 否则同一颗字母键经"IME insertText + preedit 上屏"与"过滤器 keycode"两条
+      // 路径到达引擎，TextField 每条 TextInput 插一次（真机 1 个 s 出现 2~3 个）。
+      try { shell.setImeActive(true); } catch (eImeOn) {}
       console.info('[LANLU-SHELL] IME attached win=' + this.winId);
     } catch (err) {
       console.error('[LANLU-SHELL] IME attach failed: ' + JSON.stringify(err));
@@ -689,6 +699,8 @@ struct Index {
   private listenIme(): void {
     const c = this.ime;
     if (c === undefined) return;
+    if (this.imeListenersBound) return;   // 只绑一次（见 imeListenersBound 的说明）
+    this.imeListenersBound = true;
     c.on('insertText', (text: string) => {
       try { shell.sendText(text); } catch (err) { console.error('[LANLU-SHELL] sendText fail'); }
     });
@@ -829,6 +841,23 @@ struct Index {
           fs.writeSync(f.fd, line);
           fs.closeSync(f);
         } catch (eW0) {}
+        // 关窗链路探针（LANLU_PROBE_CLOSE=1）：2 秒后模拟系统关闭钮，
+        // 验证 windowWillClose -> lwpSendCloseRequest -> 引擎 close_request -> 退出。
+        try {
+          if (AppStorage.get<boolean>('lanluProbeClose') === true) {
+            let n: number = 0;
+            const t = setInterval(() => {
+              n = n + 1;
+              if (n >= 4) {
+                clearInterval(t);
+                try {
+                  const rc: number = shell.lwpSendCloseRequest();
+                  console.info('[LANLU-SHELL] probe close_request sent rc=' + rc);
+                } catch (eC) {}
+              }
+            }, 500);
+          }
+        } catch (ePc) {}
         this.attachIme();
       })
       .catch((e: Error) => {
@@ -866,7 +895,8 @@ struct Index {
         buttonBackgroundSize: clamp(cfg[4], 20, 40),
         colorMode: mode
       });
-      console.info('[LANLU-SHELL] title buttons cfg applied visible=0x' + visible.toString(16));
+      console.info('[LANLU-SHELL] title buttons cfg applied visible=0x' + visible.toString(16)
+        + ' mode=' + cfg[5]);
     } catch (eStyle) {
       console.info('[LANLU-SHELL] decor button style failed: ' + (eStyle as Error).message);
     }

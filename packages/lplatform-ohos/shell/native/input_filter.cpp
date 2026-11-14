@@ -268,3 +268,15 @@ extern "C" int lanlu_register_filters(int32_t window_id) {
 }
 
 
+
+// ── IME 活动门禁（字母重复输入修复，2026-11-13）────────────────────────────
+// IME attach 期间物理字母键由 IME 的 insertText 提交；键盘过滤器若继续发键码，
+// 同一颗键会经"IME insertText + preedit 上屏"与"过滤器 keycode"两条路径到达引擎，
+// 引擎 TextField 每个 TextInput 插一次 —— 真机表现为输入 1 个 s 出现 2~3 个 s。
+// 此前 g_ime_active 只有声明和读取、没有任何写入（门禁形同虚设）；这里暴露 setter，
+// 由 ArkTS 在 attachIme/detach 时拨动。
+extern "C" __attribute__((visibility("default")))
+void lanlu_set_ime_active(int active) {
+    g_ime_active.store(active ? 1 : 0, std::memory_order_relaxed);
+    LOGI("ime_active=%d", active ? 1 : 0);
+}

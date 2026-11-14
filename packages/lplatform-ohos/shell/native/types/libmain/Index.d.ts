@@ -36,6 +36,7 @@ export const lwpDialogClear: () => void;
 export const lwpTestInject: (kind: number, a: number, b: number) => number;
 export const lwpTestCapture: (path: string) => number;
 export const lwpTakeImeWant: () => number;
+export const setImeActive: (active: boolean) => void;
 export const lwpTakeWindowTitle: () => string;
 export const lwpTakeWindowLimits: () => number[];
 export const lwpAttachStats: () => number[];
