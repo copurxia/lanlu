@@ -33,7 +33,10 @@ check ohos-stubs/libfontconfig.so.1 "见 docs/ohos-port.md" "fontconfig"
 check ohos-stubs/libharfbuzz.so.0   "见 docs/ohos-port.md" "harfbuzz"
 check ohos-stubs/libfribidi.so.0    "见 docs/ohos-port.md" "fribidi"
 check ohos-stubs/librocksdb.so      "见 docs/ohos-port.md（rocksdb 交叉编译）" "rocksdb"
-check ohos-stubs/libvips.so         "bash packages/lplatform-ohos/deps/vips/build-ohos.sh $RES/ohos-stubs/libvips.so" "vips（图片）"
+# vips shim 已下线：lcodec 在 OHOS 直连系统 ImageSource；AVIF 系统不支持的分支走随包的
+# libavif + dav1d（构建见 packages/lplatform-ohos/deps/avif/build-ohos.sh）。
+check ohos-stubs/libavif.so.16.1.1   "bash packages/lplatform-ohos/deps/avif/build-ohos.sh" "libavif（AVIF 回退）"
+check ohos-stubs/libdav1d.so.7.0.0   "bash packages/lplatform-ohos/deps/avif/build-ohos.sh" "dav1d（AV1 解码）"
 check ohos-stubs/libvlc.so          "bash packages/lplatform-ohos/deps/libvlc/build-ohos.sh $RES/ohos-stubs/libvlc.so" "vlc shim（媒体）"
 check ohos-stubs/ffmpeg/libavcodec.so.61 "bash packages/lpack-ohos/tools/build-ffmpeg-ohos.sh" "ffmpeg（编解码）"
 check ohos-stubs/ffmpeg/libavformat.so.61 "bash packages/lpack-ohos/tools/build-ffmpeg-ohos.sh" "ffmpeg（容器）"

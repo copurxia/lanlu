@@ -41,7 +41,21 @@ public func blurRgba(pixels: Array<UInt8>, width: Int32, height: Int32,
         return None
     }
     if (!ensureVipsForBlur()) {
-        return None
+        // OHOS 没有 vips：走纯仓颉三次盒式模糊（等价能力，无外部库依赖）。
+        let handle = unsafe { acquireArrayRawData(pixels) }
+        let blurredPtr = blurRgbaNative(CPointer<UInt8>(handle.pointer), width, height, sigma)
+        unsafe { releaseArrayRawData(handle) }
+        if (blurredPtr.isNull()) {
+            return None
+        }
+        let result = Array<UInt8>(expected, repeat: 0u8)
+        unsafe {
+            let out = acquireArrayRawData(result)
+            memcpy(out.pointer, blurredPtr, UIntNative(expected))
+            releaseArrayRawData(out)
+        }
+        freeRgba(blurredPtr)
+        return Some(result)
     }
     var source: VipsImagePtr = CPointer<VipsImage>()
     var blurred: VipsImagePtr = CPointer<VipsImage>()

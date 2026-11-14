@@ -43,12 +43,15 @@ public class NativeDecodedImage {
     public let height: Int32
     public let size: Int64
     private var ptr: ?CPointer<UInt8> = None
+    // 像素缓冲归属：true=libvips 分配（g_free）；false=系统解码器/纯仓颉/libavif 分配（free）。
+    private let vipsOwned: Bool
 
-    public init(width: Int32, height: Int32, ptr: CPointer<UInt8>, size: Int64) {
+    public init(width: Int32, height: Int32, ptr: CPointer<UInt8>, size: Int64, vipsOwned!: Bool = true) {
         this.width = width
         this.height = height
         this.size = size
         this.ptr = Some(ptr)
+        this.vipsOwned = vipsOwned
     }
 
     // 底层指针；已释放时返回空指针（调用方按需防御）。
@@ -67,7 +70,11 @@ public class NativeDecodedImage {
     public func close(): Unit {
         match (ptr) {
             case Some(p) =>
-                VipsApi.free(CPointer<Unit>(p))
+                if (vipsOwned) {
+                    VipsApi.free(CPointer<Unit>(p))
+                } else {
+                    freeRgba(p)
+                }
                 ptr = None
             case None => ()
         }
@@ -97,7 +104,83 @@ public class NativeDecodedImage {
 // maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
 // 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
 // 仅在工作线程调用（vips 解码是 CPU 重活，UI 线程纪律见 model.startImageTask）。
+// 系统解码器路径（OHOS）：直连 ImageSource，成功后按 maxDimension 做一次双线性缩放。
+private func tryDecodeWithSystem(path: String, maxDimension: Int32): ?NativeDecodedImage {
+    if (!SystemImageDecoder.available()) {
+        return None
+    }
+    match (SystemImageDecoder.decodeRgba(path)) {
+        case Some(d) =>
+            var w = d.width
+            var h = d.height
+            var ptr = d.pixels
+            if (maxDimension > 0) {
+                let longest = max(Int64(w), Int64(h))
+                if (longest > Int64(maxDimension)) {
+                    let scale = Float64(maxDimension) / Float64(longest)
+                    let dw = max(Int32(1), Int32(Float64(w) * scale))
+                    let dh = max(Int32(1), Int32(Float64(h) * scale))
+                    let scaled = resizeRgbaBilinear(ptr, w, h, dw, dh)
+                    if (!scaled.isNull()) {
+                        freeRgba(ptr)
+                        ptr = scaled
+                        w = dw
+                        h = dh
+                    }
+                }
+            }
+            let size = Int64(w) * Int64(h) * 4
+            return Some(NativeDecodedImage(w, h, ptr, size, vipsOwned: false))
+        case None => return None
+    }
+}
+
+// libavif 直连回退（AVIF 系统解码器不支持的分支：4:4:4 / 12-bit）。
+private func tryDecodeWithAvif(path: String, maxDimension: Int32): ?NativeDecodedImage {
+    match (AvifBackend.decodeRgba(path)) {
+        case Some(d) =>
+            var w = d.width
+            var h = d.height
+            var ptr = d.pixels
+            if (maxDimension > 0) {
+                let longest = max(Int64(w), Int64(h))
+                if (longest > Int64(maxDimension)) {
+                    let scale = Float64(maxDimension) / Float64(longest)
+                    let dw = max(Int32(1), Int32(Float64(w) * scale))
+                    let dh = max(Int32(1), Int32(Float64(h) * scale))
+                    let scaled = resizeRgbaBilinear(ptr, w, h, dw, dh)
+                    if (!scaled.isNull()) {
+                        freeRgba(ptr)
+                        ptr = scaled
+                        w = dw
+                        h = dh
+                    }
+                }
+            }
+            let size = Int64(w) * Int64(h) * 4
+            return Some(NativeDecodedImage(w, h, ptr, size, vipsOwned: false))
+        case None => return None
+    }
+}
+
 public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDecodedImage {
+    // OHOS：优先直连系统解码器（不走 vips）；系统不支持的 AVIF 分支再走随包的 libavif。
+    if (SystemImageDecoder.available()) {
+        match (tryDecodeWithSystem(path, maxDimension)) {
+            case Some(img) => return img
+            case None => ()
+        }
+        let fmt = sniffImageFormat(path)
+        if (fmt == SniffedImageFormat.Avif || fmt == SniffedImageFormat.Heif) {
+            match (tryDecodeWithAvif(path, maxDimension)) {
+                case Some(img) => return img
+                case None => ()
+            }
+        }
+        throw Exception("系统解码失败(format=${sniffedImageFormatName(fmt)}): " +
+            SystemImageDecoder.lastError + " / libavif: " +
+            (if (AvifBackend.available()) { AvifBackend.lastError } else { AvifBackend.unavailableReason() }))
+    }
     ensureVips()
     var inImg: VipsImagePtr = CPointer<VipsImage>()
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()
@@ -216,6 +299,45 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
 // 改为中间尺寸（~256px）+ sigma 高斯模糊，质感对齐原型 filter: blur(36px)。
 // blurSigma 为高斯核 sigma（中间图像素单位），0 表示不模糊（回退旧行为的逃生口）。
 public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64 = 8.0): NativeDecodedImage {
+    // OHOS：系统解码 + 纯仓颉缩放/模糊（vips_resize / vips_gaussblur 的等价实现）。
+    if (SystemImageDecoder.available()) {
+        var decoded: ?SystemDecoded = SystemImageDecoder.decodeRgba(path)
+        if (decoded.isNone()) {
+            let fmt = sniffImageFormat(path)
+            if (fmt == SniffedImageFormat.Avif || fmt == SniffedImageFormat.Heif) {
+                decoded = AvifBackend.decodeRgba(path)
+            }
+        }
+        match (decoded) {
+            case Some(d) =>
+                var w = d.width
+                var h = d.height
+                var ptr = d.pixels
+                if (targetWidth > 0 && w != targetWidth) {
+                    let scale = Float64(targetWidth) / Float64(w)
+                    let dh = max(Int32(1), Int32(Float64(h) * scale))
+                    let scaled = resizeRgbaBilinear(ptr, w, h, targetWidth, dh)
+                    if (!scaled.isNull()) {
+                        freeRgba(ptr)
+                        ptr = scaled
+                        w = targetWidth
+                        h = dh
+                    }
+                }
+                if (blurSigma > 0.0) {
+                    let blurred = blurRgbaNative(ptr, w, h, blurSigma)
+                    if (!blurred.isNull()) {
+                        freeRgba(ptr)
+                        ptr = blurred
+                    }
+                }
+                let size = Int64(w) * Int64(h) * 4
+                return NativeDecodedImage(w, h, ptr, size, vipsOwned: false)
+            case None => ()
+        }
+        throw Exception("系统解码失败(format=${sniffedImageFormatName(sniffImageFormat(path))}): " +
+            SystemImageDecoder.lastError)
+    }
     ensureVips()
     var inImg: VipsImagePtr = CPointer<VipsImage>()
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()

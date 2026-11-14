@@ -45,7 +45,7 @@ foreign func dlopen(filename: CString, flag: Int32): CPointer<Unit>
 foreign func dlsym(handle: CPointer<Unit>, symbol: CString): CPointer<Unit>
 
 @When[os == "Windows"]
-private func openLib(name: String): CPointer<Unit> {
+func openLib(name: String): CPointer<Unit> {
     let c = unsafe { LibC.mallocCString(name) }
     let h = unsafe { LoadLibraryA(c) }
     unsafe { LibC.free(c) }
@@ -53,7 +53,7 @@ private func openLib(name: String): CPointer<Unit> {
 }
 
 @When[os == "Windows"]
-private func symOf(handle: CPointer<Unit>, name: String): CPointer<Unit> {
+func symOf(handle: CPointer<Unit>, name: String): CPointer<Unit> {
     let c = unsafe { LibC.mallocCString(name) }
     let p = unsafe { GetProcAddress(handle, c) }
     unsafe { LibC.free(c) }
@@ -61,7 +61,7 @@ private func symOf(handle: CPointer<Unit>, name: String): CPointer<Unit> {
 }
 
 @When[os != "Windows"]
-private func openLib(name: String): CPointer<Unit> {
+func openLib(name: String): CPointer<Unit> {
     let c = unsafe { LibC.mallocCString(name) }
     let h = unsafe { dlopen(c, 2) } // RTLD_NOW
     unsafe { LibC.free(c) }
@@ -69,7 +69,7 @@ private func openLib(name: String): CPointer<Unit> {
 }
 
 @When[os != "Windows"]
-private func symOf(handle: CPointer<Unit>, name: String): CPointer<Unit> {
+func symOf(handle: CPointer<Unit>, name: String): CPointer<Unit> {
     let c = unsafe { LibC.mallocCString(name) }
     let p = unsafe { dlsym(handle, c) }
     unsafe { LibC.free(c) }

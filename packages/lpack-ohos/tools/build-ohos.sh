@@ -71,7 +71,9 @@ bash "$PKG/packages/lplatform-ohos/deps/lwp/build-ohos.sh" > "$TMPDIR/lwp-build.
 
 # 1) 结构性 shim（源码在 packages/lplatform-ohos/deps，产物进 ohos-stubs / 各包 native 目录）
 DEPS=$LPLAT/deps
-"$DEPS/vips/build-ohos.sh" "$RES/ohos-stubs/libvips.so"
+# vips shim 已下线：lcodec 在 OHOS 直连系统 ImageSource（libimage_source/libpixelmap，
+# 随系统提供），不再需要 vips 形状的中间层。AVIF 系统解码器不支持的分支（4:4:4 等）
+# 由 lcodec 的 libavif 回退承接（avif_backend.cj，当前未随包时明确跳过）。
 "$DEPS/rocksdb/build-ohos.sh" "$PKG/packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.so"
 "$DEPS/libvlc/build-ohos.sh" "$RES/ohos-stubs/libvlc.so"
 bash "$DEPS/lgpu/build-ohos.sh"
@@ -173,6 +175,8 @@ true
 # 不动 .hvigor（守护进程持有 FUSE 句柄），只清生成物
 find "$BUILD/target/ohos/hap" -mindepth 1 -maxdepth 1 ! -name '.hvigor' -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$BUILD/target/ohos/hap/entry/.cxx" 2>/dev/null || true
+# 4.4) vips shim 残留清理：lcodec 已直连系统 ImageSource，HAP 不再带 libvips.so。
+rm -f "$RES/ohos-stubs/libvips.so" 2>/dev/null || true
 # 4.5) 瘦身：strip 源库调试信息（hapgen 复制时带入 HAP）
 for d in "$ST" "$ST/ffmpeg" "$PFX" "$PK/webview/native/target/release" "$PK/rocksdb_ffi/native" "$PK/libavformat_ffi/native" "$PK/libass_ffi/native" "$PK/fontkit_ffi/native/target/release" "$ENG"; do
   find "$d" -maxdepth 1 -name '*.so*' -type f -exec "$NATIVE/llvm/bin/llvm-strip" --strip-debug {} \; 2>/dev/null || true
