@@ -114,13 +114,24 @@ typedef struct __attribute__((packed)) {
     float dy;
 } lwp_lw_input_pointer_axis;
 
-/* 键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：Linux xkb+OHOS 统一映射）；down 区分按下/释放。 */
+/* 键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：evdev 布局，OHOS keyCode 由壳映射）；
+down 区分按下/释放。
+
+since=2 追加两个字段（只追加，不改老字段布局）：
+  utf8      —— 该键在当前键盘布局/修饰键下产生的文本（可为空）。输入法不消费的可打印键
+               （数字、符号、以及没有输入法时的字母）靠它进入输入框，不再由引擎猜字符。
+  modifiers —— 修饰键位掩码，见 LWP_KEY_MOD_*（对齐 SDL_KMOD_*，引擎 KeyModifiers 直接复用）。
+
+去重约定：壳不得把输入法已消费的按键再发到这里；引擎在输入框聚焦且 utf8 非空、
+且没有 Ctrl/Alt/Meta 时插入该文本（见 docs/lwindow-ime-plan.md §3）。 */
 #define LWP_LW_INPUT_KEY_OPCODE 3
-#define LWP_LW_INPUT_KEY_SIZE 9
+#define LWP_LW_INPUT_KEY_SIZE 15
 typedef struct __attribute__((packed)) {
     uint32_t size;
     uint32_t keycode;
     uint8_t down;
+    lwp_str utf8;
+    uint16_t modifiers;
 } lwp_lw_input_key;
 
 /* IME 提交的文本（对应 wayland text-input-v3 commit）。 */
@@ -163,11 +174,16 @@ typedef struct __attribute__((packed)) {
 #define LWP_IFACE_LW_TEXT_INPUT 9
 #define LWP_IFACE_LW_TEXT_INPUT_VERSION 1
 
-/* 引擎 -> 壳：开启输入法（获得焦点时）。 */
+/* 引擎 -> 壳：开启输入法（输入框获得焦点时；失焦发 disable）。
+
+since=2 追加两个字段：input_type / enter_key（见 LWP_IME_TEXT_INPUT_*、LWP_IME_ENTER_KEY_*）。
+壳据此选择输入法模式（文本/数字/密码）与回车键形态；不认识的值按 TEXT/DONE 处理。 */
 #define LWP_LW_TEXT_INPUT_ENABLE_OPCODE 0
-#define LWP_LW_TEXT_INPUT_ENABLE_SIZE 4
+#define LWP_LW_TEXT_INPUT_ENABLE_SIZE 12
 typedef struct __attribute__((packed)) {
     uint32_t size;
+    uint32_t input_type;
+    uint32_t enter_key;
 } lwp_lw_text_input_enable;
 
 /* 引擎 -> 壳：关闭输入法。 */
@@ -198,7 +214,10 @@ typedef struct __attribute__((packed)) {
     int32_t h;
 } lwp_lw_text_input_set_cursor_rect;
 
-/* 壳 -> 引擎：候选/preedit 文本与光标位置（用于在窗口内自绘候选条）。 */
+/* 壳 -> 引擎：组合中的文本（尚未上屏）与组合串内的光标字节偏移。
+
+引擎在输入框里按"上屏文本 + 下划线组合串"渲染；cursor 是组合串内的字节偏移。
+空 text 表示组合结束（随后通常会有一个 commit_string）。 */
 #define LWP_LW_TEXT_INPUT_PREEDIT_OPCODE 0
 #define LWP_LW_TEXT_INPUT_PREEDIT_SIZE 12
 typedef struct __attribute__((packed)) {
@@ -206,6 +225,25 @@ typedef struct __attribute__((packed)) {
     lwp_str text;
     uint32_t cursor;
 } lwp_lw_text_input_preedit;
+
+/* 壳 -> 引擎：上屏文本（text-input-v3 commit_string）。引擎插入到当前光标处并清空组合串。 */
+#define LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE 1
+#define LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE 8
+typedef struct __attribute__((packed)) {
+    uint32_t size;
+    lwp_str text;
+} lwp_lw_text_input_commit_string;
+
+/* 壳 -> 引擎：输入法要求删除光标前后文本（text-input-v3 delete_surrounding_text）。
+
+before/after 单位是**字符**（UTF-8 码点），不是字节；引擎按码点删。 */
+#define LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE 2
+#define LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE 12
+typedef struct __attribute__((packed)) {
+    uint32_t size;
+    uint32_t before;
+    uint32_t after;
+} lwp_lw_text_input_delete_surrounding;
 
 /* ---- 接口 lw_clipboard（version 1）---- */
 #define LWP_IFACE_LW_CLIPBOARD 10
@@ -672,5 +710,39 @@ typedef struct __attribute__((packed)) {
 #define LWP_CORE_CAPABILITIES_MULTI_WINDOW 32768u
 #define LWP_CORE_CAPABILITIES_SOFT_KEYBOARD 65536u
 #define LWP_CORE_CAPABILITIES_TITLE_BUTTONS 131072u
+
+/* lw_input.key 的 modifiers 字段。位定义对齐 SDL_KMOD_*（lgui.input.KeyModifiers 的输入格式）。 */
+#define LWP_KEY_MODIFIERS_LSHIFT 1u
+#define LWP_KEY_MODIFIERS_RSHIFT 2u
+#define LWP_KEY_MODIFIERS_LEVEL5 4u
+#define LWP_KEY_MODIFIERS_LCTRL 64u
+#define LWP_KEY_MODIFIERS_RCTRL 128u
+#define LWP_KEY_MODIFIERS_LALT 256u
+#define LWP_KEY_MODIFIERS_RALT 512u
+#define LWP_KEY_MODIFIERS_LGUI 1024u
+#define LWP_KEY_MODIFIERS_RGUI 2048u
+#define LWP_KEY_MODIFIERS_NUM 4096u
+#define LWP_KEY_MODIFIERS_CAPS 8192u
+#define LWP_KEY_MODIFIERS_MODE 16384u
+#define LWP_KEY_MODIFIERS_SCROLL 32768u
+
+/* 输入框类型：壳据此选择输入法模式（文本/数字/密码/URL 等）。 */
+#define LWP_IME_TEXT_INPUT_TYPE_TEXT 0u
+#define LWP_IME_TEXT_INPUT_TYPE_NUMBER 1u
+#define LWP_IME_TEXT_INPUT_TYPE_PHONE 2u
+#define LWP_IME_TEXT_INPUT_TYPE_PASSWORD 3u
+#define LWP_IME_TEXT_INPUT_TYPE_URL 4u
+#define LWP_IME_TEXT_INPUT_TYPE_EMAIL 5u
+
+/* 回车键语义：壳据此决定软键盘右下角按键（完成/搜索/发送/换行）。 */
+#define LWP_IME_ENTER_KEY_UNSPECIFIED 0u
+#define LWP_IME_ENTER_KEY_NONE 1u
+#define LWP_IME_ENTER_KEY_GO 2u
+#define LWP_IME_ENTER_KEY_SEARCH 3u
+#define LWP_IME_ENTER_KEY_SEND 4u
+#define LWP_IME_ENTER_KEY_NEXT 5u
+#define LWP_IME_ENTER_KEY_DONE 6u
+#define LWP_IME_ENTER_KEY_PREVIOUS 7u
+#define LWP_IME_ENTER_KEY_NEWLINE 8u
 
 #endif /* LWP_PROTOCOL_H */

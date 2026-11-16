@@ -27,7 +27,16 @@ static int lwp_dispatch(lwp_channel* ch, const lwp_header* hdr, const void* body
             return lwp_handle_lw_input_pointer_button(ch, body);
         case LWP_LW_INPUT_POINTER_AXIS_OPCODE: /* 滚轮/触摸板滚动。dx/dy 为逻辑行数；wayland 轴向取反后传入（计划 §6.3）。 */
             return lwp_handle_lw_input_pointer_axis(ch, body);
-        case LWP_LW_INPUT_KEY_OPCODE: /* 键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：Linux xkb+OHOS 统一映射）；down 区分按下/释放。 */
+        case LWP_LW_INPUT_KEY_OPCODE: /* 键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：evdev 布局，OHOS keyCode 由壳映射）；
+down 区分按下/释放。
+
+since=2 追加两个字段（只追加，不改老字段布局）：
+  utf8      —— 该键在当前键盘布局/修饰键下产生的文本（可为空）。输入法不消费的可打印键
+               （数字、符号、以及没有输入法时的字母）靠它进入输入框，不再由引擎猜字符。
+  modifiers —— 修饰键位掩码，见 LWP_KEY_MOD_*（对齐 SDL_KMOD_*，引擎 KeyModifiers 直接复用）。
+
+去重约定：壳不得把输入法已消费的按键再发到这里；引擎在输入框聚焦且 utf8 非空、
+且没有 Ctrl/Alt/Meta 时插入该文本（见 docs/lwindow-ime-plan.md §3）。 */
             return lwp_handle_lw_input_key(ch, body);
         case LWP_LW_INPUT_TEXT_INPUT_OPCODE: /* IME 提交的文本（对应 wayland text-input-v3 commit）。 */
             return lwp_handle_lw_input_text_input(ch, body);
@@ -45,7 +54,10 @@ static int lwp_dispatch(lwp_channel* ch, const lwp_header* hdr, const void* body
         }
     case LWP_IFACE_LW_TEXT_INPUT:
         switch (hdr->opcode) {
-        case LWP_LW_TEXT_INPUT_ENABLE_OPCODE: /* 引擎 -> 壳：开启输入法（获得焦点时）。 */
+        case LWP_LW_TEXT_INPUT_ENABLE_OPCODE: /* 引擎 -> 壳：开启输入法（输入框获得焦点时；失焦发 disable）。
+
+since=2 追加两个字段：input_type / enter_key（见 LWP_IME_TEXT_INPUT_*、LWP_IME_ENTER_KEY_*）。
+壳据此选择输入法模式（文本/数字/密码）与回车键形态；不认识的值按 TEXT/DONE 处理。 */
             return lwp_handle_lw_text_input_enable(ch, body);
         case LWP_LW_TEXT_INPUT_DISABLE_OPCODE: /* 引擎 -> 壳：关闭输入法。 */
             return lwp_handle_lw_text_input_disable(ch, body);
@@ -53,8 +65,17 @@ static int lwp_dispatch(lwp_channel* ch, const lwp_header* hdr, const void* body
             return lwp_handle_lw_text_input_set_surrounding(ch, body);
         case LWP_LW_TEXT_INPUT_SET_CURSOR_RECT_OPCODE: /* 引擎 -> 壳：光标矩形（窗口坐标），输入法据此定位候选框。 */
             return lwp_handle_lw_text_input_set_cursor_rect(ch, body);
-        case LWP_LW_TEXT_INPUT_PREEDIT_OPCODE: /* 壳 -> 引擎：候选/preedit 文本与光标位置（用于在窗口内自绘候选条）。 */
+        case LWP_LW_TEXT_INPUT_PREEDIT_OPCODE: /* 壳 -> 引擎：组合中的文本（尚未上屏）与组合串内的光标字节偏移。
+
+引擎在输入框里按"上屏文本 + 下划线组合串"渲染；cursor 是组合串内的字节偏移。
+空 text 表示组合结束（随后通常会有一个 commit_string）。 */
             return lwp_handle_lw_text_input_preedit(ch, body);
+        case LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE: /* 壳 -> 引擎：上屏文本（text-input-v3 commit_string）。引擎插入到当前光标处并清空组合串。 */
+            return lwp_handle_lw_text_input_commit_string(ch, body);
+        case LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE: /* 壳 -> 引擎：输入法要求删除光标前后文本（text-input-v3 delete_surrounding_text）。
+
+before/after 单位是**字符**（UTF-8 码点），不是字节；引擎按码点删。 */
+            return lwp_handle_lw_text_input_delete_surrounding(ch, body);
         default: return -LWP_ERR_UNKNOWN_OPCODE;
         }
     case LWP_IFACE_LW_CLIPBOARD:

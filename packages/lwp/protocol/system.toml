@@ -39,8 +39,14 @@ doc = "IME：preedit 与 surrounding text（text-input-v3 的子集）。"
 [[interface.lw_text_input.request]]
 name = "enable"
 since = 1
-doc = "引擎 -> 壳：开启输入法（获得焦点时）。"
-args = []
+doc = """引擎 -> 壳：开启输入法（输入框获得焦点时；失焦发 disable）。
+
+since=2 追加两个字段：input_type / enter_key（见 LWP_IME_TEXT_INPUT_*、LWP_IME_ENTER_KEY_*）。
+壳据此选择输入法模式（文本/数字/密码）与回车键形态；不认识的值按 TEXT/DONE 处理。"""
+args = [
+  { name = "input_type", type = "u32" },
+  { name = "enter_key", type = "u32" },
+]
 
 [[interface.lw_text_input.request]]
 name = "disable"
@@ -51,10 +57,32 @@ args = []
 [[interface.lw_text_input.event]]
 name = "preedit"
 since = 1
-doc = "壳 -> 引擎：候选/preedit 文本与光标位置（用于在窗口内自绘候选条）。"
+doc = """壳 -> 引擎：组合中的文本（尚未上屏）与组合串内的光标字节偏移。
+
+引擎在输入框里按"上屏文本 + 下划线组合串"渲染；cursor 是组合串内的字节偏移。
+空 text 表示组合结束（随后通常会有一个 commit_string）。"""
 args = [
   { name = "text", type = "string" },
   { name = "cursor", type = "u32" },
+]
+
+[[interface.lw_text_input.event]]
+name = "commit_string"
+since = 2
+doc = "壳 -> 引擎：上屏文本（text-input-v3 commit_string）。引擎插入到当前光标处并清空组合串。"
+args = [
+  { name = "text", type = "string" },
+]
+
+[[interface.lw_text_input.event]]
+name = "delete_surrounding"
+since = 2
+doc = """壳 -> 引擎：输入法要求删除光标前后文本（text-input-v3 delete_surrounding_text）。
+
+before/after 单位是**字符**（UTF-8 码点），不是字节；引擎按码点删。"""
+args = [
+  { name = "before", type = "u32" },
+  { name = "after", type = "u32" },
 ]
 
 [[interface.lw_text_input.request]]
@@ -204,3 +232,30 @@ name = "capture"
 since = 1
 doc = "壳 -> 引擎：抓一帧并存到 path（真机无 ADB 时用）。"
 args = [{ name = "path", type = "string" }]
+
+# text_input.enable 的输入类型（对齐 OHOS InputMethod_TextInputType 的常用子集）。
+[enum.ime_text_input_type]
+doc = "输入框类型：壳据此选择输入法模式（文本/数字/密码/URL 等）。"
+entries = [
+  ["text", 0],
+  ["number", 1],
+  ["phone", 2],
+  ["password", 3],
+  ["url", 4],
+  ["email", 5],
+]
+
+# text_input.enable 的回车键形态（对齐 OHOS InputMethod_EnterKeyType）。
+[enum.ime_enter_key]
+doc = "回车键语义：壳据此决定软键盘右下角按键（完成/搜索/发送/换行）。"
+entries = [
+  ["unspecified", 0],
+  ["none", 1],
+  ["go", 2],
+  ["search", 3],
+  ["send", 4],
+  ["next", 5],
+  ["done", 6],
+  ["previous", 7],
+  ["newline", 8],
+]

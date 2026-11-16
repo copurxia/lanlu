@@ -302,6 +302,15 @@ public func encodeLwTextInputToggle(): Array<UInt8> {
     b
 }
 
+/// text_input.enable（since=2）：size(4) + input_type(4) + enter_key(4) = 12
+public func encodeLwTextInputEnable(inputType: UInt32, enterKey: UInt32): Array<UInt8> {
+    var b = Array<UInt8>(LWP_LW_TEXT_INPUT_ENABLE_SIZE, repeat: 0)
+    u32le(UInt32(LWP_LW_TEXT_INPUT_ENABLE_SIZE), b, 0)
+    u32le(inputType, b, 4)
+    u32le(enterKey, b, 8)
+    b
+}
+
 /// text_input.set_surrounding：size(4) + text(str) + cursor(4) + anchor(4)
 public func encodeLwTextInputSetSurrounding(text: String, cursor: UInt32, anchor: UInt32): Array<UInt8> {
     let t = text.toArray()
@@ -348,5 +357,54 @@ public func encodeLwWindowBeginResize(edges: UInt32): Array<UInt8> {
     var b = Array<UInt8>(LWP_LW_WINDOW_BEGIN_RESIZE_SIZE, repeat: 0)
     u32le(UInt32(LWP_LW_WINDOW_BEGIN_RESIZE_SIZE), b, 0)
     u32le(edges, b, 4)
+    b
+}
+
+/// key（since=2）：size(4)+keycode(4)+down(1)+utf8(string)+modifiers(u16)
+public func encodeLwInputKeyText(keycode: UInt32, down: Bool, text: String, modifiers: UInt16): Array<UInt8> {
+    let t = text.toArray()
+    let total = LWP_LW_INPUT_KEY_SIZE + t.size
+    var b = Array<UInt8>(total, repeat: 0)
+    u32le(UInt32(total), b, 0)
+    u32le(keycode, b, 4)
+    b[8] = if (down) { 1 } else { 0 }
+    u16le(UInt16(LWP_LW_INPUT_KEY_SIZE), b, 9)
+    u16le(UInt16(t.size), b, 11)
+    u16le(modifiers, b, 13)
+    for (i in 0..t.size) { b[LWP_LW_INPUT_KEY_SIZE + i] = t[i] }
+    b
+}
+
+/// text_input.preedit（壳 -> 引擎，since=1）：size(4)+text(string)+cursor(u32)
+public func encodeLwTextInputPreedit(text: String, cursor: UInt32): Array<UInt8> {
+    let t = text.toArray()
+    let total = LWP_LW_TEXT_INPUT_PREEDIT_SIZE + t.size
+    var b = Array<UInt8>(total, repeat: 0)
+    u32le(UInt32(total), b, 0)
+    u16le(UInt16(LWP_LW_TEXT_INPUT_PREEDIT_SIZE), b, 4)
+    u16le(UInt16(t.size), b, 6)
+    u32le(cursor, b, 8)
+    for (i in 0..t.size) { b[LWP_LW_TEXT_INPUT_PREEDIT_SIZE + i] = t[i] }
+    b
+}
+
+/// text_input.commit_string（壳 -> 引擎，since=2）：size(4)+text(string)
+public func encodeLwTextInputCommitString(text: String): Array<UInt8> {
+    let t = text.toArray()
+    let total = LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE + t.size
+    var b = Array<UInt8>(total, repeat: 0)
+    u32le(UInt32(total), b, 0)
+    u16le(UInt16(LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE), b, 4)
+    u16le(UInt16(t.size), b, 6)
+    for (i in 0..t.size) { b[LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE + i] = t[i] }
+    b
+}
+
+/// text_input.delete_surrounding（壳 -> 引擎，since=2）：size(4)+before(4)+after(4)
+public func encodeLwTextInputDeleteSurrounding(before: UInt32, after: UInt32): Array<UInt8> {
+    var b = Array<UInt8>(LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE, repeat: 0)
+    u32le(UInt32(LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE), b, 0)
+    u32le(before, b, 4)
+    u32le(after, b, 8)
     b
 }

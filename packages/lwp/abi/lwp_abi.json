@@ -501,12 +501,22 @@
               "down",
               "bool",
               8
+            ],
+            [
+              "utf8",
+              "string",
+              9
+            ],
+            [
+              "modifiers",
+              "u16",
+              13
             ]
           ],
           "name": "key",
           "opcode": 3,
           "since": 1,
-          "size": 9
+          "size": 15
         },
         {
           "dir": "event",
@@ -836,11 +846,22 @@
       "messages": [
         {
           "dir": "request",
-          "fields": [],
+          "fields": [
+            [
+              "input_type",
+              "u32",
+              4
+            ],
+            [
+              "enter_key",
+              "u32",
+              8
+            ]
+          ],
           "name": "enable",
           "opcode": 0,
           "since": 1,
-          "size": 4
+          "size": 12
         },
         {
           "dir": "request",
@@ -920,6 +941,39 @@
           "name": "preedit",
           "opcode": 0,
           "since": 1,
+          "size": 12
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "text",
+              "string",
+              4
+            ]
+          ],
+          "name": "commit_string",
+          "opcode": 1,
+          "since": 2,
+          "size": 8
+        },
+        {
+          "dir": "event",
+          "fields": [
+            [
+              "before",
+              "u32",
+              4
+            ],
+            [
+              "after",
+              "u32",
+              8
+            ]
+          ],
+          "name": "delete_surrounding",
+          "opcode": 2,
+          "since": 2,
           "size": 12
         }
       ],

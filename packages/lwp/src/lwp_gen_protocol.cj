@@ -35,6 +35,40 @@ public let LWP_CORE_CAPABILITIES_MULTI_WINDOW: UInt64 = 32768
 public let LWP_CORE_CAPABILITIES_SOFT_KEYBOARD: UInt64 = 65536
 public let LWP_CORE_CAPABILITIES_TITLE_BUTTONS: UInt64 = 131072
 
+// lw_input.key 的 modifiers 字段。位定义对齐 SDL_KMOD_*（lgui.input.KeyModifiers 的输入格式）。
+public let LWP_KEY_MODIFIERS_LSHIFT: UInt64 = 1
+public let LWP_KEY_MODIFIERS_RSHIFT: UInt64 = 2
+public let LWP_KEY_MODIFIERS_LEVEL5: UInt64 = 4
+public let LWP_KEY_MODIFIERS_LCTRL: UInt64 = 64
+public let LWP_KEY_MODIFIERS_RCTRL: UInt64 = 128
+public let LWP_KEY_MODIFIERS_LALT: UInt64 = 256
+public let LWP_KEY_MODIFIERS_RALT: UInt64 = 512
+public let LWP_KEY_MODIFIERS_LGUI: UInt64 = 1024
+public let LWP_KEY_MODIFIERS_RGUI: UInt64 = 2048
+public let LWP_KEY_MODIFIERS_NUM: UInt64 = 4096
+public let LWP_KEY_MODIFIERS_CAPS: UInt64 = 8192
+public let LWP_KEY_MODIFIERS_MODE: UInt64 = 16384
+public let LWP_KEY_MODIFIERS_SCROLL: UInt64 = 32768
+
+// 输入框类型：壳据此选择输入法模式（文本/数字/密码/URL 等）。
+public let LWP_IME_TEXT_INPUT_TYPE_TEXT: UInt64 = 0
+public let LWP_IME_TEXT_INPUT_TYPE_NUMBER: UInt64 = 1
+public let LWP_IME_TEXT_INPUT_TYPE_PHONE: UInt64 = 2
+public let LWP_IME_TEXT_INPUT_TYPE_PASSWORD: UInt64 = 3
+public let LWP_IME_TEXT_INPUT_TYPE_URL: UInt64 = 4
+public let LWP_IME_TEXT_INPUT_TYPE_EMAIL: UInt64 = 5
+
+// 回车键语义：壳据此决定软键盘右下角按键（完成/搜索/发送/换行）。
+public let LWP_IME_ENTER_KEY_UNSPECIFIED: UInt64 = 0
+public let LWP_IME_ENTER_KEY_NONE: UInt64 = 1
+public let LWP_IME_ENTER_KEY_GO: UInt64 = 2
+public let LWP_IME_ENTER_KEY_SEARCH: UInt64 = 3
+public let LWP_IME_ENTER_KEY_SEND: UInt64 = 4
+public let LWP_IME_ENTER_KEY_NEXT: UInt64 = 5
+public let LWP_IME_ENTER_KEY_DONE: UInt64 = 6
+public let LWP_IME_ENTER_KEY_PREVIOUS: UInt64 = 7
+public let LWP_IME_ENTER_KEY_NEWLINE: UInt64 = 8
+
 public let LWP_IFACE_LW_CORE: UInt16 = 1
 public let LWP_IFACE_LW_CORE_VERSION: UInt16 = 1
 public let LWP_IFACE_LW_INPUT: UInt16 = 2
@@ -264,15 +298,19 @@ public func decodeLwpLwInputPointerAxis(body: Array<UInt8>): LwpLwInputPointerAx
 }
 
 public let LWP_LW_INPUT_KEY_OPCODE: UInt16 = 3
-public let LWP_LW_INPUT_KEY_SIZE: Int64 = 9
+public let LWP_LW_INPUT_KEY_SIZE: Int64 = 15
 
 public struct LwpLwInputKey {
     public let keycode: UInt32
     public let down: Bool
+    public let utf8: String
+    public let modifiers: UInt16
 
-    public init(keycode: UInt32, down: Bool) {
+    public init(keycode: UInt32, down: Bool, utf8: String, modifiers: UInt16) {
         this.keycode = keycode
         this.down = down
+        this.utf8 = utf8
+        this.modifiers = modifiers
     }
 }
 
@@ -280,6 +318,8 @@ public func decodeLwpLwInputKey(body: Array<UInt8>): LwpLwInputKey {
     return LwpLwInputKey(
         lwpU32(body, 4),
         lwpBool(body, 8),
+        lwpString(body, 9),
+        lwpU16(body, 13),
     )
 }
 
@@ -352,15 +392,23 @@ public func decodeLwpLwSeatCapabilities(body: Array<UInt8>): LwpLwSeatCapabiliti
 }
 
 public let LWP_LW_TEXT_INPUT_ENABLE_OPCODE: UInt16 = 0
-public let LWP_LW_TEXT_INPUT_ENABLE_SIZE: Int64 = 4
+public let LWP_LW_TEXT_INPUT_ENABLE_SIZE: Int64 = 12
 
 public struct LwpLwTextInputEnable {
-    public init() {
+    public let input_type: UInt32
+    public let enter_key: UInt32
+
+    public init(input_type: UInt32, enter_key: UInt32) {
+        this.input_type = input_type
+        this.enter_key = enter_key
     }
 }
 
 public func decodeLwpLwTextInputEnable(body: Array<UInt8>): LwpLwTextInputEnable {
-    return LwpLwTextInputEnable()
+    return LwpLwTextInputEnable(
+        lwpU32(body, 4),
+        lwpU32(body, 8),
+    )
 }
 
 public let LWP_LW_TEXT_INPUT_DISABLE_OPCODE: UInt16 = 1
@@ -440,6 +488,43 @@ public struct LwpLwTextInputPreedit {
 public func decodeLwpLwTextInputPreedit(body: Array<UInt8>): LwpLwTextInputPreedit {
     return LwpLwTextInputPreedit(
         lwpString(body, 4),
+        lwpU32(body, 8),
+    )
+}
+
+public let LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE: UInt16 = 1
+public let LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE: Int64 = 8
+
+public struct LwpLwTextInputCommitString {
+    public let text: String
+
+    public init(text: String) {
+        this.text = text
+    }
+}
+
+public func decodeLwpLwTextInputCommitString(body: Array<UInt8>): LwpLwTextInputCommitString {
+    return LwpLwTextInputCommitString(
+        lwpString(body, 4),
+    )
+}
+
+public let LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE: UInt16 = 2
+public let LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE: Int64 = 12
+
+public struct LwpLwTextInputDeleteSurrounding {
+    public let before: UInt32
+    public let after: UInt32
+
+    public init(before: UInt32, after: UInt32) {
+        this.before = before
+        this.after = after
+    }
+}
+
+public func decodeLwpLwTextInputDeleteSurrounding(body: Array<UInt8>): LwpLwTextInputDeleteSurrounding {
+    return LwpLwTextInputDeleteSurrounding(
+        lwpU32(body, 4),
         lwpU32(body, 8),
     )
 }

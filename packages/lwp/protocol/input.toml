@@ -41,10 +41,21 @@ args = [
 [[interface.lw_input.event]]
 name = "key"
 since = 1
-doc = "键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：Linux xkb+OHOS 统一映射）；down 区分按下/释放。"
+doc = """键盘原始事件。keycode 为壳侧单表键码（计划 §6.1：evdev 布局，OHOS keyCode 由壳映射）；
+down 区分按下/释放。
+
+since=2 追加两个字段（只追加，不改老字段布局）：
+  utf8      —— 该键在当前键盘布局/修饰键下产生的文本（可为空）。输入法不消费的可打印键
+               （数字、符号、以及没有输入法时的字母）靠它进入输入框，不再由引擎猜字符。
+  modifiers —— 修饰键位掩码，见 LWP_KEY_MOD_*（对齐 SDL_KMOD_*，引擎 KeyModifiers 直接复用）。
+
+去重约定：壳不得把输入法已消费的按键再发到这里；引擎在输入框聚焦且 utf8 非空、
+且没有 Ctrl/Alt/Meta 时插入该文本（见 docs/lwindow-ime-plan.md §3）。"""
 args = [
   { name = "keycode", type = "u32" },
   { name = "down", type = "bool" },
+  { name = "utf8", type = "string" },
+  { name = "modifiers", type = "u16" },
 ]
 
 [[interface.lw_input.event]]
@@ -53,4 +64,24 @@ since = 1
 doc = "IME 提交的文本（对应 wayland text-input-v3 commit）。"
 args = [
   { name = "text", type = "string" },
+]
+
+# 修饰键位掩码（与 SDL_KMOD_* 同值，引擎 KeyModifiers 直接复用，零转换）。
+[bitfield.key_modifiers]
+extensible = true
+doc = "lw_input.key 的 modifiers 字段。位定义对齐 SDL_KMOD_*（lgui.input.KeyModifiers 的输入格式）。"
+entries = [
+  ["lshift", 1],
+  ["rshift", 2],
+  ["level5", 4],
+  ["lctrl", 64],
+  ["rctrl", 128],
+  ["lalt", 256],
+  ["ralt", 512],
+  ["lgui", 1024],
+  ["rgui", 2048],
+  ["num", 4096],
+  ["caps", 8192],
+  ["mode", 16384],
+  ["scroll", 32768],
 ]
