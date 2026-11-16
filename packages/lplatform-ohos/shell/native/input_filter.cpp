@@ -33,6 +33,7 @@ extern "C" void lanlu_lwp_resize_end(void);
 #include <cstdio>
 #include <cstdarg>
 #include <atomic>
+#include <time.h>
 
 static void lanlu_log(const char* fmt, ...) {
     char b[256];
@@ -47,6 +48,26 @@ static std::atomic<double> g_origin_y{0.0};
 static std::atomic<bool> g_origin_calibrated{false};
 static std::atomic<int32_t> g_filter_window_id{-1};
 static std::atomic<int32_t> g_ime_active{0};
+/* 组件（XComponent）当前是否持有焦点。ArkUI 把键派发给焦点组件，它的 onKeyEvent 已经
+ * 带 unicode 与修饰键走 sendKeyEvent；窗口过滤器只在组件丢焦点时兜底，否则同一个键会到两次。 */
+static std::atomic<int32_t> g_component_focused{1};
+/* 组件鼠标事件最近一次的时间（ms）。组件事件已带组件内坐标，过滤器这条屏幕坐标的路
+ * 在 50ms 内不再投递指针，避免同一动作到两次（两条路的坐标系不同，重复会抖动）。 */
+static std::atomic<int64_t> g_component_mouse_ms{0};
+extern "C" __attribute__((visibility("default")))
+void lanlu_set_component_mouse_recent(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    g_component_mouse_ms.store((int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000,
+        std::memory_order_relaxed);
+}
+static bool component_mouse_active(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const int64_t now = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    const int64_t last = g_component_mouse_ms.load(std::memory_order_relaxed);
+    return last != 0 && (now - last) < 50;
+}
 
 extern "C" {
 // Called by sdl_main.c after SDL_Init so pushes land in a live queue.
@@ -55,11 +76,34 @@ void lanlu_seed_origin(double x, double y);
 }
 
 void lanlu_seed_origin(double x, double y) {
-    if (!g_origin_calibrated.load(std::memory_order_relaxed)) {
-        g_origin_x.store(x, std::memory_order_relaxed);
-        g_origin_y.store(y, std::memory_order_relaxed);
-        // 窗口装饰已去掉（sysTop=0），窗口矩形原点就是内容区原点，可以直接视为已校准。
-        g_origin_calibrated.store(true, std::memory_order_relaxed);
+    // 窗口装饰已去掉（sysTop=0），窗口矩形原点就是内容区原点。
+    // 每次调用都覆盖：ArkTS 在 windowRectChange（拖动/最大化/还原）时重新种入，
+    // 之前"只种一次"导致窗口一移动，所有点击整体偏移移动距离（评审 M1）。
+    g_origin_x.store(x, std::memory_order_relaxed);
+    g_origin_y.store(y, std::memory_order_relaxed);
+    g_origin_calibrated.store(true, std::memory_order_relaxed);
+}
+
+/* 滚轮去重：过滤器 AXIS 通道最近一次投递的时间（ms）。ArkUI onAxisEvent 通道在
+ * 过滤器活跃期间（200ms 内）不再重复投递 —— 两条通道同时到达会让滚动距离翻倍
+ * 或（符号不一致时）互相抵消（评审 M3）。 */
+static std::atomic<int64_t> g_filter_axis_ms{0};
+static int64_t lanlu_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+extern "C" __attribute__((visibility("default")))
+int lanlu_filter_axis_recent(void) {
+    return (lanlu_now_ms() - g_filter_axis_ms.load(std::memory_order_relaxed)) < 200 ? 1 : 0;
+}
+
+/* OHOS 按键号（LEFT=0 MIDDLE=1 RIGHT=2）-> LWP 协议（0=左 1=右 2=中，对齐 winit/Wayland 壳） */
+static int lanlu_map_button(int32_t ohos_button) {
+    switch (ohos_button) {
+        case 1: return 2;   // MIDDLE
+        case 2: return 1;   // RIGHT
+        default: return 0;  // LEFT / 其它
     }
 }
 
@@ -108,11 +152,8 @@ void lanlu_input_ready(void) {
     // no-op placeholder kept for ABI; calibration runs inline in the filter
 }
 
-extern "C" int lanlu_clip_flush_pending(void);
 
 static bool LanluMouseFilter(Input_MouseEvent* event) {
-    // 剪贴板写：引擎把待写文本放在 clip_out.txt，这里在窗口输入回调里刷进系统剪贴板。
-    lanlu_clip_flush_pending();
     // 诊断：记录回调是否被调用以及原始 action 码（前 20 次）
     static int s_mouseHits = 0;
     if (event != nullptr && s_mouseHits < 20) {
@@ -124,10 +165,13 @@ static bool LanluMouseFilter(Input_MouseEvent* event) {
     if (event != nullptr) {
         const int32_t action = OH_Input_GetMouseEventAction(event);
         // display - origin = 窗口局部坐标（鼠标没有 window 局部坐标 getter，只能自己换算）
-        const int32_t mx = OH_Input_GetMouseEventDisplayX(event) -
-            (int32_t)g_origin_x.load(std::memory_order_relaxed);
-        const int32_t my = OH_Input_GetMouseEventDisplayY(event) -
-            (int32_t)g_origin_y.load(std::memory_order_relaxed);
+        // 用 double 相减再取值：先把原点截成 int 会丢亚像素（评审 M4）
+        const double fx = (double)OH_Input_GetMouseEventDisplayX(event) -
+            g_origin_x.load(std::memory_order_relaxed);
+        const double fy = (double)OH_Input_GetMouseEventDisplayY(event) -
+            g_origin_y.load(std::memory_order_relaxed);
+        const int32_t mx = (int32_t)fx;
+        const int32_t my = (int32_t)fy;
         int code = 0;
         if (action == MOUSE_ACTION_MOVE) code = 10;
         else if (action == MOUSE_ACTION_BUTTON_DOWN) code = 11;
@@ -136,7 +180,8 @@ static bool LanluMouseFilter(Input_MouseEvent* event) {
             // 缩放会话：移动时换算新尺寸，松手时结束（壳侧 begin_resize 开启会话）
             if (code == 10) lanlu_lwp_resize_track(mx, my);
             else if (code == 12) lanlu_lwp_resize_end();
-            lanlu_push_input(code, (float)mx, (float)my, OH_Input_GetMouseEventButton(event));
+            lanlu_push_input(code, (float)fx, (float)fy,
+                             code == 10 ? 0 : lanlu_map_button(OH_Input_GetMouseEventButton(event)));
         }
     }
     if (event == nullptr) return false;
@@ -146,8 +191,11 @@ static bool LanluMouseFilter(Input_MouseEvent* event) {
         const int32_t axis_type = OH_Input_GetMouseEventAxisType(event);
         const float axis_value = OH_Input_GetMouseEventAxisValue(event);
         // P5：滚轮写 L 层事件桥（action 13；x=刻度，y=0 垂直 / 1 水平）
+        // 符号与 ArkUI onAxisEvent 通道一致（horizon 实测两源同号）；之前这里取负，
+        // 平板（过滤器通道）与 2in1（ArkUI 通道）滚动方向相反（评审 M3）。
+        g_filter_axis_ms.store(lanlu_now_ms(), std::memory_order_relaxed);
         if (axis_type == AXIS_TYPE_SCROLL_VERTICAL) {
-            lanlu_push_input(13, -(axis_value / 45.0f), 0.0f, 0);
+            lanlu_push_input(13, axis_value / 45.0f, 0.0f, 0);
         } else if (axis_type == AXIS_TYPE_SCROLL_HORIZONTAL) {
             lanlu_push_input(13, axis_value / 45.0f, 1.0f, 0);
         } else {
@@ -223,6 +271,10 @@ static bool LanluKeyFilter(Input_KeyEvent* event) {
         g_ctrl_down.store(action == KEY_ACTION_DOWN ? 1 : 0, std::memory_order_relaxed);
     }
     if (g_ime_active.load(std::memory_order_relaxed) != 0) return false;
+    /* 组件有焦点时键已由 onKeyEvent -> sendKeyEvent 发送（带文本），这里不再重复投递。 */
+    if (g_component_focused.load(std::memory_order_relaxed) != 0) return false;
+    /* 组件鼠标事件在最近 50ms 内活跃：指针已由组件内坐标那条路发出，这里不再重复 */
+    if (component_mouse_active()) return false;
     const char* name = lanlu_key_name(keyCode);
     if (name != nullptr) {
         (void)lanlu_lwp_send_key(name, action == KEY_ACTION_DOWN ? 1 : 0);
@@ -245,7 +297,8 @@ static bool LanluTouchFilter(Input_TouchEvent* event) {
     const int32_t y = OH_Input_GetTouchEventWindowY(event);
     const int32_t id = OH_Input_GetTouchEventFingerId(event);
     if (action == TOUCH_ACTION_DOWN || action == TOUCH_ACTION_MOVE || action == TOUCH_ACTION_UP) {
-        lanlu_push_input((int)action, (float)x, (float)y, (int)id);
+        (void)id;   // 只跟主指；key 字段在协议里是按键号，触摸一律当左键
+        lanlu_push_input((int)action, (float)x, (float)y, 0);
     }
     return false;   // 不吞事件
 }
@@ -275,6 +328,11 @@ extern "C" int lanlu_register_filters(int32_t window_id) {
 // 引擎 TextField 每个 TextInput 插一次 —— 真机表现为输入 1 个 s 出现 2~3 个 s。
 // 此前 g_ime_active 只有声明和读取、没有任何写入（门禁形同虚设）；这里暴露 setter，
 // 由 ArkTS 在 attachIme/detach 时拨动。
+extern "C" __attribute__((visibility("default")))
+void lanlu_set_component_focused(int focused) {
+    g_component_focused.store(focused ? 1 : 0, std::memory_order_relaxed);
+}
+
 extern "C" __attribute__((visibility("default")))
 void lanlu_set_ime_active(int active) {
     g_ime_active.store(active ? 1 : 0, std::memory_order_relaxed);

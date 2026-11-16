@@ -8,8 +8,8 @@ project(main)
 # lwp_client.cpp 需要生成的协议头（packages/lwp/include，由 tools/lwp-gen.py 产出）
 include_directories(__LWP_INCLUDE__)
 
-add_library(main SHARED input_filter.cpp shell_napi.cpp lwp_client.cpp lwp_window.cpp)
+add_library(main SHARED input_filter.cpp shell_napi.cpp lwp_client.cpp lwp_window.cpp text_input.cpp)
 
 # L 层渲染器（Rust staticlib，导出 C ABI）：lgpu 自检入口需要它。
 set(LGPU_LIB "__LGPU_LIB__")
-target_link_libraries(main PUBLIC "${LGPU_LIB}" ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libpasteboard.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libudmf.so hilog_ndk.z dl m pthread ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libace_ndk.z.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libace_napi.z.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libnative_window_manager.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libnative_window.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libohinput.so)
+target_link_libraries(main PUBLIC "${LGPU_LIB}" ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libpasteboard.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libudmf.so hilog_ndk.z dl m pthread ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libace_ndk.z.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libace_napi.z.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libnative_window_manager.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libnative_window.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libohinput.so ${OHOS_SDK_NATIVE}/sysroot/usr/lib/aarch64-linux-ohos/libohinputmethod.so)

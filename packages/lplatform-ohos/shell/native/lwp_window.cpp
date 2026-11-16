@@ -33,6 +33,23 @@
 #define LOGI_LWP(fmt, ...) fprintf(stderr, "[LANLU-LWP] " fmt "\n", ##__VA_ARGS__)
 #endif
 
+/* 原生输入法桥（text_input.cpp）与输入过滤器共享的窗口原点 */
+extern "C" {
+void lanlu_ime_enable(int32_t window_id, uint32_t input_type, uint32_t enter_key, int show_soft);
+void lanlu_ime_disable(void);
+void lanlu_ime_set_cursor_rect(int32_t x, int32_t y, int32_t w, int32_t h, double origin_x, double origin_y);
+}
+extern "C" double lanlu_origin_x(void);
+extern "C" double lanlu_origin_y(void);
+/* 由 shell_napi.cpp 在窗口就绪时设置（ArkTS 的 window id 与是否弹软键盘） */
+static int32_t g_win_id_for_ime = -1;
+static int g_show_soft_keyboard = 0;
+extern "C" __attribute__((visibility("default")))
+void lanlu_ime_set_window(int32_t window_id, int show_soft) {
+    g_win_id_for_ime = window_id;
+    g_show_soft_keyboard = show_soft;
+}
+
 extern "C" {
 int lanlu_lwp_ready(void);
 int lanlu_lwp_send_raw(int dir, unsigned int iface, unsigned int opcode, unsigned int flags,
@@ -42,6 +59,13 @@ int lanlu_lwp_recv_raw(int dir, unsigned int* iface, unsigned int* opcode,
 }
 
 #define LWP_SHELL_EVENT 1
+
+static double g_ime_origin_x = 0.0;
+static double g_ime_origin_y = 0.0;
+static void refresh_ime_origin(void) {
+    g_ime_origin_x = lanlu_origin_x();
+    g_ime_origin_y = lanlu_origin_y();
+}
 
 /* 泵取到的最近状态（ArkTS 读这些 getter） */
 static volatile unsigned int g_window_id = 0;
@@ -199,10 +223,15 @@ int lanlu_lwp_send_surface_available(unsigned long long handle, unsigned int w, 
                               LWP_LW_SURFACE_AVAILABLE_OPCODE, 0, b, sizeof b);
 }
 
+/* 缩放会话锚点（会话内第一个指针位置）。必须是文件级：resize_end 要能重置它，
+ * 之前是函数内 static，第二次拖边会沿用第一次的锚点，窗口一按就跳（评审 W5）。 */
+static int g_resize_anchor_x = -1, g_resize_anchor_y = -1;
+#define anchor_x g_resize_anchor_x
+#define anchor_y g_resize_anchor_y
+
 /* input_filter 调用：缩放会话中把指针位移换算成窗口新尺寸 */
 void lanlu_lwp_resize_track(int x, int y) {
     if (!g_resize_edges) return;
-    static int anchor_x = -1, anchor_y = -1;
     if (anchor_x < 0) { anchor_x = x; anchor_y = y; return; }
     int dx = x - anchor_x, dy = y - anchor_y;
     int w = g_resize_start_w, h = g_resize_start_h;
@@ -219,7 +248,11 @@ void lanlu_lwp_resize_track(int x, int y) {
 /* 结束缩放会话（松手时由 input_filter 调用） */
 void lanlu_lwp_resize_end(void) {
     g_resize_edges = 0;
+    g_resize_anchor_x = -1;
+    g_resize_anchor_y = -1;
 }
+#undef anchor_x
+#undef anchor_y
 
 /* 一次性取走"文本输入开关"：-1 无变化，0 关闭，1 打开 */
 int lanlu_lwp_take_ime_want(void) {
@@ -440,6 +473,8 @@ int lanlu_lwp_window_pump(void) {
         } else if (iface == LWP_IFACE_LW_WINDOW &&
                    opcode == LWP_LW_WINDOW_BEGIN_RESIZE_OPCODE) {
             g_resize_edges = (int)get_u32(body, 4);
+            g_resize_anchor_x = -1;
+            g_resize_anchor_y = -1;
             g_resize_start_w = g_win_w;
             g_resize_start_h = g_win_h;
             LOGI_LWP("begin_resize edges=%d start=%dx%d", g_resize_edges, g_win_w, g_win_h);
@@ -448,9 +483,19 @@ int lanlu_lwp_window_pump(void) {
             LOGI_LWP("cursor shape -> %d", g_cursor_shape);
         } else if (iface == LWP_IFACE_LW_TEXT_INPUT &&
                    opcode == LWP_LW_TEXT_INPUT_ENABLE_OPCODE) {
+            /* 焦点进入输入框：挂载系统输入法（原生 C API，见 text_input.cpp）。
+             * input_type/enter_key 由引擎给定（since=2）；旧引擎发 4 字节体时按默认值。 */
+            unsigned int itype = LWP_IME_TEXT_INPUT_TYPE_TEXT;
+            unsigned int ekey = LWP_IME_ENTER_KEY_DONE;
+            if (len >= 12) {
+                itype = get_u32(body, 4);
+                ekey = get_u32(body, 8);
+            }
+            lanlu_ime_enable(g_win_id_for_ime, itype, ekey, g_show_soft_keyboard ? 1 : 0);
             g_ime_want = 1;
         } else if (iface == LWP_IFACE_LW_TEXT_INPUT &&
                    opcode == LWP_LW_TEXT_INPUT_DISABLE_OPCODE) {
+            lanlu_ime_disable();
             g_ime_want = 0;
         } else if (iface == LWP_IFACE_LW_TEXT_INPUT &&
                    opcode == LWP_LW_TEXT_INPUT_SET_CURSOR_RECT_OPCODE) {
@@ -459,6 +504,10 @@ int lanlu_lwp_window_pump(void) {
             g_ime_cursor_w = (int)get_u32(body, 12);
             g_ime_cursor_h = (int)get_u32(body, 16);
             g_ime_cursor_pending = 1;
+            /* 直接通知系统输入法（不经过 ArkTS 轮询）；原点用输入过滤器持续校准的值。 */
+            refresh_ime_origin();
+            lanlu_ime_set_cursor_rect(g_ime_cursor_x, g_ime_cursor_y, g_ime_cursor_w, g_ime_cursor_h,
+                                      g_ime_origin_x, g_ime_origin_y);
             LOGI_LWP("ime cursor rect %d,%d %dx%d", g_ime_cursor_x, g_ime_cursor_y,
                      g_ime_cursor_w, g_ime_cursor_h);
         } else if (iface == LWP_IFACE_LW_SYSTEM && opcode == LWP_LW_SYSTEM_LOG_OPCODE) {

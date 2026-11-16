@@ -183,6 +183,7 @@ extern "C" unsigned int lanlu_lwp_take_clip_get(void);
 /* 引擎要求写系统剪贴板（lw_clipboard.set） */
 /* 滚轮/触摸板：ArkUI 的 onAxisEvent -> lw_input.pointer_axis
  * （OHOS 的窗口鼠标过滤器收不到 AXIS，必须走 ArkUI 节点事件，见计划 §6.2/§M3） */
+extern "C" int lanlu_filter_axis_recent(void);
 static napi_value LwpSendPointerAxis(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value argv[2] = {nullptr, nullptr};
@@ -192,8 +193,30 @@ static napi_value LwpSendPointerAxis(napi_env env, napi_callback_info info) {
     if (argc >= 1) napi_get_value_double(env, argv[0], &value);
     if (argc >= 2) napi_get_value_int32(env, argv[1], &axis);
     napi_value out;
+    // 过滤器 AXIS 通道 200ms 内活跃 = 同一次滚动已经投递过，这里不再重复（评审 M3）
+    if (lanlu_filter_axis_recent()) {
+        napi_create_int32(env, 0, &out);
+        return out;
+    }
     napi_create_int32(env, lanlu_push_input(13, (float)value, (float)axis, 0), &out);
     return out;
+}
+
+/* 窗口原点重新种入（ArkTS 组件屏幕坐标；窗口移动/每秒自愈都会调） */
+extern "C" void lanlu_seed_origin(double x, double y);
+extern "C" void lanlu_ime_trace_origin(double x, double y);
+static napi_value SeedOrigin(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    double x = 0, y = 0;
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc >= 2) {
+        napi_get_value_double(env, argv[0], &x);
+        napi_get_value_double(env, argv[1], &y);
+        lanlu_seed_origin(x, y);
+        lanlu_ime_trace_origin(x, y);
+    }
+    return nullptr;
 }
 
 static napi_value LwpTakeClipboardSet(napi_env env, napi_callback_info info) {
@@ -228,6 +251,177 @@ static napi_value LwpSurfaceChanged(napi_env env, napi_callback_info info) {
         ? lanlu_lwp_send_surface_changed((unsigned int)w, (unsigned int)h) : 0, &out);
     return out;
 }
+/* ── 键事件（带文本）：OHOS 组件 onKeyEvent 的唯一入口 ─────────────────────
+ * 为什么放在组件事件而不是窗口过滤器：输入法（consumeKeyEvents=true）消费的键不会派发到
+ * 组件，没消费的键（PC 上的数字/符号、无输入法时的字母）会派发过来 —— 天然不重复。
+ * 窗口过滤器的键路径因此只作"组件丢焦点"的兜底（见 input_filter.cpp）。 */
+extern "C" int lanlu_lwp_send_key_text(uint32_t evdev, int down, const char* utf8, uint16_t modifiers);
+
+/* OHOS keyCode -> evdev（引擎唯一键码表；只有这里做转换，引擎不再认识 OHOS 码）。 */
+static int ohos_keycode_to_evdev(int32_t code) {
+    switch (code) {
+        case 2070: return 1;    /* ESCAPE */
+        case 2055: return 14;   /* DEL(退格) */
+        case 2049: return 15;   /* TAB */
+        case 2054: return 28;   /* ENTER */
+        case 2050: return 57;   /* SPACE */
+        case 2081: return 102;  /* MOVE_HOME */
+        case 2082: return 107;  /* MOVE_END */
+        case 2071: return 111;  /* FORWARD_DEL */
+        case 2012: return 103;  /* DPAD_UP */
+        case 2014: return 105;  /* DPAD_LEFT */
+        case 2015: return 106;  /* DPAD_RIGHT */
+        case 2013: return 108;  /* DPAD_DOWN */
+        default: break;
+    }
+    if (code >= 2000 && code <= 2009) {           /* 数字 0..9 */
+        return 2 + ((code - 2000 + 9) % 10);
+    }
+    if (code >= 2103 && code <= 2112) {           /* 小键盘 0..9 */
+        return 2 + ((code - 2103 + 9) % 10);
+    }
+    if (code >= 2017 && code <= 2042) {           /* A..Z：evdev 字母键码不连续，查表 */
+        static const int kLetterEvdev[26] = {
+            30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50,   /* A..M */
+            49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44,   /* N..Z */
+        };
+        return kLetterEvdev[code - 2017];
+    }
+    return -1;
+}
+
+static napi_value SendKeyEvent(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 2) {
+        napi_value out;
+        napi_create_int32(env, -1, &out);
+        return out;
+    }
+    int32_t code = 0;
+    bool down = false;
+    if (napi_get_value_int32(env, argv[0], &code) != napi_ok ||
+        napi_get_value_bool(env, argv[1], &down) != napi_ok) {
+        napi_value out;
+        napi_create_int32(env, -1, &out);
+        return out;
+    }
+    char text[16] = {0};
+    if (argc >= 3 && argv[2] != nullptr) {
+        napi_valuetype t = napi_undefined;
+        napi_typeof(env, argv[2], &t);
+        if (t == napi_string) {
+            size_t len = 0;
+            napi_get_value_string_utf8(env, argv[2], text, sizeof text, &len);
+        } else if (t == napi_number) {
+            double u = 0.0;
+            napi_get_value_double(env, argv[2], &u);
+            if (u >= 0x20 && u < 0x7f) {
+                text[0] = (char)u;
+                text[1] = '\0';
+            }
+        }
+    }
+    uint16_t mods = 0;
+    if (argc >= 4 && argv[3] != nullptr) {
+        double m = 0.0;
+        napi_get_value_double(env, argv[3], &m);
+        if (m > 0) mods = (uint16_t)m;
+    }
+    const int evdev = ohos_keycode_to_evdev(code);
+    if (evdev < 0) {
+        napi_value out;
+        napi_create_int32(env, 0, &out);   /* 不认识的键：静默丢弃，不算错误 */
+        return out;
+    }
+    /* 只有按下事件带文本：释放事件带文本会让输入框插两次。 */
+    const char* utf8 = (down && text[0] != '\0') ? text : nullptr;
+    lanlu_lwp_send_key_text((uint32_t)evdev, down ? 1 : 0, utf8, mods);
+    napi_value out;
+    napi_create_int32(env, 1, &out);
+    return out;
+}
+
+/* ── 指针事件（组件内坐标）：XComponent.onMouse 的唯一入口 ─────────────────────
+ * 为什么不用窗口级 mouse filter 的坐标：过滤器给的是**屏幕坐标**，要靠"窗口原点"换算，
+ * 而原点在窗口移动/分屏/换屏后经常对不上（真实机反复踩：点击与候选框整体偏移）。
+ * ArkUI 组件事件直接给组件内坐标（event.x/y，px），不需要任何原点换算；同一个事件还给
+ * displayX/displayY，二者相减就是精确的窗口原点（顺手校准给输入法候选框用）。 */
+static double g_component_mouse_ms = 0.0;
+static double lanlu_now_ms2(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+extern "C" int lanlu_lwp_send_pointer_local(int action, float x, float y, int button);
+extern "C" void lanlu_set_component_mouse_recent(void);
+
+static napi_value SendPointerLocal(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value argv[4] = {nullptr, nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    int32_t action = 0;
+    double x = 0, y = 0;
+    int32_t button = 0;
+    if (argc < 3) return nullptr;
+    napi_get_value_int32(env, argv[0], &action);
+    napi_get_value_double(env, argv[1], &x);
+    napi_get_value_double(env, argv[2], &y);
+    if (argc >= 4) napi_get_value_int32(env, argv[3], &button);
+    g_component_mouse_ms = lanlu_now_ms2();
+    lanlu_set_component_mouse_recent();
+    lanlu_lwp_send_pointer_local(action, (float)x, (float)y, button);
+    return nullptr;
+}
+
+/* 组件事件里顺手校准原点：ArkTS 传 displayX-x / displayY-y（物理 px）。 */
+extern "C" void lanlu_seed_origin(double x, double y);
+static napi_value CalibrateOriginFromEvent(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value argv[2] = {nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    double ox = 0, oy = 0;
+    if (argc < 2) return nullptr;
+    napi_get_value_double(env, argv[0], &ox);
+    napi_get_value_double(env, argv[1], &oy);
+    if (ox > 0 || oy > 0) {
+        lanlu_seed_origin(ox, oy);
+    }
+    return nullptr;
+}
+
+/* 组件焦点状态：决定窗口键过滤器是否兜底（见 input_filter.cpp）。 */
+extern "C" void lanlu_set_component_focused(int focused);
+static napi_value SetComponentFocused(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    bool focused = false;
+    if (argc >= 1) napi_get_value_bool(env, argv[0], &focused);
+    lanlu_set_component_focused(focused ? 1 : 0);
+    return nullptr;
+}
+
+/* 窗口就绪时告诉原生输入法桥：窗口 id 与是否弹软键盘（2in1/平板不弹，手机弹）。 */
+extern "C" void lanlu_ime_set_window(int32_t window_id, int show_soft);
+extern "C" void lanlu_ime_trace_origin(double x, double y);
+extern "C" void lanlu_ime_set_density(double density);
+static napi_value ImeSetWindow(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value argv[3] = {nullptr, nullptr, nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    int32_t win = -1;
+    bool soft = false;
+    double density = 0.0;
+    if (argc >= 1) napi_get_value_int32(env, argv[0], &win);
+    if (argc >= 2) napi_get_value_bool(env, argv[1], &soft);
+    if (argc >= 3) napi_get_value_double(env, argv[2], &density);
+    lanlu_ime_set_window(win, soft ? 1 : 0);
+    if (density > 0.0) lanlu_ime_set_density(density);
+    return nullptr;
+}
+
 static void push_key_name2(const char* name, const char* mod, int down);
 
 /* 键盘事件 -> 协议通道（M6 第 1 步：文件桥回退已删除）。
@@ -1010,6 +1204,7 @@ static napi_value ShellInit(napi_env env, napi_value exports) {
         { "lwpTestInject", nullptr, LwpTestInject, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTestCapture", nullptr, LwpTestCapture, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpSurfaceChanged", nullptr, LwpSurfaceChanged, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "seedOrigin", nullptr, SeedOrigin, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTakeImeWant", nullptr, LwpTakeImeWant, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "setImeActive", nullptr, SetImeActive, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpTakeWindowTitle", nullptr, LwpTakeWindowTitle, nullptr, nullptr, nullptr, napi_default, nullptr },
@@ -1029,6 +1224,11 @@ static napi_value ShellInit(napi_env env, napi_value exports) {
         { "lwpAppResumed", nullptr, LwpAppResumed, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "lwpAppPaused", nullptr, LwpAppPaused, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendText", nullptr, SendText, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendKeyEvent", nullptr, SendKeyEvent, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "imeSetWindow", nullptr, ImeSetWindow, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "setComponentFocused", nullptr, SetComponentFocused, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "sendPointerLocal", nullptr, SendPointerLocal, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "calibrateOriginFromEvent", nullptr, CalibrateOriginFromEvent, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendBackspace", nullptr, SendBackspace, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendEnter", nullptr, SendEnter, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "sendTab", nullptr, SendTab, nullptr, nullptr, nullptr, napi_default, nullptr },

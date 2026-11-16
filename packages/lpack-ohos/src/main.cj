@@ -280,6 +280,7 @@ main(args: Array<String>): Int64 {
         "entry/src/main/cpp/shell_napi.cpp",
         "entry/src/main/cpp/lwp_client.cpp",
         "entry/src/main/cpp/lwp_window.cpp",
+        "entry/src/main/cpp/text_input.cpp",
         "entry/src/main/cpp/types/libmain/Index.d.ts",
         "entry/src/main/cpp/types/libmain/oh-package.json5",
         "entry/src/main/cpp/types/libSDL3/Index.d.ts",

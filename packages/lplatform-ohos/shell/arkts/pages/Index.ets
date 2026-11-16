@@ -16,19 +16,91 @@ const DOMAIN = 0x0000;
 // System layer lives here (packages/ohos), not in the engine: the window-level
 // mouse/keyboard filters need the ArkTS window id + rect, which only this page
 // can read (same arrangement as horizon-ohos' shell).
+// 键修饰键位掩码（与 LWP_KEY_MODIFIERS_*/SDL_KMOD_* 同值，引擎直接复用）。
+class LanluKeyMods {
+  static mask(event: KeyEvent): number {
+    let m: number = 0;
+    try {
+      const g = event.getModifierKeyState;
+      if (g !== undefined) {
+        // ArkTS 禁止 Function.call/apply：可选方法直接调用（逐个查，命中即置位）
+        if (g(['Shift'])) { m = m | 1; }
+        if (g(['Ctrl'])) { m = m | 64; }
+        if (g(['Alt'])) { m = m | 256; }
+        if (g(['Meta'])) { m = m | 1024; }
+      }
+    } catch (eM) {}
+    return m;
+  }
+
+  // 该键产生的文本（输入法没消费的键才会到这里）：优先 unicode，其次按 keyCode 查表。
+  // OHOS 的 KeyEvent.unicode 常常是 0（只有部分场景填充），所以必须自带 US 布局表兜底，
+  // 否则字母会"有键无字"（真机实测：数字进得去、字母进不去）。
+  static text(event: KeyEvent, mods: number): string {
+    const u: number = event.unicode ?? 0;
+    if (u >= 0x20 && u !== 0x7f) {
+      return String.fromCharCode(u);
+    }
+    const k: number = event.keyCode;
+    const shift: boolean = (mods & 1) !== 0;
+    if (k >= 2000 && k <= 2009) {                       // 主键盘 1..0
+      const digits: string = "1234567890";
+      const shifted: string = "!@#$%^&*()";
+      return shift ? shifted.charAt(k - 2000) : digits.charAt(k - 2000);
+    }
+    if (k >= 2103 && k <= 2112) {                       // 小键盘 0..9
+      return String.fromCharCode(48 + ((k - 2103 + 9) % 10));
+    }
+    if (k >= 2017 && k <= 2042) {                       // A..Z
+      const lower: string = "abcdefghijklmnopqrstuvwxyz";
+      const c: string = lower.charAt(k - 2017);
+      return shift ? c.toUpperCase() : c;
+    }
+    if (k === 2050) { return " "; }                     // SPACE
+    return '';
+  }
+}
+
+// 整窗 XComponent 控制器：surface 尺寸只取 onSurfaceChanged 的 SurfaceRect（单位 px，
+// 是 XComponent 真实可绘制区域）。之前用 onSizeChange（单位 vp）当 px 用，1.9 倍缩放下
+// 交换链只配到约 1100×733；初始尺寸又取 windowRect（窗口≠组件），评审 W2/W3。
+class LanluMainXcController extends XComponentController {
+  public lastW: number = 0;
+  public lastH: number = 0;
+  public surfaceReady: boolean = false;
+
+  onSurfaceCreated(surfaceId: string): void {
+    console.info('[LANLU-SHELL] main surface created ' + surfaceId);
+  }
+
+  onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
+    const w: number = Math.round(rect.surfaceWidth);
+    const h: number = Math.round(rect.surfaceHeight);
+    if (w <= 0 || h <= 0 || (w === this.lastW && h === this.lastH)) {
+      return;
+    }
+    this.lastW = w;
+    this.lastH = h;
+    console.info('[LANLU-SHELL] main surface changed ' + w + 'x' + h + ' px');
+    // surface.available 之前的尺寸变化只记录（setMainSurface 会带上最新值）
+    if (this.surfaceReady) {
+      try { shell.lwpSurfaceChanged(w, h); } catch (e) {}
+    }
+  }
+
+  onSurfaceDestroyed(surfaceId: string): void {
+    console.info('[LANLU-SHELL] main surface destroyed ' + surfaceId);
+  }
+}
+
 @Entry
 @Component
 struct Index {
   // Text input: the OHOS SDL backend emits no SDL_EVENT_TEXT_INPUT, so attach
   // the system input method and forward committed text/editing commands to the
   // engine (libmain.so replays them as SDL events the UI layer already handles).
-  private ime: inputMethod.InputMethodController | undefined = undefined;
   private imeAttached: boolean = false;
   private imeBusy: boolean = false;
-  // IME 监听器只绑定一次：HarmonyOS 的 InputMethodController.on() 在 detach 后
-  // 不会自动解绑，重复 attach 再 listenIme 会叠加 N 个 insertText 回调 ——
-  // 真机表现为敲 1 个 s 上屏 2~3 个（监听器被注册了多次）。
-  private imeListenersBound: boolean = false;
   private winId: number = -1;
   // L 层渲染器上屏自检：一块独立小 XComponent，由 lgpu(wgpu) 清屏 present，
   // 验证 "wgpu → VK_OHOS_surface → 上屏"（不影响 SDL 主表面）。
@@ -40,7 +112,7 @@ struct Index {
   private inputProbeTimer: number = -1;
   // 窗口控制通道：轮询引擎写下的命令文件并执行（minimize/maximize/restore/close）
   private windowCmdTimer: number = -1;
-  private lgpuMainCtl: XComponentController = new XComponentController();
+  private lgpuMainCtl: LanluMainXcController = new LanluMainXcController();
   private exitTimer: number = -1;
   private lwpPumpTimer: number = -1;
   private frameLogTick: number = 0;
@@ -308,6 +380,79 @@ struct Index {
     }
   }
 
+  private lastDensity: number = 0;
+  private originTick: number = 0;
+
+  /** 用 XComponent 自己的屏幕坐标做"内容区原点"。
+   *  为什么不用 windowRect：它是启动时的快照，窗口被拖动/改尺寸后会过期，
+   *  于是鼠标命中和输入法候选框都会整体偏移（真机实测偏 (144,121) px）。
+   *  getRectangleById 的 screenOffset 是 ArkUI 当前的权威屏幕坐标（vp）。 */
+  private refreshSurfaceOrigin(): void {
+    let d: number = this.lastDensity;
+    if (!(d > 0)) {
+      d = 1.0;
+    }
+    try {
+      const info = this.getUIContext().getComponentUtils().getRectangleById('LGPU_Main');
+      if (info !== undefined && info.screenOffset !== undefined) {
+        // 实测：ComponentInfo.screenOffset 与 windowRect 同单位（**物理 px**），
+        // 不能再乘密度（乘了会让原点整体放大 1.9 倍，点击与候选框全部偏移）。
+        shell.seedOrigin(info.screenOffset.x, info.screenOffset.y);
+        return;
+      }
+    } catch (e) {}
+    // 回退：组件查不到（id 未进树等）时用窗口矩形，至少跟随窗口移动
+    try {
+      window.getLastWindow(getContext(this)).then((w: window.Window) => {
+        const r = w.getWindowProperties().windowRect;
+        shell.seedOrigin(r.left, r.top);
+      }).catch(() => {});
+    } catch (e2) {}
+  }
+
+  /** 交互式缩放：输入过滤器线程算出的待应用尺寸（与泵无关，空闲快路径也要处理）。 */
+  private applyPendingResize(): void {
+    try {
+      const rz: number[] = shell.lwpTakeResize();
+      if (rz !== undefined && rz.length === 2 && this.win !== undefined) {
+        this.win.resize(rz[0], rz[1]).then(() => {
+        }).catch((e: Error) => {
+          console.warn('[LANLU-SHELL] resize 失败: ' + JSON.stringify(e));
+        });
+      }
+    } catch (eRz) {}
+  }
+
+  /** 窗口当前所在显示器的 densityPixels；失败时退回默认显示器，再退回 1.0。 */
+  private windowDensity(): number {
+    try {
+      if (this.win !== undefined) {
+        const did: number = this.win.getWindowProperties().displayId ?? -1;
+        if (did >= 0) {
+          return display.getDisplayByIdSync(did).densityPixels;
+        }
+      }
+    } catch (eD) {}
+    try {
+      return display.getDefaultDisplaySync().densityPixels;
+    } catch (eDd) {
+      console.warn('[LANLU-SHELL] 取 densityPixels 失败，按 1.0 处理');
+    }
+    return 1.0;
+  }
+
+  /** 缩放变化（拖到另一块屏 / 改系统缩放）只记录日志、不下发：引擎按 ADR 不做运行时
+   *  动态缩放（DesktopApp 的 window.scale 是启动期常量），中途改 scale 会让指针换算、
+   *  布局、绘制三处缩放不一致。真正支持前保持启动值。 */
+  private refreshDensity(winId: number): void {
+    const d: number = this.windowDensity();
+    if (d > 0 && Math.abs(d - this.lastDensity) > 0.001) {
+      console.warn('[LANLU-SHELL] density changed ' + this.lastDensity + ' -> ' + d +
+        ' on win ' + winId + '（运行时缩放未支持，保持启动值）');
+      this.lastDensity = d;
+    }
+  }
+
   /** 启动 vsync 回调：每帧检查引擎有没有 frame.request，有就回 frame.done。 */
   private startVsync(): void {
     if (this.vsyncObj !== undefined) return;
@@ -345,7 +490,19 @@ struct Index {
       this.probeShellResize = AppStorage.get<boolean>('lanluProbeShellResize') === true;
     } catch (eP) {}
     this.lwpPumpTimer = setInterval(() => {
-      try { shell.lwpWindowPump(); } catch (e) {}
+      let pumped: number = 0;
+      try { pumped = shell.lwpWindowPump(); } catch (e) {}
+      // 原点自愈：窗口被拖动/换屏后 windowRect 会过期，每秒用组件实际屏幕坐标校正一次
+      if (++this.originTick % 60 === 0) {
+        this.refreshSurfaceOrigin();
+      }
+      // 空闲快路径（评审 P2）：本拍没有任何引擎请求时，下面十几次 take* NAPI 调用都只会
+      // 返回"无"。只保留不经泵的那一项（交互式缩放由输入过滤器线程写入），其余跳过，
+      // 主线程每 16ms 的固定开销从 ~20 次 NAPI 降到 2 次。
+      if (pumped === 0 && !this.probeShellResize) {
+        this.applyPendingResize();
+        return;
+      }
       // 剪贴板（lw_clipboard.set/get，M6 第 2 步：文件桥换成协议）
       try {
         const cs: string = shell.lwpTakeClipboardSet();
@@ -368,23 +525,9 @@ struct Index {
           });
         }
       } catch (eCg) {}
-      // 文本输入开关：引擎聚焦/失焦文本框时通知壳（显示/隐藏软键盘）
-      try {
-        const want: number = shell.lwpTakeImeWant();
-        if (want === 1) {
-          this.attachIme();
-          console.info('[LANLU-SHELL] ime want=on');
-        } else if (want === 0 && this.ime !== undefined) {
-          this.ime.detach().then(() => {
-            this.imeAttached = false;
-            // IME 已分离：恢复键盘过滤器的键码投递（功能键/方向键走过滤器路径）。
-            try { shell.setImeActive(false); } catch (eImeOff) {}
-            console.info('[LANLU-SHELL] ime want=off');
-          }).catch((e: Error) => {
-            console.warn('[LANLU-SHELL] ime detach 失败: ' + JSON.stringify(e));
-          });
-        }
-      } catch (eImeWant) {}
+      // 文本输入开关：原生输入法桥自己处理（pump 里 lw_text_input.enable/disable ->
+      // lanlu_ime_enable/disable），这里只把 want 状态清掉，避免旧队列残留被误解。
+      try { shell.lwpTakeImeWant(); } catch (eImeWant) {}
       // 运行期标题 / 尺寸约束（引擎 window.set_title / set_min_max）
       try {
         const t: string = shell.lwpTakeWindowTitle();
@@ -421,15 +564,7 @@ struct Index {
         } catch (eSt) {}
       }
       // 交互式缩放：引擎发 begin_resize 后，壳把指针位移换算成尺寸，这里真正改窗口
-      try {
-        const rz: number[] = shell.lwpTakeResize();
-        if (rz !== undefined && rz.length === 2 && this.win !== undefined) {
-          this.win.resize(rz[0], rz[1]).then(() => {
-          }).catch((e: Error) => {
-            console.warn('[LANLU-SHELL] resize 失败: ' + JSON.stringify(e));
-          });
-        }
-      } catch (eRz) {}
+      this.applyPendingResize();
       // 光标形状：引擎请求 -> 系统光标（编号表见文档 §7.5）
       try {
         const shape: number = shell.lwpTakeCursorShape();
@@ -437,37 +572,10 @@ struct Index {
           this.applyCursorShape(shape);
         }
       } catch (eCur) {}
-      // IME 光标矩形（引擎算出，壳交给输入法面板定位候选框）
-      try {
-        const rect: number[] = shell.lwpTakeImeCursorRect();
-        if (rect !== undefined && rect.length === 4) {
-          // CursorInfo 是 {left, top, width, height}（物理屏幕坐标 px）。
-          // 引擎给的是窗口局部坐标：加上窗口在屏幕上的偏移后再交给输入法。
-          let ox = 0;
-          let oy = 0;
-          try {
-            if (this.win !== undefined) {
-              const wr = this.win.getWindowProperties().windowRect;
-              ox = wr.left;
-              oy = wr.top;
-            }
-          } catch (eWr) {}
-          const ci: inputMethod.CursorInfo = {
-            left: ox + rect[0],
-            top: oy + rect[1],
-            width: rect[2],
-            height: rect[3],
-          };
-          if (this.ime !== undefined) {
-            try {
-              this.ime.updateCursor(ci);
-              console.info('[LANLU-SHELL] ime cursor ' + ci.left + ',' + ci.top);
-            } catch (eImeCur) {
-              console.error('[LANLU-SHELL] ime updateCursor failed');
-            }
-          }
-        }
-      } catch (eImeR) {}
+      // IME 候选框位置：原生桥（text_input.cpp）在 pump 里直接 NotifyCursorUpdate，
+      // 不再经 ArkTS 的 inputMethod 控制器。这里只把待取标记清掉。
+      try { shell.lwpTakeImeCursorRect(); } catch (eImeR) {}
+
       // 联调压测：真实改窗口几何，驱动 ArkUI 的 onSizeChange -> lw_surface.changed
       try {
         if (this.probeShellResize && this.win !== undefined) {
@@ -656,86 +764,7 @@ struct Index {
     }, 400);
   }
 
-  private async attachIme(): Promise<void> {
-    if (this.imeBusy || this.imeAttached) return;
-    this.imeBusy = true;
-    try {
-      if (this.ime === undefined) {
-        this.ime = inputMethod.getController();
-      }
-      const cfg: inputMethod.TextConfig = {
-        inputAttribute: {
-          textInputType: inputMethod.TextInputType.TEXT,
-          enterKeyType: inputMethod.EnterKeyType.DONE,
-        },
-      };
-      if (this.winId >= 0) {
-        cfg.windowId = this.winId;
-      }
-      // Desktop/tablet have physical keyboards: no soft panel (it would cover the
-      // UI). Phones need the panel — that is the only way to type there.
-      const type = deviceInfo.deviceType;
-      const showSoft = type !== '2in1' && type !== 'tablet';
-      await this.ime.attach(showSoft, cfg);
-      if (this.winId >= 0) {
-        this.ime.setCallingWindow(this.winId).catch((err: Error) => {
-          console.error('[LANLU-SHELL] setCallingWindow fail: ' + err.message);
-        });
-      }
-      this.listenIme();
-      this.imeAttached = true;
-      // IME 接管后 insertText 是文本唯一入口：关掉原生键盘过滤器的键码投递，
-      // 否则同一颗字母键经"IME insertText + preedit 上屏"与"过滤器 keycode"两条
-      // 路径到达引擎，TextField 每条 TextInput 插一次（真机 1 个 s 出现 2~3 个）。
-      try { shell.setImeActive(true); } catch (eImeOn) {}
-      console.info('[LANLU-SHELL] IME attached win=' + this.winId);
-    } catch (err) {
-      console.error('[LANLU-SHELL] IME attach failed: ' + JSON.stringify(err));
-    } finally {
-      this.imeBusy = false;
-    }
-  }
 
-  private listenIme(): void {
-    const c = this.ime;
-    if (c === undefined) return;
-    if (this.imeListenersBound) return;   // 只绑一次（见 imeListenersBound 的说明）
-    this.imeListenersBound = true;
-    c.on('insertText', (text: string) => {
-      try { shell.sendText(text); } catch (err) { console.error('[LANLU-SHELL] sendText fail'); }
-    });
-    c.on('deleteLeft', (n: number) => {
-      for (let i = 0; i < n; i++) { shell.sendBackspace(); }
-    });
-    c.on('sendFunctionKey', () => {
-      shell.sendEnter();
-    });
-    c.on('moveCursor', (direction: inputMethod.Direction) => {
-      if (direction === inputMethod.Direction.CURSOR_LEFT) {
-        shell.sendLeft();
-      } else if (direction === inputMethod.Direction.CURSOR_RIGHT) {
-        shell.sendRight();
-      } else if (direction === inputMethod.Direction.CURSOR_UP) {
-        shell.sendUp();
-      } else if (direction === inputMethod.Direction.CURSOR_DOWN) {
-        shell.sendDown();
-      }
-    });
-    c.on('deleteRight', (n: number) => {
-      for (let i = 0; i < n; i++) { shell.sendDelete(); }
-    });
-    c.on('handleExtendAction', (action: inputMethod.ExtendAction) => {
-      if (action === inputMethod.ExtendAction.SELECT_ALL) {
-        shell.sendSelectAll();
-      } else if (action === inputMethod.ExtendAction.COPY) {
-        shell.sendCopy();
-      } else if (action === inputMethod.ExtendAction.CUT) {
-        shell.sendCut();
-      } else if (action === inputMethod.ExtendAction.PASTE) {
-        shell.sendPaste();
-      }
-    });
-  }
   aboutToAppear(): void {
     try {
       this.lgpuTest = shell.lgpuWanted() === 1;
@@ -811,16 +840,30 @@ struct Index {
         const rc: number = shell.startFilter(props.id, rect.left, rect.top);
         console.info('[LANLU-SHELL] startFilter win=' + props.id + ' rect=(' + rect.left + ',' + rect.top + ',' + rect.width + ',' + rect.height + ') rc=' + rc);
         this.winId = props.id;
+        // 窗口移动/缩放/最大化：重新种入鼠标过滤器原点（过滤器给的是屏幕坐标），
+        // 并把新尺寸作为 configure 下发；缩放比例（跨屏/改系统缩放）一并刷新。
+        // 之前原点只在启动时种一次 —— 窗口一拖动，所有点击整体偏移（评审 M1/W4）。
+        try {
+          w.on('windowRectChange', (opt: window.RectChangeOptions) => {
+            try {
+              const nr = opt.rect;
+              // 先用组件真实屏幕坐标（权威），窗口矩形只作为 configure 的尺寸来源
+              this.refreshSurfaceOrigin();
+              shell.lwpWindowConfigure(nr.width, nr.height, 1);
+              this.refreshDensity(props.id);
+            } catch (eRc) {}
+          });
+          console.info('[LANLU-SHELL] windowRectChange listener ok');
+        } catch (eRcL) {
+          console.info('[LANLU-SHELL] windowRectChange listener failed: ' + (eRcL as Error).message);
+        }
         // LWP（计划 §7）：把窗口创建与初始尺寸告诉引擎；LANLU_LWP 未开时这些调用是空操作。
         try {
           // 系统缩放（如 PC 模式 200%）必须如实上报，否则引擎按 1x 渲染，
           // 内容只铺满左上 1/scale² 区域（第 116 轮真机症状：右侧纯黑）
-          let sysDensity = 1.0;
-          try {
-            sysDensity = display.getDefaultDisplaySync().densityPixels;
-          } catch (eDensity) {
-            console.warn('[LANLU-SHELL] 取 densityPixels 失败，按 1.0 处理');
-          }
+          // 窗口所在显示器的密度（不是默认显示器：外接屏/扩展屏缩放不同）
+          let sysDensity = this.windowDensity();
+          this.lastDensity = sysDensity;
           console.info('[LANLU-SHELL] window created density=' + sysDensity);
           shell.lwpWindowCreated(props.id, sysDensity, false);
           shell.lwpWindowConfigure(rect.width, rect.height, 1);
@@ -858,7 +901,14 @@ struct Index {
             }, 500);
           }
         } catch (ePc) {}
-        this.attachIme();
+        // 输入法挂载改由引擎的 lw_text_input.enable 驱动（焦点进入输入框时），
+        // 这里只把窗口 id 与"是否弹软键盘"告诉原生桥。
+        try {
+          const t = deviceInfo.deviceType;
+          // 第三个参数是 UI 密度：native 用它把逻辑 vp 的光标矩形换成物理 px
+          const dens: number = this.lastDensity > 0 ? this.lastDensity : this.windowDensity();
+          shell.imeSetWindow(props.id, t !== '2in1' && t !== 'tablet', dens);
+        } catch (eIw) {}
       })
       .catch((e: Error) => {
         console.error('[LANLU-SHELL] getLastWindow fail: ' + e.message);
@@ -1027,6 +1077,9 @@ struct Index {
       .width('100%')
       if (this.lgpuMain) {
         XComponent({ id: 'LGPU_Main', type: XComponentType.SURFACE, controller: this.lgpuMainCtl })
+          // 构造参数里的 id 不进 UI 树（只有 .id() 属性才进），而 getRectangleById 按属性 id 查；
+          // 没有它就拿不到组件真实屏幕坐标，鼠标命中与输入法候选框都会偏移。
+          .id('LGPU_Main')
           .width('100%')
           .height('100%')
           // 父容器是 Column（纵向排列），不加绝对定位会被排到 SDL XComponent 下方而不可见
@@ -1042,14 +1095,51 @@ struct Index {
               if (Math.abs(vx) > 0) { shell.lwpSendPointerAxis(vx / 45.0, 1); }
             } catch (eAx) {}
           })
-          // 尺寸变化 -> lw_surface.changed：引擎只重配 swapchain（不重建 device）
-          .onSizeChange((_old: SizeOptions, now: SizeOptions) => {
+          // 输入法不消费的可打印键（数字、部分符号）兜底：OHOS 的键先给输入法，输入法没吃的
+          // 才落到获得焦点的组件。PC 上的华为输入法不处理数字键，而 IME 挂着时窗口键盘过滤器
+          // 又停发键码（防字母重复）—— 数字两头落空，输入框里打不出来。
+          // 与 horizon 同一做法：组件 onKeyEvent 收到的就是输入法放行的键，转成文本发给引擎。
+          .focusable(true)
+          .defaultFocus(true)
+          // 键事件唯一入口（输入法消费的键不会到这里，见 text_input.cpp 的 consumeKeyEvents）。
+          // 携带 unicode 文本与修饰键：输入框从文本插入，控件快捷键仍能收到键。
+          .focusable(true)
+          .defaultFocus(true)
+          // 指针：用组件内坐标（vp）× 密度 = 物理 px，不依赖窗口原点；同一个事件里
+          // displayX-x 就是组件在屏幕上的起点（vp），顺手校准给输入法候选框。
+          .onMouse((e: MouseEvent) => {
             try {
-              const w: number = Number(now.width);
-              const h: number = Number(now.height);
-              if (w > 0 && h > 0) { shell.lwpSurfaceChanged(w, h); }
-            } catch (eSC) {}
+              const dens: number = this.lastDensity > 0 ? this.lastDensity : 1.0;
+              const ox: number = (e.displayX - e.x) * dens;
+              const oy: number = (e.displayY - e.y) * dens;
+              if (ox > 0 || oy > 0) {
+                try { shell.calibrateOriginFromEvent(ox, oy); } catch (eC) {}
+              }
+              let act: number = 10;   // move
+              if (e.action === MouseAction.Press) { act = 11; }
+              else if (e.action === MouseAction.Release) { act = 12; }
+              else if (e.action === MouseAction.Move) { act = 10; }
+              let btn: number = 0;
+              if (e.button === MouseButton.Right) { btn = 1; }
+              else if (e.button === MouseButton.Middle) { btn = 2; }
+              shell.sendPointerLocal(act, e.x * dens, e.y * dens, btn);
+            } catch (eM) {}
           })
+          .onAreaChange((_o: Area, _n: Area) => { this.refreshSurfaceOrigin(); })
+          .onFocus(() => { try { shell.setComponentFocused(true); } catch (eF) {} })
+          .onBlur(() => { try { shell.setComponentFocused(false); } catch (eB) {} })
+          .onKeyEvent((event: KeyEvent) => {
+            const down: boolean = event.type === KeyType.Down;
+            const mods: number = LanluKeyMods.mask(event);
+            const text: string = down ? LanluKeyMods.text(event, mods) : '';
+            let rc: number = 0;
+            try { rc = shell.sendKeyEvent(event.keyCode, down, text, mods); } catch (eK) {}
+            if (rc === 1) {
+              event.stopPropagation();
+            }
+          })
+          // 尺寸变化 -> lw_surface.changed：由 LanluMainXcController.onSurfaceChanged（px）上报，
+          // 不再用 onSizeChange（vp）。
           .onLoad(() => {
             try {
               const sid: string = this.lgpuMainCtl.getXComponentSurfaceId();
@@ -1058,10 +1148,29 @@ struct Index {
                 try {
                   const wp: window.WindowProperties = win.getWindowProperties();
                   const r = wp.windowRect;
-                  shell.setMainSurface(Number(sid), r.width, r.height);
+                  // 优先用 XComponent 自己的 surface 尺寸（px）；拿不到才退回窗口矩形
+                  let sw: number = this.lgpuMainCtl.lastW;
+                  let sh: number = this.lgpuMainCtl.lastH;
+                  if (sw <= 0 || sh <= 0) {
+                    try {
+                      const sr: SurfaceRect = this.lgpuMainCtl.getXComponentSurfaceRect();
+                      sw = Math.round(sr.surfaceWidth);
+                      sh = Math.round(sr.surfaceHeight);
+                    } catch (eSr) {}
+                  }
+                  if (sw <= 0 || sh <= 0) {
+                    sw = r.width;
+                    sh = r.height;
+                  }
+                  this.lgpuMainCtl.lastW = sw;
+                  this.lgpuMainCtl.lastH = sh;
+                  shell.setMainSurface(Number(sid), sw, sh);
+                  this.lgpuMainCtl.surfaceReady = true;
+                  this.refreshSurfaceOrigin();
                   // P5：引擎由壳层启动（不再经 SDL_main）
                   try { shell.startEngine(); } catch (eEn) {}
-                  console.info('[LANLU-SHELL] lgpu main surfaceId=' + sid + ' ' + r.width + 'x' + r.height);
+                  console.info('[LANLU-SHELL] lgpu main surfaceId=' + sid + ' ' + sw + 'x' + sh +
+                    ' (windowRect ' + r.width + 'x' + r.height + ')');
                 } catch (eW) {}
               }).catch((eP: Error) => {});
             } catch (eM) {}

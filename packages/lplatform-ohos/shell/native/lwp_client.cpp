@@ -206,6 +206,93 @@ int lanlu_lwp_send_text(const char* text) {
                   LWP_LW_INPUT_TEXT_INPUT_OPCODE, 0, buf, total) == 0;
 }
 
+/* ── lw_text_input 事件（壳 -> 引擎）─────────────────────────────────────────
+ * 输入法原生回调（text_input.cpp）直接调这三个函数，不再经过 ArkTS 轮询。
+ * 单条内联上限 200 字节（UTF-8），超长文本由调用方切段（输入法的 insertText 一段通常很短）。 */
+#define LANLU_IME_TEXT_MAX 200
+
+extern "C" __attribute__((visibility("default")))
+int lanlu_lwp_send_commit_string(const char* text) {
+    if (!lwp_ready() || text == nullptr) return 0;
+    const size_t n = strlen(text);
+    if (n == 0) return 0;
+    if (n > LANLU_IME_TEXT_MAX) return 0;
+    uint8_t buf[LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE + LANLU_IME_TEXT_MAX];
+    memset(buf, 0, sizeof buf);
+    uint32_t total = (uint32_t)(LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE + n);
+    memcpy(buf, &total, 4);
+    uint16_t off = LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE;
+    uint16_t len = (uint16_t)n;
+    memcpy(buf + 4, &off, 2);
+    memcpy(buf + 6, &len, 2);
+    memcpy(buf + LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE, text, n);
+    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+                  LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE, 0, buf, total) == 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+int lanlu_lwp_send_preedit(const char* text, uint32_t cursor) {
+    if (!lwp_ready()) return 0;
+    const size_t n = text != nullptr ? strlen(text) : 0;
+    if (n > LANLU_IME_TEXT_MAX) return 0;
+    uint8_t buf[LWP_LW_TEXT_INPUT_PREEDIT_SIZE + LANLU_IME_TEXT_MAX];
+    memset(buf, 0, sizeof buf);
+    uint32_t total = (uint32_t)(LWP_LW_TEXT_INPUT_PREEDIT_SIZE + n);
+    memcpy(buf, &total, 4);
+    uint16_t off = LWP_LW_TEXT_INPUT_PREEDIT_SIZE;
+    uint16_t len = (uint16_t)n;
+    memcpy(buf + 4, &off, 2);
+    memcpy(buf + 6, &len, 2);
+    memcpy(buf + 8, &cursor, 4);
+    if (n > 0) memcpy(buf + LWP_LW_TEXT_INPUT_PREEDIT_SIZE, text, n);
+    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+                  LWP_LW_TEXT_INPUT_PREEDIT_OPCODE, 0, buf, total) == 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+int lanlu_lwp_send_delete_surrounding(uint32_t before, uint32_t after) {
+    if (!lwp_ready()) return 0;
+    uint8_t buf[LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE];
+    memset(buf, 0, sizeof buf);
+    uint32_t total = LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_SIZE;
+    memcpy(buf, &total, 4);
+    memcpy(buf + 4, &before, 4);
+    memcpy(buf + 8, &after, 4);
+    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+                  LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE, 0, buf, total) == 0;
+}
+
+/* 指针事件（组件内坐标，物理 px）：与过滤器那条路同一个发送器，只是坐标来源不同。
+ * 由 XComponent.onMouse 调用（action: 10/2=motion, 11/1=down, 12/3=up）。 */
+extern "C" int lanlu_lwp_send_pointer(int action, float x, float y, int key);
+extern "C" __attribute__((visibility("default")))
+int lanlu_lwp_send_pointer_local(int action, float x, float y, int button) {
+    return lanlu_lwp_send_pointer(action, x, y, button);
+}
+
+/* 键事件（带文本）：OHOS 组件事件给了 keyCode、unicode 与修饰键，这里直接按协议发。
+ * keycode 用 evdev（引擎唯一键码表）；utf8 为空表示该键不产生文本。 */
+extern "C" __attribute__((visibility("default")))
+int lanlu_lwp_send_key_text(uint32_t evdev, int down, const char* utf8, uint16_t modifiers) {
+    if (!lwp_ready()) return 0;
+    const size_t n = utf8 != nullptr ? strlen(utf8) : 0;
+    if (n > 8) return 0;
+    uint8_t buf[LWP_LW_INPUT_KEY_SIZE + 8];
+    memset(buf, 0, sizeof buf);
+    uint32_t total = (uint32_t)(LWP_LW_INPUT_KEY_SIZE + n);
+    memcpy(buf, &total, 4);
+    memcpy(buf + 4, &evdev, 4);
+    buf[8] = down ? 1 : 0;
+    uint16_t off = LWP_LW_INPUT_KEY_SIZE;
+    uint16_t len = (uint16_t)n;
+    memcpy(buf + 9, &off, 2);
+    memcpy(buf + 11, &len, 2);
+    memcpy(buf + 13, &modifiers, 2);
+    if (n > 0) memcpy(buf + LWP_LW_INPUT_KEY_SIZE, utf8, n);
+    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+                  LWP_LW_INPUT_KEY_OPCODE, 0, buf, total) == 0;
+}
+
 /* 键盘：名字 -> evdev 键码（计划 §6.1 的单表；鸿蒙 keyCode 也映射到这张表） */
 static int keycode_from_name(const char* name) {
     if (name == nullptr || name[0] == '\0') return -1;
@@ -223,8 +310,18 @@ static int keycode_from_name(const char* name) {
     if (strcmp(name, "Down") == 0) return 108;
     if (name[1] == '\0') {
         char c = name[0];
-        if (c >= 'a' && c <= 'z') return 16 + (c - 'a');          /* q..p 连续段之外也能落 RawScancode */
-        if (c >= '0' && c <= '9') return 2 + ((c - '0' + 9) % 10); /* evdev 1..10 是 1..9,0 */
+        /* evdev 的字母键码不是连续的：必须查表（之前 16+(c-'a') 把 W/E/R/T 发成 B/C/D/E）。 */
+        static const struct { char ch; int code; } kLetters[] = {
+            {'q', 16}, {'w', 17}, {'e', 18}, {'r', 19}, {'t', 20}, {'y', 21}, {'u', 22},
+            {'i', 23}, {'o', 24}, {'p', 25}, {'a', 30}, {'s', 31}, {'d', 32}, {'f', 33},
+            {'g', 34}, {'h', 35}, {'j', 36}, {'k', 37}, {'l', 38}, {'z', 44}, {'x', 45},
+            {'c', 46}, {'v', 47}, {'b', 48}, {'n', 49}, {'m', 50},
+        };
+        for (size_t i = 0; i < sizeof(kLetters) / sizeof(kLetters[0]); i++) {
+            if (kLetters[i].ch == c) return kLetters[i].code;
+            if (kLetters[i].ch - 32 == c) return kLetters[i].code;   /* 大写同一物理键 */
+        }
+        if (c >= '0' && c <= '9') return 2 + ((c - '0' + 9) % 10); /* evdev 2..11 是 1..9,0 */
     }
     return -1;
 }

@@ -77,6 +77,8 @@ DEPS=$LPLAT/deps
 "$DEPS/rocksdb/build-ohos.sh" "$PKG/packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.so"
 "$DEPS/libvlc/build-ohos.sh" "$RES/ohos-stubs/libvlc.so"
 bash "$DEPS/lgpu/build-ohos.sh"
+# lcodec 原生后端（libblur 高斯模糊）：cdylib，随 HAP 打包、运行时 dlopen
+bash "$DEPS/lcodec/build-ohos.sh"
 "$DEPS/fontkit/build-ohos.sh" "$PKG/packages/fontkit_ffi/native/target/release/libfontkit_native.so"
 
 # 1.5) webview(Blitz) 交叉静态库（需 rust;已构建则就位）
@@ -169,7 +171,7 @@ PFX=$RES/sdl3-ohos/prefix-single/lib
 PK=$CN/../packages
 ENG=$BUILD/target/aarch64-linux-ohos/release/lanlu_client_next
 export OHOS_STRIP=$NATIVE/llvm/bin/llvm-strip
-export OHOS_EXTRA_LIBS="$ST:$ST/ffmpeg:$PFX:$PK/webview/native/target/release:$PK/rocksdb_ffi/native:$PK/libavformat_ffi/native:$PK/libass_ffi/native:$PK/fontkit_ffi/native/target/release:$ENG:$LWP_OHOS_LIB"
+export OHOS_EXTRA_LIBS="$ST:$ST/ffmpeg:$PFX:$PK/webview/native/target/release:$PK/rocksdb_ffi/native:$PK/libavformat_ffi/native:$PK/libass_ffi/native:$PK/fontkit_ffi/native/target/release:$PK/lcodec/native/target/ohos:$ENG:$LWP_OHOS_LIB"
 ps aux | grep -iE 'hvigor|daemon-process-boot-script' | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
 true
 # 不动 .hvigor（守护进程持有 FUSE 句柄），只清生成物
@@ -183,7 +185,10 @@ for d in "$ST" "$ST/ffmpeg" "$PFX" "$PK/webview/native/target/release" "$PK/rock
 done
 HAPGEN=$LPACK/target/release/bin/main
 [ -x "$HAPGEN" ] || { echo "缺少 hapgen：先运行 packages/lpack-ohos/tools/build-hapgen.sh"; exit 1; }
-(cd "$BUILD" && "$HAPGEN" gen --sign)
+# 签名只走一条路径：hapgen 只生成工程与 HAP（devecocli signature generate 会向 AGC 申请
+# provision，配额耗尽时**无限挂起**——2026-11-15 实测卡死 10 分钟以上）。签名由 sign-hap.sh
+# 复用本机已有材料完成（tools/sign-hap.sh），两条路径同时签名还会互相覆盖 hvigor 配置。
+(cd "$BUILD" && "$HAPGEN" gen)
 
 HAP_OUT="$BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap"
 echo "HAP: $HAP_OUT"
