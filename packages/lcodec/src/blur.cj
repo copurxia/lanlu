@@ -5,6 +5,8 @@ import std.sync.Mutex
 /*
  * RGBA 高斯模糊（Modal 背景 / backdrop 用）。
  *
+ * 后端优先级：libblur（liblcodec_native，见 blur_native.cj）> libvips > 纯仓颉盒式近似。
+ *
  * 这是原先散落在 cui（packages/cangjie-gui/lgui/src/texture.cj）里的 vips 直接调用；
  * 解码统合后由 lcodec 提供，UI 框架不再 import vips_ffi。
  */
@@ -40,6 +42,21 @@ public func blurRgba(pixels: Array<UInt8>, width: Int32, height: Int32,
     if (Int64(pixels.size) != expected) {
         return None
     }
+    // 1) libblur（所有平台优先）：真高斯 + 预乘 alpha，不需要 libvips。
+    if (nativeBlurAvailable()) {
+        let result = Array<UInt8>(expected, repeat: 0u8)
+        let src = unsafe { acquireArrayRawData(pixels) }
+        let dst = unsafe { acquireArrayRawData(result) }
+        let ok = nativeBlurInto(CPointer<UInt8>(src.pointer), CPointer<UInt8>(dst.pointer), width, height, sigma)
+        unsafe {
+            releaseArrayRawData(dst)
+            releaseArrayRawData(src)
+        }
+        if (ok) {
+            return Some(result)
+        }
+    }
+    // 2) libvips（桌面），3) 盒式近似（OHOS 无 vips 时）
     if (!ensureVipsForBlur()) {
         // OHOS 没有 vips：走纯仓颉三次盒式模糊（等价能力，无外部库依赖）。
         let handle = unsafe { acquireArrayRawData(pixels) }

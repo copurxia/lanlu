@@ -185,11 +185,29 @@ private func boxBlurV(src: CPointer<UInt8>, dst: CPointer<UInt8>, w: Int64, h: I
     unsafe { LibC.free(sums) }
 }
 
-/// 三次盒式模糊近似高斯（sigma 单位=像素）。返回 malloc 分配的新缓冲（调用方 freeRgba）。
+/// 高斯模糊（sigma 单位=像素）。返回 malloc 分配的新缓冲（调用方 freeRgba）。
+/// 优先 libblur（真高斯、SIMD+多线程、预乘 alpha）；后端不可用时回落三次盒式近似。
 public func blurRgbaNative(src: CPointer<UInt8>, w: Int32, h: Int32, sigma: Float64): CPointer<UInt8> {
     if (w <= 0 || h <= 0 || src.isNull()) {
         return CPointer<UInt8>()
     }
+    let iw = Int64(w)
+    let ih = Int64(h)
+    let total = iw * ih * 4
+    if (nativeBlurAvailable()) {
+        let dst = unsafe { LibC.malloc<UInt8>(count: total) }
+        if (!dst.isNull()) {
+            if (nativeBlurInto(src, dst, w, h, sigma)) {
+                return dst
+            }
+            unsafe { LibC.free(dst) }
+        }
+    }
+    return boxBlurRgba(src, w, h, sigma)
+}
+
+/// 三次盒式模糊近似高斯（libblur 不可用时的回落）。返回 malloc 分配的新缓冲。
+func boxBlurRgba(src: CPointer<UInt8>, w: Int32, h: Int32, sigma: Float64): CPointer<UInt8> {
     let iw = Int64(w)
     let ih = Int64(h)
     let total = iw * ih * 4

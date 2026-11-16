@@ -104,12 +104,14 @@ public class NativeDecodedImage {
 // maxDimension > 0 且原图最长边超出时按比例缩小到该上限（不放大）；磁盘缓存仍存
 // 原始字节，缩小只发生在解码期，不同展示尺寸共用同一磁盘缓存条目。
 // 仅在工作线程调用（vips 解码是 CPU 重活，UI 线程纪律见 model.startImageTask）。
-// 系统解码器路径（OHOS）：直连 ImageSource，成功后按 maxDimension 做一次双线性缩放。
+// 系统解码器路径（OHOS）：直连 ImageSource；G8 起把 maxDimension 作为 desiredSize 交给
+// 解码器（解码期缩放，省去全尺寸像素与一次仓颉双线性拷贝）。系统不支持/取不到源尺寸时
+// decodeRgba 内部自动退回全尺寸，下面的双线性分支继续兜底（此时才真正执行缩放）。
 private func tryDecodeWithSystem(path: String, maxDimension: Int32): ?NativeDecodedImage {
     if (!SystemImageDecoder.available()) {
         return None
     }
-    match (SystemImageDecoder.decodeRgba(path)) {
+    match (SystemImageDecoder.decodeRgba(path, maxDimension: maxDimension)) {
         case Some(d) =>
             var w = d.width
             var h = d.height
@@ -367,9 +369,11 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
             throw Exception("vips resize 失败: ${VipsApi.takeErrorString()}")
         }
 
-        // 3. 真高斯模糊（sigma > 0 时）：在中间尺寸上模糊，放大后保持柔和
+        // 3. 真高斯模糊（sigma > 0 时）：在中间尺寸上模糊，放大后保持柔和。
+        //    libblur 可用时在最后的 RGBA 缓冲上做（见第 5 步），这里只在回落时调 vips。
+        let useNativeBlur = blurSigma > 0.0 && nativeBlurAvailable()
         var src = resizedImg
-        if (blurSigma > 0.0) {
+        if (blurSigma > 0.0 && !useNativeBlur) {
             let blurRc = VipsApi.gaussblur(resizedImg, CPointer<VipsImagePtr>(inout blurImg), blurSigma)
             if (blurRc != 0 || blurImg.isNull()) {
                 throw Exception("vips gaussblur 失败: ${VipsApi.takeErrorString()}")
@@ -414,6 +418,14 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
         let n = Int64(size)
         let expected = Int64(bw) * Int64(bh) * 4
         if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected}") }
+
+        // 5. libblur 原地模糊（RGBA 紧凑缓冲，已完成方向/色彩空间/补 alpha）
+        if (useNativeBlur) {
+            let px = CPointer<UInt8>(mem)
+            if (!nativeBlurInto(px, px, bw, bh, blurSigma)) {
+                throw Exception("libblur 模糊失败")
+            }
+        }
 
         // 所有权移交给 NativeDecodedImage：mem 置空，finally 不再释放。
         let img = NativeDecodedImage(bw, bh, CPointer<UInt8>(mem), n)

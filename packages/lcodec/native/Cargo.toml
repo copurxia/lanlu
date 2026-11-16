@@ -1,0 +1,24 @@
+[package]
+name = "lanlu-lcodec-native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "lcodec 的原生像素运算后端：libblur 高斯模糊，导出 C ABI 给 Cangjie 使用"
+
+[lib]
+name = "lcodec_native"
+# cdylib：随 HAP 打包、由 lcodec 运行时 dlopen（与 vips 后端同一装载方式，
+# 业务层与 cui 不需要任何链接参数）；staticlib 留给需要静态链接的宿主。
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+# 纯 Rust 高斯模糊（NEON/SSE/AVX 加速），替代 libvips 的 vips_gaussblur 与
+# OHOS 上的仓颉三次盒式模糊。不开 image/fft 特性：只要 u8 RGBA 平面卷积。
+libblur = { version = "=0.24.0", default-features = false, features = ["neon", "sse"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
