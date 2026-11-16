@@ -6,9 +6,10 @@ package lanlu_client_next.ui
 // 于是所有图元/文本都走 lgpu，SDL 只保留事件循环与窗口管理。
 // 预览缩放：把逻辑尺寸的 UI 缩到小窗口里（LANLU_LGPU_SCALE 覆盖，默认 0.25）。
 
+import std.collection.ArrayList
 import std.convert.*
 import std.env.getVariable
-import std.fs.{exists as fsExists, Path as FsPath, File as FsFile}
+import std.fs.{exists as fsExists, Path as FsPath, File as FsFile, OpenMode}
 import lgpu.{Font, LgpuCanvas, Surface}
 import lwindow
 import lwindow.{LWindowEventType}
@@ -37,6 +38,13 @@ var g_title_btn_visible: Bool = false
 var g_title_btn_logged_w: Float32 = -1.0
 /// 平台三键默认配置是否已下发（只发一次）
 var g_title_btn_cfg_sent: Bool = false
+/// 平台三键期望明暗（0=跟随系统 1=light 2=dark）。main.cj 按业务主题写入，
+/// 主题切换时重发配置（docs/lwindow-title-buttons-plan.md §2.3 主题联动）。
+var g_title_btn_color_mode: UInt32 = 0
+
+public func setPlatformTitleButtonsColorMode(cm: UInt32): Unit {
+    g_title_btn_color_mode = cm
+}
 
 /// 平台三键占用的逻辑宽度（vp）。>0 表示三键由平台绘制，业务层**不再自绘**、
 /// 并在标题栏右侧留出这段宽度。返回 0 = 平台没有三键（Wayland/无装饰平台 → 自绘回退）。
@@ -45,8 +53,9 @@ public func platformTitleButtonsWidth(): Float32 {
     // 首帧布局时补发默认配置：能力位要到 hello 处理后才可用，
     // 后端安装期可能还没握手完成（install-time 发送只作兜底）。
     if (!g_title_btn_cfg_sent && lwindow.lwpShellProvidesTitleButtons()) {
-        g_title_btn_cfg_sent = lwindow.lwpSetTitleButtons(7, 0, 16, 12, 28, 0)
-        probeTrace("ui title buttons cfg sent=" + g_title_btn_cfg_sent.toString())
+        g_title_btn_cfg_sent = lwindow.lwpSetTitleButtons(7, 0, 16, 12, 28, g_title_btn_color_mode)
+        probeTrace("ui title buttons cfg sent=" + g_title_btn_cfg_sent.toString() +
+            " colorMode=" + g_title_btn_color_mode.toString())
     }
     let w = platformTitleButtonsWidthRaw()
     if (w != g_title_btn_logged_w) {
@@ -56,22 +65,83 @@ public func platformTitleButtonsWidth(): Float32 {
     w
 }
 
-private func platformTitleButtonsWidthRaw(): Float32 {
-    if (!lwindow.lwpShellProvidesTitleButtons()) {
+/// 三键宽度的决策表（纯函数，可单测）：
+///   - 平台不提供三键（能力位未宣告）→ 0 = 业务层自绘回退；
+///   - 提供了但 rect 还没到 → 文档默认 148vp（140 三键 + 8 间距），避免启动期闪自绘三键；
+///   - rect 已到 → 物理宽 / 密度（缩放用壳上报值，g_ui_scale 启动期可能未初始化）。
+public func titleButtonsWidthFor(platformProvides: Bool, rectVisible: Bool, rectWidthPx: Int64,
+    scale: Float32): Float32 {
+    if (!platformProvides) {
         return 0.0
     }
-    if (g_title_btn_visible && g_title_btn_width_px > 0) {
-        // 用客户端上报的缩放而不是 g_ui_scale：WindowCreated 可能在启动期就被
-        // lwpAwait* 消费掉，导致 g_ui_scale 仍是默认 1.0（真机实测 266px 被当成 266vp）。
-        let s = lwindow.lwpReportedScale()
-        if (s > 0.0) {
-            return Float32(g_title_btn_width_px) / s
+    if (rectVisible && rectWidthPx > 0) {
+        if (scale > 0.0) {
+            return Float32(rectWidthPx) / scale
         }
-        return Float32(g_title_btn_width_px)
+        return Float32(rectWidthPx)
     }
-    // 官方文档：三键区约 140x37 vp（mihong 实测 266x70 px @1.9 密度）
     return 148.0
 }
+
+private func platformTitleButtonsWidthRaw(): Float32 {
+    titleButtonsWidthFor(lwindow.lwpShellProvidesTitleButtons(), g_title_btn_visible,
+        g_title_btn_width_px, lwindow.lwpReportedScale())
+}
+/// 最近一次安装的后端画布（联调/抓帧用）。
+public var lastCanvas: ?LgpuCanvas = None
+
+/// 交换链当前配置的物理尺寸（px）。surface.changed 只在与它不同时才 resize。
+var g_swap_w: Int64 = 0
+var g_swap_h: Int64 = 0
+/// 已作为 UiEvent.WindowResized 交给 UI 的物理尺寸（px）。0 = 还没发过：
+/// 首次取事件时一定发一次，让 UI 视口以**真实 surface 尺寸**为准，
+/// 而不是启动期 configure 给的窗口矩形（两者不一定相等，评审 W3）。
+var g_ui_size_w: Int64 = 0
+var g_ui_size_h: Int64 = 0
+
+/// 诊断开关在启动时读一次（之前每个指针事件做 3~4 次 getVariable）。
+let g_probeCursorDbg: Bool = getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1")
+let g_probeFocusDbg: Bool = getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1")
+let g_probeLgpu: Bool = (getVariable("LANLU_PROBE_LGPU") ?? "0") == "1"
+let g_releaseBuild: Bool = (getVariable("LANLU_DEBUGGABLE") ?? "") == "0"
+
+/// 逻辑尺寸 = 物理 / 缩放（统一一处，评审 W5：之前一处存逻辑、一处存物理）
+func logicalOf(px: Int64): Int64 {
+    let sc = if (g_ui_scale > 0.0) { g_ui_scale } else { 1.0f32 }
+    Int64(Float32(px) / sc + 0.5)
+}
+
+/// 每次取事件时调用：壳报告的 surface 尺寸与交换链 / UI 视口不一致就同步。
+/// 返回需要交给 UI 的 WindowResized（物理 px；DesktopApp 按 window.scale 换算逻辑尺寸）。
+func syncSurfaceSize(): ?UiEvent {
+    let (sw, sh) = lwindow.lwpSurfaceSize()
+    let w = Int64(sw)
+    let h = Int64(sh)
+    if (w <= 0 || h <= 0) {
+        return None
+    }
+    if (w != g_swap_w || h != g_swap_h) {
+        match (lastCanvas) {
+            // 只重配 swapchain（resize），**不要**走 configure（会重建 device/pipeline，
+            // 真机 20 次 resize 压测第 13 轮后引擎线程卡死，第 53 轮）。
+            case Some(c) =>
+                c.surfaceRef().resize(w, h)
+                g_swap_w = w
+                g_swap_h = h
+            case None => return None
+        }
+    }
+    g_win_w = logicalOf(w)
+    g_win_h = logicalOf(h)
+    if (w != g_ui_size_w || h != g_ui_size_h) {
+        g_ui_size_w = w
+        g_ui_size_h = h
+        probeTrace("ui viewport <- surface ${w}x${h} px (logical ${g_win_w}x${g_win_h} @${g_ui_scale})")
+        return Some(UiEvent.WindowResized(Int32(w), Int32(h)))
+    }
+    None
+}
+
 /// 光标诊断计数（LANLU_PROBE_CURSOR_DBG=1 时限频打点）
 var g_cursorDbgCount: Int64 = 0
 /// 已打印的事件诊断条数（LANLU_PROBE_FOCUS_DBG=1 时打印前 30 条）
@@ -100,31 +170,60 @@ private var lwpQuitRequested: Bool = false
 
 
 
+/// 待投递的合成事件（按键自带文本时，先插入文本再处理按键）。
+private let g_uiPending = ArrayList<UiEvent>()
+/// 输入法组合中（收到过 preedit 且尚未 commit/清空）：此时键事件不再产生文本，
+/// 文本一律由输入法的 commit_string 提供（否则拼音期间按字母会直接落字）。
+private var g_preeditActive: Bool = false
+
+/// 键事件的修饰键位里"命令键"的掩码（LWP_KEY_MODIFIERS_*，与 SDL_KMOD_* 同值）：
+/// 这些按下时按键是快捷键而不是文本。
+private let KEY_MOD_COMMAND_MASK: UInt16 = 0x0FC0   // LCTRL|RCTRL|LALT|RALT|LGUI|RGUI = 4032
+
+/// 取出一条待投递的合成事件。
+/// 组合态事件：更新标志位并返回事件（match 分支里不能直接赋值）。
+private func preeditUi(text: String, cursor: Int64): UiEvent {
+    g_preeditActive = text.size > 0
+    UiEvent.TextEditing(text, cursor)
+}
+
+/// 上屏事件：组合态结束。
+private func commitUi(text: String): UiEvent {
+    g_preeditActive = false
+    UiEvent.TextInput(text)
+}
+
+private func takePendingUi(): ?UiEvent {
+    if (g_uiPending.size == 0) {
+        return None
+    }
+    let e = g_uiPending[0]
+    g_uiPending.remove(at: 0)
+    Some(e)
+}
+
 public func probeTrace(line: String): Unit {
     // LANLU_LWP=1：日志走协议（壳转 hilog）。联调期（LANLU_PROBE_LGPU=1）**同时**落文件，
     // 因为壳侧 stderr 未必进 hilog —— 不能把唯一的诊断手段押在一条未验证的通道上。
     let sent = lwpLog(1, line)
-    if (sent && (getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+    if (sent && !g_probeLgpu) {
         return
     }
     // release 构建（ArkTS 注入 LANLU_DEBUGGABLE=0）不落探针文件：
     // 与 lanlu_env.txt 同一条门禁（计划 §11 风险记录）。未设置时按开发环境处理。
-    if ((getVariable("LANLU_DEBUGGABLE") ?? "") == "0") {
-        return
-    }
-    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+    if (g_releaseBuild || !g_probeLgpu) {
         return
     }
     let home = getVariable("HOME") ?? "."
     let path = FsPath(home + "/probe_trace.txt")
+    // 追加写：之前每行都把整个文件读出再整体写回（O(n²)，渲染线程上越跑越慢）
     try {
-        let old = if (fsExists(path)) { String.fromUtf8(FsFile.readFrom(path)) } else { "" }
-        FsFile.writeTo(path, (old + line + String.fromUtf8(Array<UInt8>(1, repeat: 10))).toArray())
+        let f = FsFile(path, OpenMode.Append)
+        f.write((line + String.fromUtf8(Array<UInt8>(1, repeat: 10))).toArray())
+        f.close()
     } catch (_) {}
 }
 
-/// 最近一次安装的后端画布（联调/抓帧用）。
-public var lastCanvas: ?LgpuCanvas = None
 
 public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     // P5：引擎现在由壳层在 libmain 加载时自启动，可能早于 ArkTS 设置环境变量。
@@ -149,6 +248,8 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
                 probeTrace("lwp surface from protocol handle=${handle} ${w}x${h}")
                 let surfL = Surface.fromSurfaceId(handle)
                 surfL.configure(w, h)
+                g_swap_w = w
+                g_swap_h = h
                 match (systemSansFontPath()) {
                     case Some(fontPathL) =>
                         let fontL = Font.load(fontPathL)
@@ -156,6 +257,11 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
                         // 系统 UI 缩放：逻辑坐标 × scale = 物理像素。
                         // 硬编码 1.0 时，PC 模式 190%/200% 缩放下内容只铺满左上角（第 117 轮真机修复）。
                         canvasL.scale = lwindow.lwpReportedScale()
+                        // 协议路径同样要同步 g_ui_scale：否则逻辑尺寸/边缘热区按 1x 计算
+                        // （真机 probe：uiScale=1.0 logical=2090x1394）
+                        if (canvasL.scale > 0.0) {
+                            g_ui_scale = canvasL.scale
+                        }
                         probeTrace("lwp canvas scale=${canvasL.scale} (物理 ${w}x${h})")
                         lastCanvas = Some(canvasL)
                         // 与 env 路径同样要把 canvas 交给 UI 层并挂上纹理回调；
@@ -210,6 +316,8 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     }
     let surface = Surface.fromSurfaceId(sid)
     surface.configure(surfW, surfH)
+    g_swap_w = surfW
+    g_swap_h = surfH
     // 字体路径由平台层给出（分层规则：业务层不写平台路径）
     let fontPath = match (systemSansFontPath()) {
         case Some(p) => p
@@ -313,41 +421,54 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
     }
 
     // IME 候选框定位：lgui 算出光标矩形 -> 平台层（LWP text_input.set_cursor_rect）
+    // 光标周围文本（text-input-v3 set_surrounding）：输入法联想/删除上下文。
+    // 只在框架报告时转发（Frame 里判重由 sink 自身频率决定，框架每帧一次）。
+    if (lwindow.lwpInputEnabled()) {
+        lgui.textSurroundingSink = { value: String, caret: Int64, anchor: Int64 =>
+            let _ = lwindow.lwpImeSetSurrounding(value, UInt32(max(0, caret)), UInt32(max(0, anchor)))
+        }
+    }
     if (lwindow.lwpInputEnabled()) {
         lgui.textInputAreaSink = { rect =>
             let ok = lwindow.lwpImeSetCursorRect(
                 Int32(rect.x), Int32(rect.y), Int32(rect.w), Int32(rect.h))
-            if (getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1")) {
+            if (g_probeFocusDbg) {
                 probeTrace("ime sink rect=" + Int64(rect.x).toString() + "," + Int64(rect.y).toString() +
                     " " + Int64(rect.w).toString() + "x" + Int64(rect.h).toString() + " ok=" + ok.toString())
             }
         }
     }
 
+    // R6：空闲等待改阻塞在 LWP 通道上（空闲零唤醒，替代 4ms 忙轮询）。
+    // 只有协议通道可用时才注入：否则 wait 会立即返回 false，等于把忙轮询换成空转。
+    if (lwindow.lwpInputEnabled()) {
+        lgui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
+        lgui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
+    }
     lgui.headlessEventSource = Some({ =>
         // 输入源二选一（过渡期）：LANLU_LWP=1 走协议通道，否则走文件桥
         if (lwindow.lwpInputEnabled()) {
             g_srcCalls++
             match (lwindow.nextLwpEvent()) {
                 case Some(ev) =>
-                    if (getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1") && g_srcCalls % 50 == 1) {
+                    if (g_probeCursorDbg && g_srcCalls % 50 == 1) {
                         probeTrace("src call=" + g_srcCalls.toString() + " kind=" + kindName(ev.kind))
                     }
                     // 诊断（LANLU_PROBE_FOCUS_DBG=1）：按下时打点命中与焦点，定位"搜索框拿不到焦点"
-                    if (getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1") && g_evDbg < 30) {
+                    if (g_probeFocusDbg && g_evDbg < 30) {
                         g_evDbg++
                         probeTrace("ev dbg kind=" + kindName(ev.kind) + " x=" + Int64(ev.x).toString() +
                             " y=" + Int64(ev.y).toString() + " focus=" + lgui.debugFocusId)
                     }
                     if (ev.kind == lwindow.LWindowEventType.PointerDown &&
-                        getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1")) {
+                        g_probeFocusDbg) {
                         probeTrace("focus dbg down=" + Int64(ev.x).toString() + "," +
                             Int64(ev.y).toString() + " focusId=" + lgui.debugFocusId)
                     }
                     // 指针形状：移动时判断是否落在文本框内，变了才发（不刷协议）
                     if (ev.kind == lwindow.LWindowEventType.PointerMove) {
                         // 诊断（LANLU_PROBE_CURSOR_DBG=1）：确认分支执行与发送结果
-                        if (getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1")) {
+                        if (g_probeCursorDbg) {
                             g_cursorDbgCount++
                             if (g_cursorDbgCount % 30 == 1) {
                                 let hit = match (lgui.lastTextInputRect) {
@@ -462,13 +583,19 @@ public func installHeadlessInputSource(): Unit {
         lgui.textInputAreaSink = { rect =>
             let ok = lwindow.lwpImeSetCursorRect(
                 Int32(rect.x), Int32(rect.y), Int32(rect.w), Int32(rect.h))
-            if (getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1")) {
+            if (g_probeFocusDbg) {
                 probeTrace("ime sink rect=" + Int64(rect.x).toString() + "," + Int64(rect.y).toString() +
                     " " + Int64(rect.w).toString() + "x" + Int64(rect.h).toString() + " ok=" + ok.toString())
             }
         }
     }
 
+    // R6：空闲等待改阻塞在 LWP 通道上（空闲零唤醒，替代 4ms 忙轮询）。
+    // 只有协议通道可用时才注入：否则 wait 会立即返回 false，等于把忙轮询换成空转。
+    if (lwindow.lwpInputEnabled()) {
+        lgui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
+        lgui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
+    }
     lgui.headlessEventSource = Some({ =>
         if (lwindow.lwpInputEnabled()) {
             // 1) 生命周期事件：必须用 lwindow 内部的**同一个**客户端消费，
@@ -481,6 +608,7 @@ public func installHeadlessInputSource(): Unit {
                         probeTrace("lwp window created id=${id} scale=${scale}")
                         if (scale > 0.0 && scale != g_ui_scale) {
                             g_ui_scale = scale
+                            g_ui_size_w = 0   // 缩放变了：强制重发一次视口
                             // canvas 可能已建好：立刻用新 scale（下一帧起生效）
                             match (lastCanvas) {
                                 case Some(c) => c.scale = scale
@@ -508,22 +636,14 @@ public func installHeadlessInputSource(): Unit {
                         // 启动时的初始尺寸也要记下来：边缘热区判定依赖 g_win_w/g_win_h，
                         // 之前只在 surface.changed（resize）里赋值 → 拖边永远判定失败（第 116 轮修）
                         // 边缘热区用**逻辑**尺寸（指针坐标已转逻辑，见 backend_lwp 解码）
-                        g_win_w = Int64(Float32(w) / (if (g_ui_scale > 0.0) { g_ui_scale } else { 1.0f32 }))
-                        g_win_h = Int64(Float32(hh) / (if (g_ui_scale > 0.0) { g_ui_scale } else { 1.0f32 }))
+                        g_win_w = logicalOf(Int64(w))
+                        g_win_h = logicalOf(Int64(hh))
                         probeTrace("lwp surface available handle=${h} ${w}x${hh} uiScale=${g_ui_scale} logical=${Int64(Float32(w) / g_ui_scale)}x${Int64(Float32(hh) / g_ui_scale)}")
                     case lwindow.LWindowLifecycleEvent.SurfaceChanged(w, hh) =>
-                        // reconfigure **不重建** swapchain（§7.1：Maleoon 第三次重建必崩）
-                        probeTrace("lwp surface changed ${w}x${hh} -> reconfigure")
-                        match (lastCanvas) {
-                            // 只重配 swapchain（resize），**不要**再走 configure ——
-                            // configure 会重建 device/pipeline，真机上反复十几轮后引擎线程会卡死
-                            // （第 53 轮 20 次 resize 压测复现：第 13 轮后日志停住）。
-                            case Some(c) =>
-                                g_win_w = Int64(w)
-                                g_win_h = Int64(hh)
-                                c.surfaceRef().resize(Int64(w), Int64(hh))
-                            case None => ()
-                        }
+                        // 真正的同步在下面 syncSurfaceSize()：以客户端记录的 surface 尺寸为准，
+                        // 同时重配交换链**并**把 WindowResized 交给 UI（之前只 resize 交换链，
+                        // UI 视口停在启动尺寸 —— 缩放后画面裁切/留黑的根因，评审 W1）。
+                        probeTrace("lwp surface changed ${w}x${hh}")
                     // 拖放：壳已解码 uri 为本地路径。业务语义（拖到书库=导入？）待产品决定，
                     // 这里只做接收与打点，避免"协议通了但没人接"的老问题。
                     case lwindow.LWindowLifecycleEvent.DragEnter(x, y, uris) =>
@@ -566,9 +686,17 @@ public func installHeadlessInputSource(): Unit {
                     case _ => ()
                 }
             }
+            match (takePendingUi()) {
+                case Some(pending) => return Some(pending)
+                case None => ()
+            }
             if (lwpQuitRequested) {
                 lwpQuitRequested = false
                 return Some(UiEvent.Quit)
+            }
+            match (syncSurfaceSize()) {
+                case Some(resized) => return Some(resized)
+                case None => ()
             }
             let _ = lwindow.lwpCheckConfigureTimeout()
             lwpPollCount++
@@ -582,22 +710,23 @@ public func installHeadlessInputSource(): Unit {
             g_srcCalls++
             match (lwindow.nextLwpEvent()) {
                 case Some(ev) =>
-                    if (getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1") && g_srcCalls % 50 == 1) {
+                    if (g_probeCursorDbg && g_srcCalls % 50 == 1) {
                         probeTrace("src call=" + g_srcCalls.toString() + " kind=" + kindName(ev.kind))
                     }
                     // 诊断（LANLU_PROBE_FOCUS_DBG=1）：按下时打点命中与焦点，定位"搜索框拿不到焦点"
-                    if (getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1") && g_evDbg < 30) {
+                    if (g_probeFocusDbg && g_evDbg < 30) {
                         g_evDbg++
                         probeTrace("ev dbg kind=" + kindName(ev.kind) + " x=" + Int64(ev.x).toString() +
                             " y=" + Int64(ev.y).toString() + " focus=" + lgui.debugFocusId)
                     }
                     if (ev.kind == lwindow.LWindowEventType.PointerDown &&
-                        getVariable("LANLU_PROBE_FOCUS_DBG") == Some("1")) {
+                        g_probeFocusDbg) {
                         probeTrace("focus dbg down=" + Int64(ev.x).toString() + "," +
                             Int64(ev.y).toString() + " focusId=" + lgui.debugFocusId)
                     }
                     // 边缘按下 = 开始缩放（无边框窗口没有系统装饰，必须自己给热区）
-                    if (ev.kind == lwindow.LWindowEventType.PointerDown && g_win_w > 0) {
+                    // 只有左键拖边才缩放（右键/中键按在边缘不应进入缩放会话）
+                    if (ev.kind == lwindow.LWindowEventType.PointerDown && ev.key == 0 && g_win_w > 0) {
                         const EDGE: Float32 = 8.0
                         var edges: UInt32 = 0
                         if (ev.y <= EDGE) { edges = edges | 1 }
@@ -611,7 +740,7 @@ public func installHeadlessInputSource(): Unit {
                     // 指针形状：移动时判断是否落在文本框内，变了才发（不刷协议）
                     if (ev.kind == lwindow.LWindowEventType.PointerMove) {
                         // 诊断（LANLU_PROBE_CURSOR_DBG=1）：确认分支执行与发送结果
-                        if (getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1")) {
+                        if (g_probeCursorDbg) {
                             g_cursorDbgCount++
                             if (g_cursorDbgCount % 30 == 1) {
                                 let hit = match (lgui.lastTextInputRect) {
@@ -696,6 +825,8 @@ class LWindowClipboard <: ClipboardBackend {
 /// 协议键码 -> Key 枚举。
 /// 计划 §6.1 要求「单表键码」：这里先用 Linux evdev 码（与 wayland/xkb 一致），
 /// 鸿蒙侧由壳负责把 HarmonyOS keyCode 映射到同一张表；未覆盖的落到 RawScancode。
+/// evdev 键码 -> lgui Key。**全仓唯一**的键码表（计划 §6.1）：壳只发 evdev，
+/// 引擎不猜字符——字符走键事件自带的 utf8。字母用大写 ASCII（与 LETTER_A=65、SDL 路径一致）。
 public func keyFromCode(code: Int32): Key {
     match (code) {
         case 1 => Key.Escape
@@ -712,14 +843,36 @@ public func keyFromCode(code: Int32): Key {
         case 108 => Key.Down
         case _ =>
             if (code >= 2 && code <= 11) {
-                // evdev 2..11 = 数字 1..0
-                Key.Letter(UInt8(UInt32(48) + UInt32((code + 8) % 10)))   // 0x30 = '0'
+                // evdev 2..10 = 1..9，11 = 0
+                Key.Digit(UInt8(UInt32(48) + UInt32((code + 8) % 10)))   // 0x30 = '0'
             } else if (code >= 16 && code <= 25) {
-                // evdev 16..25 = Q W E R T Y U I O P
-                Key.Letter(UInt8(UInt32(97) + UInt32(code - 16)))   // 0x61 = 'q'
+                Key.Letter(UInt8(UInt32(65) + UInt32(evdevLetterIndex(code))))
+            } else if (code >= 30 && code <= 38) {
+                // evdev 30..38 = A S D F G H J K L
+                Key.Letter(UInt8(UInt32(65) + UInt32(code - 30 + 8)))
+            } else if (code >= 44 && code <= 50) {
+                // evdev 44..50 = Z X C V B N M
+                Key.Letter(UInt8(UInt32(65) + UInt32(code - 44 + 17)))
             } else {
                 Key.RawScancode(code)
             }
+    }
+}
+
+/// QWERTY 上排（Q..P）的字母序号：evdev 16..25 与字母表顺序不同，
+/// 直接 code-16 会把 W/E/R/T 变成 B/C/D/E。返回值是 0=A 的序号。
+func evdevLetterIndex(code: Int32): Int64 {
+    match (code) {
+        case 16 => 16   // Q
+        case 17 => 22   // W
+        case 18 => 4    // E
+        case 19 => 17   // R
+        case 20 => 19   // T
+        case 21 => 24   // Y
+        case 22 => 20   // U
+        case 23 => 8    // I
+        case 24 => 14   // O
+        case _ => 15    // P
     }
 }
 
@@ -730,17 +883,39 @@ func discardMotionForDnd(x: UInt32, y: UInt32): Unit {
     let _ = y
 }
 
+/// 协议按键号 -> MouseButton（0=左 1=右 2=中，lwp_protocol.h；之前一律当左键，评审 M2）
+public func mouseButtonOf(code: Int32): MouseButton {
+    match (code) {
+        case 0 => MouseButton.Left
+        case 1 => MouseButton.Right
+        case 2 => MouseButton.Middle
+        case _ => MouseButton.RawCode(UInt8(code & 0xFF))
+    }
+}
+
 func lwpEventToUi(ev: lwindow.LWindowEvent): UiEvent {
+    // 按键自带文本（壳按当前键盘布局算好）：先投递文本插入，再投递按键本身。
+    // 输入框只从 TextInput 插入（不猜键码），控件快捷键仍能收到 KeyDown。
+    if (ev.kind == lwindow.LWindowEventType.Key && ev.pressed && ev.text.size > 0 &&
+        !g_preeditActive && (ev.modifiers & KEY_MOD_COMMAND_MASK) == 0) {
+        g_uiPending.add(UiEvent.TextInput(ev.text))
+    }
     // 诊断：按下时打印 UI 实际收到的逻辑坐标（与期望位置对比可算出偏移）
-    if (ev.kind == lwindow.LWindowEventType.PointerDown) {
+    if (ev.kind == lwindow.LWindowEventType.PointerDown && g_probeFocusDbg) {
         probeTrace("ui down logical=${Int64(ev.x)},${Int64(ev.y)} uiScale=${g_ui_scale} winLogical=${g_win_w}x${g_win_h}")
     }
     match (ev.kind) {
-        case lwindow.LWindowEventType.PointerDown => UiEvent.MouseDown(MouseButton.Left, ev.x, ev.y)
+        case lwindow.LWindowEventType.PointerDown => UiEvent.MouseDown(mouseButtonOf(ev.key), ev.x, ev.y)
         case lwindow.LWindowEventType.PointerMove => UiEvent.MouseMove(ev.x, ev.y)
-        case lwindow.LWindowEventType.PointerUp => UiEvent.MouseUp(MouseButton.Left, ev.x, ev.y)
+        case lwindow.LWindowEventType.PointerUp => UiEvent.MouseUp(mouseButtonOf(ev.key), ev.x, ev.y)
         case lwindow.LWindowEventType.PointerAxis => UiEvent.MouseWheel(ev.x, ev.y, 0.0f32, 0.0f32)
-        case lwindow.LWindowEventType.TextInput => UiEvent.TextInput(ev.text)
+        // commit 之后组合态结束
+        case lwindow.LWindowEventType.TextInput => commitUi(ev.text)
+        // 输入法组合态：只影响显示（LWindowEvent.key 里装着组合串内的光标字节偏移）
+        case lwindow.LWindowEventType.Preedit =>
+            preeditUi(ev.text, Int64(ev.key))
+        case lwindow.LWindowEventType.DeleteSurrounding =>
+            UiEvent.DeleteSurrounding(Int64(ev.key), Int64(ev.x))
         case lwindow.LWindowEventType.Key =>
             if (ev.pressed) { UiEvent.KeyDown(keyFromCode(ev.key), false) } else { UiEvent.KeyUp(keyFromCode(ev.key)) }
         case _ => UiEvent.Unknown(0)

@@ -10,7 +10,7 @@ import lanlu_client_next.ui.*
 import lanlu_client_next.ui.{lastCanvas, probeTrace}
 import lwindow.{clipboardSetText, clipboardGetText, lwpInputEnabled}
 import lgui.{debugFocusId, lastTextInputRect}
-import lwindow.{lwpAwaitSystemInfo, lwpCursorShapeForPoint, lwpCursorShapeSent, lwpFrameTick, lwpImeEnable, lwpLastPointer, lwpLog, lwpRequestCapture, lwpSetCursorShape, lwpSetWindowMinMax, lwpReportedScale, lwpSetWindowTitle, lwpViolations, requestWindowCommand}
+import lwindow.{lwpAwaitSystemInfo, lwpCursorShapeForPoint, lwpCursorShapeSent, lwpFrameTick, lwpImeEnable, lwpLastPointer, lwpLog, lwpRequestCapture, lwpSetCursorShape, lwpSetWindowMinMax, lwpSetTitleButtons, lwpReportedScale, lwpSetWindowTitle, lwpViolations, requestWindowCommand}
 import std.convert.*
 import std.env.{getVariable, setVariable}
 import std.fs.{canonicalize, exists as fsExists, Path as FsPath, File as FsFile}
@@ -24,6 +24,13 @@ import portcheck.runIfEnabled
 
 /// 上一次的焦点控件 id（用于"文本输入开始/结束"的通知去抖）
 var g_lastFocusId: String = ""
+
+// G4 度量状态（UI 线程独占，同 g_lastFocusId 惯例；仓颉闭包不能捕获可变局部变量）。
+// first_cover：首个封面就绪打点的自拆标志与扫描对象（仅 LANLU_PERF=1 时挂引用）。
+private var g_firstCoverFound = false
+private var g_firstCoverModel: ?AppModel = None
+// 扫描上限：约 15s@60fps。离线/无服务时不会一直扫（超过即放弃本进程的 first_cover）。
+private let g_firstCoverScanFrameLimit: Int64 = 900
 
 /// M0 性能打点开关（只读一次环境变量）：LANLU_PERF=1 或 LANLU_PROBE_LGPU=1。
 /// 之前每帧都会被反复 getVariable，这里缓存成一次性判定。
@@ -41,6 +48,10 @@ func perfStatsEnabled(): Bool {
 }
 
 // 联调 trace：追加一行到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
+/// 每帧探针日志开关（LANLU_PROBE_LGPU=1 / LANLU_PROBE_CURSOR_DBG=1）。启动时读一次。
+let g_probeFrameLog: Bool = (getVariable("LANLU_PROBE_LGPU") ?? "0") == "1" ||
+    getVariable("LANLU_PROBE_CURSOR_DBG") == Some("1")
+
 func probeTraceLine(line: String): Unit {
     // 与 ui.probeTrace 是同一份逻辑（第 26 轮欠的合并）：委托过去，避免两处漂移。
     probeTrace(line)
@@ -126,6 +137,52 @@ private func syncTitleBarDragRegion(window: SdlWindow, model: AppModel): Unit {
 public func runApp(): Int64 {
     // 启动计时基准（LANLU_PERF 评估用）：各 [boot] 行尾部为距进程入口的累计毫秒。
     let bootT0 = MonoTime.now()
+    // G4 度量：boot_to_first_frame / first_cover 终点打点。
+    // 仅 LANLU_PERF=1 时安装（默认零开销）；装在所有既有钩子之前，后续安装点
+    // （LANLU_PROBE_CAPTURE / lwp frame tick）会把它作为 prevHook 串联，互不覆盖。
+    // first_cover 借既有逐帧钩子顺带检查 imageStates 首个 "ready"，命中或超过
+    // g_firstCoverScanFrameLimit 帧即自拆——无新增线程/定时器；理想事件点是 model
+    // dispatch 的 "img:" ready 分支（本轮文件独占范围外，接入点见 exec/G4-metrics.md）。
+    if (SubtitlePerf.enabled()) {
+        let prevFrameHook = frameProbeHook
+        frameProbeHook = { frame: Int64 =>
+            match (prevFrameHook) {
+                case Some(h) => h(frame)
+                case None => ()
+            }
+            if (frame == 1) {
+                SubtitlePerf.emit("boot_to_first_frame_ms",
+                    (MonoTime.now() - bootT0).toMilliseconds(), "ms")
+            }
+            if (!g_firstCoverFound && frame <= g_firstCoverScanFrameLimit) {
+                match (g_firstCoverModel) {
+                    case Some(m) =>
+                        for ((_, st) in m.imageStates) {
+                            if (st.value == "ready") {
+                                g_firstCoverFound = true
+                                SubtitlePerf.emit("first_cover_ms",
+                                    (MonoTime.now() - bootT0).toMilliseconds(), "ms")
+                                break
+                            }
+                        }
+                    case None => ()
+                }
+            }
+        }
+    }
+    // G5：离线缓存预热上移到设置库打开之前，与 initializeSettingsStore 并行。
+    // 依赖核实（读码）：OfflineCache.open 只用 HOME 派生的 defaultOfflineCacheRoot()
+    // + rocksdb_ffi 自身；offline_cache.cj / PageStore / SearchStore / TankoubonStore /
+    // TagTranslationStore / BlobCacheStore / ObjectStore / DbSchema 全文件无
+    // loadSettings / settingsStore / defaultSettingsRoot / AppSettings 引用 → 不依赖设置。
+    // HOME 由 lwindowInitialize() 的 initPlatformOhos 提前 setVariable 就绪（runApp 之前）。
+    // seed 模式不预热（隔离 HOME 的快照路径不应触碰真实缓存目录）；harnessSeedMode()
+    // 只解析命令行、无依赖，可在此提前判定（下方 seedMode 处会再取一次，同一实现幂等）。
+    let offlineCachePrewarm: ?Future<?OfflineCache> = if (harnessSeedMode().size == 0) {
+        Some(spawn {OfflineCache.open(defaultOfflineCacheRoot())})
+    } else {
+        None
+    }
     // 临时启动诊断（定位 Windows 启动即崩的访问违规，查到后可删）：
     // 分段打印启动进度，崩溃前最后一条即崩溃所在阶段。
     println("[boot] 0 settings-store root=${defaultSettingsRoot()} t=0ms")
@@ -170,20 +227,23 @@ public func runApp(): Int64 {
         loadSettings()
     }
     println("[boot] 2 settings loaded, seedMode=${seedMode} t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
-    // 离线缓存预热：RocksDB open（session_resume 302ms 的主要构成）与 webview 字体预热、
-    // AppModel 构造并行，首次用缓存（resumeProfile）时由 offlineCacheFor join。seed 模式
-    // 不预热——隔离 HOME 的快照路径不应触碰真实缓存目录。
-    let offlineCachePrewarm: ?Future<?OfflineCache> = if (seedMode.size == 0) {
-        Some(spawn {OfflineCache.open(defaultOfflineCacheRoot())})
-    } else {
-        None
-    }
+    // G5：离线缓存预热已上移到设置库打开之前（见 runApp 开头），此处不再 spawn；
+    // offlineCachePrewarm 变量在那里的作用域覆盖本函数余下部分。
     // webview 字体预热：fontique 系统字体扫描（FcConfigBuildFonts）是 loadHtml
     // 崩溃窗口的主要来源，提前到 GC 未活跃、主线程浅栈的启动阶段完成一次；
     // 进程级共享，后续 loadHtml 复用不再重建（见 webview_native session.rs）。
+    // G4 度量：warmup 单独计时（只加计时，不改调用时机——惰性化有 GC 栈扫描崩溃窗口）。
+    let warmupT0 = MonoTime.now()
     warmup()
-    println("[boot] 2.1 webview fonts warmed t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
+    let warmupMs = (MonoTime.now() - warmupT0).toMilliseconds()
+    println("[boot] 2.1 webview fonts warmed t=${(MonoTime.now() - bootT0).toMilliseconds()}ms (warmup=${warmupMs}ms)")
+    SubtitlePerf.gauge("webview_warmup_ms", warmupMs)
+    SubtitlePerf.emit("webview_warmup_ms", warmupMs, "ms")
     let model = AppModel(settings, persistSettings: {s => saveSettings(s)}, offlineCachePrewarm: offlineCachePrewarm)
+    // G4：first_cover 扫描对象（仅 LANLU_PERF=1 挂引用，默认不留任何状态）。
+    if (SubtitlePerf.enabled()) {
+        g_firstCoverModel = Some(model)
+    }
     if (seedMode.size > 0) {
         seedLibrarySnapshot(model, seedMode)
     } else {
@@ -215,8 +275,15 @@ public func runApp(): Int64 {
     // 注意：这里必须用 lwpInputEnabled()，不能写死 LANLU_LWP=="1" ——
     // 默认开启后 env 是空的，写死会让整段逻辑静默失效（第 70 轮踩过）。
     if (lwpInputEnabled()) {
-        let gotInfo = lwpAwaitSystemInfo(300)
-        probeTraceLine("lwp system.info ready=" + gotInfo.toString())
+        // G4 度量：有界等待的实际耗时（最坏 300ms 全暴露在 boot→首帧路径上，见 R-data §S3）。
+        // G5：上限 300→100ms；不改回退逻辑（systemSansFontPath 候选路径照旧），回退时打 fallback=true。
+        let lwpWaitT0 = MonoTime.now()
+        let gotInfo = lwpAwaitSystemInfo(100)
+        let lwpWaitMs = (MonoTime.now() - lwpWaitT0).toMilliseconds()
+        probeTraceLine("lwp system.info ready=" + gotInfo.toString() + " waitMs=" + lwpWaitMs.toString() +
+            (if (gotInfo) { "" } else { " fallback=true" }))
+        SubtitlePerf.gauge("lwp_system_info_wait_ms", lwpWaitMs)
+        SubtitlePerf.emit("lwp_system_info_wait_ms", lwpWaitMs, "ms")
     }
     let uiScale: Float32 = geom.scale
     let winW: Int32 = geom.width
@@ -234,13 +301,19 @@ public func runApp(): Int64 {
     installHeadlessInputSource()
     // 联调：LANLU_PROBE_CAPTURE=1 —— 在渲染循环内按帧触发 GPU 抓帧并写文件
     if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
+        // 第 1 帧太早（封面尚未解码）；120 帧后再抓一张用于比对封面区域像素。
         frameProbeHook = { frame: Int64 =>
-            if (frame == 1) {
+            let want = if (frame == 1 || (frame % 40 == 0 && frame <= 200)) {
+                "cap_f${frame}.rgba"
+            } else {
+                ""
+            }
+            if (want.size > 0) {
                 let home = getVariable("HOME") ?? "."
                 match (lastCanvas) {
                     case Some(c) =>
-                        let rc = c.captureTo(home + "/cap_off.rgba")
-                        probeTraceLine("capture off rc=" + rc.toString())
+                        let rc = c.captureTo(home + "/" + want)
+                        probeTraceLine("capture ${want} rc=" + rc.toString())
                     case None => probeTraceLine("capture off: no canvas")
                 }
             }
@@ -268,7 +341,8 @@ public func runApp(): Int64 {
             // 焦点刚变化那一拍未必有指针事件（第 89 轮踩过）。
             if (frame % 8 == 0) {
                 let (px, py) = lwpLastPointer()
-                if (frame % 16 == 0) {   // 只在 frame%8==0 的帧里，所以取 16 的倍数才能命中
+                // 每 16 帧一条 LWP 日志在真机上会持续占用渲染线程与 hilog：只在探针开关下输出
+                if (g_probeFrameLog && frame % 16 == 0) {   // 只在 frame%8==0 的帧里，所以取 16 的倍数才能命中
                     probeTraceLine("cursor frame=" + frame.toString() + " ptr=" +
                         Int64(px).toString() + "," + Int64(py).toString() +
                         " sent=" + lwpCursorShapeSent().toString() +
@@ -290,9 +364,10 @@ public func runApp(): Int64 {
             if (focusId != g_lastFocusId) {
                 g_lastFocusId = focusId
                 let hasText = focusId.size > 0
-                let _ = lwpImeEnable(hasText)
+                let imeOk = lwpImeEnable(hasText)
+                probeTraceLine("ime enable focus=" + focusId + " -> " + imeOk.toString())
             }
-            if (frame % 30 == 0) {
+            if (g_probeFrameLog && frame % 30 == 0) {
                 probeTraceLine("lwp violations " + lwpViolations())
             }
             // M0 渲染统计：每 120 帧（约 2s）打一行 lgpu 计数与文字测量命中率。
@@ -471,7 +546,15 @@ public func runApp(): Int64 {
     // 图片到货/UI 更新不再等下一个输入事件。
     model.worker.onResult = { => app.requestWake() }
     // 设置页主题切换的应用路径：model.setTheme 落盘后回调这里，运行时替换主题即切即生效。
-    model.themeChangeHandler = {mode => app.setTheme(lanluThemeFor(mode))}
+    // 三键平台化：平台三键的明暗跟随业务主题（壳未宣告 title_buttons 能力时是空操作）。
+    model.themeChangeHandler = {mode =>
+        app.setTheme(lanluThemeFor(mode))
+        let cm: UInt32 = if (mode == "light") { 1 } else { 2 }
+        setPlatformTitleButtonsColorMode(cm)
+        let _ = lwpSetTitleButtons(7, 0, 16, 12, 28, cm)
+    }
+    // 启动时的初值也按已保存的主题来（避免首帧平台三键按系统明暗闪一下）。
+    setPlatformTitleButtonsColorMode(if (model.isLight()) { 1 } else { 2 })
     try { app.setMinimumSize(960, 640) } catch (_: Exception) {}  // OHOS: SDL_SetWindowMinimumSize 不支持
     // 窗口图标（任务栏/窗口切换器）：logo 字节内嵌在二进制里（build.cj 生成），
     // 解码失败说明构建产物损坏，与旧"logo 文件缺失即报错"同一口径。
@@ -536,6 +619,8 @@ public func runApp(): Int64 {
         }
     }
     model.close()
+    // G2 交接：perf_log 改为 500ms 周期 flush + 8KB 缓冲，退出零丢失需在此手动落一次。
+    perfLogFlush()
     closeSettingsStore()
     return 0
 }
