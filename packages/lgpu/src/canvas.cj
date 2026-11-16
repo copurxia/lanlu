@@ -1,9 +1,9 @@
 package lgpu
 
 import std.env.getVariable
-import std.fs.{File, Path, exists}
-import std.collection.ArrayList
-import std.collection.HashMap
+import std.fs.{File, OpenMode, Path, exists}
+import std.collection.{ArrayList, HashMap, HashSet}
+import std.sync.Mutex
 import lgui.{Canvas, Color, Pen, Rect}
 
 // lgpu（wgpu）实现的 Canvas：把视图图元映射到 L 层的 SDF/纹理管线。
@@ -11,7 +11,7 @@ import lgui.{Canvas, Color, Pen, Rect}
 // 与 lgui.Renderer 的差异（迁移期可见）：
 // - 文本度量来自 lgpu 自己的字形光栅化（ab_glyph），与 fontkit 的度量在极端字号下
 //   可能差 1px；切换后如需完全一致，再把 fontkit 的度量接进来。
-// - 柔和圆角（feather）暂时按普通圆角绘制（SDF 自带抗锯齿，视觉上很接近）。
+// - 柔和圆角（feather）走解析高斯阴影（lgpu_draw_shadow，gpu.rs mode 4）。
 
 // 颜色空间：UI 画进 Rgba8Unorm 离屏目标（gamma 空间混合），blit 转线性上屏。
 // （方案C，真机逐字节验证：深色底 (11,11,13)、面板 (22,22,26) 等于设计值。
@@ -29,15 +29,21 @@ func channel(v: UInt8): Float32 {
 }
 
 // 联调 trace：把关键步骤追加到 $HOME/probe_trace.txt（LANLU_PROBE_LGPU=1 时）。
+// G2：环境变量改为启动期读取一次（probeTrace 在 uploadTexture/releaseTexture 等每次
+// 调用的路径上都会被调到）；落盘改成 open-append-close，去掉旧的整文件读改写。
+private let PROBE_LGPU_ENABLED: Bool = (getVariable("LANLU_PROBE_LGPU") ?? "0") == "1"
+private let DIAG_HOME_DIR: String = getVariable("HOME") ?? "."
+private let NO_CLIP_FORCED: Bool = (getVariable("LANLU_NO_CLIP") ?? "0") == "1"
+
 func probeTrace(line: String): Unit {
-    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") != "1") {
+    if (!PROBE_LGPU_ENABLED) {
         return
     }
-    let home = getVariable("HOME") ?? "."
-    let path = Path(home + "/probe_trace.txt")
+    let path = Path(DIAG_HOME_DIR + "/probe_trace.txt")
     try {
-        let old = if (exists(path)) { String.fromUtf8(File.readFrom(path)) } else { "" }
-        File.writeTo(path, (old + line + nline()).toArray())
+        let f = File(path, OpenMode.Append)
+        f.write((line + nline()).toArray())
+        f.close()
     } catch (_) {}
 }
 
@@ -49,13 +55,124 @@ func nline(): String {
     String.fromUtf8(Array<UInt8>(1, repeat: 10))
 }
 
+// ===== 图像诊断环形缓冲（G2）=====
+// 旧实现：uploadTexture / drawTexture / drawTextureRounded 每次调用都同步读写
+// $HOME/img_diag.txt（exists + 整文件 readFrom + UTF-8 解码 + contains 线性扫描，
+// 实测 340~440µs/次，PixelImageView 路径每图每帧 3 次），且 img_diag.txt 随新纹理
+// id 单调变大、读代价线性恶化。现在：绘制/上传路径只做内存 append（环形 200 条），
+// LANLU_IMG_DIAG=1 时经 LgpuCanvas.present 周期性落盘（append，不整文件重写），
+// 也可随时手动调用 dumpImageDiag()。渲染路径上不再有任何文件系统调用。
+private const IMG_DIAG_CAP: Int64 = 200
+private const IMG_DIAG_SEEN_CAP: Int64 = 4096
+private let IMG_DIAG_ENABLED: Bool = (getVariable("LANLU_IMG_DIAG") ?? "0") == "1"
+private let IMG_DIAG_MUTEX = Mutex()
+private let IMG_DIAG_LINES = ArrayList<String>()
+// 幂等去重：保持旧语义"同一 id/key 只记首条"（如 upload id=7、pivDraw asset:42）。
+private let IMG_DIAG_SEEN = HashSet<String>()
+
+/// 追加一条诊断（不去重，失败类逐条记录；缓冲满丢最旧）。
+/// 关闭（LANLU_IMG_DIAG≠1）时为空操作——热路径调用方无须自行判断。
+func imgDiagPush(line: String): Unit {
+    if (!IMG_DIAG_ENABLED) {
+        return
+    }
+    synchronized(IMG_DIAG_MUTEX) {
+        IMG_DIAG_LINES.add(line)
+        if (IMG_DIAG_LINES.size > IMG_DIAG_CAP) {
+            IMG_DIAG_LINES.remove(at: 0)
+        }
+    }
+}
+
+/// 查重并在未见过时登记 tag（返回 false = 调用方应记录该条）。
+/// 仓颉 lambda 捕获可变局部变量后不能作为值传递，故"惰性构造"由调用方按
+/// `imgDiagSeen(tag)` + `imgDiagPush(line)` 两步展开。
+func imgDiagSeen(tag: String): Bool {
+    synchronized(IMG_DIAG_MUTEX) {
+        if (IMG_DIAG_SEEN.contains(tag)) {
+            return true
+        }
+        if (IMG_DIAG_SEEN.size >= IMG_DIAG_SEEN_CAP) {
+            // 满员后不再登记新 tag（视作已见过）：避免 clear 后重新记账的风暴。
+            return true
+        }
+        IMG_DIAG_SEEN.add(tag)
+        return false
+    }
+}
+
+/// seen 未命中时记一条。
+func imgDiagPushNew(tag: String, line: String): Unit {
+    if (!IMG_DIAG_ENABLED) {
+        return
+    }
+    if (imgDiagSeen(tag)) {
+        return
+    }
+    imgDiagPush(line)
+}
+
+/// 把环形缓冲落盘一次（append，不整文件重写）。渲染路径不要调用；
+/// 由 present() 在 LANLU_IMG_DIAG=1 时限频调用，或联调时手动触发。
+public func dumpImageDiag(force!: Bool = false): Unit {
+    if (!IMG_DIAG_ENABLED && !force) {
+        return
+    }
+    let snapshot: Array<String>
+    synchronized(IMG_DIAG_MUTEX) {
+        snapshot = IMG_DIAG_LINES.toArray()
+    }
+    if (snapshot.size == 0) {
+        return
+    }
+    let builder = StringBuilder()
+    builder.append("==== img diag dump ====")
+    builder.append(nline())
+    for (line in snapshot) {
+        builder.append(line)
+        builder.append(nline())
+    }
+    try {
+        let f = File(Path(DIAG_HOME_DIR + "/img_diag.txt"), OpenMode.Append)
+        f.write(builder.toString().toArray())
+        f.close()
+    } catch (_) {}
+}
+
+// G3：测量缓存键改为复合 struct——省掉每次 textWidth 的 "text\0size" 拼接 String
+//（每 Label 每帧 1~3 个，命中路径也要先拼 key）。量化口径不变（1/4 pt，与 Rust 侧一致）；
+// 哈希以 String.hashCode 为主、sizeQ 参与混合。
+private struct TextMeasureKey <: Hashable & Equatable<TextMeasureKey> {
+    let text: String
+    let sizeQ: Int64
+
+    init(text: String, sizeQ: Int64) {
+        this.text = text
+        this.sizeQ = sizeQ
+    }
+
+    public func hashCode(): Int64 {
+        // 异或混合：Int64 乘法溢出会抛 OverflowException（真机首帧 Label::measure 实测
+        // text.hashCode()*31 溢出直接 SIGABRT）。碰撞由 == 兜底，哈希质量足够。
+        text.hashCode() ^ sizeQ
+    }
+
+    public operator func ==(rhs: TextMeasureKey): Bool {
+        text == rhs.text && sizeQ == rhs.sizeQ
+    }
+
+    public operator func !=(rhs: TextMeasureKey): Bool {
+        !(this == rhs)
+    }
+}
+
 public class LgpuCanvas <: Canvas {
     // R5.1：文本测量缓存——宽度只取决于 (text, pointSize)，跨帧安全复用。
     // 之前每次 textWidth 都是一次 FFI（含 UTF-8 转换与逐字符 advance 求和），
     // 即时模式下每帧每个 Label 至少测一次；缓存命中率目标是 >95%。
     // 超过容量时整体清空（简单且足够：文本集合在稳态下远小于上限）。
     private static let MEASURE_CAP: Int64 = 8192
-    private var measureCache: HashMap<String, Float32> = HashMap<String, Float32>()
+    private var measureCache: HashMap<TextMeasureKey, Float32> = HashMap<TextMeasureKey, Float32>()
     private var measureHits: Int64 = 0
     private var measureMisses: Int64 = 0
 
@@ -121,12 +238,18 @@ public class LgpuCanvas <: Canvas {
     }
 
     private var firstPresent = true
+    // G2：LANLU_IMG_DIAG=1 时周期性把诊断环形缓冲落盘（首帧一次，之后每 300 帧 ≈5s@60fps）。
+    private var presentCount: Int64 = 0
 
     public func present(): Unit {
         surface.endFrame()
         if (firstPresent) {
             firstPresent = false
             probeTrace("first frame present err=[" + lastErrorText() + "]")
+        }
+        presentCount += 1
+        if (IMG_DIAG_ENABLED && (presentCount == 1 || presentCount % 300 == 0)) {
+            dumpImageDiag()
         }
     }
 
@@ -153,7 +276,8 @@ public class LgpuCanvas <: Canvas {
     private func applyClip(): Unit {
         // 真机排查开关：LANLU_NO_CLIP=1 时忽略裁剪，用于判断"被裁剪掉的纹理"是否
         // 因 scissor 坐标空间不一致而整块不可见。
-        if ((getVariable("LANLU_NO_CLIP") ?? "0") == "1" || clipStack.isEmpty()) {
+        // G2：pushClip/popClip 每帧多次进入，环境变量改为启动期读取一次。
+        if (NO_CLIP_FORCED || clipStack.isEmpty()) {
             surface.setClip(0.0, 0.0, 0.0, 0.0)
             return
         }
@@ -172,27 +296,26 @@ public class LgpuCanvas <: Canvas {
 
     /// 注册/更新一张后端纹理（由 lgui.texturePixelsSink 调用）。
     public func uploadTexture(id: Int64, width: Int32, height: Int32, pixels: Array<UInt8>): Unit {
-        // 真机诊断：每次新 id 上传落盘（区分「未走上传」与「上传后绘制丢失」）。
-        try {
-            let home = getVariable("HOME") ?? "."
-            let p = Path(home + "/img_diag.txt")
-            let prev = if (exists(p)) { String.fromUtf8(File.readFrom(p)) } else { "" }
-            if (!prev.contains("lgpuUpload id=${id}")) {
-                // 采样像素均值（R/G/B/A）——区分「解码出来就是黑的」与「画不出来」。
-                var sum: Int64 = 0
-                let step = max(1, pixels.size / 1024)
-                var i: Int64 = 0
-                var n: Int64 = 0
-                while (i < pixels.size) {
-                    sum += Int64(pixels[i])
-                    n++
-                    i += step
-                }
-                let avg = if (n > 0) { sum / n } else { -1 }
-                File.writeTo(p,
-                    (prev + "[lgpu] upload id=${id} ${width}x${height} bytes=${pixels.size} avgByte=${avg}\n").toArray())
+        // 诊断（G2）：改为内存环形缓冲 + LANLU_IMG_DIAG=1 时经 present 周期性落盘。
+        // 旧实现每次上传都同步读写 img_diag.txt（每次上传都读、首见该 id 才写），
+        // 视频逐帧上传时等于每帧一次整文件读。语义保留：同一 id 只记首条（含像素均值）。
+        // 采样像素均值（R/G/B/A）——区分「解码出来就是黑的」与「画不出来」。
+        // 代价 ~1024 次采样（step = size/1024），远低于旧实现的整文件读写。
+        // 整段采样只在 LANLU_IMG_DIAG=1 时执行（G2 修订：关闭时连采样都不做）。
+        if (IMG_DIAG_ENABLED) {
+            var diagSum: Int64 = 0
+            let diagStep = max(1, pixels.size / 1024)
+            var diagI: Int64 = 0
+            var diagN: Int64 = 0
+            while (diagI < pixels.size) {
+                diagSum += Int64(pixels[diagI])
+                diagN++
+                diagI += diagStep
             }
-        } catch (_: Exception) {}
+            let diagAvg = if (diagN > 0) { diagSum / diagN } else { -1 }
+            imgDiagPushNew("upload id=${id}",
+                "[diag] upload id=${id} ${width}x${height} bytes=${pixels.size} avgByte=${diagAvg}")
+        }
         if (width <= 0 || height <= 0) {
             return
         }
@@ -201,10 +324,9 @@ public class LgpuCanvas <: Canvas {
             case None =>
                 let created = surface.createTexture(Int64(width), Int64(height))
                 textures[id] = created
-                if ((getVariable("LANLU_IMG_DIAG") ?? "0") == "1") {
+                if (IMG_DIAG_ENABLED) {
                     try {
-                        let h = getVariable("HOME") ?? "."
-                        let p = Path(h + "/map_diag.txt")
+                        let p = Path(DIAG_HOME_DIR + "/map_diag.txt")
                         let prev = if (exists(p)) { String.fromUtf8(File.readFrom(p)) } else { "" }
                         let mark = if (created.debugHandle().isNull()) { "null" } else { "ptr" }
                         File.writeTo(p, (prev + "SET id=${id} tex=${mark} ${width}x${height}\n").toArray())
@@ -215,12 +337,12 @@ public class LgpuCanvas <: Canvas {
         textureSizes[id] = (Float32(width), Float32(height))
         probeTrace("pixels id=" + id.toString() + " " + width.toString() + "x" + height.toString())
         // 真机验证用：记录纹理上传（LANLU_PROBE_LGPU=1 时）
-        if ((getVariable("LANLU_PROBE_LGPU") ?? "0") == "1") {
-            let base = getVariable("HOME") ?? "."
+        if (PROBE_LGPU_ENABLED) {
             try {
-                let path = Path(base + "/lgpu_textures.txt")
-                let existing = if (exists(path)) { String.fromUtf8(File.readFrom(path)) } else { "" }
-                File.writeTo(path, (existing + "id=" + id.toString() + " " + width.toString() + "x" + height.toString() + "\n").toArray())
+                let path = Path(DIAG_HOME_DIR + "/lgpu_textures.txt")
+                let f = File(path, OpenMode.Append)
+                f.write(("id=" + id.toString() + " " + width.toString() + "x" + height.toString() + nline()).toArray())
+                f.close()
             } catch (_) {}
         }
         tex.upload(pixels, 0, 0, Int64(width), Int64(height), Int64(width) * 4)
@@ -255,28 +377,26 @@ public class LgpuCanvas <: Canvas {
 
     public func drawTextureRounded(id: Int64, destination: Rect, source: ?Rect, radius: Float32,
         alpha: Float32): Unit {
-        try {
-            let home = getVariable("HOME") ?? "."
-            let pr = Path(home + "/img_diag.txt")
-            let prevR = if (exists(pr)) { String.fromUtf8(File.readFrom(pr)) } else { "" }
-            let clipTxt = if (clipStack.isEmpty()) {
-                "none"
-            } else {
-                let c0 = clipStack[clipStack.size - 1]
-                "(${c0.x},${c0.y},${c0.w},${c0.h})*${scale}"
+        // 诊断（G2）：改内存环形缓冲（首见该 id 记一条，含当前裁剪栈快照）。
+        // G2 修订：仅在 LANLU_IMG_DIAG=1 时构造字符串/查重，关闭时零成本。
+        if (IMG_DIAG_ENABLED) {
+            let diagTag = "drawRound id=${id}"
+            if (!imgDiagSeen(diagTag)) {
+                let clipTxt = if (clipStack.isEmpty()) {
+                    "none"
+                } else {
+                    let c0 = clipStack[clipStack.size - 1]
+                    "(${c0.x},${c0.y},${c0.w},${c0.h})*${scale}"
+                }
+                imgDiagPush("[diag] drawRound id=${id} dst=(${destination.x},${destination.y},${destination.w},${destination.h}) radius=${radius} scale=${scale} clip=${clipTxt}")
             }
-            if (!prevR.contains("lgpuDrawRound id=${id}")) {
-                File.writeTo(pr,
-                    (prevR + "[lgpu] drawRound id=${id} dst=(${destination.x},${destination.y},${destination.w},${destination.h}) radius=${radius} scale=${scale} clip=${clipTxt}\n").toArray())
-            }
-        } catch (_: Exception) {}
+        }
         let tex = match (textures.get(id)) {
             case Some(t) => t
             case None =>
-                if ((getVariable("LANLU_IMG_DIAG") ?? "0") == "1") {
+                if (IMG_DIAG_ENABLED) {
                     try {
-                        let h2 = getVariable("HOME") ?? "."
-                        let p2 = Path(h2 + "/map_diag.txt")
+                        let p2 = Path(DIAG_HOME_DIR + "/map_diag.txt")
                         let prev2 = if (exists(p2)) { String.fromUtf8(File.readFrom(p2)) } else { "" }
                         if (!prev2.contains("MISS id=${id}")) {
                             File.writeTo(p2, (prev2 + "MISS id=${id} (draw before create!)\n").toArray())
@@ -312,12 +432,9 @@ public class LgpuCanvas <: Canvas {
         // 同 textureRc：transform 已含 scale，勿再预乘（双乘曾把封面挤出屏幕）。
         let rc = surface.textureRoundedRc(tex, destination.x, destination.y,
             destination.w, destination.h, u0, v0, u1, v1, radius, alpha)
-        if (rc != 0) {
-            let home = getVariable("HOME") ?? "."
-            try {
-                File.writeTo(Path(home + "/draw_skip.txt"),
-                    ("drawTextureRounded rc=" + rc.toString() + " id=" + id.toString() + "\n").toArray())
-            } catch (_) {}
+        if (rc != 0 && IMG_DIAG_ENABLED) {
+            // 失败诊断（G2）：改环形缓冲，不再写 draw_skip.txt。
+            imgDiagPush("drawTextureRounded rc=" + rc.toString() + " id=" + id.toString())
         }
     }
 
@@ -325,15 +442,10 @@ public class LgpuCanvas <: Canvas {
         let tex = match (textures.get(id)) {
             case Some(t) => t
             case None =>
-                // 真机诊断：绘制未命中纹理表（上传丢失的最直接证据）。
-                try {
-                    let home = getVariable("HOME") ?? "."
-                    let p = Path(home + "/img_diag.txt")
-                    let prev = if (exists(p)) { String.fromUtf8(File.readFrom(p)) } else { "" }
-                    if (!prev.contains("lgpuDrawMiss id=${id}")) {
-                        File.writeTo(p, (prev + "[lgpu] drawMiss id=${id} (not in map)\n").toArray())
-                    }
-                } catch (_: Exception) {}
+                // 真机诊断（G2）：绘制未命中纹理表（上传丢失的最直接证据），改环形缓冲。
+                if (IMG_DIAG_ENABLED) {
+                    imgDiagPushNew("drawMiss id=${id}", "[diag] drawMiss id=${id} (not in map)")
+                }
                 return
         }
         // UV 子区：source 为空表示整张纹理
@@ -362,27 +474,20 @@ public class LgpuCanvas <: Canvas {
         if (destination.w <= 0.0 || destination.h <= 0.0) {
             return
         }
-        try {
-            let home = getVariable("HOME") ?? "."
-            let pd = Path(home + "/img_diag.txt")
-            let prevD = if (exists(pd)) { String.fromUtf8(File.readFrom(pd)) } else { "" }
-            if (!prevD.contains("lgpuDraw id=${id}")) {
-                File.writeTo(pd,
-                    (prevD + "[lgpu] draw id=${id} dst=(${destination.x},${destination.y},${destination.w},${destination.h}) uv=(${u0},${v0},${u1},${v1}) alpha=${alpha}\n").toArray())
-            }
-        } catch (_: Exception) {}
+        // 诊断（G2）：改内存环形缓冲（首见该 id 记一条），LANLU_IMG_DIAG=1 时周期落盘。
+        // G2 修订：关闭时零成本（不拼字符串、不进锁）。
+        if (IMG_DIAG_ENABLED) {
+            imgDiagPushNew("draw id=${id}",
+                "[diag] draw id=${id} dst=(${destination.x},${destination.y},${destination.w},${destination.h}) uv=(${u0},${v0},${u1},${v1}) alpha=${alpha}")
+        }
         // 注意：begin 时已 setTransform(scale,scale)，shader 会把 dst 再乘 scale。
         // 这里不得再预乘 —— 旧代码双乘导致封面被画到屏幕外（真机表现为封面全空白）。
         let rc = surface.textureRc(tex, destination.x, destination.y,
             destination.w, destination.h, u0, v0, u1, v1, 1.0, 1.0, 1.0, alpha)
-        if (rc != 0) {
-            // 记录一次，便于定位（不抛异常：单张纹理失败不应中断整帧绘制）
-            let home = getVariable("HOME") ?? "."
-            try {
-                File.writeTo(Path(home + "/draw_skip.txt"),
-                    ("drawTexture rc=" + rc.toString() + " id=" + id.toString() +
-                     " dst=" + destination.w.toString() + "x" + destination.h.toString() + "\n").toArray())
-            } catch (_) {}
+        if (rc != 0 && IMG_DIAG_ENABLED) {
+            // 失败诊断（G2）：改环形缓冲，不再写 draw_skip.txt（不抛异常：单张纹理失败不应中断整帧绘制）。
+            imgDiagPush("drawTexture rc=" + rc.toString() + " id=" + id.toString() +
+                " dst=" + destination.w.toString() + "x" + destination.h.toString())
         }
     }
 
@@ -439,8 +544,16 @@ public class LgpuCanvas <: Canvas {
     }
 
     public func fillRoundedRectSoft(rect: Rect, radius: Float32, color: Color, feather!: Float32): Unit {
-        // SDF 自带解析抗锯齿；feather 暂时忽略（见文件头说明）
-        fillRoundedRect(rect, radius, color)
+        // 柔和边缘：语义是"不透明核心 rect，边缘在 feather 宽度内淡出"（cui 的阴影两层都靠它）。
+        // 之前直接忽略 feather 画实心圆角 —— 阴影变成两块叠在卡片下的灰色实体板（真机截图）。
+        // 用 lgpu 的解析高斯阴影：feather ≈ 2σ 的淡出带（erf 曲线 ±σ 内完成 68% 过渡）。
+        if (feather <= 0.5) {
+            fillRoundedRect(rect, radius, color)
+            return
+        }
+        let sigma = feather * 0.5
+        surface.shadow(rect.x, rect.y, rect.w, rect.h, radius, sigma,
+            channel(color.r), channel(color.g), channel(color.b), alphaChannel(color.a))
     }
 
     public func strokeRect(rect: Rect, pen: Pen): Unit {
@@ -480,7 +593,8 @@ public class LgpuCanvas <: Canvas {
 
     public func textWidth(text: String, pointSize!: Float32 = 15.0): Float32 {
         // 缓存键带字号（q4 量化与 Rust 侧一致），命中即免 FFI。
-        let key = text + "\u{0}" + Int64(pointSize * 4.0).toString()
+        // G3：键改为复合 struct（不再拼接字符串）。
+        let key = TextMeasureKey(text, Int64(pointSize * 4.0))
         match (measureCache.get(key)) {
             case Some(w) =>
                 measureHits += 1

@@ -93,6 +93,16 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
   return out;
 }
 
+// erf 的有理近似（Abramowitz–Stegun 7.1.26，最大误差 1.5e-7），WGSL 没有内建 erf
+fn erf_approx(x: f32) -> f32 {
+  let s = sign(x);
+  let a = abs(x);
+  let t = 1.0 / (1.0 + 0.3275911 * a);
+  let y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+    + 0.254829592) * t * exp(-a * a);
+  return s * y;
+}
+
 // 圆角矩形的有符号距离：<0 在内部
 fn sd_round_box(p: vec2f, b: vec2f, r: f32) -> f32 {
   let q = abs(p) - b + vec2f(r);
@@ -116,6 +126,18 @@ fn fs(in: VsOut) -> @location(0) vec4f {
     let cover_r = max(line, glow);
     if (cover_r <= 0.002) { discard; }
     return vec4f(in.color.rgb, in.color.a * cover_r);
+  }
+  // mode 4 = 柔和阴影（box-shadow）：params.x = 圆角半径，params.y = 模糊 sigma（像素）。
+  // 实例矩形已向外扩出 3σ；half_size - 3σ 才是阴影本体。覆盖率 = 圆角矩形 SDF 与
+  // 高斯核卷积的解析近似：erf 型 S 曲线 0.5 * (1 - erf(d / (σ√2)))，平滑无条带。
+  if (in.params.z > 3.5) {
+    let sigma = max(in.params.y, 0.5);
+    let body = max(in.half_size - vec2f(3.0 * sigma), vec2f(0.0));
+    let r = clamp(in.params.x, 0.0, min(body.x, body.y));
+    let ds = sd_round_box(in.local, body, r);
+    let cover_s = 0.5 * (1.0 - erf_approx(ds / (sigma * 1.41421356)));
+    if (cover_s <= 0.002) { discard; }
+    return vec4f(in.color.rgb, in.color.a * cover_s);
   }
   var base = in.color;
   if (in.params.z > 0.5) {

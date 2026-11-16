@@ -1363,6 +1363,46 @@ pub extern "C" fn lgpu_draw_rect(
     0
 }
 
+/// 柔和阴影（CSS box-shadow 的 blur 部分）：(x, y, w, h, radius) 是阴影本体，
+/// sigma 是高斯模糊半径（像素）。实例矩形向外扩 3σ 覆盖整个衰减带，片元里用
+/// 圆角 SDF 的解析高斯覆盖率着色（gpu.rs mode 4），不需要离屏模糊 pass。
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn lgpu_draw_shadow(
+    surface: *mut c_void,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    sigma: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> i32 {
+    if surface.is_null() {
+        return E_BAD_ARG;
+    }
+    // 透明或空矩形：什么都不画，但不是错误（cui 会在淡入首帧传 alpha=0、在布局未定时传 0 尺寸；
+    // 返回错误会让 Cangjie 侧抛异常、吞掉整棵子树的绘制）。
+    if !(w > 0.0) || !(h > 0.0) || !(a > 0.0) || !sigma.is_finite() {
+        return 0;
+    }
+    let _guard = lock_surface();
+    let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
+    let sigma = sigma.max(0.5);
+    let pad = 3.0 * sigma;
+    ctx.instances.push(gpu::RectInstance {
+        rect: [x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad],
+        color: [r, g, b, a],
+        params: [radius, sigma, 4.0, 0.0],
+        clip: ctx.clip,
+        color2: [r, g, b, a],
+    });
+    0
+}
+
 /// 画一条线段（用旋转矩形实现）：端点为线段两端，宽度为 width。
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
@@ -1565,6 +1605,10 @@ pub extern "C" fn lgpu_frame_end(surface: *mut c_void) -> i32 {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        // 离屏纹理按 256 对齐的**容量**分配（2090×1394 -> 2304×1536），默认 viewport 是整张
+        // 附件：NDC 会被拉伸到容量尺寸，blit 再只取左上 w/cap 区域 —— 画面整体放大约 10%、
+        // 右/下溢出窗口（真机截图）。viewport 必须钉在当前帧的有效尺寸上。
+        pass.set_viewport(0.0, 0.0, fw as f32, fh as f32, 0.0, 1.0);
         // 绘制：走上屏同一条录制顺序路径（draw_recorded）。
         // R1：文本/图片实例按相邻 (纹理, clip) 合批 —— 之前是每张纹理一次 draw，
         // 文字页每个字形一次 draw call（真机一帧数千次）；合批后 draw 数 = run 数。

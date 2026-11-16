@@ -27,6 +27,8 @@ foreign {
 
     func lgpu_pipeline_init(surface: CPointer<UInt8>): Int32
     func lgpu_frame_begin(surface: CPointer<UInt8>, r: Float32, g: Float32, b: Float32, a: Float32): Int32
+    func lgpu_draw_shadow(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
+        radius: Float32, sigma: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_draw_rect(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32,
         radius: Float32, stroke: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Int32
     func lgpu_frame_end(surface: CPointer<UInt8>): Int32
@@ -221,6 +223,12 @@ public class Surface <: Resource {
         checkRc(unsafe { lgpu_draw_rect(handle, x, y, w, h, radius, stroke, r, g, b, a) }, "lgpu_draw_rect")
     }
 
+    /// 柔和阴影：(x,y,w,h,radius) 为阴影本体，sigma 为高斯模糊半径（像素）。
+    public func shadow(x: Float32, y: Float32, w: Float32, h: Float32, radius: Float32, sigma: Float32,
+        r: Float32, g: Float32, b: Float32, a: Float32): Unit {
+        checkRc(unsafe { lgpu_draw_shadow(handle, x, y, w, h, radius, sigma, r, g, b, a) }, "lgpu_draw_shadow")
+    }
+
     /// 推一个纹理绘制（UV 子区 + tint）。
     public func texture(tex: Texture, dx: Float32, dy: Float32, dw: Float32, dh: Float32,
         u0: Float32, v0: Float32, u1: Float32, v1: Float32,
@@ -286,13 +294,35 @@ public class Surface <: Resource {
         this.rect(cx - radius, cy - radius, radius * 2.0, radius * 2.0, radius, pen, r, g, b, a)
     }
 
+    // G3：复用的 UTF-8 字节缓冲（替代每段文本一次 content.toArray() 分配）。
+    // String.size 即 UTF-8 字节数、String 下标按字节取（1.2.0 已实测），按需 2 倍扩容。
+    // Surface.text 仅在 UI 渲染线程（Canvas 绘制路径）被调用；若未来多线程共享
+    // Surface，需在调用方串行化（与 lgpu 其余 Cangjie 侧状态同一约定）。
+    private var textScratch: Array<UInt8> = Array<UInt8>(0, repeat: 0)
+
     /// 绘制一段文本（UTF-8），返回前进宽度。
     public func text(font: Font, content: String, x: Float32, y: Float32, pxSize: Float32,
         r: Float32, g: Float32, b: Float32, a: Float32): Float32 {
-        let bytes = content.toArray()
-        let h = unsafe { acquireArrayRawData(bytes) }
+        let n = content.size
+        if (n == 0) {
+            return 0.0
+        }
+        if (textScratch.size < n) {
+            let cap = if (textScratch.size * 2 > n) {
+                textScratch.size * 2
+            } else {
+                max(n, 64)
+            }
+            textScratch = Array<UInt8>(cap, repeat: 0)
+        }
+        var i: Int64 = 0
+        while (i < n) {
+            textScratch[i] = content[i]
+            i += 1
+        }
+        let h = unsafe { acquireArrayRawData(textScratch) }
         try {
-            unsafe { lgpu_text_draw(handle, font.raw(), h.pointer, Int64(bytes.size), x, y, pxSize, r, g, b, a) }
+            unsafe { lgpu_text_draw(handle, font.raw(), h.pointer, n, x, y, pxSize, r, g, b, a) }
         } finally {
             unsafe { releaseArrayRawData(h) }
         }
@@ -455,12 +485,31 @@ public class Font {
         (buf[0], buf[1], buf[2], buf[3])
     }
 
+    // G3：复用的 UTF-8 字节缓冲（测量在 cache miss 时才走到，频率低于绘制，但仍省分配）。
+    private var measureScratch: Array<UInt8> = Array<UInt8>(0, repeat: 0)
+
     /// 字符串宽度（像素）。
     public func measure(content: String, pxSize: Float32): Float32 {
-        let bytes = content.toArray()
-        let h = unsafe { acquireArrayRawData(bytes) }
+        let n = content.size
+        if (n == 0) {
+            return 0.0
+        }
+        if (measureScratch.size < n) {
+            let cap = if (measureScratch.size * 2 > n) {
+                measureScratch.size * 2
+            } else {
+                max(n, 64)
+            }
+            measureScratch = Array<UInt8>(cap, repeat: 0)
+        }
+        var i: Int64 = 0
+        while (i < n) {
+            measureScratch[i] = content[i]
+            i += 1
+        }
+        let h = unsafe { acquireArrayRawData(measureScratch) }
         try {
-            unsafe { lgpu_text_measure(handle, h.pointer, Int64(bytes.size), pxSize) }
+            unsafe { lgpu_text_measure(handle, h.pointer, n, pxSize) }
         } finally {
             unsafe { releaseArrayRawData(h) }
         }
