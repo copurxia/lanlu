@@ -12,6 +12,18 @@ import std.env.getVariable
 private var g_lwpChannel: ?LwpChannel = None
 private var g_lwpWindow: ?LwpWindowClient = None
 private var g_backlog: ArrayList<LWindowEvent> = ArrayList<LWindowEvent>()
+/// 读头：g_backlog 按游标出队（remove(at: 0) 是 O(n)，高频指针移动下每条都搬整个数组）。
+private var g_backlogHead: Int64 = 0
+/// 被「非业务消费者」（lwpFrameTick / lwpAwait*）顺带取到的生命周期事件暂存区。
+/// 之前这些调用方直接丢弃 pollAll 的结果 —— surface.changed / close_request /
+/// window.created 一旦先被每帧 tick 取走，业务层永远看不到（缩放后视口不更新的根因之一）。
+private var g_lifecycleBacklog: ArrayList<LWindowLifecycleEvent> = ArrayList<LWindowLifecycleEvent>()
+
+func stashLifecycle(evs: ArrayList<LWindowLifecycleEvent>): Unit {
+    for (ev in evs) {
+        g_lifecycleBacklog.add(ev)
+    }
+}
 
 /// 是否启用 LWP 输入。
 /// **默认开启**（协议已是唯一主路径，真机验收通过后翻转）；`LANLU_LWP=0` 显式回退到文件桥，
@@ -76,7 +88,9 @@ public func nextLwpEvent(): ?LWindowEvent {
             case None => break
         }
     }
-    if (g_backlog.size == 0) {
+    if (g_backlogHead >= g_backlog.size) {
+        g_backlog.clear()
+        g_backlogHead = 0
         match (g_lwpChannel) {
             case Some(ch) =>
                 for (ev in pollLwpEvents(ch)) {
@@ -85,11 +99,34 @@ public func nextLwpEvent(): ?LWindowEvent {
             case None => return None
         }
     }
-    if (g_backlog.size == 0) {
+    if (g_backlogHead >= g_backlog.size) {
         return None
     }
-    let ev = g_backlog.remove(at: 0)
+    let ev = g_backlog[g_backlogHead]
+    g_backlogHead++
     Some(ev)
+}
+
+/// 阻塞等待下一条 LWP 输入事件（R6：空闲不轮询）。
+/// 返回 true = 有事件可取（紧接 nextLwpEvent）；false = 超时/通道不可用。
+/// 之前 lgui 的 waitEventTimeout 是「poll + sleep(4ms)」忙轮询：空闲时每秒
+/// 醒 ~250 次，每次醒来还会跑一遍事件源回调。OHOS 2in1 上这是主要空闲耗电项。
+public func lwpWaitForEvents(timeoutMs: Int32): Bool {
+    if (g_backlogHead < g_backlog.size || g_lifecycleBacklog.size > 0) {
+        return true
+    }
+    match (g_lwpChannel) {
+        case Some(ch) => ch.wait(LWP_EVENT, timeoutMs)
+        case None => false
+    }
+}
+
+/// 唤醒阻塞在 lwpWaitForEvents 的等待方（引擎线程写完队列后调用）。
+public func lwpWakeEventWaiter(): Unit {
+    match (g_lwpChannel) {
+        case Some(ch) => ch.wake(LWP_EVENT)
+        case None => ()
+    }
 }
 
 /// 启动时等待壳下发的初始 configure（毫秒）。返回 (宽, 高) 或 None。
@@ -132,6 +169,7 @@ public func lwpAwaitSystemInfo(timeoutMs: Int64): Bool {
                         case _ => ()
                     }
                 }
+                stashLifecycle(evs)
                 if (got || w.systemInfo.isSome()) {
                     return true
                 }
@@ -165,13 +203,8 @@ public func lwpAwaitSurface(timeoutMs: Int64): ?(Int64, Int64, Int64) {
                 if (lwpNowNs() >= deadline) {
                     return None
                 }
-                let evs = w.pollAll()
-                for (ev in evs) {
-                    match (ev) {
-                        case LWindowLifecycleEvent.SurfaceAvailable(_, _, _) => ()
-                        case _ => ()
-                    }
-                }
+                // 不丢：交给业务层的 lwpDrainLifecycle（SurfaceAvailable 本身也要让业务看到）
+                stashLifecycle(w.pollAll())
                 let left = (deadline - lwpNowNs()) / 1000000
                 if (left > 0) {
                     let _ = g_lwpChannel.getOrThrow().wait(LWP_EVENT, Int32(left))
@@ -298,11 +331,29 @@ public func lwpSystemInfo(): ?(String, String, String, String, UInt32) {
 
 /// 排空生命周期事件（运行期每帧调用；configure 已在客户端内自动 ack）。
 public func lwpDrainLifecycle(): ArrayList<LWindowLifecycleEvent> {
+    let out = g_lifecycleBacklog
+    g_lifecycleBacklog = ArrayList<LWindowLifecycleEvent>()
     match (g_lwpWindow) {
-        case Some(w) => w.pollAll()
-        case None =>
-            let empty = ArrayList<LWindowLifecycleEvent>()
-            empty
+        case Some(w) =>
+            for (ev in w.pollAll()) {
+                match (ev) {
+                    case LWindowLifecycleEvent.ClipboardText(_, _, text) => g_clipboardCache = text
+                    case _ => ()
+                }
+                out.add(ev)
+            }
+        case None => ()
+    }
+    out
+}
+
+/// 壳最近一次报告的 surface 物理尺寸（px）；未收到时 (0,0)。
+/// 业务层每次取事件时与已应用尺寸比较 —— 这是"可绘制区域"的唯一事实来源，
+/// 不依赖某条 surface.changed 事件恰好被谁消费。
+public func lwpSurfaceSize(): (UInt32, UInt32) {
+    match (g_lwpWindow) {
+        case Some(w) => (w.surfaceWidth, w.surfaceHeight)
+        case None => (0, 0)
     }
 }
 
@@ -322,11 +373,12 @@ public func lwpFrameTick(): Bool {
                 let _ = win.requestFrame()
             }
             let evs = win.pollAll()
-            // 剪贴板异步读的回执在这里落地（clipboard.get 是异步的）
+            // 剪贴板异步读的回执在这里落地（clipboard.get 是异步的）；
+            // 其余生命周期事件**必须**转交业务层（之前在这里被整批丢弃）。
             for (ev in evs) {
                 match (ev) {
                     case LWindowLifecycleEvent.ClipboardText(_, _, text) => g_clipboardCache = text
-                    case _ => ()
+                    case _ => g_lifecycleBacklog.add(ev)
                 }
             }
             let _ = win.checkConfigureTimeout(lwpNowNs())
@@ -391,9 +443,9 @@ public func lwpReportedScale(): Float32 {
 }
 
 /// 告知壳"文本输入开始/结束"（壳据此显示/隐藏软键盘、attach/detach 输入法）。
-public func lwpImeEnable(enabled: Bool): Bool {
+public func lwpImeEnable(enabled: Bool, inputType!: UInt32 = 0, enterKey!: UInt32 = 6): Bool {
     match (g_lwpWindow) {
-        case Some(w) => w.imeEnable(enabled)
+        case Some(w) => w.imeEnable(enabled, inputType: inputType, enterKey: enterKey)
         case None => false
     }
 }
@@ -433,6 +485,32 @@ public func lwpSetCursorShape(shape: UInt32): Bool {
     if (ok) { g_cursorShapeSent = shape }
     ok
 }
+
+/// 最近一次成功发出的 surrounding（去抖用）
+private var g_lastSurroundText: String = ""
+private var g_lastSurroundCursor: UInt32 = 0xFFFF_FFFF
+private var g_lastSurroundAnchor: UInt32 = 0xFFFF_FFFF
+
+/// 光标周围的文本（联想/删除上下文）：text-input-v3 set_surrounding_text 的出口。
+/// cursor/anchor 是 text 内的**字节**偏移。壳不支持时静默丢弃。
+public func lwpImeSetSurrounding(text: String, cursor: UInt32, anchor: UInt32): Bool {
+    // 去抖：框架每帧都会报一次（光标可能没动）。只有变化才发，避免把协议通道刷满。
+    if (g_lastSurroundText == text && g_lastSurroundCursor == cursor && g_lastSurroundAnchor == anchor) {
+        return true
+    }
+    match (g_lwpWindow) {
+        case Some(w) =>
+            let ok = w.imeSetSurrounding(text, cursor, anchor)
+            if (ok) {
+                g_lastSurroundText = text
+                g_lastSurroundCursor = cursor
+                g_lastSurroundAnchor = anchor
+            }
+            ok
+        case None => false
+    }
+}
+
 
 /// 光标矩形（窗口坐标）交给壳：IME 候选框据此定位（OHOS 给 IME 面板，Wayland 走 text-input）。
 public func lwpImeSetCursorRect(x: Int32, y: Int32, w: Int32, h: Int32): Bool {
@@ -491,10 +569,12 @@ public func lwpResetForTest(): Unit {
     g_lwpChannel = None
     g_lwpWindow = None
     g_backlog = ArrayList<LWindowEvent>()
+    g_backlogHead = 0
+    g_lifecycleBacklog = ArrayList<LWindowLifecycleEvent>()
     g_clipboardCache = ""
 }
 
 /// 测试/诊断用：当前 backlog 深度。
 public func lwpBacklogSize(): Int64 {
-    g_backlog.size
+    g_backlog.size - g_backlogHead
 }

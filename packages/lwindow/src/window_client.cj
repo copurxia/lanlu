@@ -200,9 +200,16 @@ public class LwpWindowClient {
 
     // ── IME（计划 §6.4 / text-input-v3 子集）───────────────────────────────
     /// 获得焦点时开启输入法；失去焦点时关闭。
-    public func imeEnable(enabled: Bool): Bool {
-        let op = if (enabled) { LWP_LW_TEXT_INPUT_ENABLE_OPCODE } else { LWP_LW_TEXT_INPUT_DISABLE_OPCODE }
-        ch.send(LWP_REQUEST, LWP_IFACE_LW_TEXT_INPUT, op, encodeLwTextInputToggle()) == 0
+    /// inputType/enterKey 见 LWP_IME_TEXT_INPUT_*/LWP_IME_ENTER_KEY_*（壳用来选输入法模式）。
+    public func imeEnable(enabled: Bool, inputType!: UInt32 = UInt32(LWP_IME_TEXT_INPUT_TYPE_TEXT),
+        enterKey!: UInt32 = UInt32(LWP_IME_ENTER_KEY_DONE)): Bool {
+        if (enabled) {
+            ch.send(LWP_REQUEST, LWP_IFACE_LW_TEXT_INPUT, LWP_LW_TEXT_INPUT_ENABLE_OPCODE,
+                encodeLwTextInputEnable(inputType, enterKey)) == 0
+        } else {
+            ch.send(LWP_REQUEST, LWP_IFACE_LW_TEXT_INPUT, LWP_LW_TEXT_INPUT_DISABLE_OPCODE,
+                encodeLwTextInputToggle()) == 0
+        }
     }
 
     /// 告知输入法光标周围的文本（联想/纠错用）。

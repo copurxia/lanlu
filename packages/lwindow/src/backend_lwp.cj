@@ -11,6 +11,28 @@ import lwp.*
 import std.collection.ArrayList
 
 public func decodeLwpEvent(m: LwpMessage): ?LWindowEvent {
+    // lw_text_input（壳 -> 引擎的输入法事件）必须在"只收 lw_input"的守卫**之前**处理，
+    // 否则 preedit/commit_string/delete_surrounding 会被这个提前 return 全部丢掉
+    // （真机实测：候选栏能出、上屏的字进不了输入框）。
+    if (m.iface == LWP_IFACE_LW_TEXT_INPUT) {
+        let b = m.body
+        if (m.opcode == LWP_LW_TEXT_INPUT_PREEDIT_OPCODE) {
+            if (b.size < 12) { return None }
+            return Some(LWindowEvent(LWindowEventType.Preedit, 0.0f32, 0.0f32,
+                Int32(u32at(b, 8)), text: strAt(b, 4)))
+        }
+        if (m.opcode == LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE) {
+            if (b.size < 8) { return None }
+            return Some(LWindowEvent(LWindowEventType.TextInput, 0.0f32, 0.0f32, 0,
+                text: strAt(b, 4)))
+        }
+        if (m.opcode == LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE) {
+            if (b.size < 12) { return None }
+            return Some(LWindowEvent(LWindowEventType.DeleteSurrounding,
+                Float32(u32at(b, 8)), 0.0f32, Int32(u32at(b, 4))))
+        }
+        return None
+    }
     if (m.iface != LWP_IFACE_LW_INPUT) {
         return None
     }
@@ -33,8 +55,21 @@ public func decodeLwpEvent(m: LwpMessage): ?LWindowEvent {
         if (b.size < 14) { return None }
         let down = b[13] != 0
         let kind = if (down) { LWindowEventType.PointerDown } else { LWindowEventType.PointerUp }
-        return Some(LWindowEvent(kind, f32at(b, 4) / uiDiv, f32at(b, 8) / uiDiv,
-            Int32(b[12]), pressed: down))
+        var bx = f32at(b, 4) / uiDiv
+        var by = f32at(b, 8) / uiDiv
+        // 按钮事件同样更新指针位置（OHOS 过滤器给按钮带了坐标）；Wayland 壳的按钮
+        // 恒为 (0,0)：此时沿用最近一次 motion，否则点击会落在左上角。
+        if (bx != 0.0 || by != 0.0) {
+            lwpNotePointer(bx, by)
+        } else {
+            let (lx, ly) = lwpLastPointer()
+            if (lx >= 0.0) {
+                bx = lx
+                by = ly
+            }
+        }
+        // key 字段 = 协议按键号（0=左 1=右 2=中，见 lwp_protocol.h）
+        return Some(LWindowEvent(kind, bx, by, Int32(b[12]), pressed: down))
     }
     if (m.opcode == LWP_LW_INPUT_POINTER_AXIS_OPCODE) {
         if (b.size < 12) { return None }
@@ -42,8 +77,15 @@ public func decodeLwpEvent(m: LwpMessage): ?LWindowEvent {
     }
     if (m.opcode == LWP_LW_INPUT_KEY_OPCODE) {
         if (b.size < 9) { return None }
+        // since=2：utf8（string @9）+ modifiers（u16 @13）。旧壳不发这两段，按空串/0 处理。
+        var text = ""
+        var mods: UInt16 = 0
+        if (b.size >= 15) {
+            text = strAt(b, 9)
+            mods = u16at(b, 13)
+        }
         return Some(LWindowEvent(LWindowEventType.Key, 0.0f32, 0.0f32,
-            Int32(u32at(b, 4)), pressed: b[8] != 0))
+            Int32(u32at(b, 4)), pressed: b[8] != 0, text: text, modifiers: mods))
     }
     if (m.opcode == LWP_LW_INPUT_TEXT_INPUT_OPCODE) {
         if (b.size < 8) { return None }
@@ -63,6 +105,7 @@ public func decodeLwpEvent(m: LwpMessage): ?LWindowEvent {
 /// 早先它把不认识的消息直接丢掉 —— 于是每帧 tick 都可能吞掉指针移动
 /// （第 90 轮实测：25 条 motion 全部没进 UI）。
 private let g_backlogMsgs = ArrayList<LwpMessage>()
+private var g_backlogMsgsHead: Int64 = 0
 
 /// 把轮询时误取到的输入消息放回暂存区，供 `nextLwpEvent()` 后续取出。
 public func pushBackLwpMessage(m: LwpMessage): Unit {
@@ -71,8 +114,17 @@ public func pushBackLwpMessage(m: LwpMessage): Unit {
 
 /// 从暂存区取一条（没有则 None）。
 public func takeBacklogLwpMessage(): ?LwpMessage {
-    if (g_backlogMsgs.size == 0) { return None }
-    g_backlogMsgs.remove(at: 0)
+    // 游标出队（remove(at: 0) 每条 O(n)；指针移动高峰时暂存区可达数百条）
+    if (g_backlogMsgsHead >= g_backlogMsgs.size) {
+        if (g_backlogMsgs.size > 0) {
+            g_backlogMsgs.clear()
+            g_backlogMsgsHead = 0
+        }
+        return None
+    }
+    let m = g_backlogMsgs[g_backlogMsgsHead]
+    g_backlogMsgsHead++
+    Some(m)
 }
 
 /// 排空通道的 EVENT 队列，解码为事件列表（引擎主循环的输入入口）。

@@ -58,6 +58,34 @@ public class HeadlessShell {
             encodeLwInputKey(keycode, down))
     }
 
+    /// 键事件（since=2）：带该键产生的文本与修饰键位。
+    public func keyText(keycode: UInt32, down: Bool, text: String, modifiers!: UInt16 = 0): Unit {
+        seq = seq + 1
+        let _ = ch.send(LWP_EVENT, LWP_IFACE_LW_INPUT, LWP_LW_INPUT_KEY_OPCODE,
+            encodeLwInputKeyText(keycode, down, text, modifiers))
+    }
+
+    /// 输入法组合中文本（lw_text_input.preedit）。
+    public func preedit(text: String, cursor: UInt32): Unit {
+        seq = seq + 1
+        let _ = ch.send(LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT, LWP_LW_TEXT_INPUT_PREEDIT_OPCODE,
+            encodeLwTextInputPreedit(text, cursor))
+    }
+
+    /// 输入法上屏文本（lw_text_input.commit_string）。
+    public func commitString(text: String): Unit {
+        seq = seq + 1
+        let _ = ch.send(LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT, LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE,
+            encodeLwTextInputCommitString(text))
+    }
+
+    /// 输入法要求删字（lw_text_input.delete_surrounding）。
+    public func deleteSurrounding(before: UInt32, after: UInt32): Unit {
+        seq = seq + 1
+        let _ = ch.send(LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT, LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE,
+            encodeLwTextInputDeleteSurrounding(before, after))
+    }
+
     public func textInput(text: String): Unit {
         seq = seq + 1
         let _ = ch.send(LWP_EVENT, LWP_IFACE_LW_INPUT, LWP_LW_INPUT_TEXT_INPUT_OPCODE,
