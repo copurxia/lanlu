@@ -18,6 +18,10 @@ use wayland_client::protocol::{
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::wl_registry;
 use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::ZwpTextInputManagerV3, zwp_text_input_v3::ZwpTextInputV3,
+};
+use xkbcommon_dl as xkb;
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 use crate::lwp::{Channel, LWP_EVENT, LWP_REQUEST};
@@ -41,6 +45,8 @@ pub struct Shell {
     pub outputs: Vec<wl_output::WlOutput>,
     /// 剪贴板：data device manager（有 seat 才有 data device）
     pub data_manager: Option<wl_data_device_manager::WlDataDeviceManager>,
+    /// 文本输入管理器（text-input-v3）：合成器不支持时为 None（无输入法，按键自带文本仍可用）
+    pub text_input_manager: Option<ZwpTextInputManagerV3>,
     pub seat: Option<wl_seat::WlSeat>,
     pub wm_base: xdg_wm_base::XdgWmBase,
 }
@@ -77,8 +83,12 @@ impl Shell {
         let data_manager = globals
             .bind::<wl_data_device_manager::WlDataDeviceManager, _, _>(&qh, 1..=3, ())
             .ok();
+        let text_input_manager = globals
+            .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
+            .ok();
         Ok((
-            Shell { connection, compositor, shm, seat, wm_base, output, outputs, data_manager },
+            Shell { connection, compositor, shm, seat, wm_base, output, outputs, data_manager,
+                text_input_manager },
             event_queue,
         ))
     }
@@ -195,6 +205,22 @@ pub struct State {
     pub pending_configure_serial: Option<u32>,
     /// 已创建的 xdg_surface（ack_configure 要用）
     pub xdg_surface: Option<xdg_surface::XdgSurface>,
+    /// 文本输入：管理器（registry 绑定时拿到）与会话（引擎 enable 时创建）
+    pub text_input_manager: Option<ZwpTextInputManagerV3>,
+    pub text_input: Option<ZwpTextInputV3>,
+    /// wl_seat（text-input-v3 的 get_text_input 需要它；surface 由 enter 事件给出）
+    pub seat: Option<wl_seat::WlSeat>,
+    /// 引擎请求的输入类型（lw_text_input.enable 的 input_type；1 = 数字）
+    pub pending_input_type: u32,
+    /// 引擎是否要求"输入框聚焦"（v3 的 enable 要等 enter 事件之后才生效）
+    pub text_input_wanted: bool,
+    /// xkb 键盘布局：物理键 -> 文本（wl_keyboard.keymap 事件建立）
+    pub xkb_ctx: Option<*mut xkb::xkb_context>,
+    pub xkb_keymap: Option<*mut xkb::xkb_keymap>,
+    pub xkb_state: Option<*mut xkb::xkb_state>,
+    pub mods_depressed: u32,
+    pub mods_latched: u32,
+    pub mods_locked: u32,
     /// 已 attach 的缓冲（按 fd 缓存，复用 pool/buffer，避免每帧新建导致泄漏）
     pub shm_buffers: std::collections::HashMap<i32, (wl_buffer::WlBuffer, u32, u32)>,
 }
@@ -251,6 +277,17 @@ impl State {
             pending_configure_serial: None,
             xdg_surface: None,
             shm_buffers: std::collections::HashMap::new(),
+            text_input_manager: None,
+            text_input: None,
+            seat: None,
+            pending_input_type: 0,
+            text_input_wanted: false,
+            xkb_ctx: None,
+            xkb_keymap: None,
+            xkb_state: None,
+            mods_depressed: 0,
+            mods_latched: 0,
+            mods_locked: 0,
         }
     }
 
@@ -440,6 +477,200 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
     }
 }
 
+/// text-input-v3 的内容提示/用途（引擎只区分文本与数字两类）
+fn wayland_client_hint_none() -> wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentHint {
+    wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentHint::None
+}
+fn wayland_client_purpose_normal() -> wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose {
+    wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose::Normal
+}
+fn wayland_client_purpose_number() -> wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose {
+    wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose::Number
+}
+
+/// v3 的 commit_string 编码（与 text_input.commit_string 同格式）
+fn wayland_protocols_preedit_commit(text: &str) -> Vec<u8> {
+    protocol::commit_string(text)
+}
+
+/// 没有 libxkbcommon 时的 US 布局回落表（evdev -> 字符）。
+fn us_layout_text(evdev: u32, shift: bool, caps: bool) -> String {
+    let (lower, upper): (&str, &str) = match evdev {
+        2..=11 => {
+            const ROW: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+            const SHIFTED: [&str; 10] = ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"];
+            let i = ((evdev - 2 + 9) % 10) as usize;
+            return if shift { SHIFTED[i].to_string() } else { ROW[i].to_string() };
+        }
+        16..=25 => ("qwertyuiop", "QWERTYUIOP"),
+        30..=38 => ("asdfghjkl", "ASDFGHJKL"),
+        44..=50 => ("zxcvbnm", "ZXCVBNM"),
+        57 => return " ".to_string(),
+        _ => return String::new(),
+    };
+    let idx = match evdev {
+        16..=25 => (evdev - 16) as usize,
+        30..=38 => (evdev - 30) as usize,
+        _ => (evdev - 44) as usize,
+    };
+    let letters: Vec<char> = if shift != caps { upper.chars().collect() } else { lower.chars().collect() };
+    letters.get(idx).map(|c| c.to_string()).unwrap_or_default()
+}
+
+impl State {
+    /// v3 的字节长度 -> 字符个数的保守换算（引擎按码点删；上限 8 个字符足够输入法场景）
+    fn text_len_bytes_to_chars(&self, bytes: u32) -> u32 {
+        ((bytes + 3) / 4).max(if bytes > 0 { 1 } else { 0 }).min(8)
+    }
+
+    /// 建立/替换键盘布局（wl_keyboard.keymap）。libxkbcommon 缺失时静默降级为 US 表。
+    pub fn install_keymap(&mut self, format: wl_keyboard::KeymapFormat, fd: std::os::fd::OwnedFd, size: u32) {
+        if !matches!(format, wl_keyboard::KeymapFormat::XkbV1) {
+            eprintln!("[wayland] 不支持的 keymap 格式，回落 US 布局表");
+            return;
+        }
+        let Some(lib) = xkb::xkbcommon_option() else {
+            eprintln!("[wayland] libxkbcommon 不可用，回落 US 布局表");
+            return;
+        };
+        let mut buf = vec![0u8; size as usize];
+        {
+            use std::io::Read;
+            let mut f = std::fs::File::from(fd);
+            if f.read_exact(&mut buf).is_err() {
+                eprintln!("[wayland] 读 keymap 失败");
+                return;
+            }
+        }
+        if *buf.last().unwrap_or(&1) != 0 {
+            buf.push(0);
+        }
+        unsafe {
+            if self.xkb_ctx.is_none() {
+                let ctx = (lib.xkb_context_new)(xkb::xkb_context_flags::XKB_CONTEXT_NO_FLAGS);
+                if ctx.is_null() {
+                    return;
+                }
+                self.xkb_ctx = Some(ctx);
+            }
+            let ctx = self.xkb_ctx.unwrap();
+            let km = (lib.xkb_keymap_new_from_string)(
+                ctx,
+                buf.as_ptr() as *const std::os::raw::c_char,
+                xkb::xkb_keymap_format::XKB_KEYMAP_FORMAT_TEXT_V1,
+                xkb::xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS,
+            );
+            if km.is_null() {
+                eprintln!("[wayland] keymap 编译失败，回落 US 布局表");
+                return;
+            }
+            let st = (lib.xkb_state_new)(km);
+            if st.is_null() {
+                (lib.xkb_keymap_unref)(km);
+                return;
+            }
+            if let Some(old) = self.xkb_state.take() {
+                (lib.xkb_state_unref)(old);
+            }
+            if let Some(old) = self.xkb_keymap.replace(km) {
+                (lib.xkb_keymap_unref)(old);
+            }
+            self.xkb_state = Some(st);
+            self.refresh_xkb_state();
+        }
+        println!("[wayland] keymap 已装载（xkb）");
+    }
+
+    /// 把 Wayland 的修饰键掩码同步进 xkb state（决定 Shift/Caps 后的字符）。
+    pub fn refresh_xkb_state(&mut self) {
+        let (Some(lib), Some(st)) = (xkb::xkbcommon_option(), self.xkb_state) else {
+            return;
+        };
+        unsafe {
+            (lib.xkb_state_update_mask)(st, self.mods_depressed, self.mods_latched, self.mods_locked, 0, 0, 0);
+        }
+    }
+
+    /// 该物理键在当前布局下产生的文本（空串 = 不产生文本）。
+    pub fn key_text(&self, evdev: u32) -> String {
+        let (Some(lib), Some(st)) = (xkb::xkbcommon_option(), self.xkb_state) else {
+            return us_layout_text(evdev, self.shift_held(), self.caps_on());
+        };
+        // xkb 的 keycode = evdev + 8
+        let mut out = [0i8; 32];
+        let n = unsafe {
+            (lib.xkb_state_key_get_utf8)(st, evdev + 8, out.as_mut_ptr() as *mut std::os::raw::c_char, out.len())
+        };
+        if n <= 0 {
+            return String::new();
+        }
+        let bytes: Vec<u8> = out[..(n as usize).min(out.len() - 1)].iter().map(|&b| b as u8).collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    fn shift_held(&self) -> bool {
+        // xkb 的 Shift 掩码位是布局相关的，这里用 Wayland 的原始掩码近似：
+        // 位 0 = Shift（xkb 默认布局），其余情况由 xkb 路径处理。
+        (self.mods_depressed & 1) != 0
+    }
+
+    fn caps_on(&self) -> bool {
+        (self.mods_locked & 2) != 0
+    }
+
+    /// 键事件的修饰键位（LWP_KEY_MODIFIERS_*，与 SDL_KMOD_* 同值）。
+    pub fn key_modifier_mask(&self) -> u16 {
+        let mut m: u16 = 0;
+        if let (Some(lib), Some(st)) = (xkb::xkbcommon_option(), self.xkb_state) {
+            let active = |name: &[u8]| unsafe {
+                (lib.xkb_state_mod_name_is_active)(
+                    st,
+                    name.as_ptr() as *const std::os::raw::c_char,
+                    xkb::xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
+                ) != 0
+            };
+            if active(xkb::XKB_MOD_NAME_SHIFT) { m |= 1; }
+            if active(xkb::XKB_MOD_NAME_CTRL) { m |= 64; }
+            if active(xkb::XKB_MOD_NAME_ALT) { m |= 256; }
+            if active(xkb::XKB_MOD_NAME_LOGO) { m |= 1024; }
+            if active(xkb::XKB_MOD_NAME_NUM) { m |= 4096; }
+        } else if self.shift_held() {
+            m |= 1;
+        }
+        m
+    }
+
+    /// 文本输入会话（引擎 lw_text_input.enable）：绑定到当前 surface。
+    pub fn text_input_enable(&mut self, qh: &wayland_client::QueueHandle<State>) {
+        if self.text_input.is_some() {
+            return;
+        }
+        let (Some(mgr), Some(seat)) = (&self.text_input_manager, &self.seat) else {
+            return;
+        };
+        // v3：get_text_input(seat)；绑定到哪个 surface 由 zwp_text_input_v3.enter 事件决定
+        let ti = mgr.get_text_input(seat, qh, ());
+        // 输入框语义：默认 TEXT + DONE（引擎的 input_type/enter_key 目前只有两类常用值）
+        ti.set_content_type(
+            wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentHint::None,
+            wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::ContentPurpose::Normal,
+        );
+        self.text_input = Some(ti);
+        self.text_input_wanted = true;
+        println!("[wayland] text_input enable");
+    }
+
+    pub fn text_input_disable(&mut self) {
+        self.text_input_wanted = false;
+        if let Some(ti) = self.text_input.take() {
+            ti.disable();
+            ti.commit();
+            ti.destroy();
+            println!("[wayland] text_input disable");
+        }
+    }
+}
+
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
     fn event(
         state: &mut Self,
@@ -453,6 +684,74 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             // Wayland 的 key 是 evdev code（无需 +8 偏移）；LWP 直接用 evdev
             let down = matches!(ks, wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed));
             state.send_input(op::INPUT_KEY, &protocol::key(key, down));
+        }
+    }
+}
+
+impl Dispatch<ZwpTextInputManagerV3, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTextInputManagerV3,
+        _: <ZwpTextInputManagerV3 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpTextInputV3, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwpTextInputV3,
+        event: <ZwpTextInputV3 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+        use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::Event;
+        match event {
+            // 上屏文本：引擎把它插入当前光标处并清空组合态
+            Event::CommitString { text } => {
+                if let Some(t) = text.filter(|t| !t.is_empty()) {
+                    state.send_input(op::TEXT_INPUT_COMMIT_STRING,
+                        &wayland_protocols_preedit_commit(&t));
+                }
+            }
+            // 组合中文本：cursor_begin/cursor_end 是**字节**偏移（v3 定义）
+            Event::PreeditString { text, cursor_begin, cursor_end } => {
+                let t = text.unwrap_or_default();
+                let cursor = if cursor_end >= 0 { cursor_end.max(0) as u32 } else { t.len() as u32 };
+                let _ = cursor_begin;
+                state.send_input(op::TEXT_INPUT_PREEDIT, &protocol::preedit(&t, cursor));
+            }
+            Event::DeleteSurroundingText { before_length, after_length } => {
+                // v3 的 before/after 是**字节**长度；引擎按字符删，这里按 UTF-8 码点换算成保守值
+                let before = state.text_len_bytes_to_chars(before_length.max(0) as u32);
+                let after = state.text_len_bytes_to_chars(after_length.max(0) as u32);
+                state.send_input(op::TEXT_INPUT_DELETE_SURROUNDING,
+                    &protocol::delete_surrounding(before, after));
+            }
+            // v3 的 done：一批变更结束。引擎按到达顺序逐条应用，这里不需要额外事件。
+            Event::Done { .. } => {}
+            // 会话绑定到哪个 surface 由 enter 决定；enable 必须在那之后才生效，
+            // 所以进入时才真正 enable+commit（之前调用只是登记意图）。
+            Event::Enter { .. } => {
+                if let Some(ti) = &state.text_input {
+                    let (hint, purpose) = if state.pending_input_type == 1 {
+                        (wayland_client_hint_none(), wayland_client_purpose_number())
+                    } else {
+                        (wayland_client_hint_none(), wayland_client_purpose_normal())
+                    };
+                    ti.set_content_type(hint, purpose);
+                    if state.text_input_wanted {
+                        ti.enable();
+                    }
+                    ti.commit();
+                }
+            }
+            Event::Leave { .. } => {}
+            _ => {}
         }
     }
 }
@@ -918,6 +1217,8 @@ pub fn run(channel: Channel) -> Result<(), String> {
     );
 
     let mut state = State::with_channel(channel);
+    state.text_input_manager = shell.text_input_manager.clone();
+    state.seat = shell.seat.clone();
     // 剪贴板：有 seat + manager 才建 data device
     {
         let qh = queue.handle();
@@ -989,6 +1290,41 @@ pub fn run(channel: Channel) -> Result<(), String> {
                         }
                     } else {
                         println!("[wayland] attach 的 fd 非法: {fd}");
+                    }
+                }
+                // text_input.enable：输入框获焦，绑定 text-input-v3 会话（引擎的 input_type/enter_key
+                // 只有文本/数字两类常用值，v3 的 content_purpose 只需区分 Normal/Number）
+                (iface::TEXT_INPUT, op::TEXT_INPUT_ENABLE_REQ) => {
+                    let qh = queue.handle();
+                    if body.len() >= 12 {
+                        let itype = u32::from_le_bytes(body[4..8].try_into().unwrap());
+                        state.pending_input_type = itype;
+                    }
+                    state.text_input_enable(&qh);
+                }
+                (iface::TEXT_INPUT, op::TEXT_INPUT_DISABLE_REQ) => {
+                    state.text_input_disable();
+                }
+                // text_input.set_cursor_rect：候选框跟着光标（窗口局部 px -> surface 坐标）
+                (iface::TEXT_INPUT, op::TEXT_INPUT_SET_CURSOR_RECT_REQ) if body.len() >= 20 => {
+                    let x = i32::from_le_bytes(body[4..8].try_into().unwrap());
+                    let y = i32::from_le_bytes(body[8..12].try_into().unwrap());
+                    let w = i32::from_le_bytes(body[12..16].try_into().unwrap());
+                    let h = i32::from_le_bytes(body[16..20].try_into().unwrap());
+                    if let Some(ti) = &state.text_input {
+                        ti.set_cursor_rectangle(x, y, w, h);
+                        ti.commit();
+                    }
+                }
+                // text_input.set_surrounding：光标周围文本（联想/删除上下文）
+                (iface::TEXT_INPUT, op::TEXT_INPUT_SET_SURROUNDING_REQ) if body.len() >= 16 => {
+                    let text = lwp_str(&body, 4);
+                    let text_len = lwp_str_len(&body, 4);
+                    let cursor = u32::from_le_bytes(body[8 + text_len..12 + text_len].try_into().unwrap());
+                    let anchor = u32::from_le_bytes(body[12 + text_len..16 + text_len].try_into().unwrap());
+                    if let Some(ti) = &state.text_input {
+                        ti.set_surrounding_text(text, cursor as i32, anchor as i32);
+                        ti.commit();
                     }
                 }
                 // clipboard.set：成为选区拥有者（别的客户端来取时由 data_source.send 写回）

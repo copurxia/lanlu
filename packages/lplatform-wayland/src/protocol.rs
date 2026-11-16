@@ -13,7 +13,8 @@ pub mod iface {
     pub const WINDOW: u16 = 4;
     pub const SURFACE: u16 = 5;
     pub const SYSTEM: u16 = 12;
-    pub const CLIPBOARD: u16 = 9;
+    pub const CLIPBOARD: u16 = 10;
+    pub const TEXT_INPUT: u16 = 9;
 }
 
 pub mod op {
@@ -45,6 +46,14 @@ pub mod op {
     pub const INPUT_POINTER_AXIS: u16 = 2;
     pub const INPUT_KEY: u16 = 3;
     pub const INPUT_TEXT_INPUT: u16 = 4;
+    // text_input（引擎 -> 壳的请求 / 壳 -> 引擎的事件），id 与 lw_text_input 一致
+    pub const TEXT_INPUT_ENABLE_REQ: u16 = 0;
+    pub const TEXT_INPUT_DISABLE_REQ: u16 = 1;
+    pub const TEXT_INPUT_SET_SURROUNDING_REQ: u16 = 2;
+    pub const TEXT_INPUT_SET_CURSOR_RECT_REQ: u16 = 3;
+    pub const TEXT_INPUT_PREEDIT: u16 = 0;
+    pub const TEXT_INPUT_COMMIT_STRING: u16 = 1;
+    pub const TEXT_INPUT_DELETE_SURROUNDING: u16 = 2;
     // system（壳 -> 引擎）
     pub const SYSTEM_INFO: u16 = 0;
     // clipboard（引擎 -> 壳）
@@ -76,6 +85,9 @@ pub const POINTER_MOTION_SIZE: usize = 12;
 pub const POINTER_AXIS_SIZE: usize = 12;
 pub const KEY_SIZE: usize = 9;
 pub const TEXT_INPUT_SIZE: usize = 8;
+pub const PREEDIT_SIZE: usize = 12;
+pub const COMMIT_STRING_SIZE: usize = 8;
+pub const DELETE_SURROUNDING_SIZE: usize = 12;
 
 /// 小端写缓冲。所有消息体都以 size 开头，最后统一回填。
 struct Buf {
@@ -282,6 +294,54 @@ pub fn key(keycode: u32, down: bool) -> Vec<u8> {
     b.u32(0);
     b.u32(keycode);
     b.u8(if down { 1 } else { 0 });
+    b.finish()
+}
+
+/// lw_input.key（since=2）：size(4)+keycode(4)+down(1)+utf8(string)+modifiers(u16)
+pub fn key_text(keycode: u32, down: bool, text: &str, modifiers: u16) -> Vec<u8> {
+    let t = text.as_bytes();
+    let total = KEY_SIZE + 4 + t.len() + 2;
+    let mut b = Buf::new(total);
+    b.u32(0);
+    b.u32(keycode);
+    b.u8(if down { 1 } else { 0 });
+    let off = KEY_SIZE;
+    b.u16(off as u16);
+    b.u16(t.len() as u16);
+    b.bytes(t);
+    b.u16(modifiers);
+    b.finish()
+}
+
+/// lw_text_input.preedit：size(4)+text(string)+cursor(u32)
+pub fn preedit(text: &str, cursor: u32) -> Vec<u8> {
+    let t = text.as_bytes();
+    let total = PREEDIT_SIZE + t.len();
+    let mut b = Buf::new(total);
+    b.u32(0);
+    let _ = put_str_header(&mut b, PREEDIT_SIZE, t.len());
+    b.u32(cursor);
+    b.bytes(t);
+    b.finish()
+}
+
+/// lw_text_input.commit_string：size(4)+text(string)
+pub fn commit_string(text: &str) -> Vec<u8> {
+    let t = text.as_bytes();
+    let total = COMMIT_STRING_SIZE + t.len();
+    let mut b = Buf::new(total);
+    b.u32(0);
+    let _ = put_str_header(&mut b, COMMIT_STRING_SIZE, t.len());
+    b.bytes(t);
+    b.finish()
+}
+
+/// lw_text_input.delete_surrounding：size(4)+before(u32)+after(u32)
+pub fn delete_surrounding(before: u32, after: u32) -> Vec<u8> {
+    let mut b = Buf::new(DELETE_SURROUNDING_SIZE);
+    b.u32(0);
+    b.u32(before);
+    b.u32(after);
     b.finish()
 }
 
