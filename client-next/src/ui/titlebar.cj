@@ -481,7 +481,12 @@ private class SearchKeys <: Widget {
                     slashPending.value = false
                     return true
                 }
-            case UiEvent.Frame(_) => slashPending.value = false
+            case UiEvent.Frame(_) =>
+                // 只在真的挂着"斜杠待转发"时才写：State.set 即使赋相同值也会顶
+                // stateWriteGeneration（脏帧判据），每帧无脑写 = 空闲 60fps 空转。
+                if (slashPending.value) {
+                    slashPending.value = false
+                }
             case _ => ()
         }
         false

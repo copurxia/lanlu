@@ -398,6 +398,8 @@ public func runApp(): Int64 {
             }
         }
     }
+    // 诊断：State 实例 id -> 模型字段名（配合 probe 的 ids=… 定位空转渲染的写入方）
+    probeTraceLine("state ids " + debugStateIdMap(model))
     let app = DesktopApp(
         WindowSpec("lanlu", winW, winH, scale: uiScale, supersample: supersample,
             // 无边框窗口：创建时即无 OS 装饰；标题栏由 ui/titlebar.cj 自绘。
