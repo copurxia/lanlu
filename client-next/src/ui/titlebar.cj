@@ -615,6 +615,9 @@ private func runesToString(runes: Array<Rune>, start: Int64, end: Int64): String
 // 菜单通过 Overlay 绘制在页面之上；点击外部/Esc 关闭，方向键与 Enter 可操作。
 // 用户名超 8 字截断，防止把右侧固定带撑出拖动区预算。
 private class UserMenuChip <: Widget {
+    // 关闭动画结束后只需**再要一帧**把浮层从 overlay 栈摘掉。之前无条件 requestFrame，
+    // 等于把空闲渲染钉在 60fps（附录 C 基线是 0 fps）。
+    private var exitFrameRequested = false
     private let model: AppModel
     private let logoutOpen: State<Bool>
     private let open: State<Bool>
@@ -730,6 +733,7 @@ private class UserMenuChip <: Widget {
 
     private func openPopup(ctx: UiContext): Unit {
         open.value = true
+        exitFrameRequested = false
         // 动作菜单没有已选值；鼠标打开时保持无高亮，避免首行色块突现。
         highlight.value = -1
         closeServerMenu(ctx)
@@ -877,8 +881,10 @@ private class UserMenuChip <: Widget {
         if (serverMenuOpen.value || serverMenuAnim.value > 0.0) {
             drawServerPopup(ctx, menu, serverMenuRect(ctx, menu))
         }
-        if (!open.value && progress <= 0.0) {
-            // 再请求一帧，让不可见的关闭浮层从 overlay 栈彻底移除。
+        if (!open.value && progress <= 0.0 && !exitFrameRequested) {
+            // 再请求**一帧**（只一次），让不可见的关闭浮层从 overlay 栈彻底移除。
+            // 无条件请求会让关闭后仍然 60fps 渲染（真机空闲帧率实测 60，基线应为 0）。
+            exitFrameRequested = true
             ctx.requestFrame()
         }
     }

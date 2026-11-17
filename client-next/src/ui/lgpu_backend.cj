@@ -15,6 +15,7 @@ import lwindow
 import lwindow.{LWindowEventType}
 import lwindow.{lwpLog, systemSansFontPath}
 import cui.controls.{modalDiagSink}
+import cui.desktop.{renderDiagHook}
 import lgui.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
 import lgui
 import lgui.input.{ClipboardBackend, SystemCursor, clipboardBackend, cursorSink, cursorsEnabled}
@@ -452,6 +453,10 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
         }
     }
 
+    // 空闲渲染诊断（LANLU_PROBE_IDLE=1 时引擎把"为什么还要画"写进 probe_trace）
+    if ((getVariable("LANLU_PROBE_IDLE") ?? "0") == "1") {
+        renderDiagHook = { line => probeTrace(line) }
+    }
     // R6：空闲等待改阻塞在 LWP 通道上（空闲零唤醒，替代 4ms 忙轮询）。
     // 只有协议通道可用时才注入：否则 wait 会立即返回 false，等于把忙轮询换成空转。
     if (lwindow.lwpInputEnabled()) {

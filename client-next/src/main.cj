@@ -1,7 +1,7 @@
 package lanlu_client_next
 
 import cui.*
-import cui.desktop.{frameProbeHook}
+import cui.desktop.{frameProbeHook, renderDiagHook}
 import cui.{FileDialogResult, FileDialogs}
 import lgpu.{captureRequest, captureSize, captureWriteTo, statsLine}
 import lanlu_client_next.app.*
