@@ -32,6 +32,7 @@ extern "C" void lanlu_lwp_resize_end(void);
 #include <hilog/log.h>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdarg>
 #include <atomic>
 #include <time.h>
 
@@ -42,6 +43,30 @@ static void lanlu_log(const char* fmt, ...) {
 }
 #define LOGI(...) lanlu_log(__VA_ARGS__)
 #define LOGE(...) lanlu_log(__VA_ARGS__)
+
+// 文件追踪：本构建里 native 的 hilog 在设备上收不到（LOG_APP 不可见），
+// 输入是否真的到过壳、以及壳是否真的发出去了，只能落盘取证。
+// 开关：LANLU_PROBE_LGPU=1；文件：$HOME/input_trace.txt
+static void input_trace(const char* fmt, ...) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* v = getenv("LANLU_PROBE_LGPU");
+        enabled = (v != nullptr && v[0] == '1') ? 1 : 0;
+    }
+    if (!enabled) return;
+    const char* home = getenv("HOME");
+    if (home == nullptr) return;
+    char path[512];
+    snprintf(path, sizeof path, "%s/input_trace.txt", home);
+    FILE* f = fopen(path, "a");
+    if (f == nullptr) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fputc('\n', f);
+    fclose(f);
+}
 
 static std::atomic<double> g_origin_x{0.0};
 static std::atomic<double> g_origin_y{0.0};
