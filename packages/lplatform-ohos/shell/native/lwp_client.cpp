@@ -26,6 +26,23 @@ static void lwp_send_hello(void);   /* 定义在下方；lwp_ready 首次打开�
 static int g_lwp_state = 0;          /* 0=未尝试 1=可用 -1=不可用 */
 static void* g_lwp_ch = nullptr;
 static lwp_send_parts_fn g_send = nullptr;
+/* 唤醒引擎侧阻塞在 lwp_wait 的等待方：壳发完消息必须叫一声，否则引擎空闲等待
+ * （空闲零唤醒改造后）不会自己醒来处理输入 —— 真机表现：窗口点不动、按键无反应。 */
+typedef int (*lwp_wake_fn)(void*, int);
+static lwp_wake_fn g_wake = nullptr;
+static void wake_engine(void) {
+    if (g_wake != nullptr && g_lwp_ch != nullptr) {
+        (void)g_wake(g_lwp_ch, 1 /* LWP_EVENT */);
+    }
+}
+/* 所有发送都走这里：成功即唤醒引擎 */
+static int send_woken(void* ch, int dir, uint16_t iface, uint16_t opcode, uint32_t flags,
+                      const void* body, uint32_t len) {
+    if (g_send == nullptr) return -1;
+    int rc = g_send(ch, dir, iface, opcode, flags, body, len);
+    if (rc == 0) wake_engine();
+    return rc;
+}
 
 static int lwp_ready(void) {
     if (g_lwp_state != 0) return g_lwp_state > 0;
@@ -37,6 +54,7 @@ static int lwp_ready(void) {
     if (lib == nullptr) return 0;
     lwp_open_fn open_fn = (lwp_open_fn)dlsym(lib, "lwp_open");
     g_send = (lwp_send_parts_fn)dlsym(lib, "lwp_send_parts");
+    g_wake = (lwp_wake_fn)dlsym(lib, "lwp_wake");
     if (open_fn == nullptr || g_send == nullptr) return 0;
     int rc = open_fn("lanlu", 256, &g_lwp_ch);
     if (rc != 0 || g_lwp_ch == nullptr) return 0;
@@ -94,7 +112,7 @@ static void lwp_send_hello(void) {
         0ULL;
     memcpy(buf + LWP_LW_CORE_HELLO_SIZE, shell, sl);
     memcpy(buf + LWP_LW_CORE_HELLO_SIZE + sl, os, ol);
-    g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_CORE, LWP_LW_CORE_HELLO_OPCODE, 0,
+    send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_CORE, LWP_LW_CORE_HELLO_OPCODE, 0,
            buf, h->size);
 }
 
@@ -107,7 +125,7 @@ extern "C" __attribute__((visibility("default")))
 int lanlu_lwp_send_raw(int dir, unsigned int iface, unsigned int opcode, unsigned int flags,
                        const void* body, unsigned int len) {
     if (!lwp_ready() || g_send == nullptr) return 0;
-    return g_send(g_lwp_ch, dir, (uint16_t)iface, (uint16_t)opcode, flags, body, len) == 0;
+    return send_woken(g_lwp_ch, dir, (uint16_t)iface, (uint16_t)opcode, flags, body, len) == 0;
 }
 
 typedef int (*lwp_recv_parts_fn)(void*, int, uint16_t*, uint16_t*, uint32_t*, uint64_t*,
@@ -149,7 +167,7 @@ int lanlu_lwp_send_pointer(int action, float x, float y, int key) {
             evbtn.x = x; evbtn.y = y;
             evbtn.button = (uint8_t)(key < 0 ? 0 : key);
             evbtn.down = 1;
-            return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+            return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                           LWP_LW_INPUT_POINTER_BUTTON_OPCODE, 0, &evbtn, sizeof evbtn) == 0;
         }
         case 2: case 10: case 20: {
@@ -157,7 +175,7 @@ int lanlu_lwp_send_pointer(int action, float x, float y, int key) {
             evmotion.size = LWP_LW_INPUT_POINTER_MOTION_SIZE;
             evmotion.x = x; evmotion.y = y;
             /* 高频移动标可丢弃 + 由调用方限流（计划 §6.2） */
-            return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+            return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                           LWP_LW_INPUT_POINTER_MOTION_OPCODE, 2u /* LWP_F_DROPPABLE */,
                           &evmotion, sizeof evmotion) == 0;
         }
@@ -167,7 +185,7 @@ int lanlu_lwp_send_pointer(int action, float x, float y, int key) {
             evbtn.x = x; evbtn.y = y;
             evbtn.button = (uint8_t)(key < 0 ? 0 : key);
             evbtn.down = 0;
-            return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+            return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                           LWP_LW_INPUT_POINTER_BUTTON_OPCODE, 0, &evbtn, sizeof evbtn) == 0;
         }
         case 13: {
@@ -179,7 +197,7 @@ int lanlu_lwp_send_pointer(int action, float x, float y, int key) {
             } else {                 /* y=0 -> 垂直 */
                 axis.dx = 0.0f; axis.dy = x;
             }
-            return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+            return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                           LWP_LW_INPUT_POINTER_AXIS_OPCODE, 0, &axis, sizeof axis) == 0;
         }
         default:
@@ -202,7 +220,7 @@ int lanlu_lwp_send_text(const char* text) {
     memcpy(buf + 4, &off, 2);
     memcpy(buf + 6, &len, 2);
     memcpy(buf + LWP_LW_INPUT_TEXT_INPUT_SIZE, text, n);
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                   LWP_LW_INPUT_TEXT_INPUT_OPCODE, 0, buf, total) == 0;
 }
 
@@ -226,7 +244,7 @@ int lanlu_lwp_send_commit_string(const char* text) {
     memcpy(buf + 4, &off, 2);
     memcpy(buf + 6, &len, 2);
     memcpy(buf + LWP_LW_TEXT_INPUT_COMMIT_STRING_SIZE, text, n);
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
                   LWP_LW_TEXT_INPUT_COMMIT_STRING_OPCODE, 0, buf, total) == 0;
 }
 
@@ -245,7 +263,7 @@ int lanlu_lwp_send_preedit(const char* text, uint32_t cursor) {
     memcpy(buf + 6, &len, 2);
     memcpy(buf + 8, &cursor, 4);
     if (n > 0) memcpy(buf + LWP_LW_TEXT_INPUT_PREEDIT_SIZE, text, n);
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
                   LWP_LW_TEXT_INPUT_PREEDIT_OPCODE, 0, buf, total) == 0;
 }
 
@@ -258,7 +276,7 @@ int lanlu_lwp_send_delete_surrounding(uint32_t before, uint32_t after) {
     memcpy(buf, &total, 4);
     memcpy(buf + 4, &before, 4);
     memcpy(buf + 8, &after, 4);
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_TEXT_INPUT,
                   LWP_LW_TEXT_INPUT_DELETE_SURROUNDING_OPCODE, 0, buf, total) == 0;
 }
 
@@ -289,7 +307,7 @@ int lanlu_lwp_send_key_text(uint32_t evdev, int down, const char* utf8, uint16_t
     memcpy(buf + 11, &len, 2);
     memcpy(buf + 13, &modifiers, 2);
     if (n > 0) memcpy(buf + LWP_LW_INPUT_KEY_SIZE, utf8, n);
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                   LWP_LW_INPUT_KEY_OPCODE, 0, buf, total) == 0;
 }
 
@@ -336,6 +354,6 @@ int lanlu_lwp_send_key(const char* name, int down) {
     ev.size = LWP_LW_INPUT_KEY_SIZE;
     ev.keycode = (uint32_t)code;
     ev.down = down ? 1 : 0;
-    return g_send(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
+    return send_woken(g_lwp_ch, LANLU_LWP_EVENT, LWP_IFACE_LW_INPUT,
                   LWP_LW_INPUT_KEY_OPCODE, 0, &ev, sizeof ev) == 0;
 }
