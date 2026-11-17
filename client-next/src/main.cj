@@ -318,7 +318,9 @@ public func runApp(): Int64 {
     if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
         // 第 1 帧太早（封面尚未解码）；120 帧后再抓一张用于比对封面区域像素。
         frameProbeHook = { frame: Int64 =>
-            let want = if (frame == 1 || (frame % 40 == 0 && frame <= 200)) {
+            // 空闲零渲染后总帧数很少（启动十几帧就停），按 frame==1/40/80... 会永远等不到；
+            // 前 6 帧逐帧抓，之后每 40 帧一次（交互时仍能拿到后续帧）。
+            let want = if (frame <= 6 || (frame % 40 == 0 && frame <= 200)) {
                 "cap_f${frame}.rgba"
             } else {
                 ""
@@ -410,6 +412,12 @@ public func runApp(): Int64 {
                 systemSansFontPath()
             }), theme: lanluThemeFor(settings.theme),
     )
+    // 空闲唤醒探针（LANLU_PROBE_WAKE=1）：3s 后请求一帧，验证"定时唤醒 -> 渲染"链路。
+    // 不依赖系统输入路由，用来确认空闲循环不是死锁。
+    if ((getVariable("LANLU_PROBE_WAKE") ?? "0") == "1") {
+        app.requestFrameAfter(3000)
+        probeTraceLine("probe wake scheduled +3s")
+    }
     // 联调：LANLU_PROBE_CLIP=1 各发一次 clipboard.set / get（验 M6 第 2 步双向通路）
     if ((getVariable("LANLU_PROBE_CLIP") ?? "0") == "1") {
         spawn {
