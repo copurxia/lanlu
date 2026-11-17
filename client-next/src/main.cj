@@ -1,7 +1,7 @@
 package lanlu_client_next
 
 import cui.*
-import cui.desktop.{frameProbeHook, renderDiagHook}
+import cui.desktop.{frameProbeHook, lastRenderDiag, renderDiagHook}
 import cui.{FileDialogResult, FileDialogs}
 import lgpu.{captureRequest, captureSize, captureWriteTo, statsLine}
 import lanlu_client_next.app.*
@@ -302,6 +302,17 @@ public func runApp(): Int64 {
     // 文本垂直居中口径：把字体真实度量留档（LANLU_PROBE_LGPU=1 时写 probe_trace）
     if ((getVariable("LANLU_PROBE_LGPU") ?? "0") == "1") {
         probeFontMetrics()
+    }
+    // 空闲渲染诊断：引擎帧钩子里直接读 cui 的决策标志（每 120 帧一条）
+    let prevHook = frameProbeHook
+    frameProbeHook = { frame: Int64 =>
+        match (prevHook) {
+            case Some(h) => h(frame)
+            case None => ()
+        }
+        if (frame % 120 == 0) {
+            probeTraceLine("idle " + lastRenderDiag)
+        }
     }
     // 联调：LANLU_PROBE_CAPTURE=1 —— 在渲染循环内按帧触发 GPU 抓帧并写文件
     if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
