@@ -113,7 +113,9 @@ note = "鸿蒙壳：可自由使用 OHOS NDK；不得依赖引擎内部包"
 [package.lplatform-wayland]
 path = "packages/lplatform-wayland"
 kind = "cargo"
-# 平台包可以自由依赖平台/系统库（wayland-client 直接对 wl_display/xdg-shell/wl_shm 说话，
+ # 平台包可以自由依赖平台/系统库（wayland-client 直接对 wl_display/xdg-shell/wl_shm 说话，
 # 不引入 winit，减少一层抽象）；不得依赖引擎内部包。
-allowed_deps = ["wayland-client", "wayland-protocols", "wayland-server", "libc"]
+# xkbcommon-dl：键盘布局 -> 文本（物理键的字符由壳算好随 lw_input.key 下发，引擎不猜字符），
+# 运行时 dlopen libxkbcommon，缺失回落 US 布局表。
+allowed_deps = ["wayland-client", "wayland-protocols", "wayland-server", "libc", "xkbcommon-dl"]
 note = "Wayland 壳：可自由使用 wayland-client/winit；wayland-server 与 libc 仅 dev-dependency（本机 mock 合成器做端到端验证：前者起假合成器，后者 recvmsg 收 SCM_RIGHTS 的 fd）；不得依赖引擎内部包"

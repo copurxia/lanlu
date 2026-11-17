@@ -35,7 +35,7 @@ public let LWP_CORE_CAPABILITIES_MULTI_WINDOW: UInt64 = 32768
 public let LWP_CORE_CAPABILITIES_SOFT_KEYBOARD: UInt64 = 65536
 public let LWP_CORE_CAPABILITIES_TITLE_BUTTONS: UInt64 = 131072
 
-// lw_input.key 的 modifiers 字段。位定义对齐 SDL_KMOD_*（lgui.input.KeyModifiers 的输入格式）。
+// lw_input.key 的 modifiers 字段。位定义与主流 GUI 框架的 KMOD 常量同值（lgui.input.KeyModifiers 的输入格式）。
 public let LWP_KEY_MODIFIERS_LSHIFT: UInt64 = 1
 public let LWP_KEY_MODIFIERS_RSHIFT: UInt64 = 2
 public let LWP_KEY_MODIFIERS_LEVEL5: UInt64 = 4

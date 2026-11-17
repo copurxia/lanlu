@@ -120,7 +120,8 @@ down 区分按下/释放。
 since=2 追加两个字段（只追加，不改老字段布局）：
   utf8      —— 该键在当前键盘布局/修饰键下产生的文本（可为空）。输入法不消费的可打印键
                （数字、符号、以及没有输入法时的字母）靠它进入输入框，不再由引擎猜字符。
-  modifiers —— 修饰键位掩码，见 LWP_KEY_MOD_*（对齐 SDL_KMOD_*，引擎 KeyModifiers 直接复用）。
+  modifiers —— 修饰键位掩码，见 LWP_KEY_MOD_*（位定义与主流 GUI 框架的 KMOD 常量同值，
+  引擎 KeyModifiers 可直接复用，零转换）。
 
 去重约定：壳不得把输入法已消费的按键再发到这里；引擎在输入框聚焦且 utf8 非空、
 且没有 Ctrl/Alt/Meta 时插入该文本（见 docs/lwindow-ime-plan.md §3）。 */
@@ -711,7 +712,7 @@ typedef struct __attribute__((packed)) {
 #define LWP_CORE_CAPABILITIES_SOFT_KEYBOARD 65536u
 #define LWP_CORE_CAPABILITIES_TITLE_BUTTONS 131072u
 
-/* lw_input.key 的 modifiers 字段。位定义对齐 SDL_KMOD_*（lgui.input.KeyModifiers 的输入格式）。 */
+/* lw_input.key 的 modifiers 字段。位定义与主流 GUI 框架的 KMOD 常量同值（lgui.input.KeyModifiers 的输入格式）。 */
 #define LWP_KEY_MODIFIERS_LSHIFT 1u
 #define LWP_KEY_MODIFIERS_RSHIFT 2u
 #define LWP_KEY_MODIFIERS_LEVEL5 4u
