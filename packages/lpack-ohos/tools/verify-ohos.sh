@@ -4,7 +4,7 @@
 set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 cd "$(dirname "${BASH_SOURCE[0]}")/../../.."
-OUT=client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default
+OUT="$HAP_OUT"
 HAP="${1:-}"
 if [ -z "$HAP" ]; then
   # 优先用签名版（真机安装用），构建阶段可能只有 unsigned
@@ -18,6 +18,7 @@ fail=0
 
 echo "== 1/3 分层守卫 =="
 bash tools/check-layering.sh || fail=1
+python3 tools/check-state-writes.py || fail=1   # 每帧无条件写 State -> 空闲满帧空转
 
 echo "== 2/3 HAP 依赖闭包 =="
 bash "$(dirname "${BASH_SOURCE[0]}")/check-hap-deps.sh" "$HAP" || fail=1
