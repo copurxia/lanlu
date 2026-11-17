@@ -7,7 +7,7 @@ import lgpu.{captureRequest, captureSize, captureWriteTo, statsLine}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
-import lanlu_client_next.ui.{lastCanvas, probeTrace}
+import lanlu_client_next.ui.{lastCanvas, probeFontMetrics, probeTrace}
 import lwindow.{clipboardSetText, clipboardGetText, lwpInputEnabled}
 import lgui.{debugFocusId, lastTextInputRect}
 import lwindow.{lwpAwaitSystemInfo, lwpCursorShapeForPoint, lwpCursorShapeSent, lwpFrameTick, lwpImeEnable, lwpLastPointer, lwpLog, lwpRequestCapture, lwpSetCursorShape, lwpSetWindowMinMax, lwpSetTitleButtons, lwpReportedScale, lwpSetWindowTitle, lwpViolations, requestWindowCommand}
@@ -299,6 +299,10 @@ public func runApp(): Int64 {
     }
     // P5：headless 窗口的输入源（必须在建窗口之前挂上）
     installHeadlessInputSource()
+    // 文本垂直居中口径：把字体真实度量留档（LANLU_PROBE_LGPU=1 时写 probe_trace）
+    if ((getVariable("LANLU_PROBE_LGPU") ?? "0") == "1") {
+        probeFontMetrics()
+    }
     // 联调：LANLU_PROBE_CAPTURE=1 —— 在渲染循环内按帧触发 GPU 抓帧并写文件
     if ((getVariable("LANLU_PROBE_CAPTURE") ?? "0") == "1") {
         // 第 1 帧太早（封面尚未解码）；120 帧后再抓一张用于比对封面区域像素。

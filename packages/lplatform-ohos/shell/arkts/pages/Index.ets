@@ -804,6 +804,8 @@ struct Index {
         // 窗口级鼠标过滤器换算出的局部坐标也会整体偏移。
         try {
           w.setWindowDecorVisible(false);
+          // 自绘顶栏 56vp：系统三键（经 set_title_buttons 打开）的 y 轴跟这个高度走
+          try { w.setWindowDecorHeight(56); } catch (eDH) {}
           console.info('[LANLU-SHELL] system window decor hidden');
         } catch (e2) {
           console.error('[LANLU-SHELL] decor hide fail: ' + (e2 as Error).message);
@@ -924,8 +926,17 @@ struct Index {
       return;
     }
     const visible: number = cfg[0];
+    // 三键的垂直位置由"装饰条高度"决定（系统默认约 40vp，而我们自绘顶栏 56vp）；
+    // 不对齐时系统三键浮在顶栏上方。setWindowDecorHeight 范围 [37,112] vp，56 = TITLEBAR_HEIGHT。
+    // 单独 try：这一步失败（部分设备 801）不能把下面的"显示三键"一起跳过。
     try {
-      this.win.setWindowTitleButtonVisible((visible & 1) !== 0, (visible & 2) !== 0, (visible & 4) !== 0);
+      this.win.setWindowDecorHeight(56);
+    } catch (eDH) {
+      console.info('[LANLU-SHELL] setWindowDecorHeight failed: ' + (eDH as Error).message);
+    }
+    try {
+      // 装饰条已隐藏：系统三键不渲染（渲染出来也无处安放），统一交给引擎自绘
+      this.win.setWindowTitleButtonVisible(false, false, false);
     } catch (eVis) {
       console.info('[LANLU-SHELL] title button visibility failed: ' + (eVis as Error).message);
     }
@@ -977,7 +988,10 @@ struct Index {
     const topPx: number = Math.round(ui.vp2px(rect.top));
     const wPx: number = Math.round(ui.vp2px(rect.width));
     const hPx: number = Math.round(ui.vp2px(rect.height));
-    const vis: number = wPx > 0 ? 1 : 0;
+    // 本应用始终 setWindowDecorVisible(false)（自绘 56vp 顶栏）：系统装饰条不渲染，
+    // 平台三键也就画不出来。此时必须报 visible=0，让引擎自绘三键 —— 否则引擎以为
+    // "平台会画"，右侧留白 140vp 却谁都画不出按钮（真机表现：右上角空白、无法关窗）。
+    const vis: number = 0;
     if (rightPx === this.titleBtnReportedPx[0] && topPx === this.titleBtnReportedPx[1]
       && wPx === this.titleBtnReportedPx[2] && hPx === this.titleBtnReportedPx[3]
       && vis === this.titleBtnReportedPx[4]) {

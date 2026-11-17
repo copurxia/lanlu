@@ -34,6 +34,8 @@ var g_title_btn_top_px: Int64 = 0
 var g_title_btn_width_px: Int64 = 0
 var g_title_btn_height_px: Int64 = 0
 var g_title_btn_visible: Bool = false
+/// 是否收到过 title_buttons_rect（区分"还没到"和"到了但不可见"）
+var g_title_btn_rect_arrived: Bool = false
 /// 上次打印的"平台三键宽度"（只在变化时打点，避免每帧刷屏）
 var g_title_btn_logged_w: Float32 = -1.0
 /// 平台三键默认配置是否已下发（只发一次）
@@ -70,7 +72,7 @@ public func platformTitleButtonsWidth(): Float32 {
 ///   - 提供了但 rect 还没到 → 文档默认 148vp（140 三键 + 8 间距），避免启动期闪自绘三键；
 ///   - rect 已到 → 物理宽 / 密度（缩放用壳上报值，g_ui_scale 启动期可能未初始化）。
 public func titleButtonsWidthFor(platformProvides: Bool, rectVisible: Bool, rectWidthPx: Int64,
-    scale: Float32): Float32 {
+    scale: Float32, rectArrived!: Bool = true): Float32 {
     if (!platformProvides) {
         return 0.0
     }
@@ -80,12 +82,18 @@ public func titleButtonsWidthFor(platformProvides: Bool, rectVisible: Bool, rect
         }
         return Float32(rectWidthPx)
     }
+    // rect 已到但壳明示"不可见"（本应用隐藏了系统装饰条，平台根本画不出三键）：
+    // 必须让引擎自绘，否则右侧会留白 148vp 却没有任何按钮（真机表现：右上角空白、
+    // 关不掉窗口）。只有"能力已宣告、rect 还没到"才用默认宽度占位。
+    if (rectArrived) {
+        return 0.0
+    }
     return 148.0
 }
 
 private func platformTitleButtonsWidthRaw(): Float32 {
     titleButtonsWidthFor(lwindow.lwpShellProvidesTitleButtons(), g_title_btn_visible,
-        g_title_btn_width_px, lwindow.lwpReportedScale())
+        g_title_btn_width_px, lwindow.lwpReportedScale(), rectArrived: g_title_btn_rect_arrived)
 }
 /// 最近一次安装的后端画布（联调/抓帧用）。
 public var lastCanvas: ?LgpuCanvas = None
@@ -201,6 +209,8 @@ private func takePendingUi(): ?UiEvent {
     g_uiPending.remove(at: 0)
     Some(e)
 }
+
+private var g_fontForMetrics: Option<Font> = None
 
 public func probeTrace(line: String): Unit {
     // LANLU_LWP=1：日志走协议（壳转 hilog）。联调期（LANLU_PROBE_LGPU=1）**同时**落文件，
@@ -325,6 +335,9 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     }
     probeTrace("font path=" + fontPath)
     let font = Font.load(fontPath)
+    // 文本垂直居中口径校准：真实字体度量（ascent/descent/lineGap/upem）。
+    // textHeight 用 ascent+descent 后，墨迹中心应落在盒中心；这里把数字留档便于对账。
+    g_fontForMetrics = Some(font)
     probeTrace("install main=" + isMain.toString() + " sid=" + sid.toString() + " " + surfW.toString() + "x" + surfH.toString())
     let canvas = LgpuCanvas(surface, font)
     // 缩放优先级：LANLU_LGPU_SCALE（调试）> 壳上报的 density > 1.0
@@ -622,6 +635,7 @@ public func installHeadlessInputSource(): Unit {
                         g_title_btn_width_px = Int64(w)
                         g_title_btn_height_px = Int64(hh)
                         g_title_btn_visible = vis
+                        g_title_btn_rect_arrived = true
                         probeTrace("lwp title buttons " + Int64(w).toString() + "x" + Int64(hh).toString() + "px right=" + Int64(right).toString() + " top=" + Int64(top).toString() + " visible=" + vis.toString())
                     case lwindow.LWindowLifecycleEvent.CloseRequest =>
                         // 对应 xdg_toplevel.close：引擎可以拒绝（这里按桌面应用的默认行为退出）
@@ -919,5 +933,19 @@ func lwpEventToUi(ev: lwindow.LWindowEvent): UiEvent {
         case lwindow.LWindowEventType.Key =>
             if (ev.pressed) { UiEvent.KeyDown(keyFromCode(ev.key), false) } else { UiEvent.KeyUp(keyFromCode(ev.key)) }
         case _ => UiEvent.Unknown(0)
+    }
+}
+
+/// 把字体度量写进 probe_trace（文本垂直居中口径对账；LANLU_PROBE_LGPU=1 时落盘）
+public func probeFontMetrics(): Unit {
+    match (g_fontForMetrics) {
+        case Some(f) =>
+            let sizes: Array<Float32> = [10.5, 12.0, 12.5, 13.0, 15.0]
+            for (sz in sizes) {
+                let (a, d, g, u) = f.metrics(sz)
+                probeTrace("font metrics size=" + sz.toString() + " a=" + a.toString() +
+                    " d=" + d.toString() + " gap=" + g.toString() + " upem=" + u.toString())
+            }
+        case None => ()
     }
 }

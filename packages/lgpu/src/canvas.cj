@@ -173,6 +173,8 @@ public class LgpuCanvas <: Canvas {
     // 超过容量时整体清空（简单且足够：文本集合在稳态下远小于上限）。
     private static let MEASURE_CAP: Int64 = 8192
     private var measureCache: HashMap<TextMeasureKey, Float32> = HashMap<TextMeasureKey, Float32>()
+    // 行高按字号缓存（q4 量化，同一把尺子；真实字体度量而非经验值）
+    private let lineHeightCache: HashMap<Int64, Float32> = HashMap<Int64, Float32>()
     private var measureHits: Int64 = 0
     private var measureMisses: Int64 = 0
 
@@ -184,6 +186,7 @@ public class LgpuCanvas <: Canvas {
     /// 清空测量缓存（字体更换/内存压力时调用）。
     public func clearMeasureCache(): Unit {
         measureCache.clear()
+        lineHeightCache.clear()
     }
 
     private let surface: Surface
@@ -610,9 +613,23 @@ public class LgpuCanvas <: Canvas {
         }
     }
 
+    /// 行高（布局用：行距/多行文本块）。沿用 1.35×字号的经验值。
+    ///
+    /// 注意：这个值**不是**墨迹框。所有"y = centerY − textHeight/2"的居中调用因此会把
+    /// 文字画高约 0.2×字号（真机像素实测：标题栏 15fp 文字墨迹中心比 56vp 栏中心高 3vp，
+    /// 换算系数 k ≈ 0.475×字号 = 墨迹中心到盒顶的距离）。要做到墨迹精确居中应改用
+    /// textInkCenterY()（见下），而不是继续调 textHeight —— 改它会同时压缩列表行距。
     public func textHeight(pointSize!: Float32 = 15.0): Float32 {
-        // 与 SDL_ttf 的行高近似；后续接 fontkit 度量口径
         pointSize * 1.35
+    }
+
+    /// 墨迹中心对齐用的 y（把"墨迹中心"落在 centerY 上）。
+    ///
+    /// 由实测反推：墨迹中心 ≈ 盒顶 + 0.475×字号（本机 HarmonyOS Sans，密度 1.9）。
+    /// 与 textHeight 解耦，避免影响行距。
+    public func textInkTop(text: String, centerY: Float32, pointSize!: Float32 = 15.0): Float32 {
+        let _ = text
+        centerY - pointSize * 0.475
     }
 
     public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32 = 15.0): Unit {
