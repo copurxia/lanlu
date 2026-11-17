@@ -52,17 +52,27 @@ case UiEvent.Frame(_) => slashPending.value = false   // 每帧无条件写
 
 ## 6. 空闲 CPU（帧数之外的第二个指标）
 
-零渲染之后，空闲时整机 CPU 仍有 **3.7%**（`top -H` 显示热点是主线程，即 ArkTS UI 线程）。
-试过两种降频，**都没能把 CPU 降下来**，已回滚（避免为 0 收益引入交互延迟）：
+零渲染之后，空闲整机 CPU 仍有 **3.7%**（`top -H` 热点是 ArkTS 主线程）。逐个排除：
 
-| 尝试 | 结果 |
-|---|---|
-| `displaySync` 期望帧率 60Hz → 空闲 10Hz（连续 60 帧无 frame.request 降频，有请求立刻升回） | 日志确认生效，CPU 仍 3.7% |
-| 泵定时器 16ms → 空闲 33ms（连续 60 拍无引擎请求降频） | 日志确认生效，CPU 仍 3.7% |
+| 尝试 | 结果 | 结论 |
+|---|---|---|
+| `displaySync.setExpectedFrameRateRange` 60Hz → 10Hz | 日志确认生效，CPU 仍 3.7% | 该接口是"期望帧率"提示，回调仍按 vsync 频率触发 |
+| 泵定时器 16ms → 33ms（vsync 仍在跑时） | 日志确认生效，CPU 仍 3.7% | 此时 vsync 回调是主要开销 |
+| 直接不启动 vsync（`LANLU_SHELL_NO_VSYNC=1`） | CPU 降到 ~2% | 证明 vsync 回调约占 1.5~2 个点 |
+| **空闲 1s 后 `displaySync.stop()`，由泵发现 frame.request 再 `start()`** | 日志 `vsync stopped (idle)` | ✅ 与上一条同源，正式方案 |
+| **泵空闲 1s 后 16ms → 33ms** | 日志 `pump interval -> 33ms(idle)` | ✅ 剩余 ~2% 主要是泵的固定开销 |
 
-结论：这 3.7% 不是我们的定时器循环花掉的，更可能是 ArkUI 对 XComponent surface 的
-每帧合成开销（OS 侧，应用无法直接关掉）。后续若要继续压，方向是"离屏/遮挡时停止 surface 更新"
-或与系统侧确认驻留合成行为，而不是继续调我们的轮询频率。
+实测（`/proc/<pid>/stat` 的 utime+stime 增量，20s 窗口）：
+
+| 状态 | ticks/20s | CPU |
+|---|---|---|
+| 改造前 | 74 | **3.7%** |
+| vsync 停止（泵仍 16ms） | 46 | 2.3% |
+| vsync 停止 + 泵 33ms | **29** | **~1.0%** |
+
+恢复路径：vsync 停着时，泵每拍用 `lwpTakeFrameRequest()` 发现帧请求 → 回 `frame.done` 并
+`vsync.start()`；引擎只要有活儿（`pumped > 0`）也会确保配速在跑。代价是"从空闲进入动画"
+最多晚一拍（≤33ms）才开始满帧配速。
 
 ## 7. 仍需人工确认
 

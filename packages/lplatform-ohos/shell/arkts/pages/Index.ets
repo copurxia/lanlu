@@ -120,6 +120,15 @@ struct Index {
   private dialogBusy: boolean = false;
   // vsync：壳用 ArkTS displaySync 的每帧回调回 frame.done（引擎据此配速）
   private vsyncObj: displaySync.DisplaySync | undefined = undefined;
+  // 空闲停 vsync：displaySync 降到 10Hz 只是"期望帧率"提示，实测回调仍按 vsync 频率跑，
+  // 空闲 CPU 3.7% 基本都花在这个回调上。改成连续 60 拍没有 frame.request 就 stop()，
+  // 由 16ms 泵发现请求后再 start()（首帧最多晚一拍，之后满帧配速）。
+  private vsyncRunning: boolean = false;
+  private vsyncIdleTicks: number = 0;
+  // 泵降频：空闲时 16ms -> 33ms。帧请求由泵发现，33ms 只是让"恢复满帧"最多晚 2 帧；
+  // 帧配速本身由 vsync 负责，不影响动画期间的帧率。
+  private pumpIdleTicks: number = 0;
+  private pumpSlow: boolean = false;
   // 平台三键（docs/lwindow-title-buttons-plan.md）：最近一次事件给的矩形（vp）+
   // 已上报引擎的 px 快照（只在变化时上报，避免每 400ms 刷屏）。
   private lastTitleBtnRect: window.TitleButtonRect | undefined = undefined;
@@ -456,6 +465,14 @@ struct Index {
   /** 启动 vsync 回调：每帧检查引擎有没有 frame.request，有就回 frame.done。 */
   private startVsync(): void {
     if (this.vsyncObj !== undefined) return;
+    // 诊断开关：LANLU_SHELL_NO_VSYNC=1 时不启动 displaySync，用来量"空闲 CPU 里有多少是
+    // 每帧回调的固定开销"。只在排障时用（没有 vsync 就没有 frame.done 配速）。
+    try {
+      if (AppStorage.get<boolean>('lanluNoVsync') === true) {
+        console.info('[LANLU-SHELL] vsync disabled by probe');
+        return;
+      }
+    } catch (eV) {}
     try {
       this.vsyncObj = displaySync.create();
       const range: ExpectedFrameRateRange = { expected: 60, min: 30, max: 120 };
@@ -469,6 +486,10 @@ struct Index {
           if (serial !== 0) {
             vsyncSent++;
             shell.lwpFrameDone(serial);
+            this.vsyncIdleTicks = 0;
+          } else {
+            this.vsyncIdleTicks++;
+            if (this.vsyncIdleTicks >= 60) this.stopVsyncIfIdle();
           }
           if (vsyncTicks % 120 === 0) {
             console.info('[LANLU-SHELL] vsync ticks=' + vsyncTicks + ' frameDone=' + vsyncSent);
@@ -476,11 +497,46 @@ struct Index {
         } catch (eF) {}
       });
       this.vsyncObj.start();
+      this.vsyncRunning = true;
+      this.vsyncIdleTicks = 0;
       console.info('[LANLU-SHELL] vsync started');
     } catch (e) {
       console.error('[LANLU-SHELL] vsync start failed: ' + JSON.stringify(e));
       this.vsyncObj = undefined;
     }
+  }
+
+  /** 切泵间隔：空闲 33ms / 活跃 16ms。 */
+  private setPumpSlow(slow: boolean): void {
+    if (this.lwpPumpTimer === -1 || this.pumpSlow === slow) return;
+    this.pumpSlow = slow;
+    try {
+      clearInterval(this.lwpPumpTimer);
+    } catch (e) {}
+    this.lwpPumpTimer = -1;
+    this.schedulePump();
+    console.info('[LANLU-SHELL] pump interval -> ' + (slow ? '33ms(idle)' : '16ms'));
+  }
+
+  /** 空闲满 1s 没有帧请求 -> 停 displaySync（回调开销归零）。 */
+  private stopVsyncIfIdle(): void {
+    if (!this.vsyncRunning || this.vsyncObj === undefined) return;
+    try {
+      this.vsyncObj.stop();
+      this.vsyncRunning = false;
+      console.info('[LANLU-SHELL] vsync stopped (idle)');
+    } catch (e) {}
+  }
+
+  /** 引擎有帧请求时确保 vsync 在跑。 */
+  private ensureVsyncRunning(): void {
+    this.vsyncIdleTicks = 0;
+    if (this.vsyncRunning || this.vsyncObj === undefined) return;
+    try {
+      this.vsyncObj.start();
+      this.vsyncRunning = true;
+      console.info('[LANLU-SHELL] vsync resumed');
+    } catch (e) {}
   }
 
   private startLwpWindowPump(): void {
@@ -489,135 +545,166 @@ struct Index {
     try {
       this.probeShellResize = AppStorage.get<boolean>('lanluProbeShellResize') === true;
     } catch (eP) {}
-    this.lwpPumpTimer = setInterval(() => {
-      let pumped: number = 0;
-      try { pumped = shell.lwpWindowPump(); } catch (e) {}
-      // 原点自愈：窗口被拖动/换屏后 windowRect 会过期，每秒用组件实际屏幕坐标校正一次
-      if (++this.originTick % 60 === 0) {
-        this.refreshSurfaceOrigin();
-      }
-      // 空闲快路径（评审 P2）：本拍没有任何引擎请求时，下面十几次 take* NAPI 调用都只会
-      // 返回"无"。只保留不经泵的那一项（交互式缩放由输入过滤器线程写入），其余跳过，
-      // 主线程每 16ms 的固定开销从 ~20 次 NAPI 降到 2 次。
-      if (pumped === 0 && !this.probeShellResize) {
-        this.applyPendingResize();
-        return;
-      }
-      // 剪贴板（lw_clipboard.set/get，M6 第 2 步：文件桥换成协议）
-      try {
-        const cs: string = shell.lwpTakeClipboardSet();
-        if (cs !== '') {
-          const d = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, cs);
-          pasteboard.getSystemPasteboard().setData(d)
-            .then(() => { console.info('[LANLU-SHELL] clip set ok len=' + cs.length); })
-            .catch((e: Error) => { console.error('[LANLU-SHELL] clip set fail ' + e.message); });
-        }
-      } catch (eCs) {}
-      try {
-        const cg: number = shell.lwpTakeClipboardGet();
-        if (cg !== 0) {
-          pasteboard.getSystemPasteboard().getData().then((d: pasteboard.PasteData) => {
-            let text = '';
-            try { text = d.getPrimaryText() ?? ''; } catch (eT) {}
-            try { shell.lwpClipboardText(cg, 'text/plain', text); } catch (eR) {}
-          }).catch(() => {
-            try { shell.lwpClipboardText(cg, 'text/plain', ''); } catch (eR2) {}
-          });
-        }
-      } catch (eCg) {}
-      // 文本输入开关：原生输入法桥自己处理（pump 里 lw_text_input.enable/disable ->
-      // lanlu_ime_enable/disable），这里只把 want 状态清掉，避免旧队列残留被误解。
-      try { shell.lwpTakeImeWant(); } catch (eImeWant) {}
-      // 运行期标题 / 尺寸约束（引擎 window.set_title / set_min_max）
-      try {
-        const t: string = shell.lwpTakeWindowTitle();
-        if (t !== undefined && t.length > 0 && this.win !== undefined) {
-          this.win.setWindowTitle(t).then(() => {
-            console.info('[LANLU-SHELL] window title -> ' + t);
-          }).catch((e: Error) => {
-            console.warn('[LANLU-SHELL] setWindowTitle 失败: ' + JSON.stringify(e));
-          });
-        }
-        const lm: number[] = shell.lwpTakeWindowLimits();
-        if (lm !== undefined && lm.length === 4 && this.win !== undefined) {
-          const lim: window.WindowLimits = {
-            minWidth: lm[0] > 0 ? lm[0] : undefined,
-            minHeight: lm[1] > 0 ? lm[1] : undefined,
-            maxWidth: lm[2] > 0 ? lm[2] : undefined,
-            maxHeight: lm[3] > 0 ? lm[3] : undefined,
-          };
-          this.win.setWindowLimits(lim).then(() => {
-            console.info('[LANLU-SHELL] window limits applied');
-          }).catch((e: Error) => {
-            console.warn('[LANLU-SHELL] setWindowLimits 失败: ' + JSON.stringify(e));
-          });
-        }
-      } catch (eTitle) {}
-      // 帧统计（每 ~5s 一次）：证明壳确实在消费 surface.attach 的 serial
-      if (this.frameLogTick++ % 300 === 0) {
-        try {
-          const st: number[] = shell.lwpAttachStats();
-          if (st !== undefined && st.length === 3) {
-            console.info('[LANLU-SHELL] frames=' + st[0] + ' lastAttachSerial=' + st[1] +
-              ' backwards=' + st[2]);
-          }
-        } catch (eSt) {}
-      }
-      // 交互式缩放：引擎发 begin_resize 后，壳把指针位移换算成尺寸，这里真正改窗口
-      this.applyPendingResize();
-      // 光标形状：引擎请求 -> 系统光标（编号表见文档 §7.5）
-      try {
-        const shape: number = shell.lwpTakeCursorShape();
-        if (shape >= 0) {
-          this.applyCursorShape(shape);
-        }
-      } catch (eCur) {}
-      // IME 候选框位置：原生桥（text_input.cpp）在 pump 里直接 NotifyCursorUpdate，
-      // 不再经 ArkTS 的 inputMethod 控制器。这里只把待取标记清掉。
-      try { shell.lwpTakeImeCursorRect(); } catch (eImeR) {}
+    this.schedulePump();
+  }
 
-      // 联调压测：真实改窗口几何，驱动 ArkUI 的 onSizeChange -> lw_surface.changed
+  /** 建泵定时器：空闲 33ms / 活跃 16ms（切换很少发生，重建定时器即可）。 */
+  private schedulePump(): void {
+    this.lwpPumpTimer = setInterval(() => {
+      this.pumpTick();
+    }, this.pumpSlow ? 33 : 16);
+  }
+
+  /** 每拍：泵引擎请求 + 帧请求处理 + 空闲降频。 */
+  private pumpTick(): void {
+    let pumped: number = 0;
+    try { pumped = shell.lwpWindowPump(); } catch (e) {}
+    // vsync 停着时，帧请求只能由泵发现（take 是独占的，和 vsync 回调不冲突）：
+    // 少了这段，空闲满 1s 停掉 displaySync 之后引擎的 frame.request 就永远没人应答。
+    if (!this.vsyncRunning) {
       try {
-        if (this.probeShellResize && this.win !== undefined) {
-          this.shellResizeTick = (this.shellResizeTick + 1) % 60;   // 60 帧 ≈ 1s
-          if (this.shellResizeTick === 0) {
-            const w: number = 1200 + (Math.floor(Date.now() / 1000) % 5) * 120;
-            this.win.resize(w, Math.floor(w * 1394 / 2090)).catch(() => {});
-          }
+        const serial: number = shell.lwpTakeFrameRequest();
+        if (serial !== 0) {
+          shell.lwpFrameDone(serial);
+          this.ensureVsyncRunning();
         }
-      } catch (eRs) {}
-      // 引擎经协议请求的对话框（计划 §8）：引擎 ready 后由壳弹出系统选择器
+      } catch (eFr) {}
+    }
+    // 空闲降频：连续 60 拍没有引擎活儿就把泵间隔 16ms -> 33ms
+    if (pumped > 0) {
+      this.pumpIdleTicks = 0;
+      if (this.pumpSlow) this.setPumpSlow(false);
+      // 引擎有活儿就确保配速在跑：交互后紧跟动画（滚动的惯性、过渡）需要 frame.done 配速
+      this.ensureVsyncRunning();
+    } else {
+      this.pumpIdleTicks++;
+      if (this.pumpIdleTicks >= 60 && !this.pumpSlow) this.setPumpSlow(true);
+    }
+    // 原点自愈：窗口被拖动/换屏后 windowRect 会过期，每秒用组件实际屏幕坐标校正一次
+    if (++this.originTick % 60 === 0) {
+      this.refreshSurfaceOrigin();
+    }
+    // 空闲快路径（评审 P2）：本拍没有任何引擎请求时，下面十几次 take* NAPI 调用都只会
+    // 返回"无"。只保留不经泵的那一项（交互式缩放由输入过滤器线程写入），其余跳过，
+    // 主线程每 16ms 的固定开销从 ~20 次 NAPI 降到 2 次。
+    if (pumped === 0 && !this.probeShellResize) {
+      this.applyPendingResize();
+      return;
+    }
+    // 剪贴板（lw_clipboard.set/get，M6 第 2 步：文件桥换成协议）
+    try {
+      const cs: string = shell.lwpTakeClipboardSet();
+      if (cs !== '') {
+        const d = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, cs);
+        pasteboard.getSystemPasteboard().setData(d)
+          .then(() => { console.info('[LANLU-SHELL] clip set ok len=' + cs.length); })
+          .catch((e: Error) => { console.error('[LANLU-SHELL] clip set fail ' + e.message); });
+      }
+    } catch (eCs) {}
+    try {
+      const cg: number = shell.lwpTakeClipboardGet();
+      if (cg !== 0) {
+        pasteboard.getSystemPasteboard().getData().then((d: pasteboard.PasteData) => {
+          let text = '';
+          try { text = d.getPrimaryText() ?? ''; } catch (eT) {}
+          try { shell.lwpClipboardText(cg, 'text/plain', text); } catch (eR) {}
+        }).catch(() => {
+          try { shell.lwpClipboardText(cg, 'text/plain', ''); } catch (eR2) {}
+        });
+      }
+    } catch (eCg) {}
+    // 文本输入开关：原生输入法桥自己处理（pump 里 lw_text_input.enable/disable ->
+    // lanlu_ime_enable/disable），这里只把 want 状态清掉，避免旧队列残留被误解。
+    try { shell.lwpTakeImeWant(); } catch (eImeWant) {}
+    // 运行期标题 / 尺寸约束（引擎 window.set_title / set_min_max）
+    try {
+      const t: string = shell.lwpTakeWindowTitle();
+      if (t !== undefined && t.length > 0 && this.win !== undefined) {
+        this.win.setWindowTitle(t).then(() => {
+          console.info('[LANLU-SHELL] window title -> ' + t);
+        }).catch((e: Error) => {
+          console.warn('[LANLU-SHELL] setWindowTitle 失败: ' + JSON.stringify(e));
+        });
+      }
+      const lm: number[] = shell.lwpTakeWindowLimits();
+      if (lm !== undefined && lm.length === 4 && this.win !== undefined) {
+        const lim: window.WindowLimits = {
+          minWidth: lm[0] > 0 ? lm[0] : undefined,
+          minHeight: lm[1] > 0 ? lm[1] : undefined,
+          maxWidth: lm[2] > 0 ? lm[2] : undefined,
+          maxHeight: lm[3] > 0 ? lm[3] : undefined,
+        };
+        this.win.setWindowLimits(lim).then(() => {
+          console.info('[LANLU-SHELL] window limits applied');
+        }).catch((e: Error) => {
+          console.warn('[LANLU-SHELL] setWindowLimits 失败: ' + JSON.stringify(e));
+        });
+      }
+    } catch (eTitle) {}
+    // 帧统计（每 ~5s 一次）：证明壳确实在消费 surface.attach 的 serial
+    if (this.frameLogTick++ % 300 === 0) {
       try {
-        const kind: number = shell.lwpDialogRequest();
-        if (kind !== 0 && !this.dialogBusy && this.lwpDialogSerial === 0) {
-          this.lwpDialogSerial = shell.lwpDialogSerial();
-          this.dialogBusy = true;
-          const run = async (): Promise<void> => {
-            let payload = '';
-            try {
-              if (kind === 2) {
-                await this.handleSaveDialog();
-              } else {
-                await this.pickOpenFile();
-              }
-            } catch (err) {
-              console.error('[LANLU-SHELL] lwp dialog failed: ' + JSON.stringify(err));
-              payload = '';
-            } finally {
-              // handleSaveDialog/pickOpenFile 内部会调 finishDialog('')，走这里的 LWP 回执；
-              // 若它们没调（异常路径），这里兜底发一条取消
-              if (this.lwpDialogSerial !== 0) {
-                try { shell.lwpDialogResult(this.lwpDialogSerial, ''); } catch (e2) {}
-                try { shell.lwpDialogClear(); } catch (e3) {}
-                this.lwpDialogSerial = 0;
-                this.dialogBusy = false;
-              }
+        const st: number[] = shell.lwpAttachStats();
+        if (st !== undefined && st.length === 3) {
+          console.info('[LANLU-SHELL] frames=' + st[0] + ' lastAttachSerial=' + st[1] +
+            ' backwards=' + st[2]);
+        }
+      } catch (eSt) {}
+    }
+    // 交互式缩放：引擎发 begin_resize 后，壳把指针位移换算成尺寸，这里真正改窗口
+    this.applyPendingResize();
+    // 光标形状：引擎请求 -> 系统光标（编号表见文档 §7.5）
+    try {
+      const shape: number = shell.lwpTakeCursorShape();
+      if (shape >= 0) {
+        this.applyCursorShape(shape);
+      }
+    } catch (eCur) {}
+    // IME 候选框位置：原生桥（text_input.cpp）在 pump 里直接 NotifyCursorUpdate，
+    // 不再经 ArkTS 的 inputMethod 控制器。这里只把待取标记清掉。
+    try { shell.lwpTakeImeCursorRect(); } catch (eImeR) {}
+
+    // 联调压测：真实改窗口几何，驱动 ArkUI 的 onSizeChange -> lw_surface.changed
+    try {
+      if (this.probeShellResize && this.win !== undefined) {
+        this.shellResizeTick = (this.shellResizeTick + 1) % 60;   // 60 帧 ≈ 1s
+        if (this.shellResizeTick === 0) {
+          const w: number = 1200 + (Math.floor(Date.now() / 1000) % 5) * 120;
+          this.win.resize(w, Math.floor(w * 1394 / 2090)).catch(() => {});
+        }
+      }
+    } catch (eRs) {}
+    // 引擎经协议请求的对话框（计划 §8）：引擎 ready 后由壳弹出系统选择器
+    try {
+      const kind: number = shell.lwpDialogRequest();
+      if (kind !== 0 && !this.dialogBusy && this.lwpDialogSerial === 0) {
+        this.lwpDialogSerial = shell.lwpDialogSerial();
+        this.dialogBusy = true;
+        const run = async (): Promise<void> => {
+          let payload = '';
+          try {
+            if (kind === 2) {
+              await this.handleSaveDialog();
+            } else {
+              await this.pickOpenFile();
             }
-          };
-          run();
-        }
-      } catch (eLwpD) {}
-    }, 16);
+          } catch (err) {
+            console.error('[LANLU-SHELL] lwp dialog failed: ' + JSON.stringify(err));
+            payload = '';
+          } finally {
+            // handleSaveDialog/pickOpenFile 内部会调 finishDialog('')，走这里的 LWP 回执；
+            // 若它们没调（异常路径），这里兜底发一条取消
+            if (this.lwpDialogSerial !== 0) {
+              try { shell.lwpDialogResult(this.lwpDialogSerial, ''); } catch (e2) {}
+              try { shell.lwpDialogClear(); } catch (e3) {}
+              this.lwpDialogSerial = 0;
+              this.dialogBusy = false;
+            }
+          }
+        };
+        run();
+      }
+    } catch (eLwpD) {}
   }
 
   // M6 第 3 步：filedlg_req.txt 轮询已删除（对话框只走 lw_dialog.* 与原生回调）。

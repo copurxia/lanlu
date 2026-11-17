@@ -86,6 +86,12 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<boolean>('lanluProbeSnap', v !== undefined && v.toString() === '1');
       const vR = p2['lanlu.env.LANLU_PROBE_SHELL_RESIZE'];
       AppStorage.setOrCreate<boolean>('lanluProbeShellResize', vR !== undefined && vR.toString() === '1');
+      const vN = p2['lanlu.env.LANLU_SHELL_NO_VSYNC'];
+      AppStorage.setOrCreate<boolean>('lanluNoVsync', vN !== undefined && vN.toString() === '1');
+      // 关窗链路探针：模拟"系统关闭钮"调用 lwpSendCloseRequest（与 windowWillClose 同一条路径），
+      // 用于自动验证 close_request -> 引擎退出（docs/lwindow-title-buttons-plan.md）。
+      const vC = p2['lanlu.env.LANLU_PROBE_CLOSE'];
+      AppStorage.setOrCreate<boolean>('lanluProbeClose', vC !== undefined && vC.toString() === '1');
     } catch (eP) {}
     // P5：不再把 ArkTS 对象交给 SDL（引擎由 shell.startEngine() 启动，窗口/输入走 L 层）
   }
