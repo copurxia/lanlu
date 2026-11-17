@@ -300,16 +300,19 @@ pub fn key(keycode: u32, down: bool) -> Vec<u8> {
 /// lw_input.key（since=2）：size(4)+keycode(4)+down(1)+utf8(string)+modifiers(u16)
 pub fn key_text(keycode: u32, down: bool, text: &str, modifiers: u16) -> Vec<u8> {
     let t = text.as_bytes();
-    let total = KEY_SIZE + 4 + t.len() + 2;
+    // 固定头：size(4)+keycode(4)+down(1)+utf8{off,len}(4)+modifiers(2) = 15，文本载荷在 15 之后。
+    // 之前把 off 写成 KEY_SIZE(=9)、载荷放在 13、modifiers 放到 14 —— 与 lwp_protocol.h 不一致，
+    // 引擎按 @9 取字符串、@13 取 modifiers 会读到头/正文的错位字节（单测 key_text_layout 抓到）。
+    let payload_off = KEY_SIZE + 4 + 2; // 15
+    let total = payload_off + t.len();
     let mut b = Buf::new(total);
     b.u32(0);
     b.u32(keycode);
     b.u8(if down { 1 } else { 0 });
-    let off = KEY_SIZE;
-    b.u16(off as u16);
+    b.u16(payload_off as u16);
     b.u16(t.len() as u16);
-    b.bytes(t);
     b.u16(modifiers);
+    b.bytes(t);
     b.finish()
 }
 
@@ -508,4 +511,45 @@ mod tests {
         let b = hello("wayland", "linux", 0, shells | cursor | preedit);
         assert_eq!(u64::from_le_bytes(b[20..28].try_into().unwrap()), 0b111);
     }
+    #[test]
+    fn key_text_layout_matches_c_header() {
+        // lw_input.key（since=2）：size(4)+keycode(4)+down(1)+utf8{off,len}+modifiers(u16)
+        let b = key_text(30, true, "a", 0x0001);
+        assert_eq!(u32::from_le_bytes(b[0..4].try_into().unwrap()) as usize, b.len());
+        assert_eq!(u32::from_le_bytes(b[4..8].try_into().unwrap()), 30, "keycode");
+        assert_eq!(b[8], 1, "down");
+        assert_eq!(u16::from_le_bytes([b[9], b[10]]) as usize, 15, "string off");
+        assert_eq!(u16::from_le_bytes([b[11], b[12]]) as usize, 1, "string len");
+        assert_eq!(u16::from_le_bytes([b[13], b[14]]), 0x0001, "modifiers 在文本载荷之前");
+        assert_eq!(&b[15..16], b"a");
+        // 空文本：modifiers 落在 13
+        let e = key_text(30, false, "", 0);
+        assert_eq!(e.len(), 15);
+        assert_eq!(u16::from_le_bytes([e[11], e[12]]) as usize, 0);
+    }
+
+    #[test]
+    fn text_input_events_layout() {
+        // preedit：size(4)+text{off,len}+cursor(u32)
+        let p = preedit("nihao", 5);
+        assert_eq!(u32::from_le_bytes(p[0..4].try_into().unwrap()) as usize, p.len());
+        assert_eq!(u16::from_le_bytes([p[4], p[5]]) as usize, PREEDIT_SIZE, "text off");
+        assert_eq!(u16::from_le_bytes([p[6], p[7]]) as usize, 5, "text len");
+        assert_eq!(u32::from_le_bytes(p[8..12].try_into().unwrap()), 5, "cursor");
+        assert_eq!(&p[PREEDIT_SIZE..], b"nihao");
+
+        // commit_string：size(4)+text{off,len}
+        let c = commit_string("你好");
+        assert_eq!(u32::from_le_bytes(c[0..4].try_into().unwrap()) as usize, c.len());
+        assert_eq!(u16::from_le_bytes([c[4], c[5]]) as usize, COMMIT_STRING_SIZE, "text off");
+        assert_eq!(u16::from_le_bytes([c[6], c[7]]) as usize, 6, "utf8 字节数");
+        assert_eq!(&c[COMMIT_STRING_SIZE..], "你好".as_bytes());
+
+        // delete_surrounding：size(4)+before(4)+after(4)
+        let d = delete_surrounding(2, 1);
+        assert_eq!(d.len(), DELETE_SURROUNDING_SIZE);
+        assert_eq!(u32::from_le_bytes(d[4..8].try_into().unwrap()), 2, "before");
+        assert_eq!(u32::from_le_bytes(d[8..12].try_into().unwrap()), 1, "after");
+    }
+
 }

@@ -913,7 +913,7 @@ fn clipboard_read_emits_text() {
 
     let c = shared.lock().unwrap();
     let m = c.recv(lanlu_platform_wayland::lwp::LWP_REQUEST).expect("应当收到 clipboard.text");
-    assert_eq!(m.iface, 9, "iface 应为 lw_clipboard");
+    assert_eq!(m.iface, lanlu_platform_wayland::protocol::iface::CLIPBOARD, "iface 应为 lw_clipboard");
     assert_eq!(m.opcode, 0, "opcode 应为 clipboard.text");
     let serial = u32::from_le_bytes(m.body[4..8].try_into().unwrap());
     assert_eq!(serial, 9, "serial 应原样带回");
@@ -1369,7 +1369,7 @@ fn clipboard_receive_uses_fd_and_returns_text() {
 
     let c = shared.lock().unwrap();
     let m = c.recv(lanlu_platform_wayland::lwp::LWP_REQUEST).expect("应收到 clipboard.text");
-    assert_eq!(m.iface, 9, "iface = lw_clipboard");
+    assert_eq!(m.iface, lanlu_platform_wayland::protocol::iface::CLIPBOARD, "iface = lw_clipboard");
     assert_eq!(m.opcode, 0, "opcode = clipboard.text");
     assert_eq!(u32::from_le_bytes(m.body[4..8].try_into().unwrap()), 77, "serial");
     let to = u16::from_le_bytes([m.body[12], m.body[13]]) as usize;
