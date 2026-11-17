@@ -214,6 +214,11 @@ pub struct State {
     pub pending_input_type: u32,
     /// 引擎是否要求"输入框聚焦"（v3 的 enable 要等 enter 事件之后才生效）
     pub text_input_wanted: bool,
+    /// 最近一次 set_surrounding 的文本与光标（字节偏移，与 v3 一致）。
+    /// delete_surrounding_text 的 before/after 在 v3 是字节长度，而引擎按字符删；
+    /// 有这份文本时用真实码点换算，没有才回落到保守估算。
+    pub surrounding_text: String,
+    pub surrounding_cursor: u32,
     /// xkb 键盘布局：物理键 -> 文本（wl_keyboard.keymap 事件建立）
     pub xkb_ctx: Option<*mut xkb::xkb_context>,
     pub xkb_keymap: Option<*mut xkb::xkb_keymap>,
@@ -282,6 +287,8 @@ impl State {
             seat: None,
             pending_input_type: 0,
             text_input_wanted: false,
+            surrounding_text: String::new(),
+            surrounding_cursor: 0,
             xkb_ctx: None,
             xkb_keymap: None,
             xkb_state: None,
@@ -519,8 +526,37 @@ fn us_layout_text(evdev: u32, shift: bool, caps: bool) -> String {
 
 impl State {
     /// v3 的字节长度 -> 字符个数的保守换算（引擎按码点删；上限 8 个字符足够输入法场景）
-    fn text_len_bytes_to_chars(&self, bytes: u32) -> u32 {
-        ((bytes + 3) / 4).max(if bytes > 0 { 1 } else { 0 }).min(8)
+    /// delete_surrounding_text 的字节长度 -> 引擎要的字符数。
+    ///
+    /// v3 给字节长度，引擎按字符删。有 surrounding 文本时按真实码点算；
+    /// 没有时回落到保守估算（宁可少删，也不误删）。
+    pub fn debug_bytes_to_chars(&self, bytes: u32, before: bool) -> u32 {
+        self.text_len_bytes_to_chars(bytes, before)
+    }
+
+    fn text_len_bytes_to_chars(&self, bytes: u32, before: bool) -> u32 {
+        if bytes == 0 {
+            return 0;
+        }
+        if self.surrounding_text.is_empty() {
+            return ((bytes + 3) / 4).max(1).min(8);
+        }
+        let text = &self.surrounding_text;
+        let cursor = self.surrounding_cursor.min(text.len() as u32) as usize;
+        let slice = if before {
+            let mut start = cursor.saturating_sub(bytes as usize);
+            while start < cursor && !text.is_char_boundary(start) {
+                start += 1;
+            }
+            &text[start..cursor]
+        } else {
+            let mut end = (cursor + bytes as usize).min(text.len());
+            while end > cursor && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            &text[cursor..end]
+        };
+        (slice.chars().count() as u32).max(1)
     }
 
     /// 建立/替换键盘布局（wl_keyboard.keymap）。libxkbcommon 缺失时静默降级为 US 表。
@@ -727,8 +763,8 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
             }
             Event::DeleteSurroundingText { before_length, after_length } => {
                 // v3 的 before/after 是**字节**长度；引擎按字符删，这里按 UTF-8 码点换算成保守值
-                let before = state.text_len_bytes_to_chars(before_length.max(0) as u32);
-                let after = state.text_len_bytes_to_chars(after_length.max(0) as u32);
+                let before = state.text_len_bytes_to_chars(before_length.max(0) as u32, true);
+                let after = state.text_len_bytes_to_chars(after_length.max(0) as u32, false);
                 state.send_input(op::TEXT_INPUT_DELETE_SURROUNDING,
                     &protocol::delete_surrounding(before, after));
             }
@@ -1322,6 +1358,9 @@ pub fn run(channel: Channel) -> Result<(), String> {
                     let text_len = lwp_str_len(&body, 4);
                     let cursor = u32::from_le_bytes(body[8 + text_len..12 + text_len].try_into().unwrap());
                     let anchor = u32::from_le_bytes(body[12 + text_len..16 + text_len].try_into().unwrap());
+                    // 留档：delete_surrounding_text 的字节长度换算要用它
+                    state.surrounding_text = text.to_string();
+                    state.surrounding_cursor = cursor;
                     if let Some(ti) = &state.text_input {
                         ti.set_surrounding_text(text, cursor as i32, anchor as i32);
                         ti.commit();

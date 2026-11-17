@@ -1382,3 +1382,27 @@ fn clipboard_receive_uses_fd_and_returns_text() {
     drop(shell);
     server.join().ok();
 }
+
+/// delete_surrounding_text 的字节长度换算成字符数（有 surrounding 文本时按真实码点）。
+#[test]
+fn delete_surrounding_bytes_to_chars() {
+    let mut st = lanlu_platform_wayland::shell::State::default();
+    // ASCII：5 字节 = 5 个字符（旧实现 (5+3)/4 = 2，会少删）
+    st.surrounding_text = "hello world".to_string();
+    st.surrounding_cursor = 11;
+    assert_eq!(st.debug_bytes_to_chars(5, true), 5);
+    // 中文：每字 3 字节，删 6 字节 = 2 字
+    st.surrounding_text = "你好世界".to_string();
+    st.surrounding_cursor = 12;
+    assert_eq!(st.debug_bytes_to_chars(6, true), 2);
+    // 混合 "a你好b"：光标在 7（a + 你好），删 4 字节只覆盖 1 个完整中文
+    st.surrounding_text = "a你好b".to_string();
+    st.surrounding_cursor = 7;
+    assert_eq!(st.debug_bytes_to_chars(4, true), 1);
+    // 向后删：光标 0，删 6 字节 = 2 个中文
+    st.surrounding_cursor = 0;
+    assert_eq!(st.debug_bytes_to_chars(6, false), 2);
+    // 没有 surrounding 文本：回落保守估算
+    let empty = lanlu_platform_wayland::shell::State::default();
+    assert_eq!(empty.debug_bytes_to_chars(9, true), 3);
+}
