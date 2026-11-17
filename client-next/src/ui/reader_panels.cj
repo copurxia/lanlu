@@ -678,7 +678,7 @@ private class ReaderSegmentHeader <: Widget {
         let fitted = sidebarEllipsize(ctx, title, frame.right() - 8.0 - textX, ps)
         drawIcon(ctx.renderer, IconName.ChevronDown,
             Rect(x, frame.centerY() - iconSize / 2.0, iconSize, iconSize), ctx.theme.accent)
-        ctx.renderer.text(fitted, textX, frame.centerY() - th / 2.0, ctx.theme.accent, pointSize: ps)
+        ctx.renderer.text(fitted, textX, frame.centerY() - th * 0.3519, ctx.theme.accent, pointSize: ps)
     }
 
     public func handle(_: UiContext, _: UiEvent): Bool {
@@ -828,7 +828,7 @@ private class ReaderPageRow <: Widget {
     private func drawTreeFileContent(ctx: UiContext, color: Color): Unit {
         let ps: Float32 = 12.0
         let th = ctx.renderer.textHeight(pointSize: ps)
-        let ty = frame.centerY() - th / 2.0
+        let ty = frame.centerY() - th * 0.3519
         var x = frame.x + 6.0 + Float32(depth) * 14.0
         var name = ""
         var pageType = ""
@@ -853,7 +853,7 @@ private class ReaderPageRow <: Widget {
         }
         ctx
             .renderer
-            .text(num, frame.right() - 8.0 - numW, frame.centerY() - ctx.renderer.textHeight(pointSize: 10.0) / 2.0,
+            .text(num, frame.right() - 8.0 - numW, frame.centerY() - ctx.renderer.textHeight(pointSize: 10.0) * 0.3519,
                 ctx.theme.mutedText, pointSize: 10.0)
     }
 

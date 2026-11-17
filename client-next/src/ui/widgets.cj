@@ -5,6 +5,7 @@ import lanlu_client_next.app.*
 import lanlu_client_next.net.{ArchivePageView, SearchItem, SearchItemProjectionView, SearchItemView, TankoubonInfo,
     TankoubonView, PageInfo, percentEncode}
 import std.collection.{ArrayList, HashMap, HashSet}
+import std.env.getVariable
 import std.math.{cos, sin}
 
 // 品牌 logo（顶栏 28vp / 登录卡 44vp 共用）：金色镂空书架方块。
@@ -696,7 +697,7 @@ public class MiniSeg <: Widget {
                 ctx.renderer.fillRoundedRect(item, 6.0, ctx.theme.accentSoft)
                 ctx
                     .renderer
-                    .text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0, ctx.theme.accent,
+                    .text(items[i], item.centerX() - tw / 2.0, item.centerY() - th * 0.3519, ctx.theme.accent,
                         pointSize: 11.0)
             } else {
                 let fg = if (ctx.isHovered("${segId}:${i}")) {
@@ -704,7 +705,7 @@ public class MiniSeg <: Widget {
                 } else {
                     ctx.theme.mutedText
                 }
-                ctx.renderer.text(items[i], item.centerX() - tw / 2.0, item.centerY() - th / 2.0, fg, pointSize: 11.0)
+                ctx.renderer.text(items[i], item.centerX() - tw / 2.0, item.centerY() - th * 0.3519, fg, pointSize: 11.0)
             }
         }
     }
@@ -883,7 +884,7 @@ public class NavItem <: Widget {
             case None => ()
         }
         let th = ctx.renderer.textHeight(pointSize: FontSizes.CONTROL)
-        let ty = frame.centerY() - th / 2.0
+        let ty = frame.centerY() - th * 0.3519
         ctx.renderer.text(label, textX, ty, labelColor, pointSize: FontSizes.CONTROL)
         if (count.size > 0) {
             // 原型 .side-item .cnt：11px、低透明（muted 即低对比语义）。
@@ -935,6 +936,8 @@ private func imagePlaceholder(model: AppModel, w: Length, h: Length, text: Strin
 public func remoteImage(model: AppModel, key: String, url: String, w: Length, h: Length, zoom!: Float32 = 1.0,
     radius!: Float32 = 0.0, fit!: ImageFit = ImageFit.Cover, startAligned!: Bool = false): Unit {
     let st = model.imageState(key)
+    // 真机诊断（imgDiag 在 app 层）：每种状态只打一次，观察封面三态流转是否被 UI 触发。
+    noteRemoteImageSeen(model, key, st.value, url)
     if (st.value == "") {
         model.requestImage(key, url)
         imagePlaceholder(model, w, h, "…")
@@ -1587,7 +1590,7 @@ private func homeCoverCard(model: AppModel, id: String, title: String, meta: Str
                     if (coverAssetId > 0) {
                         remoteImage(model, "asset:${coverAssetId}", "/api/assets/${coverAssetId}",
                             Length(coverW, LengthUnit.Vp), Length(coverH, LengthUnit.Vp),
-                            zoom: 1.0 + CARD_ZOOM * zoomSpring.value, radius: coverW * 0.072)
+                            zoom: 1.0 + CARD_ZOOM * zoomSpring.value, radius: if ((getVariable("LANLU_NO_RDD") ?? "0") == "1") { 0.0 } else { coverW * 0.072 })
                     } else {
                         noCoverBox(model, coverW, coverH)
                     }
@@ -2468,7 +2471,7 @@ class TagChip <: Widget {
         }
         let tw = ctx.renderer.textWidth(text, pointSize: 11.0)
         let th = ctx.renderer.textHeight(pointSize: 11.0)
-        ctx.renderer.text(text, frame.centerX() - tw / 2.0, frame.centerY() - th / 2.0, fg, pointSize: 11.0)
+        ctx.renderer.text(text, frame.centerX() - tw / 2.0, frame.centerY() - th * 0.3519, fg, pointSize: 11.0)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -2606,6 +2609,8 @@ public func progressCard(model: AppModel, big: String, ofText: String, pct: Int6
 public func tankCardRow(model: AppModel, tanks: ArrayList<TankoubonInfo>, rowId: String,
     recommendationScene!: String = "", seedType!: String = "", seedId!: String = ""): Unit {
     let items = ArrayList<TankCardItem>()
+    // G3：卡片数 = 入参 tanks 数量，已知上界。
+    items.reserve(tanks.size)
     for (t in tanks) {
         items.add(tankCardItem(t))
     }

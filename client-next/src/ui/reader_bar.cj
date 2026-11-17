@@ -61,7 +61,7 @@ private class ReaderTitle <: Widget {
     public func draw(ctx: UiContext): Unit {
         let ps: Float32 = 14.0
         let th = ctx.renderer.textHeight(pointSize: ps)
-        let ty = frame.centerY() - th / 2.0
+        let ty = frame.centerY() - th * 0.3519
         var x = frame.x
         // 页标题宽（含「 · 」前缀），为它在标题截断中预留整宽；标题更短时自然左邻。
         var chapText = ""

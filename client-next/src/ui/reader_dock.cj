@@ -415,7 +415,7 @@ class ReaderDock <: Widget {
         }
         let nw = ctx.renderer.textWidth(num, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
-        ctx.renderer.text(num, sr.right() + 6.0 + (70.0 - nw) / 2.0, sr.centerY() - nh / 2.0, dimColor(ctx, a),
+        ctx.renderer.text(num, sr.right() + 6.0 + (70.0 - nw) / 2.0, sr.centerY() - nh * 0.3519, dimColor(ctx, a),
             pointSize: 12.0)
     }
 
@@ -446,7 +446,7 @@ class ReaderDock <: Widget {
         }
         let nw = ctx.renderer.textWidth(num, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
-        ctx.renderer.text(num, sr.right() + 4.0 + (54.0 - nw) / 2.0, sr.centerY() - nh / 2.0, dimColor(ctx, a),
+        ctx.renderer.text(num, sr.right() + 4.0 + (54.0 - nw) / 2.0, sr.centerY() - nh * 0.3519, dimColor(ctx, a),
             pointSize: 12.0)
 
         let divider = fadeColor(ctx.theme.overlayBorder, Float32(a) / 255.0)
@@ -513,7 +513,7 @@ class ReaderDock <: Widget {
         let th = ctx.renderer.textHeight(pointSize: 12.0)
         ctx
             .renderer
-            .text(timeText, audioSeekRect.right() + 6.0 + (88.0 - tw) / 2.0, audioSeekRect.centerY() + dy - th / 2.0,
+            .text(timeText, audioSeekRect.right() + 6.0 + (88.0 - tw) / 2.0, audioSeekRect.centerY() + dy - th * 0.3519,
                 dimColor(ctx, a), pointSize: 12.0)
         // 音量按钮：面板打开时保持高亮底色
         if (st.volumeOpen) {
@@ -559,7 +559,7 @@ class ReaderDock <: Widget {
         let th = ctx.renderer.textHeight(pointSize: 11.0)
         ctx
             .renderer
-            .text(label, subtitleRect.centerX() - tw / 2.0, subtitleRect.centerY() + dy - th / 2.0, color,
+            .text(label, subtitleRect.centerX() - tw / 2.0, subtitleRect.centerY() + dy - th * 0.3519, color,
                 pointSize: 11.0)
     }
 
@@ -820,7 +820,7 @@ class ReaderDock <: Widget {
                     // 分隔行：内嵌轨小标题
                     ctx
                         .renderer
-                        .text("Embedded", row.x + 8.0, row.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
+                        .text("Embedded", row.x + 8.0, row.centerY() - ctx.renderer.textHeight(pointSize: 9.0) * 0.3519,
                             popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
                     continue
                 }
@@ -872,7 +872,7 @@ class ReaderDock <: Widget {
                     }
                 }
                 let textX = row.x + 24.0 // 留对勾位置
-                let textY = row.centerY() - ctx.renderer.textHeight(pointSize: 12.0) / 2.0
+                let textY = row.centerY() - ctx.renderer.textHeight(pointSize: 12.0) * 0.3519
                 let labelRect = Rect(textX, row.y, max(0.0, row.right() - textX - 8.0), row.h)
                 ctx.renderer.pushClip(labelRect)
                 ctx.renderer.text(label, textX, textY, textColor, pointSize: 12.0)
@@ -893,7 +893,7 @@ class ReaderDock <: Widget {
             ctx.renderer.pushClip(statusRow)
             ctx
                 .renderer
-                .text(status, statusRow.x + 8.0, statusRow.centerY() - ctx.renderer.textHeight(pointSize: 9.0) / 2.0,
+                .text(status, statusRow.x + 8.0, statusRow.centerY() - ctx.renderer.textHeight(pointSize: 9.0) * 0.3519,
                     popupAlpha(ctx.theme.mutedText, progress), pointSize: 9.0)
             ctx.renderer.popClip()
         }

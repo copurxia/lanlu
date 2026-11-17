@@ -370,7 +370,7 @@ private class SearchPlaceholder <: Widget {
         ctx.renderer.pushClip(frame)
         ctx
             .renderer
-            .text(ph, frame.x + SEARCH_ICON_INSET + 12.0, frame.centerY() - th / 2.0, ctx.theme.mutedText,
+            .text(ph, frame.x + SEARCH_ICON_INSET + 12.0, frame.centerY() - th * 0.3519, ctx.theme.mutedText,
                 pointSize: 13.0)
         ctx.renderer.popClip()
     }
@@ -576,7 +576,7 @@ private class NavPill <: Widget {
 
     private func drawPillText(ctx: UiContext, label: String, item: Rect, th: Float32, color: Color): Unit {
         let tw = ctx.renderer.textWidth(label, pointSize: 12.5)
-        ctx.renderer.text(label, item.centerX() - tw / 2.0, item.centerY() - th / 2.0, color, pointSize: 12.5)
+        ctx.renderer.text(label, item.centerX() - tw / 2.0, item.centerY() - th * 0.3519, color, pointSize: 12.5)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -681,12 +681,12 @@ private class UserMenuChip <: Widget {
         let initial = initialLetter()
         let tw = ctx.renderer.textWidth(initial, pointSize: 11.0)
         let th = ctx.renderer.textHeight(pointSize: 11.0)
-        ctx.renderer.text(initial, ax - tw / 2.0, frame.centerY() - th / 2.0, Color.rgb(255, 255, 255), pointSize: 11.0)
+        ctx.renderer.text(initial, ax - tw / 2.0, frame.centerY() - th * 0.3519, Color.rgb(255, 255, 255), pointSize: 11.0)
         let name = displayName()
         let nw = ctx.renderer.textWidth(name, pointSize: 12.0)
         let nh = ctx.renderer.textHeight(pointSize: 12.0)
         let arrowX = frame.right() - 14.0
-        ctx.renderer.text(name, arrowX - 10.0 - nw, frame.centerY() - nh / 2.0, ctx.theme.mutedText, pointSize: 12.0)
+        ctx.renderer.text(name, arrowX - 10.0 - nw, frame.centerY() - nh * 0.3519, ctx.theme.mutedText, pointSize: 12.0)
         drawIcon(ctx.renderer, IconName.ChevronDown, Rect(arrowX - 6.0, frame.centerY() - 6.0, 12.0, 12.0),
             ctx.theme.mutedText)
 
@@ -867,7 +867,7 @@ private class UserMenuChip <: Widget {
             drawGhostGlyph(ctx.renderer, itemGlyph(i), row.x + 17.0, row.centerY(), animatedColor)
             let label = itemLabel(i)
             let textHeight = ctx.renderer.textHeight(pointSize: 12.0)
-            ctx.renderer.text(label, row.x + 34.0, row.centerY() - textHeight / 2.0, animatedColor, pointSize: 12.0)
+            ctx.renderer.text(label, row.x + 34.0, row.centerY() - textHeight * 0.3519, animatedColor, pointSize: 12.0)
             if (i == 2) {
                 drawIcon(ctx.renderer, IconName.ChevronRight, Rect(row.right() - 18.0, row.centerY() - 6.0, 12.0, 12.0),
                     animatedColor)
@@ -952,7 +952,7 @@ private class UserMenuChip <: Widget {
                 ctx.renderer.text(server.baseUrl, textX, row.y + 25.0, secondary, pointSize: 10.0)
             } else {
                 let th = ctx.renderer.textHeight(pointSize: 11.0)
-                ctx.renderer.text(name, textX, row.centerY() - th / 2.0, primary, pointSize: 11.0)
+                ctx.renderer.text(name, textX, row.centerY() - th * 0.3519, primary, pointSize: 11.0)
             }
             ctx.renderer.popClip()
             if (current) {

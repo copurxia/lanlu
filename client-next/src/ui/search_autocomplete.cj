@@ -254,7 +254,7 @@ class SearchAutocomplete <: Widget {
         } else {
             ctx.theme.text
         }
-        let textY = row.centerY() - ctx.renderer.textHeight(pointSize: 12.5) / 2.0
+        let textY = row.centerY() - ctx.renderer.textHeight(pointSize: 12.5) * 0.3519
         ctx.renderer.pushClip(Rect(row.x + 10.0, row.y, max(0.0, row.w - 20.0), row.h))
         ctx.renderer.text(suggestion.label, row.x + 10.0, textY, textColor, pointSize: 12.5)
         if (suggestion.label != suggestion.value) {

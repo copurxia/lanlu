@@ -181,7 +181,7 @@ private class DetailMoreButton <: Widget {
                 ctx.theme.text
             }
             let th = ctx.renderer.textHeight(pointSize: 12.0)
-            ctx.renderer.text(item.label, row.x + 10.0, row.centerY() - th / 2.0, color, pointSize: 12.0)
+            ctx.renderer.text(item.label, row.x + 10.0, row.centerY() - th * 0.3519, color, pointSize: 12.0)
             y += 36.0
         }
     }
