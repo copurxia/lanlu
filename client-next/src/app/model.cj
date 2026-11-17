@@ -8,11 +8,69 @@ import lcodec.NativeDecodedImage
 import lanlu_client_next.net.*
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.convert.Parsable
+import std.env.getVariable
 import std.fs.{Directory, File, FileInfo, Path, exists}
 import std.io.OutputStream
 import std.sync.Mutex
 import std.time.MonoTime
 import libavformat_ffi.{ExtractedSubtitleTrack, SubtitleCancelToken, SubtitleStreamInfo, probeSubtitleStreams}
+
+// 真机诊断落盘：应用 stdout/eprintln 不会进 hilog（实测），关键诊断统一写 $HOME/img_diag.txt。
+// 保留最近 ~64KB（超限截断前半），避免长跑无限增长。
+// remoteImage 三态观测（同 key 只记首见与终态变化）：区分「UI 没触发请求」与「触发了
+// 但下载/解码/纹理某一环没走完」。imgDiag 是 app 层函数，ui 层经由本方法调用。
+// G2：noteRemoteImageSeen 在 remoteImage 里每图每帧被调一次，入口先判开关再进锁，
+// 开关关闭时零成本（不再有 mutex + HashMap 查找 + String 哈希）；开关启动期读一次。
+private let IMG_DIAG_ON: Bool = (getVariable("LANLU_IMG_DIAG") ?? "0") == "1"
+private var remoteImageSeen: HashMap<String, String> = HashMap<String, String>()
+private let remoteImageSeenMutex = Mutex()
+
+public func noteRemoteImageSeen(_model: AppModel, key: String, state: String, url: String): Unit {
+    if (!IMG_DIAG_ON) {
+        return
+    }
+    synchronized(remoteImageSeenMutex) {
+        let first = remoteImageSeen.size == 0
+        let last = match (remoteImageSeen.get(key)) {
+            case Some(v) => v
+            case None => "__init__"
+        }
+        if (first) {
+            // 首次调用即打进程标记（确认装机版本/构建是否生效）。
+            imgDiag("[ui] remoteImage observer active (first key=${key})")
+        }
+        if (last != state) {
+            remoteImageSeen[key] = state
+            imgDiag("[ui] remoteImage key=${key} state=${last}->${state} url=${url}")
+        }
+    }
+}
+
+public func imgDiag(line: String): Unit {
+    // 默认关闭：仅 LANLU_IMG_DIAG=1 时落盘（避免生产环境无谓 IO）。
+    // G2：开关启动期读一次，worker 路径上的调用不再反复 getVariable。
+    if (!IMG_DIAG_ON) {
+        return
+    }
+    let home = getVariable("HOME") ?? "."
+    try {
+        let path = Path(home + "/img_diag.txt")
+        let existing = if (exists(path)) {
+            String.fromUtf8(File.readFrom(path))
+        } else {
+            ""
+        }
+        let base = if (existing.size > 65536) {
+            existing[existing.size - 32768..]
+        } else {
+            existing
+        }
+        File.writeTo(path, (base + line + "\n").toArray())
+    } catch (e: Exception) {
+        // 诊断写入本身失败时不能吞掉线索：落到 stderr（Windows/桌面端可见），真机 hilog 亦有概率捕获。
+        println("[img] imgDiag write failed: ${e.message}")
+    }
+}
 
 // 排序字段映射：与 ui 层 SORT_LABELS 按下标一一对应（改动须两边同步）。
 public let SEARCH_SORT_FIELDS = ["title", "created_at", "updated_at", "lastread", "pagecount", "release_at"]
@@ -200,6 +258,24 @@ private class NativeImageReleaser <: PixelReleaser {
 }
 
 // 详情页多级编辑草稿。根层编辑档案，子层逐页编辑；草稿只在 UI 线程修改。
+/// D1：书架派生数据的快照（一次遍历的产物，跨帧复用）。
+public class ShelfDerived {
+    /// 当前 Tab + 搜索词 + 过滤条件筛选后的可见项
+    public let visible: ArrayList<SearchItem>
+    /// 历史总数（不受搜索/过滤影响，供侧栏计数）
+    public let historyCount: Int64
+    /// 最近在读（历史首项；无历史时为 None）
+    public let recent: ?SearchItem
+
+    public init(visible: ArrayList<SearchItem>, historyCount: Int64, recent: ?SearchItem) {
+
+
+        this.visible = visible
+        this.historyCount = historyCount
+        this.recent = recent
+    }
+}
+
 public class AppModel {
     public let page = State<Page>(Page.Login)
     // 页面过渡（交叉淡化）：navigate() 不立即切页，先置 pending 标志让
@@ -319,6 +395,12 @@ public class AppModel {
     public let shelfContentWidth = State<Float32>(0.0)
     private var shelfFavoritesLoaded = false
     private var shelfHistoryLoaded = false
+    // D1：书架派生数据缓存（当前 Tab 过滤后的可见列表 / 历史计数 / 最近在读）。
+    // 视图每帧重建都会遍历 SearchItemView，而超出 64 槽环形窗口的取值全是
+    // RocksDB 点查——一次重建曾有 2~3 次全量扫描（UI 线程数千次点查）。
+    // 这里按「数据版本 + 视图条件」缓存：条件不变时零存储读取。
+    private var shelfDerivedCache: ?ShelfDerived = None
+    private var shelfDerivedCacheKey: String = ""
     // 从书架打开详情/合集/阅读器时，详情顶栏返回书架而不是首页。
     private var detailReturnToShelf = false
 
@@ -435,7 +517,8 @@ public class AppModel {
     private let imageMutex = Mutex()
     private let persistSettings: (AppSettings) -> Unit
 
-    public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {_ => ()},
+    public init(s: AppSettings, persistSettings!: (AppSettings) -> Unit = {
+_ => ()},
         offlineCachePrewarm!: ?Future<?OfflineCache> = None) {
         settings = s
         this.offlineCachePrewarm = offlineCachePrewarm
@@ -1201,7 +1284,7 @@ public class AppModel {
         query.lang = language.value
         loading.value = true
         let q = query
-        let _ = worker.submitTagged("search", query.lang, {=> a.search(q)})
+        let _ = worker.submitBulk("search", query.lang, {=> a.search(q)})
     }
 
     // ---- 书架（library-redesign.html）----
@@ -1310,6 +1393,27 @@ public class AppModel {
         }
     }
 
+    /// 让书架派生缓存失效（收藏/历史列表被替换，或就地刷新后调用）。
+    public func invalidateShelfDerived(): Unit {
+        shelfDerivedCache = None
+        shelfDerivedCacheKey = ""
+    }
+
+    /// 取书架派生数据：命中缓存时不再遍历 SearchItemView（也就没有 RocksDB 点查）。
+    /// key 由调用方按「Tab/搜索词/过滤/排序/列表尺寸」拼出，条件变化自然失效。
+    public func shelfDerived(key: String, compute: () -> ShelfDerived): ShelfDerived {
+        if (shelfDerivedCacheKey == key) {
+            match (shelfDerivedCache) {
+                case Some(v) => return v
+                case None => ()
+            }
+        }
+        let fresh = compute()
+        shelfDerivedCache = Some(fresh)
+        shelfDerivedCacheKey = key
+        return fresh
+    }
+
     public func refreshShelf(): Unit {
         if (shelfTab.value == 0) {
             loadShelfFavorites()
@@ -1338,7 +1442,7 @@ public class AppModel {
         }
         shelfFavoritesLoading.value = true
         shelfFavoritesFailed.value = false
-        let _ = worker.submitTagged("shelf:favorites", q.lang, {=> a.search(q)})
+        let _ = worker.submitBulk("shelf:favorites", q.lang, {=> a.search(q)})
     }
 
     private func loadShelfHistory(): Unit {
@@ -1359,7 +1463,7 @@ public class AppModel {
         }
         shelfHistoryLoading.value = true
         shelfHistoryFailed.value = false
-        let _ = worker.submitTagged("shelf:history", q.lang, {=> a.search(q)})
+        let _ = worker.submitBulk("shelf:history", q.lang, {=> a.search(q)})
     }
 
     // 浏览模式 ⟺ 无搜索词、无侧栏过滤（收藏/未读/无标签均关）、未选分类、未「查看更多」出站。
@@ -1950,6 +2054,13 @@ public class AppModel {
         }
         let old = browseRows.value
         let rows = ArrayList<BrowseRow>()
+        // G3：行数上界已知（resume + random + min(分类数, 行上限)），预 reserve。
+        let rowCap = if (categories.value.size < BROWSE_CATEGORY_ROW_LIMIT) {
+            categories.value.size
+        } else {
+            BROWSE_CATEGORY_ROW_LIMIT
+        }
+        rows.reserve(rowCap + 2)
         rows.add(findOrCreateRow(old, "resume", t("library.resume"), ""))
         rows.add(findOrCreateRow(old, "random", t("library.random"), ""))
         let cats = categories.value
@@ -2023,7 +2134,7 @@ public class AppModel {
             seedQ.lang = lang
             seedQ.groupbyTanks = groupbyTanks
             seedRowFromCache(r, seedQ)
-            let _ = worker.submitTagged("row:random", lang,
+            let _ = worker.submitBulk("row:random", lang,
                 {
                     =>
                         // LANLU_PERF 打点：行搜索 RPC 实际执行耗时（区分 RPC 慢与 API 池排队）。
@@ -2054,7 +2165,7 @@ public class AppModel {
                 }
             }
             seedRowFromCache(r, q)
-            let _ = worker.submitTagged("row:${r.key}", lang,
+            let _ = worker.submitBulk("row:${r.key}", lang,
                 {
                     =>
                         // LANLU_PERF 打点：行搜索 RPC 实际执行耗时（区分 RPC 慢与 API 池排队）。
@@ -2692,7 +2803,18 @@ public class AppModel {
         detailPagesState.value = "loading"
         detailPagesError.value = ""
         navigate(Page.Detail(arcid))
-        let a = api ?? return
+        // 没有可用服务器时**不要**让详情页停在"加载中"：直接落到错误态，
+        // 用户能看到原因并返回（此前是 `?? return`，页面永久转圈 —— 真机复现）。
+        let a = match (api) {
+            case Some(x) => x
+            case None =>
+                let msg = t("login.noServersDetail")
+                detailLoadState.value = "error"
+                detailLoadError.value = msg
+                detailPagesState.value = "error"
+                detailPagesError.value = msg
+                return
+        }
         let lang = language.value
         let _ = worker.submitTagged("meta:${arcid}", lang, {=> a.metadata(arcid, lang: lang)})
         // 辅助卡片数据（页面预览/所属合集/相关推荐）：失败静默，卡片无数据即隐藏。
@@ -2726,7 +2848,16 @@ public class AppModel {
         tankMembersState.value = "loading"
         tankMembersError.value = ""
         navigate(Page.Tank(tankid))
-        let a = api ?? return
+        let a = match (api) {
+            case Some(x) => x
+            case None =>
+                let msg = t("login.noServersDetail")
+                tankLoadState.value = "error"
+                tankLoadError.value = msg
+                tankMembersState.value = "error"
+                tankMembersError.value = msg
+                return
+        }
         let lang = language.value
         let _ = worker.submitTagged("tankmeta:${tankid}", lang, {=> a.getTankoubon(tankid, lang: lang)})
         // 成员档案按 256 项分批拉取并逐页写入 RocksDB membership，避免万级响应一次物化。
@@ -2736,7 +2867,7 @@ public class AppModel {
         q.order = "asc"
         q.pageSize = 256
         q.lang = lang
-        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
+        let _ = worker.submitBulk("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
         let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
             => a.relatedTankoubons(tankid, 12, lang: lang)
         })
@@ -2761,7 +2892,7 @@ public class AppModel {
         q.order = "asc"
         q.pageSize = 256
         q.lang = lang
-        let _ = worker.submitTagged("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
+        let _ = worker.submitBulk("tankmembers:${tankid}", lang, {=> a.searchAll(q)})
         let _ = worker.submitTagged("tankrelated:${tankid}", lang, {
             => a.relatedTankoubons(tankid, 12, lang: lang)
         })
@@ -3479,6 +3610,7 @@ public class AppModel {
         tankMembers.value = tankMembers.value
         shelfFavorites.value = shelfFavorites.value
         shelfHistory.value = shelfHistory.value
+        invalidateShelfDerived()
         toggleFavorite(arcid, target)
     }
 
@@ -3571,6 +3703,7 @@ public class AppModel {
         parentTanks.value = parentTanks.value
         tankRelated.value = tankRelated.value
         shelfFavorites.value = shelfFavorites.value
+        invalidateShelfDerived()
         let a = api ?? return
         let nextFavorite = target
         let _ = worker.submit(
@@ -4456,6 +4589,7 @@ public class AppModel {
             // 不 toast 但留 stderr 痕迹：Windows 上批量封面失败类故障（如缺解码器）
             // 全靠这条日志定位（与 [boot]/[win] 诊断风格一致）。
             eprintln("[img] download failed ${r.name}: ${r.error}")
+            imgDiag("[img] download failed ${r.name}: ${r.error}")
             imageState(r.name.removePrefix("imgdl:")).value = "error"
             return
         }
@@ -4463,6 +4597,7 @@ public class AppModel {
         if (r.name.startsWith("img:")) {
             finishImageTask()
             eprintln("[img] decode failed ${r.name}: ${r.error}")
+            imgDiag("[img] decode failed ${r.name}: ${r.error}")
             imageState(r.name.removePrefix("img:")).value = "error"
             return
         }
@@ -4858,6 +4993,7 @@ public class AppModel {
             match (r.payload) {
                 case Some(p) =>
                     shelfFavorites.value = (p as SearchPage).getOrThrow().items
+                    invalidateShelfDerived()
                     shelfFavoritesLoaded = true
                     shelfFavoritesFailed.value = false
                 case None => ()
@@ -4867,6 +5003,7 @@ public class AppModel {
             match (r.payload) {
                 case Some(p) =>
                     shelfHistory.value = (p as SearchPage).getOrThrow().items
+                    invalidateShelfDerived()
                     shelfHistoryLoaded = true
                     shelfHistoryFailed.value = false
                 case None => ()
@@ -5005,6 +5142,17 @@ public class AppModel {
                     }
                     row.loading = false
                     row.failed = false
+                    // 诊断（行到货打一次）：coverAssetId 全为 0 时卡片不会出图、也不显示占位文案，
+                    // 现象与"图片解码坏了"很难区分——这里直接给出区分依据（DTO 解析 vs 渲染）。
+                    if (row.items.size > 0) {
+                        var zero = 0
+                        for (it in row.items) {
+                            if (it.coverAssetId <= 0) {
+                                zero++
+                            }
+                        }
+                        imgDiag("[img] row=${key} items=${row.items.size} coverIdZero=${zero} first=${row.items[0].coverAssetId}")
+                    }
                 }
             }
             browseRows.value = browseRows.value
@@ -5469,7 +5617,7 @@ public class AppModel {
                     imageState(key).value = "error"
                     // 解码失败此前完全静默（真机只能看到占位图，无法区分坏缓存/后端不支持该格式）。
                     // 打一行带 key 与原因的日志：低频事件，直接进 hilog/控制台，便于真机定位。
-                    println("[img] decode failed key=${key}: ${r.error}")
+                    imgDiag("[img] decode failed key=${key}: ${r.error}")
                     // LANLU_PERF 打点：失败也要清起点，避免残留影响后续重试的 e2e。
                     if (SubtitlePerf.enabled()) {
                         imgPerfT0.remove(key)

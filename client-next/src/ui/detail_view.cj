@@ -274,7 +274,7 @@ private func detailLoadPanel(model: AppModel, state: String, message: String, re
                         message
                     } else {
                         "加载失败"
-                    }).muted().wrap()
+                    }).muted().wrap().maxWidth(320.vp)
                     Button("重试", retry).role(ButtonRole.Primary)
                 }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             } else {
@@ -287,7 +287,9 @@ private func detailLoadPanel(model: AppModel, state: String, message: String, re
                     Label(model.t("common.loading")).muted()
                 }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
             }
-        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug().padding(28.vp)
+        // 撑满再居中：hug 状态下外层没有宽度约束，换行文本会按"无限宽"测量，
+        // 结果整块被挤到右边并被面板右边缘裁掉（真机截图可见）。
+        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth().padding(28.vp)
     }
 }
 
