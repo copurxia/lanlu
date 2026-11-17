@@ -9,7 +9,7 @@ import lanlu_client_next.net.{ArchivePageView, CategoryItem, SearchItem, SearchI
     PasskeyItem, TotpStatus}
 import std.collection.ArrayList
 import std.convert.Parsable
-import std.env.getCommandLine
+import std.env.{getCommandLine, getVariable}
 import std.time.DateTime
 
 // ── 临时快照播种装置（Task E3 验证专用，用后删除，不随产品交付）──
@@ -27,6 +27,12 @@ import std.time.DateTime
 // --reader-rtl（双页/RTL）、--reader-audio（从第 6 页音频页起）。
 
 public func harnessSeedMode(): String {
+    // 真机联调：能力没有命令行（aa start 只能传 env），用 LANLU_SEED 触发同一套种子，
+    // 便于在设备上复现卡片悬浮态（卡片悬浮 tag 的底色/遮罩是只能肉眼看的问题）。
+    let envMode = getVariable("LANLU_SEED") ?? ""
+    if (envMode.size > 0) {
+        return envMode
+    }
     for (a in getCommandLine()) {
         if (a == "--seed-browse") { return "browse" }
         if (a == "--seed-search") { return "search" }
