@@ -634,8 +634,8 @@ public class LgpuCanvas <: Canvas {
 
     public func textCenter(text: String, rect: Rect, color: Color, pointSize!: Float32 = 15.0): Unit {
         let w = textWidth(text, pointSize: pointSize)
-        let h = textHeight(pointSize: pointSize)
-        this.text(text, rect.x + (rect.w - w) * 0.5, rect.y + (rect.h - h) * 0.5, color,
-            pointSize: pointSize)
+        // 墨迹居中：行盒高度 textHeight 比墨迹框大，按它居中会把文字整体画高约 0.2em。
+        this.text(text, rect.x + (rect.w - w) * 0.5, textInkTop(text, rect.centerY(), pointSize: pointSize),
+            color, pointSize: pointSize)
     }
 }
