@@ -2840,6 +2840,13 @@ pub extern "C" fn lgpu_text_draw(
     // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）
     let baseline = y + text::metrics(fh, px_size).0;
     let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)> = Vec::new();
+    // 缺字形时前进宽度必须与 text::measure() 同口径（h_advance），否则测宽 < 绘制宽，
+    // 框会容不下文字（真机：FPS 叠层文字顶出 surface 右缘被裁）。
+    let scaled_font = {
+        use ab_glyph::Font as _;
+        fh.font.as_scaled(ab_glyph::PxScale::from(px_size))
+    };
+    { use ab_glyph::ScaleFont as _; }
 
     for ch in s.chars() {
         let glyph_id = {
@@ -2858,7 +2865,12 @@ pub extern "C" fn lgpu_text_draw(
             Some(v) => v,
             None => {
                 let Some(rg) = text::rasterize(fh, ch, px_size) else {
-                    pen_x += px_size * 0.5;
+                    // 与 measure() 同口径：用字体对该码位的 h_advance，而不是拍脑袋的半 em。
+                    // 两者不一致时，测出来的框比画出来的文字窄 —— 文字会顶出框/表面被裁。
+                    {
+                        use ab_glyph::{Font as _, ScaleFont as _};
+                        pen_x += scaled_font.h_advance(fh.font.glyph_id(ch));
+                    }
                     continue;
                 };
                 if rg.w == 0 || rg.h == 0 {
