@@ -9,14 +9,14 @@
 ```bash
 # 1) 构建（末尾自动跑静态门禁：分层/HAP 依赖闭包/关键符号）
 CN_OHOS_SEED_FILE=/workspace/tmp/lanlu_kv_seed.bin \
-  bash client-next/ohos/build-ohos.sh
+  bash packages/lpack-ohos/tools/build-ohos.sh
 
 # 2) 签名（复用本机已有调试材料，绕开 AGC 配额）
 bash packages/lpack-ohos/tools/sign-hap.sh
 
 # 3) 安装启动
 hdc -t 192.168.0.26:42113 install \
-  client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap
+  packages/lpack-ohos/target/lanlu/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap
 hdc -t 192.168.0.26:42113 shell aa start -b com.example.cmakehap -a EntryAbility
 ```
 
@@ -30,9 +30,9 @@ hdc -t 192.168.0.26:42113 shell aa start -b com.example.cmakehap -a EntryAbility
 
 收尾步骤：
 1. 在 AGC 控制台清理历史 profile（或等配额恢复）；
-2. 把 `client-next/cjpm.toml` 与 `client-next/ohos/cjpm.toml.ohos` 的
+2. 把 `client-next/cjpm.toml` 与 `packages/lpack-ohos/app-profiles/lanlu/app.toml` 的
    `bundle-name` 改回 `com.lanlu.clientnext`；
-3. `cd client-next/build/ohos/target/ohos/hap && devecocli signature generate --product default --type debug`
+3. `cd packages/lpack-ohos/target/lanlu/target/ohos/hap && devecocli signature generate --product default --type debug`
    （会写入官方 signingConfigs）；
 4. 重新 `build-ohos.sh`（此时**不要**再跑 `sign-hap.sh`），安装包名即为产品包。
 
@@ -66,7 +66,7 @@ hdc -t 192.168.0.26:42113 shell aa start -b com.example.cmakehap -a EntryAbility
 |---|---|
 | 业务/UI（跨平台） | `client-next/src/`（禁止出现平台标识，`tools/check-layering.sh` 会把关） |
 | 平台适配层（对标 Chromium ozone） | `packages/lwindow/`：进程环境/路径/字体/首启种子、窗口几何、渲染驱动、桌面集成 |
-| **解码统合层** | `packages/lcodec/`：图片解码/缩放/圆角/模糊的跨平台 API；OHOS 实现在 `lplatform-ohos/deps/vips`（同符号 shim），见 [lcodec.md](lcodec.md) |
+| **解码统合层** | `packages/lcodec/`：图片解码/缩放/圆角/模糊的跨平台 API；设备直连系统 ImageSource（HAP 不带解码库），见 [lcodec.md](lcodec.md) |
 | 视图/控件框架 | `packages/cangjie-gui/`（cui + sdl 绑定，含事件解码、文本输入分发） |
 | OHOS 系统层 | `packages/ohos/`：ArkTS 壳（XComponent/IME/窗口控制/picker）+ C++ 桥（`shell_napi.cpp`、`input_filter.cpp`、`sdl_main.c`）+ hapgen 打包器 |
 | 媒体 | `packages/lplatform-ohos/deps/libvlc/vlc_shim.c`（单 demuxer、OH_AudioRenderer、自研重采样） |

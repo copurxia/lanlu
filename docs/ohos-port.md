@@ -14,9 +14,9 @@
 ## 构建
 
 ```bash
-bash client-next/ohos/build-ohos.sh            # 产物: build/ohos/.../entry-default-signed.hap
+bash packages/lpack-ohos/tools/build-ohos.sh   # 产物: packages/lpack-ohos/target/<app>/target/ohos/hap/.../entry-default-signed.hap
 # 调试种子（联调用预置会话）:
-CN_OHOS_SEED_FILE=/workspace/tmp/lanlu_kv_seed.bin bash client-next/ohos/build-ohos.sh
+CN_OHOS_SEED_FILE=/workspace/tmp/lanlu_kv_seed.bin bash packages/lpack-ohos/tools/build-ohos.sh
 ```
 
 ### 前置工具（一次性，改动后需重跑对应脚本）
@@ -63,9 +63,9 @@ bash .research-ohos/verify-cn.sh                   # 构建→安装→启动→
 ## 回归测试（主机侧，无需设备）
 
 ```bash
-bash packages/lplatform-ohos/deps/vips/run-host-test.sh <image>
-# ASAN: decodeFileToRgba 的 handle/unref 序列 + resize/extract/gaussblur 链
+cd packages/lcodec && cjpm test    # 文件/字节两条解码入口、嗅探、backdrop、blur
 ```
+（vips shim 的宿主机 ASAN 回归测试已随 shim 一起删除：设备端不再使用 vips。）
 
 ## 系统层补丁（packages/ohos/patches，见 ohos 仓库）
 
