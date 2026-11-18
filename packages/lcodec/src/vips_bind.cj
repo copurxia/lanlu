@@ -84,6 +84,8 @@ private type FnErrBuf = CFunc<() -> CString>
 private type FnSetConcurrency = CFunc<(Int32) -> Unit>
 private type FnNewFromFile = CFunc<(CString, CPointer<Unit>) -> CPointer<Unit>>
 private type FnNewFromMemCopy = CFunc<(CPointer<Unit>, UIntNative, Int32, Int32, Int32, Int32) -> CPointer<Unit>>
+// vips_image_new_from_buffer(const void *buf, size_t len, const char *option_string, ...)
+private type FnNewFromBuffer = CFunc<(CPointer<Unit>, UIntNative, CString, CPointer<Unit>) -> CPointer<Unit>>
 private type FnGetInt = CFunc<(CPointer<Unit>) -> Int32>
 private type FnOutOnly = CFunc<(CPointer<Unit>, CPointer<CPointer<Unit>>, CPointer<Unit>) -> Int32>
 private type FnResize = CFunc<(CPointer<Unit>, CPointer<CPointer<Unit>>, Float64, CPointer<Unit>) -> Int32>
@@ -113,6 +115,9 @@ private var fnErrorClear: ?FnVoid = None
 private var fnConcurrency: ?FnSetConcurrency = None
 private var fnNewFromFile: ?FnNewFromFile = None
 private var fnNewFromMemCopy: ?FnNewFromMemCopy = None
+// 内存字节解码入口（vips_image_new_from_buffer）：老版本后端可能没有该符号，
+// 因此按**可选能力**装载——缺符号时 decodeBytesToRgba 给出明确报错，其余解码不受影响。
+private var fnNewFromBuffer: ?FnNewFromBuffer = None
 private var fnGetWidth: ?FnGetInt = None
 private var fnGetHeight: ?FnGetInt = None
 private var fnGetBands: ?FnGetInt = None
@@ -169,6 +174,8 @@ private func ensureBackend(): Bool {
         let sConc = need("vips_concurrency_set")
         let sNewFile = need("vips_image_new_from_file")
         let sNewMem = need("vips_image_new_from_memory_copy")
+        // 可选：内存字节解码（vips_image_new_from_buffer）。缺符号不影响其它能力。
+        let sNewBuf = symOf(handle, "vips_image_new_from_buffer")
         let sW = need("vips_image_get_width")
         let sH = need("vips_image_get_height")
         let sB = need("vips_image_get_bands")
@@ -196,6 +203,11 @@ private func ensureBackend(): Bool {
         fnConcurrency = Some(CFunc<(Int32) -> Unit>(sConc))
         fnNewFromFile = Some(CFunc<(CString, CPointer<Unit>) -> CPointer<Unit>>(sNewFile))
         fnNewFromMemCopy = Some(CFunc<(CPointer<Unit>, UIntNative, Int32, Int32, Int32, Int32) -> CPointer<Unit>>(sNewMem))
+        fnNewFromBuffer = if (sNewBuf.isNull()) {
+            None
+        } else {
+            Some(CFunc<(CPointer<Unit>, UIntNative, CString, CPointer<Unit>) -> CPointer<Unit>>(sNewBuf))
+        }
         fnGetWidth = Some(CFunc<(CPointer<Unit>) -> Int32>(sW))
         fnGetHeight = Some(CFunc<(CPointer<Unit>) -> Int32>(sH))
         fnGetBands = Some(CFunc<(CPointer<Unit>) -> Int32>(sB))
@@ -299,6 +311,36 @@ public class VipsApi {
         }
         match (fnNewFromMemCopy) {
             case Some(f) => CPointer<VipsImage>(unsafe { f(data, size, width, height, 4, VIPS_FORMAT_UCHAR) })
+            case None => CPointer<VipsImage>()
+        }
+    }
+
+    /// 后端是否支持"内存字节 → 图像"（vips_image_new_from_buffer）。
+    /// OHOS 上通常由系统解码器承担字节解码，本能力只在桌面/老 shim 回退时用到。
+    public static func supportsBufferDecode(): Bool {
+        if (!ensureBackend()) {
+            return false
+        }
+        fnNewFromBuffer.isSome()
+    }
+
+    /// 从内存字节打开图像（格式由 vips 按内容自动识别）。
+    ///
+    /// 契约：libvips **不拷贝**缓冲区，`buf` 必须在其返回的图像被消费完并 unref 之前保持有效
+    /// （decodeBytesToRgba 用 acquireArrayRawData 把调用方数组钉住到整条管线结束）。
+    public static func imageNewFromBuffer(buf: CPointer<Unit>, len: UIntNative): VipsImagePtr {
+        if (!ensureBackend()) {
+            return CPointer<VipsImage>()
+        }
+        match (fnNewFromBuffer) {
+            case Some(f) =>
+                let opts = unsafe { LibC.mallocCString("") }
+                let img = try {
+                    unsafe { f(buf, len, opts, CPointer<Unit>()) }
+                } finally {
+                    unsafe { LibC.free(opts) }
+                }
+                CPointer<VipsImage>(img)
             case None => CPointer<VipsImage>()
         }
     }

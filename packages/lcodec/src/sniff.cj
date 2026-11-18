@@ -6,8 +6,8 @@ import std.fs.exists
 /*
  * 魔数嗅探（诊断口，跨平台纯仓颉）。
  *
- * 背景：OHOS 的 vips shim（packages/lplatform-ohos/deps/vips/vips_shim.c）里
- * vips_error_buffer() 恒返回空串，格式不被支持时 UI 只能看到 "error" 占位，
+ * 背景：解码链路的错误串在不同后端质量不一（系统 ImageSource 只给错误码，桌面
+ * libvips 的 error buffer 视构建而定）。格式不被支持时 UI 只能看到 "error" 占位，
  * 无法区分"下载坏了"与"该格式落在不支持的后端链路"。sniffImageFormat 只读
  * 文件头若干字节，按魔数判定容器格式，供解码异常信息与自检输出使用。
  *
@@ -98,7 +98,16 @@ private func sniffIsobmff(head: Array<UInt8>): ?SniffedImageFormat {
 
 // 魔数嗅探公开入口：读文件头 ≤32 字节判定容器格式。纯仓颉、无 FFI。
 public func sniffImageFormat(path: String): SniffedImageFormat {
-    let head = readHead(path, 32)
+    sniffHead(readHead(path, 32))
+}
+
+// 内存字节版嗅探（解码入口不再只有文件路径；异常信息同样要能报出格式）。
+public func sniffImageFormatBytes(bytes: Array<UInt8>): SniffedImageFormat {
+    sniffHead(if (bytes.size > 32) { bytes[0..32].toArray() } else { bytes })
+}
+
+// 嗅探核心：head 至少是文件开头若干字节（不足按 Unknown 处理）。
+private func sniffHead(head: Array<UInt8>): SniffedImageFormat {
     if (head.size >= 8 && head[0] == 0x89u8 && head[1] == 0x50u8 && head[2] == 0x4Eu8 &&
         head[3] == 0x47u8 && head[4] == 0x0Du8 && head[5] == 0x0Au8 && head[6] == 0x1Au8 &&
         head[7] == 0x0Au8) {

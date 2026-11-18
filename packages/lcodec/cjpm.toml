@@ -10,7 +10,7 @@ output-type = "static"
 # 图片：本包**不依赖 vips_ffi、也不声明 -lvips**。
 # 解码后端在运行时 dlopen（见 src/vips_bind.cj）：
 #   - 桌面：系统 libvips.so(.42/.43/.44) / libvips.dylib / libvips-42.dll
-#   - OHOS：随 HAP 打包的同名 shim（lplatform-ohos/deps/vips）
+#   - 设备：不用 vips，直连系统 ImageSource（libimage_source/libpixelmap，随系统）
 # 这样 client-next 的链接行里不会再有 vips，缺库时报运行时错误而不是链接失败。
 
 # stdx（encoding.base64，单测用）以二进制依赖方式引入，与 client-next/qwest 同款。

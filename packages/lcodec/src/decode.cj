@@ -1,6 +1,7 @@
 package lcodec
 
-import std.fs.{File, OpenMode, Path}
+import std.env.getVariable
+import std.fs.{Directory, File, OpenMode, Path, remove}
 import std.math.sqrt
 import std.sync.Mutex
 
@@ -112,56 +113,42 @@ private func tryDecodeWithSystem(path: String, maxDimension: Int32): ?NativeDeco
         return None
     }
     match (SystemImageDecoder.decodeRgba(path, maxDimension: maxDimension)) {
-        case Some(d) =>
-            var w = d.width
-            var h = d.height
-            var ptr = d.pixels
-            if (maxDimension > 0) {
-                let longest = max(Int64(w), Int64(h))
-                if (longest > Int64(maxDimension)) {
-                    let scale = Float64(maxDimension) / Float64(longest)
-                    let dw = max(Int32(1), Int32(Float64(w) * scale))
-                    let dh = max(Int32(1), Int32(Float64(h) * scale))
-                    let scaled = resizeRgbaBilinear(ptr, w, h, dw, dh)
-                    if (!scaled.isNull()) {
-                        freeRgba(ptr)
-                        ptr = scaled
-                        w = dw
-                        h = dh
-                    }
-                }
-            }
-            let size = Int64(w) * Int64(h) * 4
-            return Some(NativeDecodedImage(w, h, ptr, size, vipsOwned: false))
-        case None => return None
+        case Some(d) => Some(finishSystemDecoded(d, maxDimension))
+        case None => None
     }
+}
+
+// 系统/libavif 解码结果 → NativeDecodedImage：后端没有"解码期缩档"（或老 API 缺符号）时，
+// 在这里用仓颉双线性缩放兜底到 maxDimension（与 vips 路径同语义：等比、不放大）。
+// 所有权：直接把 d.pixels 交给 NativeDecodedImage，缩放成功时先释放旧缓冲。
+private func finishSystemDecoded(d: SystemDecoded, maxDimension: Int32): NativeDecodedImage {
+    var w = d.width
+    var h = d.height
+    var ptr = d.pixels
+    if (maxDimension > 0) {
+        let longest = max(Int64(w), Int64(h))
+        if (longest > Int64(maxDimension)) {
+            let scale = Float64(maxDimension) / Float64(longest)
+            let dw = max(Int32(1), Int32(Float64(w) * scale))
+            let dh = max(Int32(1), Int32(Float64(h) * scale))
+            let scaled = resizeRgbaBilinear(ptr, w, h, dw, dh)
+            if (!scaled.isNull()) {
+                freeRgba(ptr)
+                ptr = scaled
+                w = dw
+                h = dh
+            }
+        }
+    }
+    let size = Int64(w) * Int64(h) * 4
+    NativeDecodedImage(w, h, ptr, size, vipsOwned: false)
 }
 
 // libavif 直连回退（AVIF 系统解码器不支持的分支：4:4:4 / 12-bit）。
 private func tryDecodeWithAvif(path: String, maxDimension: Int32): ?NativeDecodedImage {
     match (AvifBackend.decodeRgba(path)) {
-        case Some(d) =>
-            var w = d.width
-            var h = d.height
-            var ptr = d.pixels
-            if (maxDimension > 0) {
-                let longest = max(Int64(w), Int64(h))
-                if (longest > Int64(maxDimension)) {
-                    let scale = Float64(maxDimension) / Float64(longest)
-                    let dw = max(Int32(1), Int32(Float64(w) * scale))
-                    let dh = max(Int32(1), Int32(Float64(h) * scale))
-                    let scaled = resizeRgbaBilinear(ptr, w, h, dw, dh)
-                    if (!scaled.isNull()) {
-                        freeRgba(ptr)
-                        ptr = scaled
-                        w = dw
-                        h = dh
-                    }
-                }
-            }
-            let size = Int64(w) * Int64(h) * 4
-            return Some(NativeDecodedImage(w, h, ptr, size, vipsOwned: false))
-        case None => return None
+        case Some(d) => Some(finishSystemDecoded(d, maxDimension))
+        case None => None
     }
 }
 
@@ -184,7 +171,131 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
             (if (AvifBackend.available()) { AvifBackend.lastError } else { AvifBackend.unavailableReason() }))
     }
     ensureVips()
+    let fmtName = sniffedImageFormatName(sniffImageFormat(path))
     var inImg: VipsImagePtr = CPointer<VipsImage>()
+    try {
+        let inC = unsafe { LibC.mallocCString(path) }
+        inImg = VipsApi.imageNewFromFile(inC)
+        unsafe { LibC.free(inC) }
+        // OHOS 系统解码器错误串完整，桌面 vips 走这里；失败时带魔数嗅探结果，
+        // UI/日志能直接看出是哪类格式落在不支持的后端（如 avif）。
+        if (inImg.isNull()) {
+            throw Exception("vips 解码失败(format=${fmtName}): ${VipsApi.takeErrorString()}")
+        }
+        inImg = applyShrinkOnLoad(path, inImg, maxDimension)
+        vipsPipelineToRgba(inImg, maxDimension, fmtName)
+    } finally {
+        // VipsApi.unref 内部自带空指针判断；未走到的步骤保持空指针，自然跳过。
+        VipsApi.unref(inImg)
+    }
+}
+
+public func decodeBytesToRgba(bytes: Array<UInt8>, maxDimension!: Int32 = 0): NativeDecodedImage {
+    // 内存字节（内嵌资源 = 顶栏/登录卡 logo、网络直收的字节）→ RGBA。
+    // 全仓唯一的内存字节解码入口：任何 UI/框架层都不得自带解码器。
+    //
+    // 后端顺序（2026-11-18 真机"logo 仍空白"后调整）：
+    //   设备：**先落临时文件走文件入口**——那是封面/阅读页长期验证过的通路；
+    //         字节直连（OH_ImageSourceNative_CreateFromData）只作兜底。
+    //         宁可多一次 4KB 临时文件写，也不要一条未在真机验证过的解码分支。
+    //   桌面：vips 的内存缓冲入口（无 IO）优先，失败再落文件。
+    if (bytes.size == 0) {
+        throw Exception("解码失败(字节): 空缓冲")
+    }
+    let fmtName = sniffedImageFormatName(sniffImageFormatBytes(bytes))
+    if (SystemImageDecoder.available()) {
+        let fileError = try {
+            return decodeViaTempFile(bytes, maxDimension)
+        } catch (e: Exception) {
+            e.message
+        }
+        try {
+            match (SystemImageDecoder.decodeRgbaBytes(bytes, maxDimension: maxDimension)) {
+                case Some(d) => return finishSystemDecoded(d, maxDimension)
+                case None => throw Exception("系统字节解码失败: " + SystemImageDecoder.lastError)
+            }
+        } catch (e: Exception) {
+            throw Exception("解码失败(字节, format=" + fmtName + "): 文件入口(" + fileError +
+                ")；字节入口(" + e.message + ")")
+        }
+    }
+    ensureVips()
+    var bufferError = ""
+    if (!VipsApi.supportsBufferDecode()) {
+        bufferError = "后端缺少 vips_image_new_from_buffer" + VipsApi.unavailableReason()
+    } else {
+        // libvips 不拷贝缓冲区：把仓颉数组钉住（pin）到整条管线结束，之后才放手。
+        let handle = unsafe { acquireArrayRawData(bytes) }
+        try {
+            let inImg = VipsApi.imageNewFromBuffer(CPointer<Unit>(handle.pointer), UIntNative(bytes.size))
+            if (inImg.isNull()) {
+                bufferError = "vips buffer 解码失败: " + VipsApi.takeErrorString()
+            } else {
+                try {
+                    return vipsPipelineToRgba(inImg, maxDimension, fmtName)
+                } finally {
+                    VipsApi.unref(inImg)
+                }
+            }
+        } catch (e: Exception) {
+            bufferError = e.message
+        } finally {
+            unsafe { releaseArrayRawData(handle) }
+        }
+    }
+    try {
+        return decodeViaTempFile(bytes, maxDimension)
+    } catch (e: Exception) {
+        throw Exception("解码失败(字节, format=" + fmtName + "): 内存入口(" + bufferError +
+            ")；临时文件回退也失败(" + e.message + ")")
+    }
+}
+
+// 字节兜底通路：写临时文件 → decodeFileToRgba → 清理。仅内存入口失败时走。
+private func decodeViaTempFile(bytes: Array<UInt8>, maxDimension: Int32): NativeDecodedImage {
+    let dir = createDecodeTempDir()
+    let path = "${dir}/bytes.img"
+    try {
+        File.writeTo(Path(path), bytes)
+        decodeFileToRgba(path, maxDimension: maxDimension)
+    } finally {
+        try {
+            remove(Path(path))
+        } catch (_: Exception) {}
+        try {
+            remove(dir, recursive: true)
+        } catch (_: Exception) {}
+    }
+}
+
+// 临时目录基址：TMPDIR → HOME → 当前目录（设备上 HOME 可写，桌面两者都可用）。
+private func createDecodeTempDir(): Path {
+    let base = match (getVariable("TMPDIR")) {
+        case Some(v) => if (v.size > 0) {
+            Path(v)
+        } else {
+            decodeTempBase()
+        }
+        case None => decodeTempBase()
+    }
+    try {
+        Directory.createTemp(base)
+    } catch (_: Exception) {
+        Directory.createTemp(Path("."))
+    }
+}
+
+private func decodeTempBase(): Path {
+    match (getVariable("HOME")) {
+        case Some(h) => if (h.size > 0) { Path(h) } else { Path(".") }
+        case None => Path(".")
+    }
+}
+
+// 已打开的 vips 图像 → 紧凑 RGBA：resize 档位 → autorot（EXIF 方向）→ sRGB → uchar →
+// 波段归一到 4（RGBA）→ 写内存。文件与字节两个入口共用。
+// 所有权：`inImg` 仍归调用方（本函数不 unref 它），中间句柄在 finally 统一释放。
+private func vipsPipelineToRgba(inImg: VipsImagePtr, maxDimension: Int32, formatName: String): NativeDecodedImage {
     var resizedImg: VipsImagePtr = CPointer<VipsImage>()
     var rotImg: VipsImagePtr = CPointer<VipsImage>()
     var srgbImg: VipsImagePtr = CPointer<VipsImage>()
@@ -192,46 +303,14 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
     var normImg: VipsImagePtr = CPointer<VipsImage>()
     var mem = CPointer<Unit>()
     try {
-        let inC = unsafe { LibC.mallocCString(path) }
-        inImg = VipsApi.imageNewFromFile(inC)
-        unsafe { LibC.free(inC) }
-        // OHOS vips shim 错误缓冲区恒空：失败时带上魔数嗅探结果，
-        // UI/日志能直接看出是哪类格式落在不支持的后端（如 avif）。
-        if (inImg.isNull()) {
-            throw Exception("vips 解码失败(format=${sniffedImageFormatName(sniffImageFormat(path))}): ${VipsApi.takeErrorString()}")
-        }
-
         // 可选缩小解码：最长边超过 maxDimension 时按比例缩（封面/阅读页省内存与解码耗时）。
         var src = inImg
         if (maxDimension > 0) {
-            var w0 = VipsApi.imageWidth(inImg)
-            var h0 = VipsApi.imageHeight(inImg)
+            let w0 = VipsApi.imageWidth(inImg)
+            let h0 = VipsApi.imageHeight(inImg)
             if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
-            var longest = max(Int64(w0), Int64(h0))
+            let longest = max(Int64(w0), Int64(h0))
             if (longest > Int64(maxDimension)) {
-                // shrink-on-load（#7）：JPEG 解码器支持 DCT 缩放（loader 选项 shrink=2/4/8），
-                // WebP 解码器支持 libwebp 解码期缩放（loader 选项 scale=2/4/8，与 shrink 同构），
-                // 按目标档位选最大 2 幂因子先缩（shrunk 最长边不低于目标档），余量仍交给
-                // vips_resize——避免全尺寸解码，JPEG/WebP 可获 4-8 倍解码加速。vips 是惰性管线，
-                // 上面的打开只读头部，带选项重开才真正决定解码分辨率；其余格式（PNG 等 loader
-                // 没有缩档选项）或选项不被接受时保持原图走原 resize 路径，行为不变。
-                let (shrink, shrinkOpt) = shrinkOnLoadOption(path, longest, maxDimension)
-                if (shrink > 1) {
-                    let optC = unsafe { LibC.mallocCString("${path}[${shrinkOpt}=${shrink}]") }
-                    let shrunk = VipsApi.imageNewFromFile(optC)
-                    unsafe { LibC.free(optC) }
-                    if (shrunk.isNotNull()) {
-                        VipsApi.unref(inImg)
-                        inImg = shrunk
-                        w0 = VipsApi.imageWidth(inImg)
-                        h0 = VipsApi.imageHeight(inImg)
-                        if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
-                        longest = max(Int64(w0), Int64(h0))
-                    } else {
-                        // 重开失败会在 vips 错误缓冲区留下记录，清掉以免污染后续真实错误的文案。
-                        let _ = VipsApi.takeErrorString()
-                    }
-                }
                 let scale = Float64(maxDimension) / Float64(longest)
                 let resizeRc = VipsApi.resize(inImg, CPointer<VipsImagePtr>(inout resizedImg), scale)
                 if (resizeRc != 0 || resizedImg.isNull()) {
@@ -254,7 +333,7 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
         let bands = VipsApi.imageBands(u8Img)
         if (bands == 4) {
             normImg = u8Img
-            u8Img = CPointer<VipsImage>()  // 所有权移交 normImg，finally 不得重复 unref
+            u8Img = CPointer<VipsImage>() // 所有权移交 normImg，finally 不得重复 unref
         } else if (bands == 3) {
             let rc = VipsApi.bandjoinConstAlpha255(u8Img, CPointer<VipsImagePtr>(inout normImg))
             if (rc != 0 || normImg.isNull()) { throw Exception("vips 补 alpha 失败: ${VipsApi.takeErrorString()}") }
@@ -277,15 +356,13 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
         if (mem.isNull() || size == 0) { throw Exception("vips 写内存失败: ${VipsApi.takeErrorString()}") }
         let n = Int64(size)
         let expected = Int64(w) * Int64(h) * 4
-        if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected}") }
+        if (n != expected) { throw Exception("vips RGBA 字节数不符: ${n} != ${expected} (format=${formatName})") }
 
         // 所有权移交给 NativeDecodedImage：mem 置空，finally 不再释放。
         let img = NativeDecodedImage(w, h, CPointer<UInt8>(mem), n)
         mem = CPointer<Unit>()
         return img
     } finally {
-        // VipsApi.unref/free 内部自带空指针判断；未走到的步骤保持空指针，自然跳过。
-        VipsApi.unref(inImg)
         VipsApi.unref(resizedImg)
         VipsApi.unref(rotImg)
         VipsApi.unref(srgbImg)
@@ -293,6 +370,38 @@ public func decodeFileToRgba(path: String, maxDimension!: Int32 = 0): NativeDeco
         VipsApi.unref(normImg)
         VipsApi.free(mem)
     }
+}
+
+// shrink-on-load（#7）：JPEG 走 DCT 缩放（loader 选项 shrink=2/4/8），WebP 走 libwebp
+// 解码期缩放（scale=2/4/8），按目标档位选最大 2 幂因子先缩——避免全尺寸解码，
+// JPEG/WebP 可获 4-8 倍解码加速；其余格式（PNG 等）loader 没有缩档选项，原样返回。
+// vips 是惰性管线：上面的打开只读头部，带选项重开才真正决定解码分辨率。
+// 所有权：被替换的旧句柄在这里 unref，调用方只需要管返回值。
+private func applyShrinkOnLoad(path: String, src: VipsImagePtr, maxDimension: Int32): VipsImagePtr {
+    if (maxDimension <= 0) {
+        return src
+    }
+    let w0 = VipsApi.imageWidth(src)
+    let h0 = VipsApi.imageHeight(src)
+    if (w0 <= 0 || h0 <= 0) { throw Exception("vips 尺寸非法: ${w0}x${h0}") }
+    let longest = max(Int64(w0), Int64(h0))
+    if (longest <= Int64(maxDimension)) {
+        return src
+    }
+    let (shrink, shrinkOpt) = shrinkOnLoadOption(path, longest, maxDimension)
+    if (shrink <= 1) {
+        return src
+    }
+    let optC = unsafe { LibC.mallocCString("${path}[${shrinkOpt}=${shrink}]") }
+    let shrunk = VipsApi.imageNewFromFile(optC)
+    unsafe { LibC.free(optC) }
+    if (shrunk.isNull()) {
+        // 重开失败会在 vips 错误缓冲区留下记录，清掉以免污染后续真实错误的文案。
+        let _ = VipsApi.takeErrorString()
+        return src
+    }
+    VipsApi.unref(src)
+    shrunk
 }
 
 // backdrop 解码：加载文件 → vips_resize 缩到 targetWidth 像素宽（保持比例）→ vips_gaussblur
