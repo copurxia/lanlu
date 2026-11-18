@@ -351,16 +351,8 @@ public class LgpuCanvas <: Canvas {
         tex.upload(pixels, 0, 0, Int64(width), Int64(height), Int64(width) * 4)
     }
 
-    /// 注册一张 PNG 纹理（解码在 lgpu 内完成）。
-    public func uploadTexturePng(id: Int64, bytes: Array<UInt8>): Unit {
-        match (surface.createTextureFromPng(bytes)) {
-            case Some(tex) =>
-                textures[id] = tex
-                probeTrace("png id=" + id.toString() + " bytes=" + bytes.size.toString())
-            case None =>
-                probeTrace("png failed id=" + id.toString() + " err=" + lastErrorText())
-        }
-    }
+    // 后端只收 RGBA 像素（uploadTexture）。PNG 字节入口已删除：解码归 lcodec，
+    // 渲染器不再持有任何图片解码器。
 
     /// 释放一张后端纹理（R4：Texture.close → Canvas.releaseTexture）。
     /// 幂等：id 不存在时为空操作；释放后同 id 重新 uploadTexture 会创建新纹理。

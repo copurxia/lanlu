@@ -277,7 +277,6 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
                         lastCanvas = Some(canvasL)
                         // 与 env 路径同样要把 canvas 交给 UI 层并挂上纹理回调；
                         // 少这一步的表现是 beginScene 抛「需要渲染后端」并崩进程。
-                        lgui.texturePngSink = {id, bytes => canvasL.uploadTexturePng(id, bytes)}
                         lgui.texturePixelsSink = {id, w, h, pixels => canvasL.uploadTexture(id, w, h, pixels)}
                         // R4：纹理关闭时真正回收 lgpu 侧纹理（显存预算生效的前提）
                         lgui.textureReleaseSink = {id => canvasL.releaseTexture(id)}
@@ -366,7 +365,6 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         canvas.forceClearRed = true
     }
     // 纹理委派：SDL 纹理创建/更新时把 RGBA 像素送给 lgpu 后端
-    lgui.texturePngSink = {id, bytes => canvas.uploadTexturePng(id, bytes)}
     lgui.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     // R4：纹理关闭时真正回收 lgpu 侧纹理（显存预算生效的前提）
     lgui.textureReleaseSink = {id => canvas.releaseTexture(id)}

@@ -52,8 +52,6 @@ foreign {
     func lgpu_set_transform(surface: CPointer<UInt8>, sx: Float32, sy: Float32, ox: Float32, oy: Float32): Int32
 
     func lgpu_texture_create(surface: CPointer<UInt8>, width: UInt32, height: UInt32): CPointer<UInt8>
-    func lgpu_texture_create_from_png(surface: CPointer<UInt8>, bytes: CPointer<UInt8>, len: Int64,
-        outW: CPointer<UInt32>, outH: CPointer<UInt32>): CPointer<UInt8>
     func lgpu_texture_upload(surface: CPointer<UInt8>, tex: CPointer<UInt8>, x: UInt32, y: UInt32,
         width: UInt32, height: UInt32, pixels: CPointer<UInt8>, stride: UInt32): Int32
     func lgpu_draw_texture(surface: CPointer<UInt8>, tex: CPointer<UInt8>,
@@ -333,19 +331,9 @@ public class Surface <: Resource {
         checkRc(unsafe { lgpu_frame_end(handle) }, "lgpu_frame_end")
     }
 
-    /// 直接从 PNG 字节创建纹理（解码在 lgpu 内完成）。
-    public func createTextureFromPng(bytes: Array<UInt8>): ?Texture {
-        let h = unsafe { acquireArrayRawData(bytes) }
-        let tex = try {
-            unsafe { lgpu_texture_create_from_png(handle, h.pointer, Int64(bytes.size), CPointer<UInt32>(), CPointer<UInt32>()) }
-        } finally {
-            unsafe { releaseArrayRawData(h) }
-        }
-        if (tex.isNull()) {
-            return None
-        }
-        return Texture(this, tex)
-    }
+    // 说明：渲染器**不负责图片解码**。历史上这里用 Rust 的 `png` crate 直接解 PNG
+    // （lgpu_texture_create_from_png），形成与 lcodec 并行的第二条解码路径：只认 PNG、
+    // 尺寸不回传、失败静默。现统一由 lcodec 解码成 RGBA 后经 uploadTexture 上传。
 
     /// GPU 快照：把本帧已录制的图元渲染进一张可采样纹理（不读回 CPU、不阻塞）。
     /// 返回 (纹理, 物理宽, 物理高)；失败返回 None。
