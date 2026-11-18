@@ -1,5 +1,6 @@
 package lcodec
 
+import std.env.getVariable
 import std.fs.{remove, Directory, File, Path}
 import stdx.encoding.base64.fromBase64String
 
@@ -17,9 +18,27 @@ private let AVIF_HEAD: Array<UInt8> = [0x00u8, 0x00u8, 0x00u8, 0x20u8, 0x66u8, 0
     0x00u8, 0x00u8, 0x00u8, 0x00u8, 0x61u8, 0x76u8, 0x69u8, 0x73u8, 0x6Du8, 0x69u8, 0x66u8, 0x31u8, 0x6Du8, 0x69u8, 0x61u8, 0x69u8,
     0x00u8, 0x00u8, 0x00u8, 0x00u8]
 
+// 测试临时目录：固定基目录（TMPDIR → /tmp），不再落在包目录里。
+// 历史问题：`Directory.createTemp(Path("."))` 把 tmpDir*/cover.img 之类的残渣写进仓库，
+// 而且收尾的 remove 在某些文件系统上会因 `Directory not empty` 把解码用例判成 ERROR。
+private func testTempDir(): Path {
+    let base = match (getVariable("TMPDIR")) {
+        case Some(v) => if (v.size > 0) { Path(v) } else { Path("/tmp") }
+        case None => Path("/tmp")
+    }
+    Directory.createTemp(base)
+}
+
+// 收尾：临时目录清不掉不是被测行为的问题（失败用例已断言过解码结果），不让它掩盖结论。
+private func discardTempDir(dir: Path): Unit {
+    try {
+        remove(dir, recursive: true)
+    } catch (_: Exception) {}
+}
+
 @Test
 func decodePngToRgba(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/in.png"
     let bytes = fromBase64String(PNG_1PX_B64) ?? Array<UInt8>(0, repeat: 0u8)
     File.writeTo(Path(src), bytes)
@@ -32,12 +51,12 @@ func decodePngToRgba(): Unit {
     d.close()
     @Expect(d.isClosed(), true)
     d.close()
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func decodeBadBytesThrows(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/bad.img"
     File.writeTo(Path(src), [0x89u8, 0x50u8, 0x4Eu8, 0x47u8, 0x0Du8, 0x0Au8, 0x1Au8, 0x0Au8])
     var threw = false
@@ -51,12 +70,12 @@ func decodeBadBytesThrows(): Unit {
     @Expect(threw, true)
     // 截断 PNG 嗅探仍是 png：异常信息带 format=png（坏字节 != 未知格式）。
     @Expect(msg.contains("format=png"), true)
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func decodeJpegFullSize(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/cover.img"
     let bytes = fromBase64String(JPEG_64_B64) ?? Array<UInt8>(0, repeat: 0u8)
     File.writeTo(Path(src), bytes)
@@ -65,12 +84,12 @@ func decodeJpegFullSize(): Unit {
     @Expect(d.height, 64i32)
     @Expect(d.size, 64 * 64 * 4)
     d.close()
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func decodeJpegShrinkOnLoad(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/cover.img"
     let bytes = fromBase64String(JPEG_64_B64) ?? Array<UInt8>(0, repeat: 0u8)
     File.writeTo(Path(src), bytes)
@@ -84,12 +103,12 @@ func decodeJpegShrinkOnLoad(): Unit {
     }
     @Expect(sum > 0, true)
     d.close()
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func decodeWebpShrinkOnLoad(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/cover.img"
     let bytes = fromBase64String(WEBP_64_B64) ?? Array<UInt8>(0, repeat: 0u8)
     File.writeTo(Path(src), bytes)
@@ -110,26 +129,26 @@ func decodeWebpShrinkOnLoad(): Unit {
     } catch (e: Exception) {
         @Expect(e.message.contains("format=webp"), true)
     }
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func decodeBackdropResizesToTargetWidth(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/bd.img"
     let bytes = fromBase64String(JPEG_64_B64) ?? Array<UInt8>(0, repeat: 0u8)
     File.writeTo(Path(src), bytes)
     let d = decodeBackdrop(src, 48)
     @Expect(d.width, 48i32)
     d.close()
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 // ---- 嗅探（sniff.cj）----
 
 @Test
 func sniffDetectsPngJpegWebp(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let png = "${dir}/a.img"
     File.writeTo(Path(png), fromBase64String(PNG_1PX_B64) ?? Array<UInt8>(0, repeat: 0u8))
     @Expect(sniffImageFormat(png), SniffedImageFormat.Png)
@@ -139,28 +158,28 @@ func sniffDetectsPngJpegWebp(): Unit {
     let webp = "${dir}/c.img"
     File.writeTo(Path(webp), fromBase64String(WEBP_64_B64) ?? Array<UInt8>(0, repeat: 0u8))
     @Expect(sniffImageFormat(webp), SniffedImageFormat.Webp)
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func sniffDetectsAvifByFtypBrand(): Unit {
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let avif = "${dir}/x.avif"
     File.writeTo(Path(avif), AVIF_HEAD)
     @Expect(sniffImageFormat(avif), SniffedImageFormat.Avif)
     @Expect(sniffedImageFormatName(sniffImageFormat(avif)), "avif")
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 @Test
 func sniffUnknownForMissingAndGarbage(): Unit {
     @Expect(sniffImageFormat("/nonexistent/dir/x.img"), SniffedImageFormat.Unknown)
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let junk = "${dir}/j.img"
     File.writeTo(Path(junk), [0x00u8, 0x01u8, 0x02u8, 0x03u8, 0x04u8, 0x05u8, 0x06u8, 0x07u8,
         0x08u8, 0x09u8, 0x0Au8, 0x0Bu8, 0x0Cu8, 0x0Du8, 0x0Eu8, 0x0Fu8])
     @Expect(sniffImageFormat(junk), SniffedImageFormat.Unknown)
-    remove(dir, recursive: true)
+    discardTempDir(dir)
 }
 
 // ---- 高斯模糊（blur.cj，替代 cui 里原先直接调 vips 的 Modal 背景）----
@@ -212,7 +231,7 @@ func vipsBackendIsLoadable(): Unit {
 func avifFailureCarriesFormatDiagnostic(): Unit {
     // 只有 ftyp 头的 AVIF（无真实像素）：不管哪个后端都解不出来，
     // 但异常信息必须指明 format=avif（真机定位“后端不支持”而非“下载坏”的依据）。
-    let dir = Directory.createTemp(Path("."))
+    let dir = testTempDir()
     let src = "${dir}/cover.img"
     File.writeTo(Path(src), AVIF_HEAD)
     var msg = ""
@@ -226,5 +245,57 @@ func avifFailureCarriesFormatDiagnostic(): Unit {
     if (msg.size > 0) {
         @Expect(msg.contains("format=avif"), true)
     }
-    remove(dir, recursive: true)
+    discardTempDir(dir)
+}
+
+@Test
+func decodePngBytesToRgba(): Unit {
+    // 内存字节入口（内嵌资源/logo 走这条）：桌面经 vips_image_new_from_buffer，
+    // 设备经 OH_ImageSourceNative_CreateFromData。尺寸必须来自真实解码结果。
+    let bytes = fromBase64String(PNG_1PX_B64) ?? Array<UInt8>(0, repeat: 0u8)
+    let d = decodeBytesToRgba(bytes)
+    @Expect(d.width, 1i32)
+    @Expect(d.height, 1i32)
+    @Expect(d.size, 4i64)
+    @Expect(d.isClosed(), false)
+    d.close()
+    @Expect(d.isClosed(), true)
+}
+
+@Test
+func decodeBytesShrinkRespectsMaxDimension(): Unit {
+    // 64x64 JPEG 字节 → maxDimension=32 必须等比缩到 32x32（与文件路径同语义）。
+    let bytes = fromBase64String(JPEG_64_B64) ?? Array<UInt8>(0, repeat: 0u8)
+    let d = decodeBytesToRgba(bytes, maxDimension: 32)
+    @Expect(max(d.width, d.height), 32i32)
+    @Expect(d.size, Int64(d.width) * Int64(d.height) * 4)
+    d.close()
+}
+
+@Test
+func decodeBadBytesThrowsWithFormat(): Unit {
+    // 截断的 PNG 头：字节入口也必须抛异常并带 format=png（不能静默返回空图）。
+    var threw = false
+    var msg = ""
+    try {
+        let d = decodeBytesToRgba([0x89u8, 0x50u8, 0x4Eu8, 0x47u8, 0x0Du8, 0x0Au8, 0x1Au8, 0x0Au8])
+        d.close()
+    } catch (e: Exception) {
+        threw = true
+        msg = e.message
+    }
+    @Expect(threw, true)
+    @Expect(msg.contains("format=png"), true)
+}
+
+@Test
+func decodeEmptyBytesThrows(): Unit {
+    var threw = false
+    try {
+        let d = decodeBytesToRgba(Array<UInt8>(0, repeat: 0u8))
+        d.close()
+    } catch (_: Exception) {
+        threw = true
+    }
+    @Expect(threw, true)
 }
