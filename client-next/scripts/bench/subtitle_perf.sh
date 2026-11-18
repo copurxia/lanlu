@@ -2,12 +2,12 @@
 # 字幕性能基准运行器：用真实桌面渲染链路跑通「复仇公主斯嘉丽」
 # 冷扫描→播放→切换→seek→缓存命中。
 # 用法：
-#   LANLU_BENCH_ARCID=<arcid> ./subtitle_perf.sh [--page 6] [--play-ms 10000] ...
+#   LANLU_BENCH_ARCID=<arcid> bash scripts/bench/subtitle_perf.sh [--page 6] [--play-ms 10000] ...
 # 环境变量透传给客户端；输出 @@RESULT 行由本脚本收集归档到 docs/perf/。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLIENT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CLIENT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 REPO_DIR="$(cd "${CLIENT_DIR}/.." && pwd)"
 
 # 不覆盖 SDL 视频/渲染驱动：性能结果必须来自正常桌面后端，不允许默认降级到
