@@ -52,7 +52,7 @@ note = "M6 拆出 lbase 后，lgui 应替换为 lbase"
 [package.lcodec]
 path = "packages/lcodec"
 allowed_deps = []
-note = "解码统合层：图片解码跨平台 API；OHOS 后端由 lplatform-ohos 的同符号 shim 顶替 libvips"
+note = "解码统合层：全仓唯一的图片解码实现；设备走系统 ImageSource，桌面走系统 libvips（均运行时 dlopen，无链接依赖）"
 
 [package.lgpu]
 path = "packages/lgpu"
@@ -68,8 +68,10 @@ note = "平台抽象层不得依赖 SDL 绑定包（M6）"
 
 [package.lgui]
 path = "packages/cangjie-gui/lgui"
-allowed_deps = ["lcodec"]
-note = "过渡期 SDL 绑定包：M6 整体删除，期间不得新增依赖"
+# sdl_stub_ffi：**只给 cjpm test 链接期声明 -lSDL3/-lSDL3_ttf 用的空壳包**（不含代码），
+# 桩库本体由 tools/verify-cui-interactions.sh 生成；不进 OHOS/桌面产物。
+allowed_deps = ["lcodec", "sdl_stub_ffi"]
+note = "过渡期 SDL 绑定包：M6 整体删除，期间不得新增依赖；图片解码只能调 lcodec（不得自带解码器，不得依赖 vips_ffi）"
 
 [package.portcheck]
 path = "packages/portcheck"
@@ -84,8 +86,10 @@ note = "移植自检：允许触达所有后端；M5 起改为经 lwp test 接�
 path = "packages/lgpu/native"
 kind = "cargo"
 allowed_deps = [
-  "wgpu", "naga", "ab_glyph", "png", "pollster", "bytemuck", "raw-window-handle",
+  "wgpu", "naga", "ab_glyph", "pollster", "bytemuck", "raw-window-handle",
   "log", "rustybuzz",
+  # 注意：不允许引入图片解码 crate（png/image/stb）。渲染器只接收 RGBA 像素，
+  # 解码归 lcodec；历史上 lgpu 自带 Rust png 解码，形成第二条解码路径。
 ]
 # 渲染器不得引入窗口/输入栈：窗口句柄由壳经 surface.available 给出（§4.1、§8A）
 forbidden = ["winit", "winit-ohos", "winit-wayland", "smithay-client-toolkit", "wayland-client"]

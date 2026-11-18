@@ -28,7 +28,9 @@ if [ -n "${PKG_DIR:-}" ]; then
   PKG="$PKG_DIR"
 fi
 
-CJV="${CJV:-/workspace/.cjv}"
+# 默认用与 client-next 一致的工具链（lcodec 的 cjpm.toml 要求 cjc 1.2.0，
+# /workspace/.cjv/bin 的 lts 1.0.5 装不了 lcodec 这个依赖）。
+CJV="${CJV:-/workspace/.cjv/toolchains/sts-1.2.0}"
 STUB="${STUB:-/workspace/tmp/cui-test-stubs}"
 
 if [ ! -x "$CJV/bin/cjc" ]; then
@@ -85,17 +87,39 @@ SYMS="$( { printf '%s\n' $KNOWN_SDL; printf '%s\n' "$DISCOVERED"; } | grep -E '^
 { echo '#include <stdint.h>'; printf '%s\n' "$SYMS" | sed 's/.*/void &(void) {}/'; } >> "$STUB/stub.c"
 
 gcc -shared -fPIC -o "$STUB/libvips.so" "$STUB/stub.c"
+# 同一份桩也导出成 libSDL3.so / libSDL3_ttf.so：manifest 里声明的是 -lSDL3/-lSDL3_ttf
+# （图片解码已归 lcodec，不再靠 -lvips 顺带带出 SDL 符号）。
+cp -f "$STUB/libvips.so" "$STUB/libSDL3.so"
+cp -f "$STUB/libvips.so" "$STUB/libSDL3_ttf.so"
 
-echo "== 桩库：$STUB/libvips.so（$(nm -D --defined-only "$STUB/libvips.so" | wc -l) 个符号）"
+echo "== 桩库：$STUB/libvips.so + libSDL3.so + libSDL3_ttf.so（$(nm -D --defined-only "$STUB/libvips.so" | wc -l) 个符号）"
 echo "== 工程：$PKG"
 
 cd "$PKG"
-export PATH="$CJV/bin:$PATH"
+export PATH="$CJV/bin:$CJV/tools/bin:$PATH"
+export CANGJIE_HOME="${CANGJIE_HOME:-$CJV}"
 export LIBRARY_PATH="$STUB"
-export LD_LIBRARY_PATH="$STUB"
+# 工具链自带的运行库必须留在搜索路径里，否则 cjpm/cjc 自身起不来。
+export LD_LIBRARY_PATH="$STUB:$CJV/runtime/lib/linux_x86_64_cjnative:$CJV/lib/linux_x86_64_cjnative"
+# lcodec 的 cjpm.toml 用 ${CANGJIE_STDX_PATH} 声明 stdx 二进制依赖（单测要 base64），
+# 未导出时 cjpm 会报 "imports package stdx.encoding.base64 ... not added as a dependency"。
+# 默认取与 CJV 工具链配套的 static stdx（可按需用环境变量覆盖）。
+CJV_STDX_ROOT=${CJV_STDX_ROOT:-/workspace/.cjv/stdx}
+if [ -z "${CANGJIE_STDX_PATH:-}" ]; then
+  for cand in "$CJV_STDX_ROOT/sts-1.2.0/static/stdx" "$CJV_STDX_ROOT/lts/static/stdx"; do
+    if [ -d "$cand" ]; then export CANGJIE_STDX_PATH="$cand"; break; fi
+  done
+fi
+echo "== stdx：${CANGJIE_STDX_PATH:-<未设置>}"
 LOG="${LOG:-/workspace/tmp/cui-interactions-${TREE}.log}"
 set +e
-cjpm test > "$LOG" 2>&1
+# 包内 target/ 的增量缓存跨 cjpm 版本会不兼容（DataModelException），需要时可指定独立 target：
+#   CUI_TEST_TARGET_DIR=/tmp/cui-test tools/verify-cui-interactions.sh
+if [ -n "${CUI_TEST_TARGET_DIR:-}" ]; then
+  cjpm test --target-dir "$CUI_TEST_TARGET_DIR" > "$LOG" 2>&1
+else
+  cjpm test > "$LOG" 2>&1
+fi
 RC=$?
 set -e
 CLEAN="$(mktemp)"

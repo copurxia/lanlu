@@ -22,6 +22,7 @@ keys = [
   "client-next/src/ui/reader_bar.cj|sdl",
   "client-next/src/ui/titlebar.cj|sdl",
   "client-next/src/ui/upload_drawer.cj|sdl",
+  "packages/lcodec/src/ohos_image.cj|ohos",
   "packages/lgpu/native/src/lib.rs|ohos",
   "packages/libass_ffi/native/lanlu_ass_bridge.c|ohos",
   "packages/lwindow/src/lwindow.cj|ohos",
@@ -30,4 +31,5 @@ keys = [
   "packages/lwindow/src/window_policy.cj|ohos",
   "packages/lwindow/src/window_policy.cj|sdl",
   "packages/lwindow/src/window_policy.cj|wayland",
+  "packages/sdl_stub_ffi/src/sdl_stub_ffi.cj|sdl",
 ]

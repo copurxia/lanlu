@@ -16,6 +16,7 @@
 | `check-layering.sh` | （旧）业务/UI/绑定层不得出现平台专有字样 |
 | `check-no-file-bridge.sh` | 文件桥命中点只允许减少（计划 §11 / M6 删除进度），新增即失败 |
 | `check-no-sdl.sh` | （旧）SDL 引用数只允许下降 |
+| `check-image-decode.sh` | 图片解码只有一个实现：lgui/cui/lgpu 不得自带解码器、渲染器不得引入解码 crate、`uploadTexturePng` 类旁路不得复活 |
 
 规则与基线：
 
