@@ -4,7 +4,7 @@ package portcheck
 import std.env.getVariable
 import std.fs.{File, Path, exists}
 import std.time.MonoTime
-import lcodec.{VipsApi, sniffImageFormat, sniffedImageFormatName, decodeFileToRgba}
+import lcodec.{SystemImageDecoder, VipsApi, decodeBytesToRgba, sniffImageFormat, sniffedImageFormatName, decodeFileToRgba}
 import qwest.*
 import libavformat_ffi.*
 import libass_ffi.*
@@ -47,6 +47,25 @@ func ohosImageSelftest(base: String): Unit {
         } catch (e: Exception) {
             m3 = "lcodec " + e.message
         }
+        // 字节入口（顶栏/登录卡 logo 用的就是这条）：自检里解同一张 PNG 字节，
+        // 真机一眼看出"内存入口/临时文件回退"是否成立。
+        var m4 = "n/a"
+        try {
+            let d = decodeBytesToRgba(SELFTEST_PNG)
+            m4 = "bytes w=${d.width} h=${d.height} sz=${d.size}"
+            d.close()
+        } catch (e: Exception) {
+            m4 = "bytes " + e.message
+        }
+        let sysBytes = if (SystemImageDecoder.available()) {
+            if (SystemImageDecoder.bytesSupported()) {
+                "CreateFromData ok"
+            } else {
+                "CreateFromData missing(API<12) -> temp-file fallback"
+            }
+        } else {
+            "system decoder unavailable: " + SystemImageDecoder.unavailableReason()
+        }
         let sniffs = "png=" + sniffedImageFormatName(sniffImageFormat(base + "/vt.png")) +
             " webp=" + sniffedImageFormatName(sniffImageFormat(base + "/vt.webp"))
         // 远端格式探测（可选，样本不入库）：从环境变量取 URL → 下载 → lcodec 解码。
@@ -60,8 +79,9 @@ func ohosImageSelftest(base: String): Unit {
         let p2 = probeImageFromEnv(base, "2", "LANLU_CODEC_PROBE2_URL")
         // 运行时装载诊断：图片后端是 dlopen 进来的（不参与链接），真机缺库时这里能直接看到原因。
         let backend = if (VipsApi.available()) { "loaded" } else { "unavailable: " + VipsApi.unavailableReason() }
-        File.writeTo(Path(base + "/vipstest.txt"),
-            "rc=${rc}\npng: ${m1}\nwebp: ${m2}\nlcodec: ${m3}\nprobe1: ${p1}\nprobe2: ${p2}\nsniff: ${sniffs}\nbackend: ${backend}\n".toArray())
+        let report = "rc=${rc}\npng: ${m1}\nwebp: ${m2}\nlcodec: ${m3}\nemb: ${m4}\nsysbytes: ${sysBytes}" +
+            "\nprobe1: ${p1}\nprobe2: ${p2}\nsniff: ${sniffs}\nbackend: ${backend}\n"
+        File.writeTo(Path(base + "/vipstest.txt"), report.toArray())
     } catch (_) {
     }
 }
