@@ -7,8 +7,8 @@ import std.fs.{File, Path}
 import std.collection.ArrayList
 import std.convert.*
 import libavformat_ffi.probeSubtitleStreams
-import lgui.input.Clipboard
-import lgui
+import cui.input.Clipboard
+import lbase
 import lgpu
 import lwindow
 
@@ -191,10 +191,10 @@ func runLwindowProbeIfRequested(): Unit {
             let font = lgpu.Font.load(fontPath)
             let canvas = lgpu.LgpuCanvas(surface, font)
             surface.beginFrame(0.05, 0.07, 0.14, 1.0)
-            canvas.fillRoundedRect(lgui.Rect(8.0, 8.0, 120.0, 30.0), 8.0, lgui.Color(0xE8, 0xB0, 0x4B, 0xFF))
-            canvas.fillCircle(200.0, 30.0, 16.0, lgui.Color.rgb(80, 200, 255))
-            canvas.strokeLine(8.0, 120.0, 220.0, 120.0, lgui.Pen(width: 3.0, color: lgui.Color.rgb(255, 255, 255)))
-            canvas.text("lwindow+lgpu", 8.0, 60.0, lgui.Color.rgb(255, 255, 255), pointSize: 18.0)
+            canvas.fillRoundedRect(lbase.Rect(8.0, 8.0, 120.0, 30.0), 8.0, lbase.Color(0xE8, 0xB0, 0x4B, 0xFF))
+            canvas.fillCircle(200.0, 30.0, 16.0, lbase.Color.rgb(80, 200, 255))
+            canvas.strokeLine(8.0, 120.0, 220.0, 120.0, lbase.Pen(width: 3.0, color: lbase.Color.rgb(255, 255, 255)))
+            canvas.text("lwindow+lgpu", 8.0, 60.0, lbase.Color.rgb(255, 255, 255), pointSize: 18.0)
             surface.endFrame()
             let (asc, desc, gap, upem) = font.metrics(19.5)
             let lineH = asc - desc + gap

@@ -8,7 +8,7 @@
 #   REPO_ROOT   仓库根（含 client-next/ 与 packages/）
 #   LPACK_DIR   本包根（packages/lpack-ohos）
 #   HAP_OUT     HAP 输出目录
-#   CN_BUILD    引擎构建目录（client-next/build/ohos）
+#   CN_BUILD    引擎构建目录（packages/lpack-ohos/target/<app>）
 
 # shellcheck shell=bash
 
@@ -27,7 +27,7 @@ TMP_ROOT=${TMP_ROOT:-$(dirname "$REPO_ROOT")/tmp}
 mkdir -p "$TMP_ROOT" 2>/dev/null || true
 export TMPDIR=${TMPDIR:-$TMP_ROOT}
 
-CN_BUILD=${CN_BUILD:-$REPO_ROOT/client-next/build/ohos}
+CN_BUILD=${CN_BUILD:-$LPACK_DIR/target/${LPACK_APP:-lanlu}}
 export CN_BUILD
 HAP_OUT=${HAP_OUT:-$CN_BUILD/target/ohos/hap/entry/build/default/outputs/default}
 export HAP_OUT

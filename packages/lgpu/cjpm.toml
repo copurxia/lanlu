@@ -6,5 +6,6 @@ description = "L 层渲染器（wgpu/Vulkan）的 Cangjie 绑定"
 output-type = "static"
 
 [dependencies]
-# 迁移期：Canvas 接口与 Color/Pen/Rect 还在 sdl 包里（P5 删 sdl 时会搬到中立包）
-lgui = { path = "../cangjie-gui/lgui" }
+# P6 lbase 拆包：Canvas 接口与 Color/Pen/Rect 已迁至中立包 lbase，
+# lgpu 不再依赖 UI 框架（计划 docs/lwindow-platform-separation-plan.md §4.5 目标态达成）。
+lbase = { path = "../lbase" }

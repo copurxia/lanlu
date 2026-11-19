@@ -4,21 +4,24 @@ name = "lanlu_client_next"
 version = "0.1.0"
 description = "lanlu client-next (OHOS engine build)"
 output-type = "dynamic"
+# G1：target 段 -O2 只覆盖 root 包（实测 27/32 依赖包命令行缺失），
+# 全局生效必须用 override-compile-option（与桌面端同款），执行记录见 .research-local/opt/exec/G1-build.md
+override-compile-option = "-O2"
 
 [dependencies]
-lgpu = { path = "../../../packages/lgpu" }
-cui = { path = "../../../packages/cangjie-gui" }
-lgui = { path = "../../../packages/cangjie-gui/lgui" }
-lcodec = { path = "../../../packages/lcodec" }
-webview = { path = "../../../packages/webview" }
-rocksdb_ffi = { path = "../../../packages/rocksdb_ffi" }
-libvlc_ffi = { path = "../../../packages/libvlc_ffi" }
-libavformat_ffi = { path = "../../../packages/libavformat_ffi" }
-libass_ffi = { path = "../../../packages/libass_ffi" }
-fontkit_ffi = { path = "../../../packages/fontkit_ffi" }
-qwest = { path = "../../../packages/qwest" }
-lwindow = { path = "../../../packages/lwindow" }
-portcheck = { path = "../../../packages/portcheck" }
+lgpu = { path = "@REPO_ROOT@/packages/lgpu" }
+cui = { path = "@REPO_ROOT@/packages/cangjie-gui" }
+lbase = { path = "@REPO_ROOT@/packages/lbase" }
+lcodec = { path = "@REPO_ROOT@/packages/lcodec" }
+webview = { path = "@REPO_ROOT@/packages/webview" }
+rocksdb_ffi = { path = "@REPO_ROOT@/packages/rocksdb_ffi" }
+libvlc_ffi = { path = "@REPO_ROOT@/packages/libvlc_ffi" }
+libavformat_ffi = { path = "@REPO_ROOT@/packages/libavformat_ffi" }
+libass_ffi = { path = "@REPO_ROOT@/packages/libass_ffi" }
+fontkit_ffi = { path = "@REPO_ROOT@/packages/fontkit_ffi" }
+qwest = { path = "@REPO_ROOT@/packages/qwest" }
+lwindow = { path = "@REPO_ROOT@/packages/lwindow" }
+portcheck = { path = "@REPO_ROOT@/packages/portcheck" }
 
 [package.metadata.ohos]
 app-name = "Lanlu"
@@ -33,7 +36,8 @@ page = "pages/Index"
 ui = "sdl3"
 
 [target.aarch64-linux-ohos]
-compile-option = "--sysroot=/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot -B/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"
+# G1 构建优化档：追加 -O2（sysroot/-B 原样保留），执行记录见 .research-local/opt/exec/G1-build.md
+compile-option = "-O2 --sysroot=/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot -B/workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos"
 link-option = "-L @LWP_OHOS_LIB@ -L /workspace/lanlu/.research-ohos/sdl3-ohos/prefix-nov/lib -L /workspace/lanlu/.research-ohos/sdl3-ohos/prefix-single/lib -L /workspace/lanlu/.research-ohos/ohos-stubs -L /workspace/lanlu/.research-ohos/ohos-stubs/ffmpeg -L @REPO_ROOT@/packages/webview/native/target/release -L @REPO_ROOT@/packages/rocksdb_ffi/native -L @REPO_ROOT@/packages/libavformat_ffi/native -L @REPO_ROOT@/packages/libass_ffi/native -L @REPO_ROOT@/packages/fontkit_ffi/native/target/release -L @REPO_ROOT@/packages/lgpu/native/target/release -L /workspace/horizon-ohos/.tooling/sdk26/clt/command-line-tools/sdk/default/openharmony/native/sysroot/usr/lib/aarch64-linux-ohos -lvlc -lrocksdb -lavformat -lavcodec -lavutil -llanlu_rocksdb_bridge -llanlu_avformat_bridge -llanlu_ass_bridge -l:libass.so.9 -lfontconfig -lfreetype -lfontkit_native -llgpu_native -lnative_window -lwebview_native -lSDL3 -lSDL3_ttf -llwp_native -ldl -lpthread -lm"
   [target.aarch64-linux-ohos.bin-dependencies]
     path-option = [ "/workspace/.cjv/stdx/sts-1.2.0-linux-x64-ohos/static/stdx" ]

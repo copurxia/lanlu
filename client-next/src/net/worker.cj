@@ -42,7 +42,12 @@ private class WorkItem {
 //（activeImages=4 槽位 + DECODE_THREADS=2），下载/解码本身 p50 仅 ~20ms，故下载 4→6、
 // 解码 2→4；4 解码 × vips 内部并发 2 = 8 线程，仍不超过物理核数。
 public class ApiWorker {
+    // D2：交互 API 与批量 API 分池。服务端 /api/search 单次 1.3~8s，批量搜索
+    // （书库行、合集成员 searchAll）会把 2 条 API 线程吃满，交互请求（详情/元数据/
+    // 进度/收藏回执）只能排在后面 —— 表现为"点进详情很久没反应"。
+    // 拆成交互池 2 + 批量池 2 后，批量再慢也不挡住交互。
     private static let API_THREADS: Int64 = 2
+    private static let BULK_THREADS: Int64 = 2
     private static let DOWNLOAD_THREADS: Int64 = 6
     private static let DECODE_THREADS: Int64 = 4
     private static let SUBTITLE_THREADS: Int64 = 1
@@ -54,6 +59,8 @@ public class ApiWorker {
     // 任务队列：API/下载队列容量给足（启动批量行加载 + 图片排队也不过几十），add 阻塞
     // 语义不触发；解码队列有界（32）作为背压阀：满时下载线程的 submitDecode 阻塞。
     private let apiQueue = LinkedBlockingQueue<WorkItem>(4096, ArrayList<WorkItem>())
+    /// 批量 API 池（慢搜索类）：与交互池互不阻塞。
+    private let bulkQueue = LinkedBlockingQueue<WorkItem>(4096, ArrayList<WorkItem>())
     private let downloadQueue = LinkedBlockingQueue<WorkItem>(4096, ArrayList<WorkItem>())
     private let decodeQueue = LinkedBlockingQueue<WorkItem>(32, ArrayList<WorkItem>())
     private let subtitleQueue = LinkedBlockingQueue<WorkItem>(8, ArrayList<WorkItem>())
@@ -68,6 +75,9 @@ public class ApiWorker {
     public init() {
         for (_ in 0..API_THREADS) {
             let _ = spawn {workLoop(apiQueue)}
+        }
+        for (_ in 0..BULK_THREADS) {
+            let _ = spawn {workLoop(bulkQueue)}
         }
         for (_ in 0..DOWNLOAD_THREADS) {
             let _ = spawn {workLoop(downloadQueue)}
@@ -119,7 +129,15 @@ public class ApiWorker {
         return true
     }
 
-    // 图片下载任务：4 线程独立池，与 API/解码池互不阻塞。去重语义同 submit。
+    /// 批量 API 任务（慢搜索类：书库行、searchAll、合集成员）。
+    ///
+    /// 与 `submit` 的区别只是**排哪条队列**：走独立 bulk 池，慢搜索再久也不会把
+    /// 交互请求（详情/元数据/进度）堵在 API 池后面。去重仍与其它池共享命名空间。
+    public func submitBulk(name: String, tag: String, job: () -> Any): Bool {
+        submitTo(name, "${name}@${tag}", tag, job, bulkQueue)
+    }
+
+    /// 图片下载任务：4 线程独立池，与 API/解码池互不阻塞。去重语义同 submit。
     public func submitImage(name: String, job: () -> Any): Bool {
         submitTo(name, name, "", job, downloadQueue)
     }

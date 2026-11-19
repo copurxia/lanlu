@@ -171,10 +171,14 @@ class ClickSensor <: Widget {
 // 事件自顶向下分发，内容未消费的左键抬起最终落到传感器触发 onClick。
 public class ClickArea {
     public init(onClick!: () -> Unit, body!: () -> Unit) {
-        ZStack {
-            ClickSensor(onClick)
-            body()
-        }.alignment(Alignment.TopLeading)
+        // 改用框架的 FocusTarget：行为壳一个不少（点击聚焦、按下+框内抬起才触发、悬停手型），
+        // 另外把整块区域登记成焦点停靠点——Enter/Space 可激活、Tab 能到达、键盘焦点时画统一外环
+        // （审计缺口 #2：应用层 17 类自绘点击件此前全都不在 Tab 环里）。
+        FocusTarget(onClick: onClick) {
+            ZStack {
+                body()
+            }.alignment(Alignment.TopLeading)
+        }
     }
 }
 
@@ -515,6 +519,9 @@ public class GhostIconButton <: Widget {
         this.active = active
         this.size = size
         this.tint = color
+        // 自绘图标钮自己就是控件，用 registerFocusStop 登记停靠点（hoverId 本身唯一，直接复用）；
+        // 屏幕阅读/键盘用户 Tab 到它时 Enter/Space 激活，焦点态画统一外环。
+        registerFocusStop(hoverId)
         emit(this)
     }
 
@@ -522,7 +529,7 @@ public class GhostIconButton <: Widget {
         Size(size, size)
     }
 
-    public func layout(_: UiContext, rect: Rect): Unit {
+    public func layout(ctx: UiContext, rect: Rect): Unit {
         frame = rect
         noteTitleBarControl(rect)
     }
@@ -551,6 +558,14 @@ public class GhostIconButton <: Widget {
                 }
         }
         drawGhostGlyph(ctx.renderer, glyph, frame.centerX(), frame.centerY(), color)
+        // 键盘焦点外环（指针点击不画，遵循 :focus-visible）。
+        if (ctx.showFocusRing(hoverId)) {
+            drawFocusRing(ctx, frame, radius)
+        }
+    }
+
+    public func focusableId(): ?String {
+        Some(hoverId)
     }
 
     public func handle(ctx: UiContext, event: UiEvent): Bool {
@@ -559,14 +574,31 @@ public class GhostIconButton <: Widget {
                 if (frame.contains(x, y)) {
                     ctx.claimHover(hoverId, CursorShape.Interactive)
                 }
+            case UiEvent.MouseDown(MouseButton.Left, x, y) =>
+                // 指针按下即聚焦：焦点跟着点击走（与按钮族一致）。
+                if (frame.contains(x, y)) {
+                    ctx.focus(hoverId)
+                }
             case UiEvent.MouseUp(MouseButton.Left, x, y) =>
                 if (frame.contains(x, y)) {
                     onClick()
                     return true
                 }
+            case UiEvent.KeyDown(Key.Enter, _) => return activateByKeyboard(ctx)
+            case UiEvent.KeyDown(Key.Space, _) => return activateByKeyboard(ctx)
             case _ => ()
         }
         false
+    }
+
+    // 键盘激活（Enter/Space）：仅当焦点在本钮上。
+    private func activateByKeyboard(ctx: UiContext): Bool {
+        if (ctx.hasFocus(hoverId)) {
+            onClick()
+            true
+        } else {
+            false
+        }
     }
 }
 

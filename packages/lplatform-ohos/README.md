@@ -25,10 +25,10 @@ selftest/            真机自检（M5 从 packages/portcheck 的 ohos_selftest*
 由 `lpack-ohos` 驱动，不单独构建：
 
 ```
-bash client-next/ohos/build-ohos.sh      # 内部：交叉编译引擎 → 本包壳 → lpack-ohos 生成工程 → hvigor → 签名
+bash packages/lpack-ohos/tools/build-ohos.sh   # 内部：交叉编译引擎 → 本包壳 → lpack-ohos 生成工程 → hvigor → 签名
 ```
 
-`build-ohos.sh` 会把 `shell/` 覆盖到 `lpack-ohos` 模板的暂存副本上（`build/ohos/.hap-templates`），
+`build-ohos.sh` 会把 `shell/` 覆盖到 `lpack-ohos` 模板的暂存副本上（`packages/lpack-ohos/target/<app>/.hap-templates`），
 因此**壳源码只有这一份**，模板里不再重复存放。
 
 ## 迁移状态（M0）

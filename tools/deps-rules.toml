@@ -42,11 +42,16 @@ allowed_deps = [
 forbidden = ["lgui", "lgpu", "lwp"]
 note = "违规项应在 M1/M6 迁入 lwindow.backend.lwp 后消失"
 
+[package.lbase]
+path = "packages/lbase"
+allowed_deps = []
+note = "中立基础类型（Canvas 渲染接口 + Color/Pen/Rect 几何颜色类型）：零依赖，任何层都可引用；不得引入 FFI 或其他 lanlu 包"
+
 [package.cui]
 path = "packages/cangjie-gui"
-allowed_deps = ["lbase", "lwindow"]
+allowed_deps = ["lbase", "lcodec", "sdl_stub_ffi", "lwindow"]
 forbidden = ["lgui", "lgpu", "lwp"]
-note = "M6 拆出 lbase 后，lgui 应替换为 lbase"
+note = "P6 吸收完成：lgui 包已删除，SDL 过渡代码并入本包（M6 彻底清除 SDL 时移除 sdl_stub_ffi）"
 
 # 解码统合层：允许依赖 vips_ffi（FFI 绑定）；业务层经 lcodec 间接使用，不再直连
 [package.lcodec]
@@ -66,17 +71,10 @@ allowed_deps = ["lbase", "lwp", "lgpu"]
 forbidden = ["lgui"]
 note = "平台抽象层不得依赖 SDL 绑定包（M6）"
 
-[package.lgui]
-path = "packages/cangjie-gui/lgui"
-# sdl_stub_ffi：**只给 cjpm test 链接期声明 -lSDL3/-lSDL3_ttf 用的空壳包**（不含代码），
-# 桩库本体由 tools/verify-cui-interactions.sh 生成；不进 OHOS/桌面产物。
-allowed_deps = ["lcodec", "sdl_stub_ffi"]
-note = "过渡期 SDL 绑定包：M6 整体删除，期间不得新增依赖；图片解码只能调 lcodec（不得自带解码器，不得依赖 vips_ffi）"
-
 [package.portcheck]
 path = "packages/portcheck"
 allowed_deps = [
-  "lwindow", "lgpu", "lgui", "lwp", "lbase", "lcodec",
+  "lwindow", "lgpu", "cui", "lwp", "lbase", "lcodec",
   "qwest", "libavformat_ffi", "libass_ffi", "libvlc_ffi",
   "webview", "fontkit_ffi",
 ]

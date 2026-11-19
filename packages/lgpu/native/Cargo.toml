@@ -7,7 +7,7 @@ description = "L 层渲染器：wgpu 后端，导出 C ABI 给 Cangjie 使用（
 
 [lib]
 name = "lgpu_native"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 # 只取 vulkan：OHOS 的呈现路径是 VK_OHOS_surface，不需要 dx12/metal/gles。
 [dependencies]

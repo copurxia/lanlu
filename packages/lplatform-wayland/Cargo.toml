@@ -12,7 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 wayland-client = "0.31.15"
-wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# staging：fractional-scale（分数缩放）；unstable：text-input-v3
+wayland-protocols = { version = "0.32", features = ["client", "unstable", "staging"] }
 # 键盘布局 -> 文本：物理键产生的字符由**壳**算好随 lw_input.key 下发（引擎不猜字符）。
 # 运行时 dlopen libxkbcommon（xkbcommon-dl 不引入链接依赖）；库缺失时回落 US 布局表。
 xkbcommon-dl = "0.4"

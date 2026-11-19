@@ -442,6 +442,32 @@ public func lwpReportedScale(): Float32 {
     }
 }
 
+/// 打开文件选择器（包级包装：业务层不持有 LwpWindowClient 实例，不能走实例方法）。
+/// 返回本次 serial（结果经 DialogResult 事件回来）；无壳/通道未初始化返回 0。
+public func dialogOpenFile(filters!: String = ""): UInt32 {
+    match (g_lwpWindow) {
+        case Some(w) => w.dialogOpenFile(filters: filters)
+        case None => 0
+    }
+}
+
+/// 保存对话框（包级包装）。返回 serial；无壳/通道未初始化返回 0。
+public func dialogSaveFile(suggested: String): UInt32 {
+    match (g_lwpWindow) {
+        case Some(w) => w.dialogSaveFile(suggested)
+        case None => 0
+    }
+}
+
+/// 预留对话框 serial（不发协议请求）：给协议暂不支持的 kind（如 folder）用。
+/// 宿主拿到 serial 后应尽快 `resolveDialogBySerial(取消)`，避免请求永久 pending。
+public func reserveDialogSerial(): UInt32 {
+    match (g_lwpWindow) {
+        case Some(w) => w.nextDialogSerial()
+        case None => 0
+    }
+}
+
 /// 告知壳"文本输入开始/结束"（壳据此显示/隐藏软键盘、attach/detach 输入法）。
 public func lwpImeEnable(enabled: Bool, inputType!: UInt32 = 0, enterKey!: UInt32 = 6): Bool {
     match (g_lwpWindow) {

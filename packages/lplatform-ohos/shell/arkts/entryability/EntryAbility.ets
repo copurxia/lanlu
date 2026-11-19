@@ -86,6 +86,8 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<boolean>('lanluProbeSnap', v !== undefined && v.toString() === '1');
       const vR = p2['lanlu.env.LANLU_PROBE_SHELL_RESIZE'];
       AppStorage.setOrCreate<boolean>('lanluProbeShellResize', vR !== undefined && vR.toString() === '1');
+      const vIR = p2['lanlu.env.LANLU_PROBE_IDLE_RESUME'];
+      AppStorage.setOrCreate<boolean>('lanluProbeIdleResume', vIR !== undefined && vIR.toString() === '1');
       const vN = p2['lanlu.env.LANLU_SHELL_NO_VSYNC'];
       AppStorage.setOrCreate<boolean>('lanluNoVsync', vN !== undefined && vN.toString() === '1');
       // 关窗链路探针：模拟"系统关闭钮"调用 lwpSendCloseRequest（与 windowWillClose 同一条路径），

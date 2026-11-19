@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 从 client-next 本体构建 OHOS HAP（src 在构建时复制到 build/ohos，非 fork）。
+# 从 client-next 本体构建 OHOS HAP（src 在构建时复制到本包 target/<app>/，非 fork）。
 # 依赖：
 #   - cjv 工具链 sts-1.2.0-linux-x64-ohos + stdx 组件（cjv component add stdx --toolchain sts-1.2.0-linux-x64-ohos）
 #   - packages/lplatform-ohos/deps/* 的 OHOS shim 与 ohos-stubs 预编译库
@@ -32,7 +32,7 @@ NATIVE=$OHOS_NATIVE_SDK
 SYSROOT=$OHOS_SYSROOT
 # 预编译材料（ohos-stubs、sdl3 prefix）：尚未迁入仓库，M0-7 收尾时改为 lpack-ohos 配置项
 RES=${CN_OHOS_RES:-/workspace/lanlu/.research-ohos}
-BUILD=${CN_OHOS_BUILD:-$CN/build/ohos}
+BUILD=${CN_OHOS_BUILD:-$LPACK/target/$APP}
 CJV_TOOLCHAINS=${CJV_TOOLCHAINS:-/workspace/.cjv/toolchains}
 OH=${CJV_OHOS_TOOLCHAIN:-$CJV_TOOLCHAINS/sts-1.2.0-linux-x64-ohos}
 BASE=${CJV_HOST_TOOLCHAIN:-$CJV_TOOLCHAINS/sts-1.2.0}

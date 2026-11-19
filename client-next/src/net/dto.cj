@@ -367,7 +367,9 @@ public class SearchPage {
 
 public func parseSearchPage(body: String): SearchPage {
     let res = SearchPage()
+    // G3：rows 是首页高频路径；服务端 pageSize 上限 200，常规页 20~48，预 reserve 64。
     let items = ArrayList<SearchItem>()
+    items.reserve(64)
     let r = readerOf(body)
     while (let Some(tok) <- r.peek()) {
         match (tok) {
@@ -405,7 +407,9 @@ public class CategoryItem {
 }
 
 public func parseCategoryList(body: String): ArrayList<CategoryItem> {
+    // G3：分类数量通常 < 100，预 reserve 避免 parse 期间反复扩容拷贝。
     let list = ArrayList<CategoryItem>()
+    list.reserve(64)
     let env = parseEnvelope(body)
     if (env.dataRaw.size == 0) {
         return list
@@ -662,6 +666,11 @@ public func parseArchiveDownloadParts(body: String): ArrayList<ArchiveDownloadPa
 // /api/tags/translations 的 data.map：canonical tag -> translated text。
 public func parseTagTranslationMap(body: String): HashMap<String, String> {
     let out = HashMap<String, String>()
+    // G3：标签翻译响应 ~1.4MB（数千条），预留桶避免 parse 期间反复 rehash；
+    // 小响应不值得预分配，按响应体大小门控。
+    if (body.size > 65536) {
+        out.reserve(4096)
+    }
     let raw = unwrapDataRaw(body)
     if (raw.size == 0) {
         return out
@@ -812,7 +821,9 @@ private func extractPagesRaw(dataRaw: String): String {
 }
 
 private func parsePageArray(raw: String): ArrayList<PageInfo> {
+    // G3：阅读页数量常见几十~几百，预 reserve 64（不足时仍会扩容）。
     let list = ArrayList<PageInfo>()
+    list.reserve(64)
     if (raw.size == 0) {
         return list
     }

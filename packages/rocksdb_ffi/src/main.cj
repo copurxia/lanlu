@@ -305,7 +305,16 @@ public class RocksDb {
         this.writeOptions = writeOptions
     }
 
-    public static func openBalanced(path: String, kvMemoryMb: Int32): (Bool, Option<RocksDb>, String) {
+    /// 打开一个 RocksDB 实例。
+    ///
+    /// `blockCacheMb`：本实例 block cache 容量（MB）。G7：分实例分档（settings DB 小、
+    /// cache/objects DB 中），避免同一进程多个实例各自常驻 64MB 上限。命名参数、默认 0
+    /// 表示**沿用历史默认 64MB**，因此既有调用方（openLowMemory 及测试）行为不变。
+    public static func openBalanced(
+        path: String,
+        kvMemoryMb: Int32,
+        blockCacheMb!: Int32 = 0
+    ): (Bool, Option<RocksDb>, String) {
         let normalizedKvMemoryMb = normalizeKvMemoryMb(kvMemoryMb)
         let writeBufferSizeBytes = mbToBytes(normalizedKvMemoryMb)
         let dbWriteBufferSizeBytes = writeBufferSizeBytes * dbWriteBufferMultiplier
@@ -320,7 +329,7 @@ public class RocksDb {
             return (false, None, "rocksdb_block_based_options_create failed")
         }
 
-        let blockCache = unsafe { rocksdb_cache_create_lru(blockCacheSizeBytes) }
+        let blockCache = unsafe { rocksdb_cache_create_lru(blockCacheBytesFor(blockCacheMb)) }
         if (blockCache.isNull()) {
             unsafe {
                 rocksdb_block_based_options_destroy(tableOptions)
@@ -461,8 +470,26 @@ public class RocksDb {
         return (true, Some(opened), "")
     }
 
-    public static func openLowMemory(path: String): (Bool, Option<RocksDb>, String) {
-        return openBalanced(path, defaultKvMemoryMb)
+    /// 低内存默认值打开（kvMemoryMb=16）。`blockCacheMb` 语义同 openBalanced：
+    /// 默认 0 = 历史默认 64MB；显式传入则按实例分档。
+    public static func openLowMemory(path: String, blockCacheMb!: Int32 = 0): (Bool, Option<RocksDb>, String) {
+        return openBalanced(path, defaultKvMemoryMb, blockCacheMb: blockCacheMb)
+    }
+
+    // block cache 容量归一：<=0 用历史默认 64MB；有效值夹到 [4MB, 1GB]（与 kvMemoryMb
+    // 同样的防呆策略，避免误传 0/负数/超大值把实例打爆或让 cache 形同虚设）。
+    private static func blockCacheBytesFor(blockCacheMb: Int32): UIntNative {
+        var mb = blockCacheMb
+        if (mb <= 0) {
+            mb = Int32(blockCacheSizeBytes / (1024 * 1024))
+        }
+        if (mb < 4) {
+            mb = 4
+        }
+        if (mb > 1024) {
+            mb = 1024
+        }
+        return mbToBytes(mb)
     }
 
     private static func normalizeKvMemoryMb(kvMemoryMb: Int32): Int32 {

@@ -3,12 +3,10 @@ package lwindow
 // 窗口/显示相关的平台策略（对标 Chromium ozone 的 PlatformWindow 初始化决策）。
 //
 // 业务层只拿到“最终几何 + 是否已就绪”，不关心是哪个平台、用哪个渲染后端。
-// 目前收敛：窗口初始几何与缩放、渲染驱动优先级、桌面集成（libdecor 插件）、系统字体。
+// 目前收敛：窗口初始几何与缩放、桌面集成（libdecor 插件）、系统字体。（渲染驱动 hint 随 P5 删除 SDL 壳一并移除：SDL 渲染器已无运行时初始化路径。）
 
-import std.env.{getVariable, setVariable}
-import std.fs.{canonicalize, exists, Path}
-import lgui.displays.{DisplayInfo, primaryDisplayInfo}
-import lgui.system.{SdlHint, SdlHints}
+import std.fs.{exists, Path}
+import lwindow.displays.{DisplayInfo, primaryDisplayInfo}
 
 // 窗口初始几何（逻辑尺寸 + 缩放因子）。
 public struct WindowGeometry {
@@ -64,39 +62,12 @@ public func preferredWindowGeometry(defaultW: Int32, defaultH: Int32, pinScale!:
     }
 }
 
-// 渲染驱动优先级：D3D/Metal（Windows/macOS 由 SDL 内置顺序保证）> vulkan > opengl > software。
-// SDL3 内置把 opengl 排在 vulkan 前，故 Linux 桌面会话显式指定回退列表；用户显式设置永远优先。
-public func prepareRendererHints(): Unit {
-    let session = getVariable("XDG_SESSION_TYPE")
-    let isDesktopLinux = session == Some("wayland") || session == Some("x11")
-    if (!isDesktopLinux) {
-        return
-    }
-    if (SdlHints.get(SdlHint.CustomHint("SDL_RENDER_DRIVER")).isSome()) {
-        return
-    }
-    let driver = if (getVariable("LANLU_SOFTWARE_RENDER") == Some("1")) {
-        "software"
-    } else {
-        "vulkan,opengl"
-    }
-    SdlHints.set(SdlHint.CustomHint("SDL_RENDER_DRIVER"), driver)
-}
-
-// 桌面集成：无边框窗口在 Wayland 下靠 libdecor 插件绘制装饰；
-// 以可执行文件位置推导随仓库插件目录（不依赖启动目录），插件缺失则回退系统插件。
+// 桌面集成：历史遗留 —— 曾从仓库内 packages/cangjie-gui/sdl/libdecor-plugins 注入
+// LIBDECOR_PLUGIN_DIR。P6 吸收后该目录已删除（exists 分支永远不成立），且桌面壳现在走
+// lplatform-wayland 自己的 xdg-shell 路径、不链接 libdecor。保留空实现供调用方兼容，
+// 回退系统插件的行为不变。
 public func prepareDesktopIntegration(): Unit {
-    match (LWINDOW_PLATFORM) {
-        case LWindowPlatform.Ohos => return
-        case LWindowPlatform.Desktop => ()
-    }
-    try {
-        let exeDir = canonicalize(Path("/proc/self/exe")).parent.toString()
-        let pluginDir = "${exeDir}/../../../../packages/cangjie-gui/sdl/libdecor-plugins"
-        if (exists(Path("${pluginDir}/libdecor-cairo.so"))) {
-            setVariable("LIBDECOR_PLUGIN_DIR", pluginDir)
-        }
-    } catch (_: Exception) {}
+    ()
 }
 
 // 系统无 fontconfig 平台（OHOS）的默认无衬线字体；找不到返回 None，由 cui 走字体库回退。

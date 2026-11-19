@@ -169,20 +169,27 @@ public class LwpWindowClient {
         clipboardSerial
     }
 
+    /// 预留一个对话框 serial（不发送协议请求）。用于壳/协议暂不支持的 kind：
+    /// 宿主拿到号后应尽快 `resolveDialogBySerial(serial, 取消)`，避免调用方永久 pending。
+    public func nextDialogSerial(): UInt32 {
+        dialogSerial = dialogSerial + 1
+        dialogSerial
+    }
+
     /// 打开文件选择器。返回 serial。
     public func dialogOpenFile(filters!: String = ""): UInt32 {
-        dialogSerial = dialogSerial + 1
+        let serial = nextDialogSerial()
         let _ = ch.send(LWP_REQUEST, LWP_IFACE_LW_DIALOG, LWP_LW_DIALOG_OPEN_FILE_OPCODE,
-            encodeLwDialogOpenFile(dialogSerial, filters))
-        dialogSerial
+            encodeLwDialogOpenFile(serial, filters))
+        serial
     }
 
     /// 保存对话框。返回 serial。
     public func dialogSaveFile(suggested: String): UInt32 {
-        dialogSerial = dialogSerial + 1
+        let serial = nextDialogSerial()
         let _ = ch.send(LWP_REQUEST, LWP_IFACE_LW_DIALOG, LWP_LW_DIALOG_SAVE_FILE_OPCODE,
-            encodeLwDialogSaveFile(dialogSerial, suggested))
-        dialogSerial
+            encodeLwDialogSaveFile(serial, suggested))
+        serial
     }
 
     /// 请壳抓一帧到指定路径（`lw_test.capture`，壳用 componentSnapshot）。

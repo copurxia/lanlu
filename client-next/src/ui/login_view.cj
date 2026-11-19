@@ -259,7 +259,10 @@ func passwordFormPanel(model: AppModel, p: ServerProfile): Unit {
     // 原型节奏：label 紧贴自己的输入框（6px），组与组之间 16px，按钮上沿再留 6px。
     VStack {
         Label(model.t("login.username")).fontSize(12.fp).muted().tight()
-        TextField(user, key: "login-user-${p.id}", leadingIcon: IconName.User).width(320.vp)
+        TextField(user, key: "login-user-${p.id}", leadingIcon: IconName.User,
+            onSubmit: {=> model.loginSelected(user.value.trimAscii(), pass.value)})
+            .width(320.vp)
+            .autofocus()
     }.spacing(6.vp)
     VStack {
         Label(model.t("login.password")).fontSize(12.fp).muted().tight()
@@ -267,7 +270,8 @@ func passwordFormPanel(model: AppModel, p: ServerProfile): Unit {
         // 同 key 的 rememberState 保留已输入内容）。
         TextField(pass, key: "login-pass-${p.id}", masked: !showPass.value, leadingIcon: IconName.Lock,
             trailingIcon: Some(if (showPass.value) { IconName.EyeOff } else { IconName.Eye }),
-            onTrailingClick: {=> showPass.value = !showPass.value }).width(320.vp)
+            onTrailingClick: {=> showPass.value = !showPass.value },
+            onSubmit: {=> model.loginSelected(user.value.trimAscii(), pass.value)}).width(320.vp)
     }.spacing(6.vp)
     VStack {
         busyPrimaryButton(model, model.t("login.signIn"), {=> model.loginSelected(user.value.trimAscii(), pass.value) })
@@ -282,11 +286,16 @@ func totpFormPanel(model: AppModel): Unit {
         if (model.isLight()) { Color.rgba(199, 138, 30, 76) } else { Color.rgba(232, 176, 75, 76) })
     VStack {
         Label(model.t("login.code")).fontSize(12.fp).muted().tight()
-        TextField(code, key: "login-totp", leadingIcon: IconName.Lock).width(320.vp)
+        TextField(code, key: "login-totp", leadingIcon: IconName.Lock,
+            onSubmit: {=> model.verifyTotp(code.value.trimAscii(), recovery.value.trimAscii())})
+            .width(320.vp)
+            .autofocus()
     }.spacing(6.vp)
     VStack {
         Label(model.t("login.recovery")).fontSize(12.fp).muted().tight()
-        TextField(recovery, key: "login-recovery", leadingIcon: IconName.Pencil).width(320.vp)
+        TextField(recovery, key: "login-recovery", leadingIcon: IconName.Pencil,
+            onSubmit: {=> model.verifyTotp(code.value.trimAscii(), recovery.value.trimAscii())})
+            .width(320.vp)
     }.spacing(6.vp)
     VStack {
         busyPrimaryButton(model, model.t("login.verify"),
@@ -322,9 +331,13 @@ func serverEditModal(model: AppModel): Unit {
         VStack {
             Label(if (eid.size > 0) { model.t("login.editServer") } else { model.t("login.addServer") }).fontSize(15.fp)
             Label(model.t("login.serverNameHint")).fontSize(12.fp).muted()
-            TextField(name, key: "srv-name", leadingIcon: IconName.Pencil).width(320.vp)
+            TextField(name, key: "srv-name", leadingIcon: IconName.Pencil,
+                onSubmit: {=> model.saveServer(name.value.trimAscii(), url.value)})
+                .width(320.vp)
+                .autofocus()
             Label(model.t("login.serverAddress")).fontSize(12.fp).muted()
-            TextField(url, key: "srv-url", leadingIcon: IconName.Server).width(320.vp)
+            TextField(url, key: "srv-url", leadingIcon: IconName.Server,
+                onSubmit: {=> model.saveServer(name.value.trimAscii(), url.value)}).width(320.vp)
             HStack {
                 Button(model.t("login.testConnection"), {=> model.testConnection(url.value) })
                     .key("server.test").style(ghostStyleOf(model))

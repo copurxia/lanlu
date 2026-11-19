@@ -18,8 +18,15 @@ use wayland_client::protocol::{
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::wl_registry;
 use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+    wp_fractional_scale_v1::{self, WpFractionalScaleV1},
+};
 use wayland_protocols::wp::text_input::zv3::client::{
     zwp_text_input_manager_v3::ZwpTextInputManagerV3, zwp_text_input_v3::ZwpTextInputV3,
+};
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
 };
 use xkbcommon_dl as xkb;
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
@@ -49,6 +56,12 @@ pub struct Shell {
     pub text_input_manager: Option<ZwpTextInputManagerV3>,
     pub seat: Option<wl_seat::WlSeat>,
     pub wm_base: xdg_wm_base::XdgWmBase,
+    /// viewporter 管理器：为表面建 wp_viewport（destination = 逻辑尺寸），配合
+    /// fractional-scale 实现分数缩放下的物理分辨率渲染。合成器不支持时为 None。
+    pub viewporter: Option<WpViewporter>,
+    /// fractional-scale 管理器：合成器建议的缩放（preferred_scale 事件，1/120 定点）。
+    /// 没有它时只能按 wl_output 的整数 scale 渲染（分数缩放屏上会被合成器放大，整帧发糊）。
+    pub fractional_manager: Option<WpFractionalScaleManagerV1>,
 }
 
 impl Shell {
@@ -86,15 +99,24 @@ impl Shell {
         let text_input_manager = globals
             .bind::<ZwpTextInputManagerV3, _, _>(&qh, 1..=1, ())
             .ok();
+        // HiDPI：viewporter + fractional-scale 都是可选全局 —— 不支持时退回
+        // 整数 set_buffer_scale 路径（分数缩放屏上仍是 1x 缓冲，被合成器放大）。
+        let viewporter = globals
+            .bind::<WpViewporter, _, _>(&qh, 1..=1, ())
+            .ok();
+        let fractional_manager = globals
+            .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
+            .ok();
         Ok((
             Shell { connection, compositor, shm, seat, wm_base, output, outputs, data_manager,
-                text_input_manager },
+                text_input_manager, viewporter, fractional_manager },
             event_queue,
         ))
     }
 
     /// 建一个 xdg 窗口：`wl_surface` + `xdg_surface` + `xdg_toplevel`，并 commit 触发生效。
-    /// 返回三个对象；调用方负责在每个 configure 后 ack 并回 LWP 的 `window.configure`。
+    /// 合成器支持时一并建 wp_viewport + wp_fractional_scale_v1（分数缩放渲染）。
+    /// 返回五个对象；调用方负责在每个 configure 后 ack 并回 LWP 的 `window.configure`。
     pub fn create_window(
         &self,
         qh: &wayland_client::QueueHandle<State>,
@@ -104,15 +126,27 @@ impl Shell {
         wl_surface::WlSurface,
         xdg_surface::XdgSurface,
         xdg_toplevel::XdgToplevel,
+        Option<WpViewport>,
+        Option<WpFractionalScaleV1>,
     ) {
         let surface = self.compositor.create_surface(qh, ());
+        // viewport/fractional 必须在首次 commit **之前**建好：destination/preferred_scale
+        // 都是 double-buffered 状态，首个带缓冲的 commit 就要带上正确的映射。
+        let viewport = self
+            .viewporter
+            .as_ref()
+            .map(|v| v.get_viewport(&surface, qh, ()));
+        let fractional = self
+            .fractional_manager
+            .as_ref()
+            .map(|m| m.get_fractional_scale(&surface, qh, ()));
         let xdg_surface = self.wm_base.get_xdg_surface(&surface, qh, ());
         let toplevel = xdg_surface.get_toplevel(qh, ());
         toplevel.set_title(title.to_string());
         toplevel.set_app_id(app_id.to_string());
         // 首次 commit：合成器才会下发 configure（Wayland 的既定流程）
         surface.commit();
-        (surface, xdg_surface, toplevel)
+        (surface, xdg_surface, toplevel, viewport, fractional)
     }
 
     /// 把引擎的共享缓冲（fd）挂到 wl_surface 上：`wl_shm` 池 + buffer + attach + damage + commit。
@@ -228,6 +262,14 @@ pub struct State {
     pub mods_locked: u32,
     /// 已 attach 的缓冲（按 fd 缓存，复用 pool/buffer，避免每帧新建导致泄漏）
     pub shm_buffers: std::collections::HashMap<i32, (wl_buffer::WlBuffer, u32, u32)>,
+    /// 本表面的 wp_viewport（destination = 逻辑尺寸）；合成器无 viewporter 时为 None
+    pub viewport: Option<WpViewport>,
+    /// 本表面的 wp_fractional_scale_v1；preferred_scale 事件经它到达
+    pub fractional: Option<WpFractionalScaleV1>,
+    /// 合成器建议的分数缩放（preferred_scale / 120，如 1.25）；0 = 还没收到
+    pub preferred_scale: f32,
+    /// 最近一次通知引擎的 configure 逻辑尺寸（preferred_scale 单独到达时重发物理尺寸用）
+    pub last_logical: Option<(u32, u32)>,
 }
 
 impl State {
@@ -295,6 +337,24 @@ impl State {
             mods_depressed: 0,
             mods_latched: 0,
             mods_locked: 0,
+            viewport: None,
+            fractional: None,
+            preferred_scale: 0.0,
+            last_logical: None,
+        }
+    }
+
+    /// 生效缩放：优先 fractional-scale 协议的 preferred_scale（含分数，如 1.25），
+    /// 没收到（或不支持该协议）时退回 wl_output 的整数 scale。
+    /// 兜底 1.0：preferred_scale 未到（0）或 output_scale 未初始化（测试里
+    /// `..Default::default()` 给 0）都不能让坐标/尺寸乘成 0。
+    pub fn effective_scale(&self) -> f32 {
+        if self.preferred_scale > 0.0 {
+            self.preferred_scale
+        } else if self.output_scale > 0 {
+            self.output_scale as f32
+        } else {
+            1.0
         }
     }
 
@@ -400,24 +460,79 @@ impl State {
 
     /// configure 齐了（serial + 尺寸）就通知引擎并 ack。
     /// 通知内容：`lw_surface.changed(width, height)` —— 引擎据此重配 swapchain。
+    ///
+    /// HiDPI：Wayland 的 configure 是**逻辑**坐标，引擎约定 surface.changed 是**物理**
+    /// 像素（与 OHOS 壳同约定），这里乘生效缩放换算。之前直接把逻辑尺寸当物理发，
+    /// 交换链只配到 1x 大小 —— 高分/分数缩放屏上合成器把 1x 缓冲放大上屏，整帧发糊。
+    /// fractional 路径：wp_viewport.set_destination(逻辑尺寸)，buffer 用物理尺寸
+    /// （合成器把 buffer 缩放到 destination，恰好 1 buffer px = 1 物理 px）；
+    /// 此时 set_buffer_scale 必须保持 1（协议禁止与 viewport destination 并用）。
+    /// 仅整数缩放路径（无 fractional 协议）：buffer_scale = wl_output scale，
+    /// buffer = 逻辑 × scale，合成器 1:1 贴图。
     pub fn flush_configure(&mut self) {
         let (Some(serial), Some((w, h))) = (self.pending_configure_serial, self.pending) else {
             return;
         };
+        let scale = self.effective_scale();
+        let pw = (((w as f32) * scale).round() as u32).max(1);
+        let ph = (((h as f32) * scale).round() as u32).max(1);
         if let Some(ch) = &self.channel {
             if let Ok(c) = ch.lock() {
                 let _ = c.send(LWP_REQUEST, iface::SURFACE, op::SURFACE_CHANGED, 0,
-                    &protocol::surface_changed(w, h));
+                    &protocol::surface_changed(pw, ph));
             }
         }
-        // DPI：告诉合成器这块缓冲按 scale 倍逻辑像素渲染
+        self.last_logical = Some((w, h));
         if let Some(surf) = &self.surface {
-            surf.set_buffer_scale(self.output_scale);
+            // DPI：告诉合成器这块缓冲按 scale 倍逻辑像素渲染（仅整数回退路径）。
+            // set_buffer_scale(0) 是协议错误，兜底至少 1。
+            let bs = if self.viewport.is_some() {
+                1
+            } else {
+                (self.output_scale.max(1)) as i32
+            };
+            surf.set_buffer_scale(bs);
+        }
+        if let Some(vp) = &self.viewport {
+            vp.set_destination(w as i32, h as i32);
         }
         if let Some(xdg) = &self.xdg_surface {
             xdg.ack_configure(serial);
         }
         self.pending_configure_serial = None;
+    }
+
+    /// preferred_scale 到达且没有待处理的 configure 时，按新缩放重算物理尺寸重发
+    /// （跨屏拖动/改系统缩放时合成器可能只发 preferred_scale 不发 configure）。
+    pub fn resync_after_scale_change(&mut self) {
+        let Some((w, h)) = self.last_logical else { return };
+        if self.pending_configure_serial.is_some() {
+            return; // configure 马上会走 flush_configure，避免双发
+        }
+        let scale = self.effective_scale();
+        let pw = (((w as f32) * scale).round() as u32).max(1);
+        let ph = (((h as f32) * scale).round() as u32).max(1);
+        if let Some(ch) = &self.channel {
+            if let Ok(c) = ch.lock() {
+                let _ = c.send(LWP_REQUEST, iface::SURFACE, op::SURFACE_CHANGED, 0,
+                    &protocol::surface_changed(pw, ph));
+            }
+        }
+        if let Some(surf) = &self.surface {
+            // 整数回退路径没有 viewport destination，缩放变化必须同步 buffer_scale：
+            // 只发 surface.changed 会让引擎按新物理尺寸提交、合成器仍按旧比例解释
+            // （xdg-shell 不保证缩放变化后一定来 configure，不能等 flush_configure）。
+            // 分数路径保持 1（协议禁止与 viewport destination 并用）。
+            let bs = if self.viewport.is_some() {
+                1
+            } else {
+                (self.output_scale.max(1)) as i32
+            };
+            surf.set_buffer_scale(bs);
+        }
+        if let Some(vp) = &self.viewport {
+            vp.set_destination(w as i32, h as i32);
+        }
     }
 
     /// 壳 -> 引擎的界面事件（窗口拖放等）。
@@ -453,8 +568,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
         use wl_pointer::Event as E;
         match event {
             E::Motion { surface_x, surface_y, .. } => {
+                // 引擎约定 lw_input 的指针坐标是**物理像素**（引擎按 reportedScale 除回去，
+                // 见 lwindow/backend_lwp.cj）；Wayland 的 surface 坐标是逻辑值，这里乘缩放。
+                let sc = state.effective_scale();
                 state.send_input(op::INPUT_POINTER_MOTION, &protocol::pointer_motion(
-                    surface_x as f32, surface_y as f32));
+                    surface_x as f32 * sc, surface_y as f32 * sc));
             }
             E::Button { button, state: bs, serial, .. } => {
                 state.last_input_serial = serial;
@@ -928,19 +1046,21 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for State {
                 }
                 state.selection_offer = id;
             }
-            // 拖放：进入/移动/离开/落下
+            // 拖放：进入/移动/离开/落下（坐标乘缩放换算成物理像素，与指针事件同约定）
             E::Enter { x, y, id, .. } => {
+                let sc = state.effective_scale();
                 state.dnd_offer = id;
-                state.dnd_x = x as u32;
-                state.dnd_y = y as u32;
+                state.dnd_x = (x as f32 * sc) as u32;
+                state.dnd_y = (y as f32 * sc) as u32;
                 state.send_request_event(iface::WINDOW, op::WINDOW_DRAG_ENTER,
-                    &protocol::drag_enter(x as u32, y as u32, ""));
+                    &protocol::drag_enter((x as f32 * sc) as u32, (y as f32 * sc) as u32, ""));
             }
             E::Motion { x, y, .. } => {
-                state.dnd_x = x as u32;
-                state.dnd_y = y as u32;
+                let sc = state.effective_scale();
+                state.dnd_x = (x as f32 * sc) as u32;
+                state.dnd_y = (y as f32 * sc) as u32;
                 state.send_request_event(iface::WINDOW, op::WINDOW_DRAG_MOTION,
-                    &protocol::drag_motion(x as u32, y as u32));
+                    &protocol::drag_motion((x as f32 * sc) as u32, (y as f32 * sc) as u32));
             }
             E::Leave => {
                 state.dnd_offer = None;
@@ -1032,10 +1152,73 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
                 // 表面就在这个 output 上：立刻更新
                 if state.surface_output == Some(id) {
                     state.output_scale = factor;
-                    state.flush_configure();
+                    // preferred_scale 未到位时整数 scale 是唯一缩放来源，变化要重发
+                    if state.preferred_scale <= 0.0 {
+                        state.resync_after_scale_change();
+                    }
                 }
             }
         }
+    }
+}
+
+/// fractional-scale：合成器建议的缩放（1/120 定点，如 150 -> 1.25）。
+/// 支持该协议的合成器（GNOME 分数缩放 / KDE / sway）以此为权威 —— 之前不绑它，
+/// 分数缩放屏上 output_scale 恒为整数 1，引擎按 1x 渲染被合成器放大（整帧发糊）。
+impl Dispatch<WpFractionalScaleV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpFractionalScaleV1,
+        event: <WpFractionalScaleV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            let new = scale as f32 / 120.0;
+            if (state.preferred_scale - new).abs() > f32::EPSILON {
+                state.preferred_scale = new;
+                state.resync_after_scale_change();
+            }
+        }
+    }
+}
+
+/// wp_viewport：无事件（destination 由 flush_configure / resync 设置）。
+impl Dispatch<WpViewport, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpViewport,
+        _: <WpViewport as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+/// 两个管理器接口无事件，但 `globals.bind` 要求 State 实现 Dispatch。
+impl Dispatch<WpViewporter, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpViewporter,
+        _: <WpViewporter as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WpFractionalScaleManagerV1, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &WpFractionalScaleManagerV1,
+        _: <WpFractionalScaleManagerV1 as wayland_client::Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
     }
 }
 
@@ -1297,18 +1480,28 @@ pub fn run(channel: Channel) -> Result<(), String> {
                 // window.create：建 xdg 窗口，回 created + configure（计划 §7）
                 (iface::WINDOW, op::WINDOW_CREATE_REQ) => {
                     let qh = queue.handle();
-                    let (surf, xdg, tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+                    let (surf, xdg, tl, vp, fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
                     state.surface = Some(surf);
                     state.xdg_surface = Some(xdg);
                     state.toplevel = Some(tl);
+                    state.viewport = vp;
+                    state.fractional = fs;
+                    // HiDPI：建窗时上报的 scale 决定引擎的整个逻辑/物理换算，必须等到
+                    // preferred_scale 到达再报（一次 roundtrip 收齐；合成器不支持
+                    // fractional 协议时退回 wl_output 整数 scale）。没有这一步，
+                    // 分数缩放屏上首帧按 1x 渲染，窗口尺寸/文字全部错位。
+                    let _ = queue.roundtrip(&mut state);
+                    let scale = state.effective_scale();
                     if let Ok(c) = shared.lock() {
-                        let scale = state.output_scale as f32;
                         let _ = c.send(LWP_REQUEST, iface::WINDOW, op::WINDOW_CREATED, 0,
                             &protocol::window_created(1, scale, false));
+                        // 引擎约定 configure 尺寸是物理像素（窗口策略按 scale 反推逻辑尺寸）
                         let _ = c.send(LWP_REQUEST, iface::WINDOW, op::WINDOW_CONFIGURE, 0,
-                            &protocol::window_configure(iface_w, iface_h, 0));
+                            &protocol::window_configure(
+                                ((iface_w as f32) * scale).round() as u32,
+                                ((iface_h as f32) * scale).round() as u32, 0));
                     }
-                    println!("[wayland] window.create -> xdg toplevel {iface_w}x{iface_h}");
+                    println!("[wayland] window.create -> xdg toplevel {iface_w}x{iface_h} logical @ scale {scale}");
                 }
                 // surface.attach：引擎提交一帧。buffer = 进程内 fd（同进程），见 §7.3.1
                 (iface::SURFACE, op::SURFACE_ATTACH_REQ) if body.len() >= 24 => {

@@ -132,30 +132,43 @@ foreign func rocksdb_options_create(): CPointer<rocksdb_options_t>
 
 foreign func rocksdb_options_destroy(options: CPointer<rocksdb_options_t>): Unit
 
+@FastNative
 foreign func rocksdb_options_set_create_if_missing(options: CPointer<rocksdb_options_t>, value: UInt8): Unit
 
+@FastNative
 foreign func rocksdb_options_set_paranoid_checks(options: CPointer<rocksdb_options_t>, value: UInt8): Unit
 
+@FastNative
 foreign func rocksdb_options_set_write_buffer_size(options: CPointer<rocksdb_options_t>, size: UIntNative): Unit
 
+@FastNative
 foreign func rocksdb_options_set_db_write_buffer_size(options: CPointer<rocksdb_options_t>, size: UIntNative): Unit
 
+@FastNative
 foreign func rocksdb_options_set_max_open_files(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 
+@FastNative
 foreign func rocksdb_options_set_max_write_buffer_number(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 
+@FastNative
 foreign func rocksdb_options_set_min_write_buffer_number_to_merge(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 
+@FastNative
 foreign func rocksdb_options_set_max_background_jobs(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 
+@FastNative
 foreign func rocksdb_options_set_keep_log_file_num(options: CPointer<rocksdb_options_t>, value: UIntNative): Unit
 
+@FastNative
 foreign func rocksdb_options_set_use_fsync(options: CPointer<rocksdb_options_t>, value: UInt8): Unit
 
+@FastNative
 foreign func rocksdb_options_set_allow_mmap_reads(options: CPointer<rocksdb_options_t>, value: UInt8): Unit
 
+@FastNative
 foreign func rocksdb_options_set_bytes_per_sync(options: CPointer<rocksdb_options_t>, value: UInt64): Unit
 
+@FastNative
 foreign func rocksdb_options_set_compression(options: CPointer<rocksdb_options_t>, value: Int32): Unit
 
 foreign func rocksdb_block_based_options_create(): CPointer<rocksdb_block_based_table_options_t>
@@ -383,6 +396,7 @@ foreign func llrocksdb_snapshot_get_sequence_number(snapshot: CPointer<rocksdb_s
 
 foreign func rocksdb_iter_destroy(iter: CPointer<rocksdb_iterator_t>): Unit
 
+@FastNative
 foreign func rocksdb_iter_valid(iter: CPointer<rocksdb_iterator_t>): UInt8
 
 foreign func rocksdb_iter_seek_to_first(iter: CPointer<rocksdb_iterator_t>): Unit
@@ -397,11 +411,13 @@ foreign func rocksdb_iter_next(iter: CPointer<rocksdb_iterator_t>): Unit
 
 foreign func rocksdb_iter_prev(iter: CPointer<rocksdb_iterator_t>): Unit
 
+@FastNative
 foreign func rocksdb_iter_key(
     iter: CPointer<rocksdb_iterator_t>,
     klen: CPointer<UIntNative>
 ): CPointer<UInt8>
 
+@FastNative
 foreign func rocksdb_iter_value(
     iter: CPointer<rocksdb_iterator_t>,
     vlen: CPointer<UIntNative>
@@ -578,4 +594,5 @@ foreign func rocksdb_approximate_sizes_cf(db: CPointer<rocksdb_t>,
 
 foreign func rocksdb_get_latest_sequence_number(db: CPointer<rocksdb_t>): UInt64
 
+@FastNative
 foreign func rocksdb_free(ptr: CPointer<Unit>): Unit

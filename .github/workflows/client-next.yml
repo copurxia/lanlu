@@ -286,6 +286,21 @@ jobs:
       - name: Show compiler version
         run: cjc -v
 
+      - name: Build lgpu native (render backend)
+        working-directory: packages/lgpu/native
+        run: |
+          cargo build --release
+          test -f target/release/liblgpu_native.a
+
+      # 显式装软件 Vulkan 实现（lavapipe），否则下面的离屏回归会因无适配器而静默 skip
+      - name: Install Vulkan software rasterizer (lavapipe)
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
+      # 真实 GPU 离屏渲染回归：文字 quad 的变换旁路语义（有 lavapipe 即真实执行）
+      - name: lgpu native tests (offscreen render)
+        working-directory: packages/lgpu/native
+        run: cargo test --lib --test tex_transform_render -- --nocapture
+
       - name: Build client-next
         working-directory: client-next
         run: cjpm build -V
@@ -301,6 +316,7 @@ jobs:
         run: |
           export LWP_LIB_DIR="$PWD/packages/lwp/lib"
           export LGUI_SDL_LIB_DIR="$PWD/packages/cangjie-gui/sdl/.sdl3"
+          export LGPU_LIB_DIR="$PWD/packages/lgpu/native/target/release"
           bash packages/lwp/native/build.sh
           (cd packages/lwindow && cjpm test --no-color)
 

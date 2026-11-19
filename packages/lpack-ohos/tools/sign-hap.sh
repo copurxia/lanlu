@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
 # 用本机已有的调试签名材料给 HAP 签名，绕开 AGC "Provision number exceeds limit" 配额。
 #
 # 背景：devecocli 只有在工程里没有可用 signingConfig 时才去申请新 provision；
@@ -9,14 +8,12 @@
 # 约束：bundleName 必须与 profile 里的 bundle-name 一致——当前借用的是 CmakeHap 的
 # 调试材料，所以包名是 com.example.cmakehap。配额恢复后应改用产品包 com.lanlu.clientnext
 # 并重新生成 profile（届时直接跑 devecocli signature generate 即可）。
-# 原理：devecocli 只在“项目里没有可用 signingConfig”时才申请新 provision；把已有材料
-# 写进 build-profile.json5 后，hvigor 的 SignHap 直接使用它，不再消耗配额。
-# 约束：bundleName 必须与 profile 内的 bundle-name 一致（当前 com.example.cmakehap）。
 set -euo pipefail
 RES=/workspace/lanlu/.research-ohos
-CN=/workspace/lanlu/lanlu/client-next
+LPACK=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+BUILD=${CN_OHOS_BUILD:-$LPACK/target/${LPACK_APP:-lanlu}}
 CLT=$RES/tools/clt-7.0/command-line-tools
-BP="$CN/build/ohos/target/ohos/hap/build-profile.json5"
+BP="$BUILD/target/ohos/hap/build-profile.json5"
 export TMPDIR=/workspace/tmp
 export JAVA_HOME=${JAVA_HOME:-/workspace/horizon-ohos/.tooling/jdk17}
 export PATH=$JAVA_HOME/bin:/workspace/bin:$PATH
@@ -53,7 +50,7 @@ t=t.replace("signingConfigs: [],", block, 1)
 open(bp,"w").write(t)
 PY
 echo "签名配置已注入（复用本机 CmakeHap 材料）"
-cd "$CN/build/ohos/target/ohos/hap"
+cd "$BUILD/target/ohos/hap"
 set +e
 "$CLT/bin/hvigorw" --mode module -p module=entry@default -p product=default -p buildMode=debug assembleHap 2>&1 | tail -4
 set -e

@@ -278,7 +278,10 @@ public func initializeSettingsStore(root: String): Unit {
     if (!exists(Path(root))) {
         Directory.create(Path(root), recursive: true)
     }
-    match (RocksDb.openLowMemory(root)) {
+    // G7：设置库是小数据集（settings 单文档 + servers 对象），显式给 8MB block cache，
+    // 不再沿用 64MB 默认——与离线/缓存库分档后，进程内两实例的常驻上限从 128MB 降到 32MB。
+    // 桌面与 OHOS 同参：设置库读量极小，8MB 足够；桌面若需更大可后续按平台分档（记录为后续项）。
+    match (RocksDb.openLowMemory(root, blockCacheMb: 8)) {
         case (true, Some(db), _) =>
             let meta = requireSettingsColumnFamily(db, "meta")
             let objects = requireSettingsColumnFamily(db, "objects")

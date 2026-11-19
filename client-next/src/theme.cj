@@ -1,5 +1,6 @@
 package lanlu_client_next
 
+import std.env.getVariable
 import cui.{Color, Theme}
 import lanlu_client_next.app.*
 
@@ -71,6 +72,14 @@ public func lanluThemeLight(): Theme {
 }
 
 // 设置值 → 主题（"light" 之外的值一律按暗色处理，与 AppSettings.theme 默认值对齐）。
+/// 联调/截图钩子：LANLU_FORCE_THEME=light|dark 覆盖启动主题。
+public func forcedThemeMode(): ?String {
+    match (getVariable("LANLU_FORCE_THEME")) {
+        case Some(v) => if (v == "light" || v == "dark") { return v } else { return None }
+        case None => return None
+    }
+}
+
 public func lanluThemeFor(mode: String): Theme {
     if (mode == "light") {
         lanluThemeLight()

@@ -61,38 +61,33 @@ func titleBarDragRectsDropSlivers(): Unit {
 
 
 // ── 三键平台化（docs/lwindow-title-buttons-plan.md）───────────────────────
-// platformTitleButtonsWidth 的决策表：能力位未宣告 → 0（自绘回退）；
-// 宣告 + rect 到达 → 物理宽 / 密度；宣告 + rect 未到 → 文档默认 140vp + 8。
+// 决策表：平台不提供 → 0（自绘回退）；提供但 rect 未到 → 文档默认 148vp；
+// rect 已到 → 物理宽 / 密度。
 
 @Test
-func platformTitleButtonsWidthZeroWithoutCapability(): Unit {
-    // 宿主（无 LWP 通道）：能力位必然未宣告 → 业务层应自绘三键
-    @Expect(platformTitleButtonsWidth(), 0.0)
+func titleButtonsWidthFallbackToSelfDrawn(): Unit {
+    // 能力位未宣告（Wayland/宿主）→ 0，业务层自绘三键
+    @Expect(titleButtonsWidthFor(false, false, 0, 1.0), 0.0)
+    @Expect(titleButtonsWidthFor(false, true, 266, 1.9), 0.0)
 }
 
 @Test
-func platformTitleButtonsWidthFallbackUsesDocumentedDefault(): Unit {
-    // 能力位已宣告但 rect 未到时给文档默认值（140vp + 8 间距），
-    // 避免启动期闪现自绘三键再消失。
-    g_title_btn_visible = true
-    g_title_btn_width_px = 0
-    @Expect(platformTitleButtonsWidth(), 148.0)
-    g_title_btn_visible = false
-    g_title_btn_width_px = 0
+func titleButtonsWidthUsesDocumentedDefaultBeforeRect(): Unit {
+    // 平台提供三键但 rect 还没到：给 140vp + 8 间距，避免启动期闪一下自绘三键
+    // （rectArrived 默认 true 表示「已收到壳的矩形回执」，此场景必须显式传 false）
+    @Expect(titleButtonsWidthFor(true, false, 0, 1.9, rectArrived: false), 148.0)
+    @Expect(titleButtonsWidthFor(true, true, 0, 1.9, rectArrived: false), 148.0)
 }
 
 @Test
-func platformTitleButtonsWidthScalesReportedPixels(): Unit {
-    // 真机实测：266px / 1.9 密度 = 140vp（官方文档三键区 140x37vp）
-    g_title_btn_visible = true
-    g_title_btn_width_px = 266
-    let w = platformTitleButtonsWidth()
-    @Expect(w > 139.0 && w < 141.0, true)
-    // 壳应用配置后回报 256px → 134.7vp（避让随真实 rect 收紧）
-    g_title_btn_width_px = 256
-    let w2 = platformTitleButtonsWidth()
-    @Expect(w2 > 134.0 && w2 < 135.5, true)
-    g_title_btn_visible = false
-    g_title_btn_width_px = 0
+func titleButtonsWidthScalesReportedPixels(): Unit {
+    // 真机实测：266px @1.9 密度 = 140vp（官方文档三键区 140x37vp）
+    let w1 = titleButtonsWidthFor(true, true, 266, 1.9)
+    @Expect(w1 > 139.9 && w1 < 140.1, true)
+    // 壳应用配置（margin 16/spacing 12/size 28）后回报 256px → 134.7vp
+    let w2 = titleButtonsWidthFor(true, true, 256, 1.9)
+    @Expect(w2 > 134.6 && w2 < 134.9, true)
+    // 缩放缺失（0）时按 1x 兜底，不能除零
+    @Expect(titleButtonsWidthFor(true, true, 140, 0.0), 140.0)
 }
 

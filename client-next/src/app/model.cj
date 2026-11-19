@@ -4165,6 +4165,10 @@ _ => ()},
     // 构建期主题判定：视图构建时拿不到 ctx.theme（绘制期上下文），需要铺底/描边色时
     // 用本判定在 palette.cj 的明/暗常量间二选一（settings.theme 由 setTheme 即时更新并触发重绘）。
     public func isLight(): Bool {
+        match (getVariable("LANLU_FORCE_THEME")) {
+            case Some(v) => if (v == "light") { return true } else if (v == "dark") { return false }
+            case None => ()
+        }
         settings.theme == "light"
     }
 

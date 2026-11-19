@@ -4,7 +4,7 @@ import std.env.getVariable
 import std.fs.{File, OpenMode, Path, exists}
 import std.collection.{ArrayList, HashMap, HashSet}
 import std.sync.Mutex
-import lgui.{Canvas, Color, Pen, Rect}
+import lbase.{Canvas, Color, Pen, Rect}
 
 // lgpu（wgpu）实现的 Canvas：把视图图元映射到 L 层的 SDF/纹理管线。
 //
@@ -582,7 +582,9 @@ public class LgpuCanvas <: Canvas {
     }
 
     public func text(text: String, x: Float32, y: Float32, color: Color, pointSize!: Float32 = 15.0): Unit {
-        let _ = surface.text(font, text, x, y, pointSize,
+        // 文字按物理像素光栅化：scale 交给 native 侧换算物理字号并整像素吸附
+        // （几何图元继续走 setTransform 的逻辑→物理变换，见 begin）。
+        let _ = surface.text(font, text, x, y, pointSize, scale,
             channel(color.r), channel(color.g), channel(color.b), alphaChannel(color.a))
     }
 

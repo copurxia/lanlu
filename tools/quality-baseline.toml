@@ -2,18 +2,7 @@
 # 记录迁移起点的问题集合；数量只允许下降。清理后运行对应脚本刷新。
 
 [deps]
-keys = [
-  "cui:dep:lgui",
-  "cui:import:lgui",
-  "lanlu_client_next:dep:lgpu",
-  "lanlu_client_next:dep:lgui",
-  "lanlu_client_next:import:lgpu",
-  "lanlu_client_next:import:lgui",
-  "lgpu:dep:lgui",
-  "lgpu:import:lgui",
-  "lwindow:dep:lgui",
-  "lwindow:import:lgui",
-]
+keys = []
 
 [platform]
 keys = [
@@ -29,7 +18,5 @@ keys = [
   "packages/lwindow/src/ohos_entry.cj|ohos",
   "packages/lwindow/src/ohos_fontsconf.cj|ohos",
   "packages/lwindow/src/window_policy.cj|ohos",
-  "packages/lwindow/src/window_policy.cj|sdl",
-  "packages/lwindow/src/window_policy.cj|wayland",
   "packages/sdl_stub_ffi/src/sdl_stub_ffi.cj|sdl",
 ]

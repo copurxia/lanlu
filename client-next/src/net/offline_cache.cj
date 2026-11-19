@@ -137,7 +137,10 @@ public class OfflineCache {
             if (!exists(Path(path))) {
                 Directory.create(Path(path), recursive: true)
             }
-            match (RocksDb.openLowMemory(path)) {
+            // G7：离线/缓存库承载 search/page/tank/tag/blob 多类对象，读量大于设置库，
+            // 给 24MB block cache（区间 16~32MB 的中值）；配合索引/过滤器已 pin 进 cache
+            // （rocksdb_ffi openBalanced）在 OHOS 上压 RSS，桌面同参（可后续按平台分档）。
+            match (RocksDb.openLowMemory(path, blockCacheMb: 24)) {
                 case (true, Some(db), _) =>
                     let meta = match (db.ensureColumnFamilyResult("meta")) {
                         case RocksDbOperationResult<RocksDbColumnFamily>.Ok(value) => value

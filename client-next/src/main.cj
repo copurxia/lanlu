@@ -3,13 +3,12 @@ package lanlu_client_next
 import cui.*
 import cui.desktop.{frameProbeHook, lastRenderDiag, renderDiagHook}
 import cui.{FileDialogResult, FileDialogs}
-import lgpu.{captureRequest, captureSize, captureWriteTo, statsLine}
 import lanlu_client_next.app.*
 import lanlu_client_next.net.{OfflineCache, defaultOfflineCacheRoot}
 import lanlu_client_next.ui.*
 import lanlu_client_next.ui.{lastCanvas, probeFontMetrics, probeTrace}
+import lwindow.backend
 import lwindow.{clipboardSetText, clipboardGetText, lwpInputEnabled}
-import lgui.{debugFocusId, lastTextInputRect}
 import lwindow.{lwpAwaitSystemInfo, lwpCursorShapeForPoint, lwpCursorShapeSent, lwpFrameTick, lwpImeEnable, lwpLastPointer, lwpLog, lwpRequestCapture, lwpSetCursorShape, lwpSetWindowMinMax, lwpSetTitleButtons, lwpReportedScale, lwpSetWindowTitle, lwpViolations, requestWindowCommand}
 import std.convert.*
 import std.env.{getVariable, setVariable}
@@ -17,9 +16,9 @@ import std.fs.{canonicalize, exists as fsExists, Path as FsPath, File as FsFile}
 import std.time.MonoTime
 import webview.warmup
 import lwindow.{initialize as lwindowInitialize, preferredWindowGeometry, prepareDesktopIntegration,
-    prepareRendererHints, systemSansFontPath}
+    systemSansFontPath}
 import qwest.ClientBuilder
-import lgui.input.{Clipboard}
+import cui.input.Clipboard
 import portcheck.runIfEnabled
 
 /// 上一次的焦点控件 id（用于"文本输入开始/结束"的通知去抖）
@@ -204,7 +203,6 @@ public func runApp(): Int64 {
     // 分隔回退列表（SDL_render.c 逐 token 尝试），vulkan 创建失败自动回退 opengl。
     // LANLU_SOFTWARE_RENDER=1 强制 software 兜底；用户显式 SDL_RENDER_DRIVER 永远优先。
     // 渲染驱动优先级由 lwindow 按平台决定（Linux 桌面 vulkan>opengl；Win/mac 交给 SDL 内置顺序）。
-    prepareRendererHints()
     // Wayland 下任务栏/应用菜单的图标按 app_id 匹配同名 .desktop 文件（CI 打包安装
     // lanlu.desktop）；X11/Windows 的任务栏图标由下方 setIcon 直接生效。
     // 用户显式设置 SDL_APP_ID 时不覆盖。
@@ -263,7 +261,7 @@ public func runApp(): Int64 {
     println("[boot] 3.4 SubtitleBench ready (enabled=${benchEnabled}) t=${(MonoTime.now() - bootT0).toMilliseconds()}ms")
     // 启动时一次性缩放适配（ADR：不做运行时动态缩放）：seedMode 钉死 1.0 保证
     // CI 快照像素确定性；正常启动取主显示器 contentScale（Windows 高 DPI 下 >1，
-    // primaryDisplayInfo 内部自带 SDL_Init(VIDEO) 引用计数，建窗前调用安全），
+    // preferredWindowGeometry 的显示器查询已去 SDL（P5/lwindow.displays，占位实现）；
     // 查询失败回退 1.0。逻辑尺寸按可用桌面区钳制：默认 1440×900 在 150% 缩放的
     // 1080p 屏上物理 2160×1350 超界，收缩逻辑尺寸使 逻辑×scale ≤ usableBounds；
     // 钳制结果低于 960×640 最小窗口时不再收缩（宁可超界也保住最小可用布局）。
@@ -390,10 +388,9 @@ public func runApp(): Int64 {
             // M0 渲染统计：每 120 帧（约 2s）打一行 lgpu 计数与文字测量命中率。
             // 只在探针/性能开关打开时输出，release 默认不产生任何字符串。
             if (frame % 120 == 0 && perfStatsEnabled()) {
-                probeTraceLine("lgpu stats " + statsLine() + " measure=" +
-                    (match (lastCanvas) {
-                        case Some(c) =>
-                            let (hits, misses, entries) = c.measureStats()
+                probeTraceLine("lgpu stats " + backend.shellStatsLine() + " measure=" +
+                    (match (backend.shellCanvasMeasureStats()) {
+                        case Some((hits, misses, entries)) =>
                             "hits=${hits} miss=${misses} entries=${entries}"
                         case None => "n/a"
                     }))
@@ -410,7 +407,7 @@ public func runApp(): Int64 {
                 Some(settings.fontPath)
             } else {
                 systemSansFontPath()
-            }), theme: lanluThemeFor(settings.theme),
+            }), theme: lanluThemeFor(forcedThemeMode() ?? settings.theme),
     )
     // 空闲唤醒探针（LANLU_PROBE_WAKE=1）：3s 后请求一帧，验证"定时唤醒 -> 渲染"链路。
     // 不依赖系统输入路由，用来确认空闲循环不是死锁。

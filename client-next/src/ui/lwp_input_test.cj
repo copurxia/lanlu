@@ -5,7 +5,7 @@ package lanlu_client_next.ui
 
 import lwindow.*
 import lwindow
-import lgui.{Key, UiEvent, MouseButton}
+import cui.{Key, UiEvent, MouseButton}
 
 func uiEventName(ev: UiEvent): String {
     match (ev) {

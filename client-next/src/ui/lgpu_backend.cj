@@ -2,7 +2,7 @@ package lanlu_client_next.ui
 
 // P4 对照：CN_UI_BACKEND=lgpu 时，把整棵 UI 树的绘制交给 lgpu（wgpu/Vulkan）。
 //
-// 工作方式：lgui.Renderer 内部有一个可选后端（Canvas）；这里造一个 LgpuCanvas 装上，
+// 工作方式：cui.Renderer 内部有一个可选后端（Canvas）；这里造一个 LgpuCanvas 装上，
 // 于是所有图元/文本都走 lgpu，SDL 只保留事件循环与窗口管理。
 // 预览缩放：把逻辑尺寸的 UI 缩到小窗口里（LANLU_LGPU_SCALE 覆盖，默认 0.25）。
 
@@ -10,16 +10,18 @@ import std.collection.ArrayList
 import std.convert.*
 import std.env.getVariable
 import std.fs.{exists as fsExists, Path as FsPath, File as FsFile, OpenMode}
-import lgpu.{Font, LgpuCanvas, Surface}
+import lwindow.backend
 import lwindow
 import lwindow.{LWindowEventType}
-import lwindow.{lwpLog, systemSansFontPath}
+import lwindow.{lwpLog}
 import cui.controls.{modalDiagSink}
 import cui.desktop.{renderDiagHook}
-import lgui.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
-import lgui
-import lgui.input.{ClipboardBackend, SystemCursor, clipboardBackend, cursorSink, cursorsEnabled}
-import lgui.input
+import cui.{Canvas, Key, MouseButton, SdlWindow, UiEvent, WindowSpec}
+import cui
+import cui.{ClipboardBackend, clipboardBackend}
+import cui.input.{SystemCursor, cursorSink, cursorsEnabled}
+import cui.dialogs.{dialogDispatcher, FileDialogOptions, FileDialogRequest, FileDialogResult, resolveDialogBySerial}
+import cui.input
 
 /// 上次发给壳的光标形状（255 = 还没决定过），避免每次鼠标移动都发协议
 var g_lastCursorShape: UInt32 = 255
@@ -97,7 +99,58 @@ private func platformTitleButtonsWidthRaw(): Float32 {
         g_title_btn_width_px, lwindow.lwpReportedScale(), rectArrived: g_title_btn_rect_arrived)
 }
 /// 最近一次安装的后端画布（联调/抓帧用）。
-public var lastCanvas: ?LgpuCanvas = None
+public var lastCanvas: ?Canvas = None
+
+// ── 对话框桥（P6）：cui.dialogs 的派发钩子 → lw_dialog 协议 ──────────────
+// cui.dialogs 侧持有 serial→请求登记；这里只做协议收发，不持状态。
+// filters 格式：OHOS DocumentViewPicker 不吃过滤器，原样透传空串即可。
+/// 协议暂不支持的对话框 kind（folder）：dispatch 时 pending 尚未登记，
+/// 只能把 serial 记下、下一帧（登记完成后）统一回取消。
+var g_dialogCancelSerials: ArrayList<UInt32> = ArrayList<UInt32>()
+
+func dispatchDialog(request: FileDialogRequest, kind: String, options: FileDialogOptions): ?UInt32 {
+    if (!lwindow.lwpInputEnabled()) {
+        return None   // 无壳：回落文件桥
+    }
+    match (kind) {
+        case "open" =>
+            // filters 原样透传（OHOS DocumentViewPicker 不消费过滤器；桌面 portal 自行解析）
+            Some(UInt32(lwindow.dialogOpenFile(filters: joinFilters(options))))
+        case "save" =>
+            let suggested = match (options.defaultLocation) {
+                case Some(v) => v
+                case None => ""
+            }
+            Some(UInt32(lwindow.dialogSaveFile(suggested)))
+        case "folder" =>
+            // 协议 v1 没有 folder opcode（core.toml 只有 file_dialog_folder 能力位、无消息），
+            // 且 OHOS 壳的文件桥轮询已删（Index.ets M6 第 3 步）——回落文件桥会永久 pending。
+            // 预留 serial、下一帧补"取消"回执：UI 表现为用户取消，不卡死。
+            // TODO(lwp v2)：补 lw_dialog.open_folder，接壳侧已有的 DocumentSelectMode.FOLDER。
+            let serial = lwindow.reserveDialogSerial()
+            if (serial == 0) {
+                None
+            } else {
+                g_dialogCancelSerials.add(serial)
+                Some(serial)
+            }
+        case _ =>
+            None
+    }
+}
+
+internal func joinFilters(options: FileDialogOptions): String {
+    var joined = ""
+    var first = true
+    for (filter in options.filters) {
+        if (!first) {
+            joined = joined + ";"
+        }
+        first = false
+        joined = joined + filter.pattern
+    }
+    joined
+}
 
 /// 交换链当前配置的物理尺寸（px）。surface.changed 只在与它不同时才 resize。
 var g_swap_w: Int64 = 0
@@ -130,15 +183,13 @@ func syncSurfaceSize(): ?UiEvent {
         return None
     }
     if (w != g_swap_w || h != g_swap_h) {
-        match (lastCanvas) {
-            // 只重配 swapchain（resize），**不要**走 configure（会重建 device/pipeline，
-            // 真机 20 次 resize 压测第 13 轮后引擎线程卡死，第 53 轮）。
-            case Some(c) =>
-                c.surfaceRef().resize(w, h)
-                g_swap_w = w
-                g_swap_h = h
-            case None => return None
+        // 只重配 swapchain（resize），**不要**走 configure（会重建 device/pipeline，
+        // 真机 20 次 resize 压测第 13 轮后引擎线程卡死，第 53 轮）。
+        if (!backend.resizeShellCanvas(w, h)) {
+            return None
         }
+        g_swap_w = w
+        g_swap_h = h
     }
     g_win_w = logicalOf(w)
     g_win_h = logicalOf(h)
@@ -211,7 +262,6 @@ private func takePendingUi(): ?UiEvent {
     Some(e)
 }
 
-private var g_fontForMetrics: Option<Font> = None
 
 public func probeTrace(line: String): Unit {
     // LANLU_LWP=1：日志走协议（壳转 hilog）。联调期（LANLU_PROBE_LGPU=1）**同时**落文件，
@@ -246,6 +296,9 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         backend = "lgpu"
     }
     let envWait = 0
+    // P6：对话框平台派发（lw_dialog 协议）。必须先于任何 return 注册：
+    // 对话框不依赖渲染后端，LWP 未启用时派发器内部回落文件桥。
+    dialogDispatcher = Some(dispatchDialog)
     probeTrace("backend mode=" + backend + " waited=" + envWait.toString())
     probeTrace("lwp trace env=" + (getVariable("LANLU_LWP_TRACE") ?? "<unset>"))
     if (backend != "lgpu") {
@@ -257,29 +310,23 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
         match (lwindow.lwpAwaitSurface(3000)) {
             case Some((handle, w, h)) =>
                 probeTrace("lwp surface from protocol handle=${handle} ${w}x${h}")
-                let surfL = Surface.fromSurfaceId(handle)
-                surfL.configure(w, h)
                 g_swap_w = w
                 g_swap_h = h
-                match (systemSansFontPath()) {
-                    case Some(fontPathL) =>
-                        let fontL = Font.load(fontPathL)
-                        let canvasL = LgpuCanvas(surfL, fontL)
-                        // 系统 UI 缩放：逻辑坐标 × scale = 物理像素。
-                        // 硬编码 1.0 时，PC 模式 190%/200% 缩放下内容只铺满左上角（第 117 轮真机修复）。
-                        canvasL.scale = lwindow.lwpReportedScale()
+                // lgpu 细节（Surface/字体/缩放）收敛在 lwindow.backend（全仓唯一 lgpu 消费方）
+                match (backend.createSurfaceCanvas(handle, w, h, lwindow.lwpReportedScale())) {
+                    case Some(canvasL) =>
                         // 协议路径同样要同步 g_ui_scale：否则逻辑尺寸/边缘热区按 1x 计算
                         // （真机 probe：uiScale=1.0 logical=2090x1394）
-                        if (canvasL.scale > 0.0) {
-                            g_ui_scale = canvasL.scale
+                        if (lwindow.lwpReportedScale() > 0.0) {
+                            g_ui_scale = lwindow.lwpReportedScale()
                         }
-                        probeTrace("lwp canvas scale=${canvasL.scale} (物理 ${w}x${h})")
+                        probeTrace("lwp canvas scale=${lwindow.lwpReportedScale()} (物理 ${w}x${h})")
                         lastCanvas = Some(canvasL)
                         // 与 env 路径同样要把 canvas 交给 UI 层并挂上纹理回调；
                         // 少这一步的表现是 beginScene 抛「需要渲染后端」并崩进程。
-                        lgui.texturePixelsSink = {id, w, h, pixels => canvasL.uploadTexture(id, w, h, pixels)}
+                        cui.texturePixelsSink = {id, w, h, pixels => canvasL.uploadTexture(id, w, h, pixels)}
                         // R4：纹理关闭时真正回收 lgpu 侧纹理（显存预算生效的前提）
-                        lgui.textureReleaseSink = {id => canvasL.releaseTexture(id)}
+                        cui.textureReleaseSink = {id => canvasL.releaseTexture(id)}
                         apply(canvasL)
                         probeTrace("lwp canvas 已安装 ${w}x${h}")
                         return true
@@ -324,34 +371,21 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
             surfH = 1394
         }
     }
-    let surface = Surface.fromSurfaceId(sid)
-    surface.configure(surfW, surfH)
+    // lgpu 细节（Surface/字体/缩放）收敛在 lwindow.backend（全仓唯一 lgpu 消费方）
+    let scale0: Float32 = if (isMain) { lwindow.lwpReportedScale() } else { 0.25 }
+    let canvasOpt = backend.createSurfaceCanvas(sid, surfW, surfH, scale0)
     g_swap_w = surfW
     g_swap_h = surfH
-    // 字体路径由平台层给出（分层规则：业务层不写平台路径）
-    let fontPath = match (systemSansFontPath()) {
-        case Some(p) => p
-        case None => return false
-    }
-    probeTrace("font path=" + fontPath)
-    let font = Font.load(fontPath)
-    // 文本垂直居中口径校准：真实字体度量（ascent/descent/lineGap/upem）。
-    // textHeight 用 ascent+descent 后，墨迹中心应落在盒中心；这里把数字留档便于对账。
-    g_fontForMetrics = Some(font)
+    // 文本垂直居中口径校准探针的字体度量改由 backend 持有（g_fontForMetrics 移除）。
     probeTrace("install main=" + isMain.toString() + " sid=" + sid.toString() + " " + surfW.toString() + "x" + surfH.toString())
-    let canvas = LgpuCanvas(surface, font)
+    match (canvasOpt) {
+        case Some(canvas) =>
     // 缩放优先级：LANLU_LGPU_SCALE（调试）> 壳上报的 density > 1.0
-    var scale: Float32 = if (isMain) { lwindow.lwpReportedScale() } else { 0.25 }
+    var scale = scale0
     // g_ui_scale 只由 WindowCreated 事件更新，而该事件可能在启动期被 lwpAwait* 消费；
     // 这里用客户端上报值兜底，避免边缘热区/三键宽度按 1x 计算（第 116 轮同类问题）。
     if (isMain && scale > 0.0) {
         g_ui_scale = scale
-    }
-    // 平台三键默认配置：必须在这里发（SurfaceAvailable 事件可能在启动期被
-    // lwpAwaitSurface 消费掉，放事件里不会执行）。壳未宣告能力时是空操作。
-    if (isMain && !g_title_btn_cfg_sent && lwindow.lwpShellProvidesTitleButtons()) {
-        g_title_btn_cfg_sent = lwindow.lwpSetTitleButtons(7, 0, 16, 12, 28, 0)
-        probeTrace("ui title buttons cfg sent=" + g_title_btn_cfg_sent.toString())
     }
     match (getVariable("LANLU_LGPU_SCALE")) {
         case Some(v) =>
@@ -360,17 +394,21 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
             } catch (_) {}
         case None => ()
     }
-    canvas.scale = scale
+    backend.setShellCanvasScale(scale)
     if ((getVariable("LANLU_MAIN_PROBE_FILL") ?? "0") == "1") {
-        canvas.forceClearRed = true
+        backend.setShellCanvasForceClearRed(true)
     }
     // 纹理委派：SDL 纹理创建/更新时把 RGBA 像素送给 lgpu 后端
-    lgui.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
+    cui.texturePixelsSink = {id, w, h, pixels => canvas.uploadTexture(id, w, h, pixels)}
     // R4：纹理关闭时真正回收 lgpu 侧纹理（显存预算生效的前提）
-    lgui.textureReleaseSink = {id => canvas.releaseTexture(id)}
+    cui.textureReleaseSink = {id => canvas.releaseTexture(id)}
     apply(canvas)
-                lastCanvas = canvas
+    lastCanvas = Some(canvas)
     return true
+        case None =>
+            probeTrace("backend: 没有可用字体，安装失败")
+            return false
+    }
 }
 
 /// P5：用 L 层窗口 + lgpu 后端替代 SDL 窗口。
@@ -381,7 +419,7 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
     }
     let window = SdlWindow.headless(spec)
     // 事件源：L 层输入桥（文件通道）→ UiEvent
-    // 光标形状：lgui 决定「要什么形状」-> 平台层（LWP lw_seat.set_cursor）
+    // 光标形状：cui 决定「要什么形状」-> 平台层（LWP lw_seat.set_cursor）
     if (lwindow.lwpInputEnabled()) {
         cursorSink = { kind =>
             let code: UInt32 = match (kind) {
@@ -432,16 +470,16 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
         probeTrace("probe cursor shape=1 -> " + ok.toString())
     }
 
-    // IME 候选框定位：lgui 算出光标矩形 -> 平台层（LWP text_input.set_cursor_rect）
+    // IME 候选框定位：cui 算出光标矩形 -> 平台层（LWP text_input.set_cursor_rect）
     // 光标周围文本（text-input-v3 set_surrounding）：输入法联想/删除上下文。
     // 只在框架报告时转发（Frame 里判重由 sink 自身频率决定，框架每帧一次）。
     if (lwindow.lwpInputEnabled()) {
-        lgui.textSurroundingSink = { value: String, caret: Int64, anchor: Int64 =>
+        cui.textSurroundingSink = { value: String, caret: Int64, anchor: Int64 =>
             let _ = lwindow.lwpImeSetSurrounding(value, UInt32(max(0, caret)), UInt32(max(0, anchor)))
         }
     }
     if (lwindow.lwpInputEnabled()) {
-        lgui.textInputAreaSink = { rect =>
+        cui.textInputAreaSink = { rect =>
             let ok = lwindow.lwpImeSetCursorRect(
                 Int32(rect.x), Int32(rect.y), Int32(rect.w), Int32(rect.h))
             if (g_probeFocusDbg) {
@@ -456,10 +494,10 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
     // R6：空闲等待改阻塞在 LWP 通道上（空闲零唤醒，替代 4ms 忙轮询）。
     // 只有协议通道可用时才注入：否则 wait 会立即返回 false，等于把忙轮询换成空转。
     if (lwindow.lwpInputEnabled()) {
-        lgui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
-        lgui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
+        cui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
+        cui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
     }
-    lgui.headlessEventSource = Some({ =>
+    cui.headlessEventSource = Some({ =>
         // 输入源二选一（过渡期）：LANLU_LWP=1 走协议通道，否则走文件桥
         if (lwindow.lwpInputEnabled()) {
             g_srcCalls++
@@ -472,12 +510,12 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
                     if (g_probeFocusDbg && g_evDbg < 30) {
                         g_evDbg++
                         probeTrace("ev dbg kind=" + kindName(ev.kind) + " x=" + Int64(ev.x).toString() +
-                            " y=" + Int64(ev.y).toString() + " focus=" + lgui.debugFocusId)
+                            " y=" + Int64(ev.y).toString() + " focus=" + cui.debugFocusId)
                     }
                     if (ev.kind == lwindow.LWindowEventType.PointerDown &&
                         g_probeFocusDbg) {
                         probeTrace("focus dbg down=" + Int64(ev.x).toString() + "," +
-                            Int64(ev.y).toString() + " focusId=" + lgui.debugFocusId)
+                            Int64(ev.y).toString() + " focusId=" + cui.debugFocusId)
                     }
                     // 指针形状：移动时判断是否落在文本框内，变了才发（不刷协议）
                     if (ev.kind == lwindow.LWindowEventType.PointerMove) {
@@ -485,14 +523,14 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
                         if (g_probeCursorDbg) {
                             g_cursorDbgCount++
                             if (g_cursorDbgCount % 30 == 1) {
-                                let hit = match (lgui.lastTextInputRect) {
+                                let hit = match (cui.lastTextInputRect) {
                                     case Some(r) => "rect"
                                     case None => "none"
                                 }
                                 probeTrace("cursor dbg #\${g_cursorDbgCount} move=\${Int64(ev.x)},\${Int64(ev.y)} text=\${hit}")
                             }
                         }
-                        match (lgui.lastTextInputRect) {
+                        match (cui.lastTextInputRect) {
                             case Some(r) =>
                                 let want = lwindow.lwpCursorShapeForPoint(
                                     r.x, r.y, r.w, r.h, ev.x, ev.y, true)
@@ -520,7 +558,7 @@ public func makeHeadlessWindow(spec: WindowSpec): ?SdlWindow {
 /// 必须在创建 headless 窗口之前调用（DesktopApp 内部读 CN_WINDOW）。
 public func installHeadlessInputSource(): Unit {
     // 窗口控制：headless 下交给平台层（写命令文件，ArkTS 轮询执行）
-    lgui.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
+    cui.headlessWindowCommand = Some({command => lwindow.requestWindowCommand(command)})
     // 剪贴板：SDL 在真机读不到系统剪贴板，改走 L 层（文件通道 + ArkTS pasteboard）
     clipboardBackend = LWindowClipboard()
 
@@ -541,7 +579,7 @@ public func installHeadlessInputSource(): Unit {
 
         }
     }
-    // 光标形状：lgui 决定「要什么形状」-> 平台层（LWP lw_seat.set_cursor）
+    // 光标形状：cui 决定「要什么形状」-> 平台层（LWP lw_seat.set_cursor）
     if (lwindow.lwpInputEnabled()) {
         cursorSink = { kind =>
             let code: UInt32 = match (kind) {
@@ -592,9 +630,9 @@ public func installHeadlessInputSource(): Unit {
         probeTrace("probe cursor shape=1 -> " + ok.toString())
     }
 
-    // IME 候选框定位：lgui 算出光标矩形 -> 平台层（LWP text_input.set_cursor_rect）
+    // IME 候选框定位：cui 算出光标矩形 -> 平台层（LWP text_input.set_cursor_rect）
     if (lwindow.lwpInputEnabled()) {
-        lgui.textInputAreaSink = { rect =>
+        cui.textInputAreaSink = { rect =>
             let ok = lwindow.lwpImeSetCursorRect(
                 Int32(rect.x), Int32(rect.y), Int32(rect.w), Int32(rect.h))
             if (g_probeFocusDbg) {
@@ -607,11 +645,20 @@ public func installHeadlessInputSource(): Unit {
     // R6：空闲等待改阻塞在 LWP 通道上（空闲零唤醒，替代 4ms 忙轮询）。
     // 只有协议通道可用时才注入：否则 wait 会立即返回 false，等于把忙轮询换成空转。
     if (lwindow.lwpInputEnabled()) {
-        lgui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
-        lgui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
+        cui.eventWaitSource = Some({ms => lwindow.lwpWaitForEvents(ms)})
+        cui.eventWakeSink = Some({=> lwindow.lwpWakeEventWaiter()})
     }
-    lgui.headlessEventSource = Some({ =>
+    cui.headlessEventSource = Some({ =>
         if (lwindow.lwpInputEnabled()) {
+            // 0) 协议不支持的对话框（folder）：dispatch 时 pending 尚未登记，
+            //    这里（登记完成后）补一条取消回执，避免调用方永久 pending。
+            if (g_dialogCancelSerials.size > 0) {
+                for (s in g_dialogCancelSerials) {
+                    let _ = resolveDialogBySerial(s, FileDialogResult.FileDialogCanceled)
+                    probeTrace("dialog unsupported kind -> canceled serial=${s}")
+                }
+                g_dialogCancelSerials.clear()
+            }
             // 1) 生命周期事件：必须用 lwindow 内部的**同一个**客户端消费，
             //    否则两个客户端会抢同一条队列（configure 可能被另一个吃掉）。
             for (ev in lwindow.lwpDrainLifecycle()) {
@@ -624,11 +671,20 @@ public func installHeadlessInputSource(): Unit {
                             g_ui_scale = scale
                             g_ui_size_w = 0   // 缩放变了：强制重发一次视口
                             // canvas 可能已建好：立刻用新 scale（下一帧起生效）
-                            match (lastCanvas) {
-                                case Some(c) => c.scale = scale
-                                case None => ()
-                            }
+                            backend.setShellCanvasScale(scale)
                         }
+                    case lwindow.LWindowLifecycleEvent.DialogResult(serial, path) =>
+                        // P6 对话框结果：OHOS 壳 picker 完成/取消后经协议回填
+                        let value: FileDialogResult = if (path.isEmpty()) {
+                            FileDialogResult.FileDialogCanceled
+                        } else {
+                            // 多路径分隔符以壳为准：OHOS ArkTS 用 ';'（Index.ets: split('\n').join(';')），
+                            // 兼容历史 '\n' 拼法 —— 先归一再拆；单选 = 单路径。
+                            let paths = path.replace("\n", ";").split(";")
+                            FileDialogResult.FileDialogSelected(paths, Some(0))
+                        }
+                        let matched = resolveDialogBySerial(serial, value)
+                        probeTrace("lw dialog result serial=${serial} matched=${matched} path=${path}")
                     case lwindow.LWindowLifecycleEvent.TitleButtonsRect(right, top, w, hh, vis) =>
                         // 平台三键矩形（窗口局部 px）：业务层据此避让，不再自绘三键
                         g_title_btn_right_px = Int64(right)
@@ -732,12 +788,12 @@ public func installHeadlessInputSource(): Unit {
                     if (g_probeFocusDbg && g_evDbg < 30) {
                         g_evDbg++
                         probeTrace("ev dbg kind=" + kindName(ev.kind) + " x=" + Int64(ev.x).toString() +
-                            " y=" + Int64(ev.y).toString() + " focus=" + lgui.debugFocusId)
+                            " y=" + Int64(ev.y).toString() + " focus=" + cui.debugFocusId)
                     }
                     if (ev.kind == lwindow.LWindowEventType.PointerDown &&
                         g_probeFocusDbg) {
                         probeTrace("focus dbg down=" + Int64(ev.x).toString() + "," +
-                            Int64(ev.y).toString() + " focusId=" + lgui.debugFocusId)
+                            Int64(ev.y).toString() + " focusId=" + cui.debugFocusId)
                     }
                     // 边缘按下 = 开始缩放（无边框窗口没有系统装饰，必须自己给热区）
                     // 只有左键拖边才缩放（右键/中键按在边缘不应进入缩放会话）
@@ -758,14 +814,14 @@ public func installHeadlessInputSource(): Unit {
                         if (g_probeCursorDbg) {
                             g_cursorDbgCount++
                             if (g_cursorDbgCount % 30 == 1) {
-                                let hit = match (lgui.lastTextInputRect) {
+                                let hit = match (cui.lastTextInputRect) {
                                     case Some(r) => "rect"
                                     case None => "none"
                                 }
                                 probeTrace("cursor dbg #\${g_cursorDbgCount} move=\${Int64(ev.x)},\${Int64(ev.y)} text=\${hit}")
                             }
                         }
-                        match (lgui.lastTextInputRect) {
+                        match (cui.lastTextInputRect) {
                             case Some(r) =>
                                 let want = lwindow.lwpCursorShapeForPoint(
                                     r.x, r.y, r.w, r.h, ev.x, ev.y, true)
@@ -840,7 +896,7 @@ class LWindowClipboard <: ClipboardBackend {
 /// 协议键码 -> Key 枚举。
 /// 计划 §6.1 要求「单表键码」：这里先用 Linux evdev 码（与 wayland/xkb 一致），
 /// 鸿蒙侧由壳负责把 HarmonyOS keyCode 映射到同一张表；未覆盖的落到 RawScancode。
-/// evdev 键码 -> lgui Key。**全仓唯一**的键码表（计划 §6.1）：壳只发 evdev，
+/// evdev 键码 -> cui Key。**全仓唯一**的键码表（计划 §6.1）：壳只发 evdev，
 /// 引擎不猜字符——字符走键事件自带的 utf8。字母用大写 ASCII（与 LETTER_A=65、SDL 路径一致）。
 public func keyFromCode(code: Int32): Key {
     match (code) {
@@ -939,14 +995,13 @@ func lwpEventToUi(ev: lwindow.LWindowEvent): UiEvent {
 
 /// 把字体度量写进 probe_trace（文本垂直居中口径对账；LANLU_PROBE_LGPU=1 时落盘）
 public func probeFontMetrics(): Unit {
-    match (g_fontForMetrics) {
-        case Some(f) =>
-            let sizes: Array<Float32> = [10.5, 12.0, 12.5, 13.0, 15.0]
-            for (sz in sizes) {
-                let (a, d, g, u) = f.metrics(sz)
+    let sizes: Array<Float32> = [10.5, 12.0, 12.5, 13.0, 15.0]
+    for (sz in sizes) {
+        match (backend.shellFontMetrics(sz)) {
+            case Some((a, d, g, u)) =>
                 probeTrace("font metrics size=" + sz.toString() + " a=" + a.toString() +
                     " d=" + d.toString() + " gap=" + g.toString() + " upem=" + u.toString())
-            }
-        case None => ()
+            case None => ()
+        }
     }
 }

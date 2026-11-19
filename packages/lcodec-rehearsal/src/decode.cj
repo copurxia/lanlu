@@ -1,5 +1,6 @@
 package lcodec
 
+import std.env.getVariable
 import std.fs.{File, OpenMode, Path}
 import std.math.sqrt
 import std.sync.Mutex
@@ -314,6 +315,12 @@ public func decodeBackdrop(path: String, targetWidth: Int32, blurSigma!: Float64
 // 底得到真圆角封面。在工作线程（解码后、返回前）调用，避免 UI dispatch() 遍历整张
 // 封面像素；阅读页（page: key）不处理。
 public func roundCoverAlphaNative(d: NativeDecodedImage): Unit {
+    // 真机排查用开关：LANLU_NO_ROUND=1 时跳过圆角烘焙，用于区分
+    // 「圆角 alpha 烘焙把整张图写成透明」与「纹理/采样问题」。
+    // TODO(圆角排查结案后删除)：临时诊断开关，不应长期留在生产路径。
+    if ((getVariable("LANLU_NO_ROUND") ?? "0") == "1") {
+        return
+    }
     let w = Int64(d.width)
     let h = Int64(d.height)
     let r = Float64(min(w, h)) * 0.072

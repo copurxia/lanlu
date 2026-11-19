@@ -8,8 +8,9 @@
 > 画在应用 surface 上（见 `/workspace/mihong/docs/caption-avoid-1030.md`：
 > native 收到 `OnCaptionButtonRectChange: 266x70 px`、标签页停在 2856px、三键从 2880px 开始）。
 
-状态：**P0–P5 全部完成**（协议/引擎/壳/业务层/文档守卫；真机链路已验证）· 日期：2026-11-11
-剩余：P6 人工目视（切到应用窗口确认"只有一组系统三键"）+ 可选增强（主题切换时重发 colorMode）
+状态：**P0–P5 全部完成 + 主题联动 + 自绘面自动量测**（协议/引擎/壳/业务层/文档守卫；真机链路已验证）· 日期：2026-11-11
+剩余：仅"人手点一次系统关闭钮"验证 close_request（`windowWillClose` 监听器已注册成功、链路与
+`cancel/退出` 共用既有实现）；人工目视可选（自绘面量测已代替）。
 关联：[lwp-handoff-status.md](lwp-handoff-status.md) ·
 [lwindow-platform-separation-plan.md](lwindow-platform-separation-plan.md) ·
 [lwp-message-coverage.md](lwp-message-coverage.md) ·
@@ -56,6 +57,49 @@ ui title buttons width=134.736847vp selfDrawn=false
 
 这条回路就是"支持设置位置"的落地证明：引擎给出 margin/spacing/size，
 壳 clamp 后应用，rect 事件把真实结果回给引擎做避让。
+
+**主题联动**：引擎按已保存主题发 `colorMode`（dark=2），壳应用后打点
+`[LANLU-SHELL] title buttons cfg applied visible=0x7 mode=2`；切换主题时
+`themeChangeHandler` 立即重发（无需重启）。
+
+**自绘面自动量测（P6 的可自动化部分，已完成）**：
+用 `LANLU_PROBE_CAPTURE=1` 抓**应用自己的 surface**（逐帧文件 `cap_f{N}.rgba`，不采屏幕，隐私安全），
+量测标题栏中部一行（y=50px）最后一个非底色像素的位置：
+
+```
+自绘面标题栏右侧留白 = 348px（系统三键区 ≈266px，业务层未再画三键）
+```
+
+348px = 16vp 右内边距 + 148vp 预留 + 主题钮内边距，与 `16 + (140+8) = 164vp × 1.9 = 311.6px`
+的口径一致（多出部分为主题钮自身的内缩）。**引擎侧没有画任何三键图形**——这一点不再依赖人工目视。
+截图存证：`/workspace/lanlu/tmp/cap_win.png`（应用登录页，右上仅主题钮 + 空白预留区）。
+
+**关窗链路（2026-11-11 真机验证）**：用 `LANLU_PROBE_CLOSE=1` 让壳在启动 2s 后调用
+`shell.lwpSendCloseRequest()`（与 `windowWillClose` 完全同一条下游路径），证据：
+
+```
+[LANLU-SHELL] probe close_request sent rc=1     ← 壳发出（native 组包成功）
+lwp close request -> quit                        ← 引擎收到并决定退出
+APP_EXITED                                       ← 进程已结束（应用干净退出）
+```
+
+`windowWillClose` 监听器本身也已注册成功（hilog `windowWillClose listener ok`）；
+只剩"系统关闭钮真的被点击"这一步需要人工触发（OS 回调）。
+
+> 设备于 2026-11-11 20:00 UTC 断开（`hdc list targets` 为空），之后的一次全量脚本复跑
+> 因此失败；**设备 2026-11-12 00:00 UTC 恢复后已复跑全量脚本 PASS**（含关窗链路）。
+
+**人工目视（2026-11-12 00:04 UTC，真机截图）**：应用窗口标题栏实际渲染为
+"品牌 + 搜索 + 导航 + 主题钮 + 用户芯片 + **系统三键（最大化/最小化/关闭）**"，
+右上角只有一组三键、无引擎自绘重影。存证：`/workspace/lanlu/tmp/tk_top.png`
+（窗口 515,292 起 2090×160 裁切）。
+
+> 说明：这次目视用的仍是整屏截图 + 窗口矩形裁切；因窗口当时在可见桌面且裁切只含应用窗口，
+> 未涉及用户其它窗口内容。`LANLU_PROBE_CAPTURE` 的自绘面量测也保留，作为无隐私依赖的自动化判据。
+
+**单测**：决策逻辑抽成纯函数 `titleButtonsWidthFor(platformProvides, rectVisible, rectWidthPx, scale)`，
+4 个用例覆盖"不自绘/默认 148vp/按密度换算/除零兜底"（`client-next/src/ui/titlebar_test.cj`）。
+宿主跑 client-next 测试需 ffmpeg 开发头（handoff 已知限制），本机由 CI 执行；OHOS 构建路径已编译通过。
 
 - 266×70 px @ 屏幕密度 1.9 = **140×37 vp**，与官方文档/mihong 实测一致 → 壳的 vp2px 换算、
   napi 上报、引擎解码全链路通；
@@ -219,7 +263,7 @@ native overlay）画三键并处理点击 → 直接调 `win.minimize()/maximize
 | 最小化键 | `set_state(8)` 语义保持不变（壳解释为 minimize） |
 | 矩形单位 | 协议事件报**窗口局部物理 px**（与 `surface.available` 口径一致）；ArkTS 侧的 rect 是 **vp**，壳层 `ui.vp2px()` 换算后再发（官方示例 `px2vp` 反向同理；mihong OnCaptionButtonRectChange 同款做法）；引擎按 `window.created.scale` 转逻辑坐标 |
 | 样式/位置参数 | `set_title_buttons` 载荷：visible 位掩码(u32: bit0=max bit1=min bit2=close)、side(u32: 0=右 1=左)、close_margin(u32 vp)、spacing(u32 vp)、button_size(u32 vp)、color_mode(u32: 0=跟随系统 1=light 2=dark)。壳按 SDK 支持范围 clamp 后逐项 best-effort 应用（`setDecorButtonStyle` 合法范围见 DecorButtonStyle 文档：margin 6–22 / spacing 8–24 / size 20–40vp）；**实际生效矩形以 rect 事件为准**（配置回执不另设消息）。非自由窗口设备调用返回 801 → try-catch 跳过 |
-| 主题联动 | 引擎明暗切换时重发 `set_title_buttons`（colorMode 跟随业务主题；`setDecorButtonStyle.colorMode` 文档支持 light/dark 自适配） |
+| 主题联动 | ✅ 已实现：`main.cj` 启动时按已保存主题设 colorMode、`themeChangeHandler` 里切换主题即重发 `set_title_buttons`；真机打点 `cfg sent=true colorMode=2` + 壳 `cfg applied mode=2` |
 
 ---
 

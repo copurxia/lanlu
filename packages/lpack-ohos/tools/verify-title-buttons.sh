@@ -25,10 +25,12 @@ fi
 hc "rm -f $BASE/window_info.txt $BASE/probe_trace.txt" >/dev/null
 hc "aa force-stop $BUNDLE" >/dev/null
 sleep 1
-# 引擎探针要 LANLU_PROBE_LGPU=1（debug 包才落文件；release 包由 LANLU_DEBUGGABLE=0 门禁）
+# 引擎探针要 LANLU_PROBE_LGPU=1（debug 包才落文件；release 包由 LANLU_DEBUGGABLE=0 门禁）；
+# LANLU_PROBE_CAPTURE=1 额外抓一帧**应用自己的 surface**（不采屏幕，隐私安全），
+# 用于自动量测标题栏右侧给系统三键留了多少空白。
 hc "aa start -b $BUNDLE -a EntryAbility \
   --ps lanlu.env.CN_UI_BACKEND lgpu --ps lanlu.env.LANLU_MAIN_LGPU 1 \
-  --ps lanlu.env.LANLU_PROBE_LGPU 1" >/dev/null
+  --ps lanlu.env.LANLU_PROBE_LGPU 1 --ps lanlu.env.LANLU_PROBE_CAPTURE 1" >/dev/null
 
 say "等待探针（最多 30s）..."
 TB=""
@@ -89,9 +91,68 @@ else
   say "[warn] hilog 未见 'title buttons cfg applied'（缓冲轮转或引擎未发配置）"
 fi
 
+# 5) 应用自绘面量测：标题栏右侧应为系统三键留出空白（业务层不再画三键）
+#    探针写的是逐帧文件 cap_f{N}.rgba（client-next/src/main.cj frameProbeHook），
+#    这里取设备上最新的一张；本地先删目标文件 —— hc 的退出码恒 0（管道尾是 tr），
+#    只有 recv 后本地文件非空才算抓帧成功，否则会量到上次残留的旧帧。
+CAP=/workspace/lanlu/tmp/cap_latest.rgba
+mkdir -p /workspace/lanlu/tmp
+rm -f "$CAP"
+REMOTE_CAP=$(hc "ls -t $BASE/cap_f*.rgba 2>/dev/null | head -1")
+if [ -n "$REMOTE_CAP" ]; then
+  "$HDC" -t "$DEV" file recv "$REMOTE_CAP" "$CAP" >/dev/null 2>&1
+else
+  say "[warn] 设备上未找到 cap_f*.rgba（LANLU_PROBE_CAPTURE 未开启或帧钩子未触发）"
+fi
+if [ -s "$CAP" ]; then
+    # 抓帧尺寸 = 窗口矩形（从 window_info 的 rect=L,T,W,H 解析，避免写死分辨率）
+    RECTV=$(printf "%s" "$WI" | sed -n 's/.*rect=\([^ ]*\) .*/\1/p')
+    [ -n "$RECTV" ] || RECTV=$(printf "%s" "$WI" | sed -n 's/.*rect=\(.*\)$/\1/p')
+    CAPW=$(printf "%s" "$RECTV" | cut -d, -f3)
+    CAPH=$(printf "%s" "$RECTV" | cut -d, -f4)
+    [ -n "$CAPW" ] || CAPW=2090
+    [ -n "$CAPH" ] || CAPH=1394
+    RES=$(python3 - "$CAP" "$CAPW" "$CAPH" <<'PY'
+import sys
+p, w, h = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+data = open(p, "rb").read()
+row = 50                      # 标题栏中部（56vp × 1.9 ≈ 106px）
+bg = (data[0], data[1], data[2])   # 左上角像素 = 标题栏底色
+last = -1
+for x in range(w):
+    o = (row * w + x) * 4
+    if abs(data[o]-bg[0]) > 6 or abs(data[o+1]-bg[1]) > 6 or abs(data[o+2]-bg[2]) > 6:
+        last = x
+print(w - 1 - last if last >= 0 else -1)
+PY
+)
+    if [ -n "$RES" ] && [ "$RES" -gt 200 ] 2>/dev/null; then
+      say "[ok]   自绘面标题栏右侧留白 = ${RES}px（系统三键区 ≈266px，业务层未再画三键）"
+    else
+      say "[warn] 自绘面留白 = ${RES:-?}px（可能页面无右缘控件或抓帧帧号不同，人工目视兜底）"
+    fi
+fi
 say "[info] 目视检查（人工）：右上角只有一组三键（系统），引擎自绘三键不得出现重影"
 
+# 6) 关窗链路：模拟系统关闭钮（LANLU_PROBE_CLOSE=1 → lwpSendCloseRequest），
+#    引擎应收到 close_request 并退出（与 windowWillClose 同一条下游路径）。
+hc "aa force-stop $BUNDLE" >/dev/null
+sleep 1
+hc "aa start -b $BUNDLE -a EntryAbility --ps lanlu.env.CN_UI_BACKEND lgpu \
+  --ps lanlu.env.LANLU_MAIN_LGPU 1 --ps lanlu.env.LANLU_PROBE_LGPU 1 \
+  --ps lanlu.env.LANLU_PROBE_CLOSE 1" >/dev/null
+EXITED=0
+for _ in $(seq 1 12); do
+  P=$(hc "pidof $BUNDLE")
+  if [ -z "$P" ]; then EXITED=1; break; fi
+  sleep 1
+done
+if [ "$EXITED" = "1" ]; then
+  say "[ok]   close_request -> 引擎退出（进程已结束）"
+else
+  say "[FAIL] close_request 后引擎仍在运行（pid=$P）"; RC=1
+fi
 hc "aa force-stop $BUNDLE" >/dev/null
 
-if [ "$RC" = "0" ]; then say "[PASS] 三键平台化链路通（rect 到达引擎 + decor=false）"; else say "[FAIL] 三键平台化验证未通过"; fi
+if [ "$RC" = "0" ]; then say "[PASS] 三键平台化链路通（rect 到达引擎 + decor=false + 关窗链路）"; else say "[FAIL] 三键平台化验证未通过"; fi
 exit "$RC"

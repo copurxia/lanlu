@@ -22,11 +22,15 @@ private func shelfSortLabels(model: AppModel): Array<String> {
 // library-redesign.html：左侧书架导航 + 右侧收藏/历史主区。顶栏搜索绑定
 // shelfSearchText，输入即本地过滤标题与标签；数据仍来自真实 search API。
 public func shelfView(model: AppModel): Unit {
+    // D1：一次遍历拿到「可见列表 / 历史计数 / 最近在读」，并按视图条件缓存。
+    // 之前侧栏计数、可见列表、最近在读各自全量扫一遍 SearchItemView，
+    // 超出 64 槽环形窗口的每个 item 都是 RocksDB 点查（UI 线程每帧数千次）。
+    let derived = model.shelfDerived(shelfDerivedKey(model), {=> computeShelfDerived(model)})
     HStack {
-        shelfSidebar(model)
+        shelfSidebar(model, derived)
         Divider(axis: Axis.Vertical)
         SizeProbe(width: model.shelfContentWidth) {
-            let items = visibleShelfItems(model)
+            let items = derived.visible
             VStack {
                 shelfToolbar(model, items.size)
                 if (activeShelfLoading(model) && activeShelfItems(model).size == 0) {
@@ -55,14 +59,14 @@ public func shelfView(model: AppModel): Unit {
                 } else if (model.shelfTab.value == 0) {
                     favoritesContent(model, items)
                 } else {
-                    historyContent(model, items)
+                    historyContent(model, items, derived)
                 }
             }.spacing(0.0)
         }
     }.spacing(0.0)
 }
 
-private func shelfSidebar(model: AppModel): Unit {
+private func shelfSidebar(model: AppModel, derived: ShelfDerived): Unit {
     let bg = if (model.isLight()) {
         LANLU_L_BG
     } else {
@@ -76,7 +80,7 @@ private func shelfSidebar(model: AppModel): Unit {
                 => model.selectShelfTab(0)
             }
             NavItem(model.t("shelf.history"), active: model.shelfTab.value == 1,
-                count: "${historyCount(model.shelfHistory.value)}", glyph: Some(GhostGlyph.Named(IconName.Clock))) {
+                count: "${derived.historyCount}", glyph: Some(GhostGlyph.Named(IconName.Clock))) {
                 => model.selectShelfTab(1)
             }
         }.spacing(2.vp).crossAxisAlignment(CrossAxisAlignment.Start).hug().padding(10.vp, 8.vp)
@@ -164,14 +168,34 @@ private func activeShelfFailed(model: AppModel): Bool {
     }
 }
 
-private func historyCount(items: SearchItemView): Int64 {
+/// 派生缓存的键：任一视图条件或数据尺寸变化都会重算（数据被替换时由
+/// AppModel.invalidateShelfDerived 主动失效，见收藏/历史加载与就地刷新的 4 个点）。
+private func shelfDerivedKey(model: AppModel): String {
+    model.shelfTab.value.toString() + "|" + model.shelfFilter.value.toString() + "|" +
+        model.shelfSearchText.value + "|" + model.shelfFavorites.value.size.toString() + "|" +
+        model.shelfHistory.value.size.toString() + "|" + model.shelfFavoriteSortIndex.value.toString() +
+        "|" + model.shelfHistorySortIndex.value.toString() + "|" + model.language.value
+}
+
+/// 一次遍历产出书架派生数据：
+/// - visible：当前 Tab + 搜索词 + 快捷过滤后的可见项（供网格/分组）
+/// - historyCount：历史总数（不受过滤影响，供侧栏计数）
+/// - recent：最近在读（历史首项，供"继续阅读"横幅）
+private func computeShelfDerived(model: AppModel): ShelfDerived {
+    let visible = visibleShelfItems(model)
     var count: Int64 = 0
-    for (item in items) {
-        if (item.lastreadtime > 0 && !isTankItem(item)) {
+    var recent: ?SearchItem = None
+    var recentTime: Int64 = 0
+    for (item in model.shelfHistory.value) {
+        if (!isTankItem(item) && item.lastreadtime > 0) {
             count++
+            if (item.lastreadtime > recentTime) {
+                recent = Some(item)
+                recentTime = item.lastreadtime
+            }
         }
     }
-    count
+    ShelfDerived(visible, count, recent)
 }
 
 private func visibleShelfItems(model: AppModel): ArrayList<SearchItem> {
@@ -247,7 +271,7 @@ private func favoritesContent(model: AppModel, items: ArrayList<SearchItem>): Un
     }.padding(SHELF_PADDING, 4.0, SHELF_PADDING, 30.0)
 }
 
-private func historyContent(model: AppModel, items: ArrayList<SearchItem>): Unit {
+private func historyContent(model: AppModel, items: ArrayList<SearchItem>, derived: ShelfDerived): Unit {
     let now = DateTime.now().toUnixTimeStamp().toSeconds()
     let today = ArrayList<SearchItem>()
     let week = ArrayList<SearchItem>()
@@ -266,7 +290,7 @@ private func historyContent(model: AppModel, items: ArrayList<SearchItem>): Unit
     ScrollView(key: "shelf:history") {
         VStack {
             if (model.shelfSearchText.value.trimAscii().size == 0 && model.shelfFilter.value == 0) {
-                match (mostRecentHistory(model.shelfHistory.value)) {
+                match (derived.recent) {
                     case Some(item) => resumeBanner(model, item)
                     case None => ()
                 }
@@ -278,17 +302,6 @@ private func historyContent(model: AppModel, items: ArrayList<SearchItem>): Unit
     }.padding(SHELF_PADDING, 4.0, SHELF_PADDING, 30.0)
 }
 
-private func mostRecentHistory(items: SearchItemView): ?SearchItem {
-    var latest: ?SearchItem = None
-    var latestTime: Int64 = 0
-    for (item in items) {
-        if (!isTankItem(item) && item.lastreadtime > latestTime) {
-            latest = Some(item)
-            latestTime = item.lastreadtime
-        }
-    }
-    latest
-}
 
 private func historyGroup(model: AppModel, title: String, items: ArrayList<SearchItem>, cardW: Float32, now: Int64): Unit {
     if (items.size == 0) {

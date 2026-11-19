@@ -121,7 +121,14 @@ public func addToTankDialog(model: AppModel, open: State<Bool>, arcids: State<Ar
                 // 新建合集并加入（原型批量栏同款内联创建）。
                 HStack {
                     ZStack {
-                        TextField(newName)
+                        TextField(newName, onSubmit: {=>
+                            // 回车等同「新建并加入」按钮：回车提交是表单肌肉记忆。
+                            let name = newName.value.trimAscii()
+                            if (name.size > 0) {
+                                open.value = false
+                                model.createTankAndAdd(name, copyArchiveIds(arcids.value))
+                            }
+                        })
                         if (newName.value.size == 0) {
                             Label(model.t("dialog.newCollectionName"))
                                 .fontSize(13.fp)

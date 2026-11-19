@@ -4,11 +4,12 @@ name = "lanlu_client_next"
 version = "0.1.0"
 description = "lanlu desktop client built on CangjieGUI"
 output-type = "executable"
+# G1 构建优化档：override-compile-option 全局生效（会覆盖依赖模块自身的同名编译选项；
+# 依赖包没有额外 -O 设置，实测无冲突）。执行记录属本机性能实验，不入库。
+override-compile-option = "-O2"
 
 [dependencies]
-lgpu = { path = "../packages/lgpu" }
 cui = { path = "../packages/cangjie-gui" }
-lgui = { path = "../packages/cangjie-gui/lgui" }
 lwindow = { path = "../packages/lwindow" }
 portcheck = { path = "../packages/portcheck" }
 lcodec = { path = "../packages/lcodec" }
@@ -23,7 +24,7 @@ qwest = { path = "../packages/qwest" }
 [target.x86_64-unknown-linux-gnu]
 # vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
 # rocksdb_ffi 需要 librocksdb（与服务端同款）。
-link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -l:libass.so.9"
+link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -L ../packages/lgpu/native/target/release -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -l:libass.so.9 -llgpu_native"
 # 仅当出现 undefined reference to ...@PCRE2_10.47 时取消注释：
 # link-option = "/usr/lib/x86_64-linux-gnu/libpcre2-8.so"
   [target.x86_64-unknown-linux-gnu.bin-dependencies]

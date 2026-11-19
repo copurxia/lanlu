@@ -174,7 +174,13 @@ func addToTankDialog(model: AppModel, open: State<Bool>, arcid: String): Unit {
                 }
                 Label(model.t("dialog.newCollection")).fontSize(11.fp).muted()
                 HStack {
-                    TextField(newName, key: "dlg.addtank.field:${arcid}").flex()
+                    TextField(newName, key: "dlg.addtank.field:${arcid}", onSubmit: {=>
+                        let name = newName.value.trimAscii()
+                        if (name.size > 0) {
+                            open.value = false
+                            model.createTankAndAdd(name, arcidListOf(arcid))
+                        }
+                    }).flex()
                     Button(
                         model.t("dialog.createAndAdd"),
                         {
@@ -260,7 +266,9 @@ func tankAddArchivesDialog(model: AppModel, open: State<Bool>, tankId: String): 
                     VStack {
                         Label(model.t("dialog.addArchives")).fontSize(15.fp)
                         HStack {
-                            TextField(query, key: "dlg.tankadd.field:${tankId}").flex()
+                            TextField(query, key: "dlg.tankadd.field:${tankId}", onSubmit: {=>
+                                submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
+                            }).flex()
                             Button(model.t("dialog.search"), {
                                 => submitTankAddSearch(model, cell, tankId, query.value.trimAscii())
                             }).style(ghostStyleOf(model))

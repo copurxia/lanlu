@@ -1,0 +1,11 @@
+[package]
+cjc-version = "1.2.0"
+name = "lbase"
+version = "0.1.0"
+output-type = "static"
+description = "L 层中立基础类型：Canvas 渲染接口 + Color/Pen/Rect 等几何与颜色类型。零依赖（仅 std），业务层、UI 框架（cui）、平台层（lwindow）与渲染后端（lgpu）共同引用，杜绝反向依赖。"
+
+# 计划 docs/lwindow-platform-separation-plan.md §4.5 目标态：
+#   lgpu -> lbase（渲染后端只认接口与中性类型）
+#   cui/lwindow -> lbase（UI 框架与平台层共用类型）
+# 本包不得依赖任何其他 lanlu 包，也不得引入 FFI —— 保持中立。

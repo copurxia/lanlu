@@ -290,7 +290,7 @@ fn shell_creates_window_and_gets_configure() {
     };
     queue.roundtrip(&mut state).expect("首轮 roundtrip");
     let qh = queue.handle();
-    let (_w_surf, w_xdg, _w_tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (_w_surf, w_xdg, _w_tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.xdg_surface = Some(w_xdg);
     queue.roundtrip(&mut state).expect("建窗 roundtrip");
 
@@ -522,7 +522,7 @@ fn surface_attach_creates_shm_buffer() {
     };
     queue.roundtrip(&mut state).expect("roundtrip");
     let qh = queue.handle();
-    let (wl_surf, xdg_s, _tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (wl_surf, xdg_s, _tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.surface = Some(wl_surf.clone());
     state.xdg_surface = Some(xdg_s);
     queue.roundtrip(&mut state).expect("建窗 roundtrip");
@@ -646,7 +646,7 @@ fn window_state_maps_to_toplevel_requests() {
     let mut state = lanlu_platform_wayland::shell::State::default();
     queue.roundtrip(&mut state).expect("roundtrip");
     let qh = queue.handle();
-    let (_surf, xdg_s, tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (_surf, xdg_s, tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.xdg_surface = Some(xdg_s);
     state.toplevel = Some(tl.clone());
 
@@ -760,7 +760,7 @@ fn configure_emits_surface_changed() {
     };
     queue.roundtrip(&mut state).expect("roundtrip");
     let qh = queue.handle();
-    let (wl_surf, xdg_surf, tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (wl_surf, xdg_surf, tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.surface = Some(wl_surf);
     state.xdg_surface = Some(xdg_surf);
     state.toplevel = Some(tl);
@@ -783,6 +783,171 @@ fn configure_emits_surface_changed() {
     }
     assert_eq!(changed, Some((1024, 768)), "应发出 surface.changed(1024,768)");
     assert_eq!(acks.lock().unwrap().as_slice(), &[5u32], "应 ack 一次 configure");
+
+    drop(queue);
+    drop(shell);
+    server.join().ok();
+}
+
+/// HiDPI 分数缩放：合成器宣告 fractional-scale/viewporter 并下发 preferred_scale=150
+/// （1.25×120）时，configure 800×600（逻辑）应换算成 surface.changed(1000, 750)（物理）；
+/// buffer_scale 必须保持 1（协议禁止与 viewport destination 并用），destination 用逻辑尺寸。
+#[test]
+fn fractional_scale_sends_physical_surface_changed() {
+    let _serial = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (_name, listener) = listen("frac");
+
+    let acks = Arc::new(Mutex::new(Vec::<u32>::new()));
+    let acks_srv = Arc::clone(&acks);
+    let buf_scales = Arc::new(Mutex::new(Vec::<i32>::new()));
+    let buf_scales_srv = Arc::clone(&buf_scales);
+    let destinations = Arc::new(Mutex::new(Vec::<(i32, i32)>::new()));
+    let destinations_srv = Arc::clone(&destinations);
+    let server = std::thread::spawn(move || {
+        let (mut s, _) = listener.accept().expect("accept");
+        let mut registry = 0u32;
+        let mut wm_base = 0u32;
+        let mut compositor = 0u32;
+        let mut surface = 0u32;
+        let mut xdg = 0u32;
+        let mut toplevel = 0u32;
+        let mut fractional = 0u32;
+        let mut viewport = 0u32;
+        let mut viewporter_mgr = 0u32;
+        let mut fractional_mgr = 0u32;
+        while let Some((object, opcode, args)) = read_msg(&mut s) {
+            if object == 1 {
+                match opcode {
+                    0 if args.len() >= 4 => {
+                        let cb = u32at(&args, 0);
+                        let _ = write_msg(&mut s, cb, 0, &0u32.to_le_bytes());
+                    }
+                    1 if args.len() >= 4 => {
+                        registry = u32at(&args, 0);
+                        global(&mut s, registry, 1, "wl_compositor", 4);
+                        global(&mut s, registry, 2, "wl_shm", 1);
+                        global(&mut s, registry, 3, "xdg_wm_base", 1);
+                        global(&mut s, registry, 4, "wp_viewporter", 1);
+                        global(&mut s, registry, 5, "wp_fractional_scale_manager_v1", 1);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if object == registry {
+                if args.len() >= 12 {
+                    let slen = u32at(&args, 4) as usize;
+                    if slen > 0 && 8 + slen <= args.len() {
+                        let iface = String::from_utf8_lossy(&args[8..8 + slen - 1]).into_owned();
+                        let new_id = u32at(&args, args.len() - 4);
+                        match iface.as_str() {
+                            "wl_compositor" => compositor = new_id,
+                            "xdg_wm_base" => wm_base = new_id,
+                            // 管理器对象 id 由客户端按 bind 顺序分配，必须动态记录
+                            "wp_viewporter" => viewporter_mgr = new_id,
+                            "wp_fractional_scale_manager_v1" => fractional_mgr = new_id,
+                            _ => {}
+                        }
+                    }
+                }
+                continue;
+            }
+            if object == compositor && opcode == 0 && args.len() >= 4 {
+                surface = u32at(&args, 0);
+                continue;
+            }
+            // viewporter.get_viewport(1)：new_id 在首参
+            if viewporter_mgr != 0 && object == viewporter_mgr && opcode == 1 && args.len() >= 4 {
+                viewport = u32at(&args, 0);
+                continue;
+            }
+            // fractional_scale_manager.get_fractional_scale(1)：new_id 在首参
+            if fractional_mgr != 0 && object == fractional_mgr && opcode == 1 && args.len() >= 4 {
+                fractional = u32at(&args, 0);
+                continue;
+            }
+            if object == wm_base && opcode == 2 && args.len() >= 8 {
+                xdg = u32at(&args, 0);
+                continue;
+            }
+            if object == xdg && opcode == 1 && args.len() >= 4 {
+                toplevel = u32at(&args, 0);
+                continue;
+            }
+            if object == xdg && opcode == 4 && args.len() >= 4 {
+                acks_srv.lock().unwrap().push(u32at(&args, 0));
+                continue;
+            }
+            if object == surface && opcode == 8 && args.len() >= 4 {
+                buf_scales_srv.lock().unwrap().push(i32::from_le_bytes(args[0..4].try_into().unwrap()));
+                continue;
+            }
+            if object == viewport && opcode == 2 && args.len() >= 8 {
+                destinations_srv.lock().unwrap().push((
+                    i32::from_le_bytes(args[0..4].try_into().unwrap()),
+                    i32::from_le_bytes(args[4..8].try_into().unwrap()),
+                ));
+                continue;
+            }
+            if object == surface && opcode == 6 {
+                // commit：先发 preferred_scale（1.25 = 150/120），再发 configure
+                if fractional != 0 {
+                    let _ = write_msg(&mut s, fractional, 0, &150u32.to_le_bytes());
+                }
+                let mut cfg = Vec::new();
+                cfg.extend_from_slice(&800u32.to_le_bytes());
+                cfg.extend_from_slice(&600u32.to_le_bytes());
+                cfg.extend_from_slice(&0u32.to_le_bytes());
+                let _ = write_msg(&mut s, toplevel, 0, &cfg);
+                let _ = write_msg(&mut s, xdg, 0, &7u32.to_le_bytes());
+                continue;
+            }
+        }
+    });
+
+    let ch = lanlu_platform_wayland::lwp::Channel::open(
+        &format!("wayland-frac-{}", std::process::id()), 64).expect("通道");
+    ch.enable_checker(false);
+    let shared = Arc::new(Mutex::new(ch));
+    let (shell, mut queue) =
+        lanlu_platform_wayland::shell::Shell::connect().expect("连假合成器失败");
+    let mut state = lanlu_platform_wayland::shell::State {
+        channel: Some(Arc::clone(&shared)),
+        ..Default::default()
+    };
+    queue.roundtrip(&mut state).expect("roundtrip");
+    let qh = queue.handle();
+    let (wl_surf, xdg_surf, tl, vp, fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    state.surface = Some(wl_surf);
+    state.xdg_surface = Some(xdg_surf);
+    state.toplevel = Some(tl);
+    state.viewport = vp;
+    state.fractional = fs;
+    assert!(state.viewport.is_some(), "合成器宣告了 viewporter，建窗必须建 wp_viewport");
+    assert!(state.fractional.is_some(), "合成器宣告了 fractional-scale，建窗必须建 wp_fractional_scale_v1");
+    queue.roundtrip(&mut state).expect("configure roundtrip");
+    queue.roundtrip(&mut state).expect("ack roundtrip");
+
+    // surface.changed 走 LWP 通道（iface 5 = lw_surface，opcode 1 = changed）
+    let mut changed: Option<(u32, u32)> = None;
+    {
+        let c = shared.lock().unwrap();
+        while let Some(m) = c.recv(lanlu_platform_wayland::lwp::LWP_REQUEST) {
+            if m.iface == 5 && m.opcode == 1 && m.body.len() >= 12 {
+                changed = Some((
+                    u32::from_le_bytes(m.body[4..8].try_into().unwrap()),
+                    u32::from_le_bytes(m.body[8..12].try_into().unwrap()),
+                ));
+            }
+        }
+    }
+    assert_eq!(changed, Some((1000u32, 750u32)),
+        "800x600 逻辑 @1.25 应发物理 surface.changed(1000,750)");
+    assert_eq!(acks.lock().unwrap().as_slice(), &[7u32], "应 ack 一次 configure");
+    assert_eq!(buf_scales.lock().unwrap().as_slice(), &[1i32],
+        "fractional 路径 set_buffer_scale 必须保持 1");
+    assert_eq!(destinations.lock().unwrap().last(), Some(&(800i32, 600i32)),
+        "viewport destination 应为逻辑尺寸 800x600");
 
     drop(queue);
     drop(shell);
@@ -871,7 +1036,7 @@ fn output_scale_sets_buffer_scale() {
     assert_eq!(state.output_scale, 2, "应收到 wl_output.scale=2");
 
     let qh = queue.handle();
-    let (wl_surf, xdg_s, _tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (wl_surf, xdg_s, _tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.surface = Some(wl_surf);
     state.xdg_surface = Some(xdg_s);
     // 触发 flush：制造一次 configure
@@ -881,6 +1046,124 @@ fn output_scale_sets_buffer_scale() {
     queue.roundtrip(&mut state).expect("scale roundtrip");
 
     assert_eq!(scales.lock().unwrap().as_slice(), &[2u32], "应发 set_buffer_scale(2)");
+    drop(queue);
+    drop(shell);
+    server.join().ok();
+}
+
+/// 跨屏拖动/改系统缩放时，合成器可能只发 wl_output.scale 而不发 configure。
+/// 整数回退路径（无 viewporter）收到 Scale 事件后必须**同步重发 set_buffer_scale**，
+/// 否则引擎按新物理尺寸提交、合成器仍按旧比例解释（测试同时锁住 surface.changed 尺寸）。
+#[test]
+fn scale_change_without_configure_resyncs_buffer_scale() {
+    let _serial = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (_name, listener) = listen("scale-resync");
+
+    let scales = Arc::new(Mutex::new(Vec::<u32>::new()));
+    let scales_srv = Arc::clone(&scales);
+    let server = std::thread::spawn(move || {
+        let (mut s, _) = listener.accept().expect("accept");
+        let mut registry = 0u32;
+        let mut wm_base = 0u32;
+        let mut compositor = 0u32;
+        let mut xdg = 0u32;
+        while let Some((object, opcode, args)) = read_msg(&mut s) {
+            if object == 1 {
+                match opcode {
+                    0 if args.len() >= 4 => {
+                        let cb = u32at(&args, 0);
+                        let _ = write_msg(&mut s, cb, 0, &0u32.to_le_bytes());
+                    }
+                    1 if args.len() >= 4 => {
+                        registry = u32at(&args, 0);
+                        global(&mut s, registry, 1, "wl_compositor", 4);
+                        global(&mut s, registry, 2, "wl_shm", 1);
+                        global(&mut s, registry, 3, "xdg_wm_base", 1);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if object == registry && args.len() >= 12 {
+                let slen = u32at(&args, 4) as usize;
+                if slen > 0 && 8 + slen <= args.len() {
+                    let iface = String::from_utf8_lossy(&args[8..8 + slen - 1]).into_owned();
+                    let new_id = u32at(&args, args.len() - 4);
+                    match iface.as_str() {
+                        "wl_compositor" => compositor = new_id,
+                        "xdg_wm_base" => wm_base = new_id,
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            if compositor != 0 && object == compositor && opcode == 0 && args.len() >= 4 {
+                continue; // create_surface：new_id 无需记录
+            }
+            if wm_base != 0 && object == wm_base && opcode == 2 && args.len() >= 8 {
+                xdg = u32at(&args, 0);
+                continue;
+            }
+            if xdg != 0 && object == xdg && opcode == 1 && args.len() >= 4 {
+                continue; // get_toplevel
+            }
+            if opcode == 8 && args.len() >= 4 {
+                // wl_surface.set_buffer_scale
+                scales_srv.lock().unwrap().push(u32at(&args, 0));
+                continue;
+            }
+        }
+    });
+
+    let ch = lanlu_platform_wayland::lwp::Channel::open(
+        &format!("wayland-resync-{}", std::process::id()), 32).expect("通道");
+    ch.enable_checker(false);
+    let shared = Arc::new(Mutex::new(ch));
+    let (shell, mut queue) =
+        lanlu_platform_wayland::shell::Shell::connect().expect("连假合成器失败");
+    let mut state = lanlu_platform_wayland::shell::State {
+        channel: Some(Arc::clone(&shared)),
+        ..Default::default()
+    };
+    state.output_scale = 1; // 合成器未宣告 scale：从 1x 起
+    queue.roundtrip(&mut state).expect("roundtrip");
+
+    let qh = queue.handle();
+    let (wl_surf, xdg_s, _tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    state.surface = Some(wl_surf);
+    state.xdg_surface = Some(xdg_s);
+    // 一次普通 configure：落 last_logical，并按 1x 设 buffer_scale
+    state.pending = Some((640, 480));
+    state.pending_configure_serial = Some(1);
+    state.flush_configure();
+    queue.roundtrip(&mut state).expect("configure roundtrip");
+    assert_eq!(scales.lock().unwrap().as_slice(), &[1u32], "初始应为 1x");
+
+    // 模拟 wl_output.scale=2 到达但合成器**不发 configure**：直接走事件的 resync 路径
+    state.output_scale = 2;
+    assert_eq!(state.pending_configure_serial, None, "前提：没有待处理 configure");
+    state.resync_after_scale_change();
+    queue.roundtrip(&mut state).expect("resync roundtrip");
+
+    assert_eq!(scales.lock().unwrap().as_slice(), &[1u32, 2u32],
+        "Scale 变化必须重发 set_buffer_scale(2)（不能只等 configure）");
+
+    // 引擎应收到新的物理尺寸（640x480 逻辑 @2x）
+    let mut changed: Option<(u32, u32)> = None;
+    {
+        let c = shared.lock().unwrap();
+        while let Some(m) = c.recv(lanlu_platform_wayland::lwp::LWP_REQUEST) {
+            if m.iface == 5 && m.opcode == 1 && m.body.len() >= 12 {
+                changed = Some((
+                    u32::from_le_bytes(m.body[4..8].try_into().unwrap()),
+                    u32::from_le_bytes(m.body[8..12].try_into().unwrap()),
+                ));
+            }
+        }
+    }
+    assert_eq!(changed, Some((1280u32, 960u32)),
+        "resync 应重发物理 surface.changed(1280,960)");
+
     drop(queue);
     drop(shell);
     server.join().ok();
@@ -1031,7 +1314,7 @@ fn begin_move_and_resize_map_to_xdg_requests() {
     };
     queue.roundtrip(&mut state).expect("roundtrip");
     let qh = queue.handle();
-    let (_surf, xdg_s, tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (_surf, xdg_s, tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.xdg_surface = Some(xdg_s);
     state.toplevel = Some(tl.clone());
     state.last_input_serial = 42;
@@ -1138,7 +1421,7 @@ fn multi_output_switch_scale() {
     queue.roundtrip(&mut state).expect("roundtrip");
     assert_eq!(shell.outputs.len(), 2, "应绑定两个 output");
     let qh = queue.handle();
-    let (wl_surf, xdg_s, _tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (wl_surf, xdg_s, _tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     state.surface = Some(wl_surf);
     state.xdg_surface = Some(xdg_s);
     queue.roundtrip(&mut state).expect("enter roundtrip");
@@ -1243,7 +1526,7 @@ fn shm_pool_passes_fd_over_scm_rights() {
         use std::os::fd::AsRawFd;
         file.as_raw_fd()
     };
-    let (surf, _xdg, _tl) = shell.create_window(&qh, "lanlu", "com.lanlu");
+    let (surf, _xdg, _tl, _vp, _fs) = shell.create_window(&qh, "lanlu", "com.lanlu");
     let _ = shell.attach_shm(&qh, &surf, fd, 64, 48).expect("attach_shm");
     queue.roundtrip(&mut state).expect("attach roundtrip");
 

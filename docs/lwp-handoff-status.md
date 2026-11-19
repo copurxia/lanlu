@@ -12,7 +12,12 @@
 引擎编解码 + 42 项 lwindow 测试、OHOS 壳（配置应用 + vp2px 上报 + `windowWillClose`→close_request）、
 业务层去三键（`selfDrawn=false`）。真机证据：`title buttons cfg applied visible=0x7` + `lwp title buttons 256x70px`
 + `ui title buttons width=134.7vp selfDrawn=false`；一条命令复验：
-`bash packages/lpack-ohos/tools/verify-title-buttons.sh`（PASS）。剩余仅 P6 人工目视。
+`bash packages/lpack-ohos/tools/verify-title-buttons.sh`（PASS，含关窗链路：`probe close_request sent rc=1`
+→ `lwp close request -> quit` → 进程退出）。剩余仅"人手点系统关闭钮"这一步（OS 回调）。
+**设备 2026-11-12 00:00 UTC 恢复，全量脚本已复跑 PASS**（rect/配置/自绘面留白 348px/关窗链路），
+并补了真机目视：右上角只有一组系统三键。唯一未做的动作：**在 UI 里点一次主题钮**验证
+"切换即重发 colorMode"（代码路径与启动时的初值发送相同，风险低；谁方便可点一下看
+hilog `title buttons cfg applied ... mode=1`）。
 M6 手册：[m6-deletion-checklist.md](m6-deletion-checklist.md)
 
 ## 接手第一天该做什么（清单）
@@ -63,7 +68,7 @@ M6 手册：[m6-deletion-checklist.md](m6-deletion-checklist.md)
 ```bash
 bash packages/lpack-ohos/tools/build-ohos.sh          # 构建
 bash packages/lpack-ohos/tools/sign-hap.sh            # 签名
-hdc install -r client-next/build/ohos/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap
+hdc install -r packages/lpack-ohos/target/lanlu/target/ohos/hap/entry/build/default/outputs/default/entry-default-signed.hap
 bash tools/ohos-input-probe.sh 690 21                 # 点搜索框+移动（自动换算窗口偏移）
 ```
 - 协议取证：启动时加 `--ps lanlu.env.LANLU_LWP_TRACE /data/storage/el2/base/files/x.lwtrace`，

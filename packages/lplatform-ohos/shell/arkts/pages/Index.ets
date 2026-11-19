@@ -136,6 +136,11 @@ struct Index {
   // 联调：LANLU_PROBE_SHELL_RESIZE=1 时每秒真实改一次窗口尺寸（验 surface.changed 链路）
   private shellResizeTick: number = 0;
   private probeShellResize: boolean = false;
+  // 联调：LANLU_PROBE_IDLE_RESUME=1 在启动 6s 后真实改一次窗口尺寸（此时 vsync 已因空闲停掉），
+  // 用来验证"引擎重新出帧 -> 泵发现 frame.request -> vsync.start() 恢复配速"这条链路。
+  private probeIdleResume: boolean = false;
+  private idleResumeDone: boolean = false;
+  private idleResumeAt: number = 0;
   private host: common.UIAbilityContext | undefined = undefined;
 
   // The engine returns when the user closes the window from the app's own
@@ -419,8 +424,13 @@ struct Index {
     } catch (e2) {}
   }
 
-  /** 交互式缩放：输入过滤器线程算出的待应用尺寸（与泵无关，空闲快路径也要处理）。 */
-  private applyPendingResize(): void {
+  /**
+   * 交互式缩放：输入过滤器线程算出的待应用尺寸（与泵无关，空闲快路径也要处理）。
+   *
+   * 返回 true 表示本拍真的改了一次窗口尺寸。泵降频必须把"有缩放"当成"有活儿"：
+   * 否则拖窗口边缘时尺寸仍按 33ms 一拍应用（30Hz），观感就是"缩放卡顿/兜不住"。
+   */
+  private applyPendingResize(): boolean {
     try {
       const rz: number[] = shell.lwpTakeResize();
       if (rz !== undefined && rz.length === 2 && this.win !== undefined) {
@@ -428,8 +438,10 @@ struct Index {
         }).catch((e: Error) => {
           console.warn('[LANLU-SHELL] resize 失败: ' + JSON.stringify(e));
         });
+        return true;
       }
     } catch (eRz) {}
+    return false;
   }
 
   /** 窗口当前所在显示器的 densityPixels；失败时退回默认显示器，再退回 1.0。 */
@@ -544,6 +556,8 @@ struct Index {
     this.startVsync();
     try {
       this.probeShellResize = AppStorage.get<boolean>('lanluProbeShellResize') === true;
+      this.probeIdleResume = AppStorage.get<boolean>('lanluProbeIdleResume') === true;
+      this.idleResumeAt = Date.now() + 6000;
     } catch (eP) {}
     this.schedulePump();
   }
@@ -587,8 +601,23 @@ struct Index {
     // 空闲快路径（评审 P2）：本拍没有任何引擎请求时，下面十几次 take* NAPI 调用都只会
     // 返回"无"。只保留不经泵的那一项（交互式缩放由输入过滤器线程写入），其余跳过，
     // 主线程每 16ms 的固定开销从 ~20 次 NAPI 降到 2 次。
+    // 空闲恢复探针：等到 vsync 已停（>6s）后真实改一次窗口尺寸，看配速能否恢复
+    try {
+      if (this.probeIdleResume && !this.idleResumeDone && Date.now() >= this.idleResumeAt &&
+          this.win !== undefined) {
+        this.idleResumeDone = true;
+        const w: number = 1500;
+        this.win.resize(w, Math.floor(w * 1394 / 2090)).catch(() => {});
+        console.info('[LANLU-SHELL] probe idle-resume resize sent');
+      }
+    } catch (eIR) {}
     if (pumped === 0 && !this.probeShellResize) {
-      this.applyPendingResize();
+      if (this.applyPendingResize()) {
+        // 正在缩放：泵必须回到 16ms（缩放请求是按拍消费的，33ms 会明显卡顿）
+        this.pumpIdleTicks = 0;
+        if (this.pumpSlow) this.setPumpSlow(false);
+        this.ensureVsyncRunning();
+      }
       return;
     }
     // 剪贴板（lw_clipboard.set/get，M6 第 2 步：文件桥换成协议）
@@ -652,7 +681,11 @@ struct Index {
       } catch (eSt) {}
     }
     // 交互式缩放：引擎发 begin_resize 后，壳把指针位移换算成尺寸，这里真正改窗口
-    this.applyPendingResize();
+    if (this.applyPendingResize()) {
+      this.pumpIdleTicks = 0;
+      if (this.pumpSlow) this.setPumpSlow(false);
+      this.ensureVsyncRunning();
+    }
     // 光标形状：引擎请求 -> 系统光标（编号表见文档 §7.5）
     try {
       const shape: number = shell.lwpTakeCursorShape();
@@ -860,11 +893,14 @@ struct Index {
       try {
         if (shell.inputProbeWanted() === 1) {
           let step: number = 0;
+          // 扫过"卡片悬浮"能命中的区域（逻辑坐标）：种子浏览页的卡片大约在 x 480~1050、
+          // y 330~560，扫这里才能看到卡片悬浮层（tag 胶囊底色/封面渐变）的真实观感。
+          const sweep: number[][] = [[700, 400], [780, 450], [860, 500], [700, 520]];
           this.inputProbeTimer = setInterval(() => {
             try {
               step = (step + 1) % 4;
-              const x = step < 2 ? 300 : 900;
-              const y = 200 + step * 40;
+              const x = sweep[step][0];
+              const y = sweep[step][1];
               // action: 1=down 2=move 3=up（与 L 层事件桥口径一致）
               shell.pushInput(2, x, y, 0);
               if (step === 1) { shell.pushInput(1, x, y, 0); }

@@ -47,7 +47,7 @@ foreign {
     func lgpu_font_destroy(font: CPointer<UInt8>): Unit
     func lgpu_text_measure(font: CPointer<UInt8>, utf8: CPointer<UInt8>, len: Int64, pxSize: Float32): Float32
     func lgpu_text_draw(surface: CPointer<UInt8>, font: CPointer<UInt8>, utf8: CPointer<UInt8>, len: Int64,
-        x: Float32, y: Float32, pxSize: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Float32
+        x: Float32, y: Float32, pxSize: Float32, scale: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Float32
     func lgpu_set_clip(surface: CPointer<UInt8>, x: Float32, y: Float32, w: Float32, h: Float32): Int32
     func lgpu_set_transform(surface: CPointer<UInt8>, sx: Float32, sy: Float32, ox: Float32, oy: Float32): Int32
 
@@ -298,9 +298,11 @@ public class Surface <: Resource {
     // Surface，需在调用方串行化（与 lgpu 其余 Cangjie 侧状态同一约定）。
     private var textScratch: Array<UInt8> = Array<UInt8>(0, repeat: 0)
 
-    /// 绘制一段文本（UTF-8），返回前进宽度。
+    /// 绘制一段文本（UTF-8），返回前进宽度（逻辑像素）。
+    /// `scale` 是全局 UI 缩放：字形按 pxSize×scale 的**物理**字号光栅化，quad 直接
+    /// 落物理像素整点并绕过全局变换（HiDPI 文字 1:1 上屏，不再被 GPU 拉伸）。
     public func text(font: Font, content: String, x: Float32, y: Float32, pxSize: Float32,
-        r: Float32, g: Float32, b: Float32, a: Float32): Float32 {
+        scale: Float32, r: Float32, g: Float32, b: Float32, a: Float32): Float32 {
         let n = content.size
         if (n == 0) {
             return 0.0
@@ -320,7 +322,7 @@ public class Surface <: Resource {
         }
         let h = unsafe { acquireArrayRawData(textScratch) }
         try {
-            unsafe { lgpu_text_draw(handle, font.raw(), h.pointer, n, x, y, pxSize, r, g, b, a) }
+            unsafe { lgpu_text_draw(handle, font.raw(), h.pointer, n, x, y, pxSize, scale, r, g, b, a) }
         } finally {
             unsafe { releaseArrayRawData(h) }
         }

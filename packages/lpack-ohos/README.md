@@ -3,7 +3,7 @@
 计划：[docs/lwindow-platform-separation-plan.md](../../docs/lwindow-platform-separation-plan.md) §4.3、§9.2。
 
 职责：**主仓不存放任何鸿蒙工程**。本包读取 app profile + 引擎产物 + `lplatform-ohos` 的壳源码，
-生成完整鸿蒙工程到不入库的 `build/ohos/`，调用 hvigor 打包并签名。
+生成完整鸿蒙工程到不入库的 `target/<app>/`，调用 hvigor 打包并签名。
 
 上游：`git.copur.xyz/cangjie-ohos/ohos`（hapgen）。本目录是它的主仓副本，日常在此开发，定期回推。
 
@@ -19,7 +19,7 @@ assets/libcxx/        OHOS 可用的 libc++.so（ABI 对齐，见 client-next-oh
 
 ## 用法
 
-由 `client-next/ohos/build-ohos.sh` 调用：
+由 `tools/build-ohos.sh`（完整构建入口）调用：
 
 ```
 lpack-ohos  gen --sign      # 当前入口：生成 + 构建 + 签名（在工作目录下执行）
@@ -29,7 +29,7 @@ hapgen 读取的环境变量：
 
 | 变量 | 含义 |
 |---|---|
-| `OHOS_TEMPLATES` | 模板根；同级 `<值>_sdl3` 为覆盖层（构建脚本在 `build/ohos/.hap-templates` 里拼好） |
+| `OHOS_TEMPLATES` | 模板根；同级 `<值>_sdl3` 为覆盖层（构建脚本在 `packages/lpack-ohos/target/<app>/.hap-templates` 里拼好） |
 | `OHOS_ASSETS` | 图标资源目录 |
 | `OHOS_LIBCXX` | libc++.so 路径 |
 | `OHOS_UI` | 壳形态（当前 `sdl3`） |

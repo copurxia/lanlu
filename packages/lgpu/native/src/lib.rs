@@ -7,7 +7,8 @@
 //! 本文件当前是 P2 的第一块：实例创建 + 适配器枚举 + surface 创建。
 //! 管线/绘制在后续加入（见 docs/l-layer-plan）。
 
-mod gpu;
+#[doc(hidden)]
+pub mod gpu;
 mod text;
 
 use std::cell::RefCell;
@@ -369,6 +370,7 @@ struct Offscreen {
 struct TextRun {
     quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)>,
     /// 本段全部四边形共享的页纹理集合非空时才可复用（页淘汰后失效）。
+    /// 单位是**物理像素**（缓存键只含 px_phys，不含 scale；逻辑宽度 = advance / scale）。
     advance: f32,
 }
 
@@ -2736,8 +2738,15 @@ pub extern "C" fn lgpu_text_measure(font: *mut c_void, utf8: *const u8, len: usi
 
 const ATLAS_SIZE: u32 = 1024;
 
-/// 绘制一段文本到当前帧。返回文字前进宽度（像素）。
-/// 字形按需光栅化进图集（同一字形按 (字体, 字号) 缓存）。
+/// 绘制一段文本到当前帧。返回文字前进宽度（**逻辑**像素，与 `lgpu_text_measure` 同口径）。
+/// 字形按需光栅化进图集（同一字形按 (字体, 物理字号) 缓存）。
+///
+/// HiDPI 文字路径：`x`/`y`/`px_size` 是**逻辑**坐标（与几何图元同一空间），`scale` 是
+/// 全局 UI 缩放。字形按 `px_size × scale` 的**物理**字号光栅化，quad 直接落在**物理
+/// 像素**整点上（params.y = 1 让顶点着色器绕过全局变换）。之前把逻辑字号的位图交给
+/// 变换在 GPU 上拉伸 —— 高分屏上每个字形都是一次双线性上采样，是文字发糊的主因；
+/// 且笔位/基线是小数，线性过滤把笔画抹开半像素。现在光栅化尺寸与上屏尺寸 1:1，
+/// 落点整像素吸附。
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn lgpu_text_draw(
@@ -2748,6 +2757,7 @@ pub extern "C" fn lgpu_text_draw(
     x: f32,
     y: f32,
     px_size: f32,
+    scale: f32,
     r: f32,
     g: f32,
     b: f32,
@@ -2765,6 +2775,8 @@ pub extern "C" fn lgpu_text_draw(
         ));
         return 0.0;
     }
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let px_phys = px_size * scale;
     let fh = unsafe { &*(font as *const text::FontHandle) };
     let s = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(utf8, len) }).to_string();
 
@@ -2785,7 +2797,7 @@ pub extern "C" fn lgpu_text_draw(
 
     // 阶段 1：按需光栅化 + 上传（上传期间不持有 ctx 借用）。
     // 多页查找/分配：先在现有页里找缓存槽或能放下的空位；全都放不下就新开一页。
-    let size_key = (px_size * 4.0) as u32;
+    let size_key = (px_phys * 4.0) as u32;
 
     // R5.2 整段缓存快路径：同一 (字体, 字号, 文本) 的排版结果直接平移复用。
     // 之前每帧每段文本都要重做 char→glyph 映射 + 槽位查找 + Vec 重建；
@@ -2808,13 +2820,18 @@ pub extern "C" fn lgpu_text_draw(
                 }
             }
             if ok {
-                let baseline = y + text::metrics(fh, px_size).0;
+                // 缓存里是相对（起笔原点, 基线）的**物理像素未吸附**偏移；这里换到本次
+                // 调用的物理位置再吸附。吸附公式必须与慢路径逐字一致：
+                //   x = round(绝对位置)（逐字形整列）；y = round(基线) + round(bearing)。
+                // 平移一个已吸附的相对值会把上次的相位带进来，所以先加后吸。
+                let origin_x = x * scale;
+                let baseline = y * scale + text::metrics(fh, px_phys).0;
                 let mut q = run.quads;
-                for quad in q.iter_mut() {
-                    quad.0 += x;
-                    quad.1 += baseline;
-                }
                 ctx.tex_instances.reserve(q.len());
+                for quad in q.iter_mut() {
+                    quad.0 = snap_text_x(quad.0 + origin_x);
+                    quad.1 = snap_text_y(baseline, quad.1);
+                }
                 for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in q {
                     ctx.tex_instances.push((
                         gpu::TexInstance {
@@ -2823,28 +2840,32 @@ pub extern "C" fn lgpu_text_draw(
                             tint: [r, g, b, a],
                             clip: ctx.clip,
                             color2: [r, g, b, a],
-                            params: [0.0, 0.0, 0.0, 0.0],
+                            // params.y = 1：文本 quad 已按物理像素定位，绕过全局变换
+                            params: [0.0, 1.0, 0.0, 0.0],
                         },
                         page_tex,
                     ));
                 }
                 STATS.text_run_hits.fetch_add(1, Ordering::Relaxed);
-                return run.advance; // 相对起笔的前进宽度
+                // 缓存里是物理宽度；按本次 scale 换算回逻辑像素（缩放切换帧上
+                // (px_size, scale) 变了但 px_phys 相同也会命中，不能直接返回旧比例的值）。
+                return run.advance / scale;
             }
             // 有页被淘汰：整段失效，走慢路径重排
             ctx.text_runs.remove(&run_key);
         }
     }
 
-    let mut pen_x = x;
-    // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）
-    let baseline = y + text::metrics(fh, px_size).0;
+    let mut pen_x = x * scale;
+    // 基线用字体真实 ascent（之前硬编码 0.8*size，跟字体实际度量有偏差）。
+    let baseline_unsnapped = y * scale + text::metrics(fh, px_phys).0;
+    let origin_x_phys = x * scale;
     let mut quads: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)> = Vec::new();
     // 缺字形时前进宽度必须与 text::measure() 同口径（h_advance），否则测宽 < 绘制宽，
     // 框会容不下文字（真机：FPS 叠层文字顶出 surface 右缘被裁）。
     let scaled_font = {
         use ab_glyph::Font as _;
-        fh.font.as_scaled(ab_glyph::PxScale::from(px_size))
+        fh.font.as_scaled(ab_glyph::PxScale::from(px_phys))
     };
     { use ab_glyph::ScaleFont as _; }
 
@@ -2864,7 +2885,7 @@ pub extern "C" fn lgpu_text_draw(
         let (slot, page_tex) = match cached {
             Some(v) => v,
             None => {
-                let Some(rg) = text::rasterize(fh, ch, px_size) else {
+                let Some(rg) = text::rasterize(fh, ch, px_phys) else {
                     // 与 measure() 同口径：用字体对该码位的 h_advance，而不是拍脑袋的半 em。
                     // 两者不一致时，测出来的框比画出来的文字窄 —— 文字会顶出框/表面被裁。
                     {
@@ -2917,7 +2938,7 @@ pub extern "C" fn lgpu_text_draw(
                 let Some((page_tex, ax, ay)) = alloc else {
                     // 单个字形比整页还大：跳过该字符（仍前进半个字宽），不再中断整段。
                     STATS.glyph_overflow.fetch_add(1, Ordering::Relaxed);
-                    pen_x += px_size * 0.5;
+                    pen_x += px_phys * 0.5;
                     continue;
                 };
                 let mut rgba = vec![0u8; (rg.w * rg.h * 4) as usize];
@@ -2948,8 +2969,9 @@ pub extern "C" fn lgpu_text_draw(
 
         if slot.w > 0 && slot.h > 0 {
             let page_size = ATLAS_SIZE as f32;
+            // 物理像素坐标（未吸附）；吸附统一在入队时做，缓存存未吸附的相对值。
             let dx = pen_x + slot.bearing_x;
-            let dy = baseline + slot.bearing_y;
+            let dy = baseline_unsnapped + slot.bearing_y;
             quads.push((
                 dx,
                 dy,
@@ -2968,25 +2990,28 @@ pub extern "C" fn lgpu_text_draw(
     // 阶段 2：把四边形推入当前帧（quad 自带所在页的纹理指针）
     let _guard = lock_surface();
     let ctx = unsafe { &mut *(surface as *mut SurfaceCtx) };
-    let advance = pen_x - x;
+    // 前进宽度以**逻辑**像素回给调用方（与 measure 同口径；调用方全在逻辑空间排版）
+    let advance = (pen_x - origin_x_phys) / scale;
 
     // R5.2：缓存**相对**偏移的四边形（去掉起笔点与基线），下次命中直接平移。
     // 淘汰保护：段内任何一页被逐出时，快路径检查页存活并整段失效。
     let mut rel: Vec<(f32, f32, f32, f32, f32, f32, f32, f32, *mut c_void)> =
         Vec::with_capacity(quads.len());
-    let baseline = y + text::metrics(fh, px_size).0;
     for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in quads.iter() {
-        rel.push((dx - x, dy - baseline, *dw, *dh, *u0, *v0, *u1, *v1, *page_tex));
+        rel.push((dx - origin_x_phys, dy - baseline_unsnapped, *dw, *dh, *u0, *v0, *u1, *v1, *page_tex));
     }
     if ctx.text_runs_count >= TEXT_RUN_CACHE_MAX {
         ctx.text_runs.clear();
         ctx.text_runs_count = 0;
     }
-    ctx.text_runs.insert(run_key, TextRun { quads: rel, advance });
+    ctx.text_runs.insert(run_key, TextRun { quads: rel, advance: pen_x - origin_x_phys });
     ctx.text_runs_count += 1;
     STATS.text_run_misses.fetch_add(1, Ordering::Relaxed);
 
     for (dx, dy, dw, dh, u0, v0, u1, v1, page_tex) in quads {
+        // 整像素吸附（公式与取值口径见 snap_text_x/snap_text_y）
+        let dx = snap_text_x(dx);
+        let dy = snap_text_y(baseline_unsnapped, dy - baseline_unsnapped);
         ctx.tex_instances.push((
             gpu::TexInstance {
                 dst: [dx, dy, dw, dh],
@@ -2994,7 +3019,8 @@ pub extern "C" fn lgpu_text_draw(
                 tint: [r, g, b, a],
                 clip: ctx.clip,
                 color2: [r, g, b, a],
-                params: [0.0, 0.0, 0.0, 0.0],
+                // params.y = 1：文本 quad 已按物理像素定位，顶点着色器绕过全局变换
+                params: [0.0, 1.0, 0.0, 0.0],
             },
             page_tex,
         ));
@@ -3011,6 +3037,18 @@ fn fxhash64(bytes: &[u8]) -> u64 {
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
+}
+
+/// 文字 quad 的整像素吸附 —— 快路径（run 缓存命中）与慢路径**必须**共用这两个函数，
+/// 否则同一 (文本, 位置) 在缓存命中与未命中两种走向下会画出不同的相位（±0.5px 抖动）。
+///   x：绝对物理位置取整 —— 每个字形落整列，笔画不被线性过滤抹开半像素；
+///   y：基线取整一次 + 每字形 bearing 取整 —— 行内所有字形共享同一整像素基线。
+fn snap_text_x(abs: f32) -> f32 {
+    abs.round()
+}
+
+fn snap_text_y(baseline: f32, rel: f32) -> f32 {
+    baseline.round() + rel.round()
 }
 
 /// 文本自检：用给定字体渲染 "AA" 到离屏目标，返回可见包围盒高度<<8 | 宽度高 8 位。
@@ -3045,7 +3083,7 @@ pub extern "C" fn lgpu_selftest_text(surface: *mut c_void, font_path: *const u8,
     let size = 48.0f32;
     let sample: &[u8] = b"AA";
     let advance = lgpu_text_draw(
-        surface, font, sample.as_ptr(), sample.len(), 10.0, 10.0, size, 1.0, 1.0, 1.0, 1.0,
+        surface, font, sample.as_ptr(), sample.len(), 10.0, 10.0, size, 1.0, 1.0, 1.0, 1.0, 1.0,
     );
 
     // 取渲染需要的东西（克隆句柄），随后**不再**持有 ctx 借用
@@ -3432,5 +3470,38 @@ mod tests {
         let v = vec![mk(c0), mk(c0), mk(c1), mk(c0)];
         assert_eq!(draw_rect_batch_count(&v), 3);
         assert_eq!(draw_rect_batch_count(&[]), 0);
+    }
+
+    /// HiDPI 文字吸附：慢路径（绝对坐标直接吸附）与快路径（缓存相对偏移 + 本次原点）
+    /// 对同一 (字形, 位置) 必须产出**逐位相同**的 quad 位置 —— 两条走向公式漂移会
+    /// 表现为缓存命中与未命中交替时文字 ±0.5px 抖动。
+    #[test]
+    fn text_snap_slow_path_matches_run_cache_path() {
+        // (origin_x, baseline, dx_rel=笔位+bearing, dy_rel=bearing) 的代表样本：
+        // 小数原点、负 bearing（基线上方）、跨 0.5 边界的值都覆盖。
+        let cases = [
+            (10.3f32, 20.7f32, 8.36f32, -10.37f32),
+            (137.5, 452.25, -3.5, 0.5),
+            (0.0, 0.0, 0.49, -0.51),
+            (2090.0 * 0.0 + 33.7, 1394.0 * 0.0 + 88.2, 120.9, -14.3),
+        ];
+        for (origin_x, baseline, dx_rel, dy_rel) in cases {
+            // 慢路径：quad 存绝对坐标（dx_abs = origin + dx_rel，dy_abs = baseline + dy_rel）
+            let dx_abs = origin_x + dx_rel;
+            let dy_abs = baseline + dy_rel;
+            let slow_x = snap_text_x(dx_abs);
+            let slow_y = snap_text_y(baseline, dy_abs - baseline);
+            // 快路径：缓存存相对偏移，命中时加本次原点再吸附
+            let fast_x = snap_text_x(dx_rel + origin_x);
+            let fast_y = snap_text_y(baseline, dy_rel);
+            assert_eq!(slow_x, fast_x, "x 相位不一致 origin={origin_x} rel={dx_rel}");
+            assert_eq!(slow_y, fast_y, "y 相位不一致 baseline={baseline} rel={dy_rel}");
+        }
+        // 吸附后的坐标必须落在整像素上（1x 屏上不再有跨像素列的笔画）
+        for v in [snap_text_x(10.3), snap_text_x(10.5), snap_text_x(10.7)] {
+            assert_eq!(v, v.trunc());
+        }
+        let (b, rel) = (20.7f32, -10.37f32);
+        assert_eq!(snap_text_y(b, rel).fract(), 0.0);
     }
 }

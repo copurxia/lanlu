@@ -6,6 +6,7 @@ output-type = "static"
 description = "移植自检（图片/网络/媒体/字幕）：跨平台代码，按 OHOS_SELFTEST=1 触发，结果写文件便于 hdc 取回。"
 
 [dependencies]
+lbase = { path = "../lbase" }
 lcodec = { path = "../lcodec" }
 qwest = { path = "../qwest" }
 libavformat_ffi = { path = "../libavformat_ffi" }
@@ -13,7 +14,7 @@ libass_ffi = { path = "../libass_ffi" }
 libvlc_ffi = { path = "../libvlc_ffi" }
 webview = { path = "../webview" }
 fontkit_ffi = { path = "../fontkit_ffi" }
-lgui = { path = "../cangjie-gui/lgui" }
+cui = { path = "../cangjie-gui" }
 lgpu = { path = "../lgpu" }
 lwindow = { path = "../lwindow" }
 

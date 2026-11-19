@@ -8,7 +8,9 @@ set -euo pipefail
 BASE=${CJV_HOST_TOOLCHAIN:-/workspace/.cjv/toolchains/sts-1.2.0}
 PKG=${PKG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}   # 本脚本已在本包 tools/ 下
 cd "$PKG"
-rm -rf target
+# 只清宿主工具链产物；target/<app>/ 是应用打包工作区（tools/build-ohos.sh 生成），
+# 不能整目录删除，否则重建 hapgen 会把应用工程一起抹掉。
+rm -rf target/release target/debug target/.dep-cache target/.cjpm-history
 export CANGJIE_HOME="$BASE"
 export LD_LIBRARY_PATH="$BASE/runtime/lib/linux_x86_64_cjnative:$BASE/lib/linux_x86_64_cjnative"
 export PATH="$BASE/bin:${TOOLS_BIN:-/workspace/bin}:$PATH"

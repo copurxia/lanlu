@@ -94,7 +94,7 @@ client-next 的架构底子是对的：脏帧驱动循环、Lazy 虚拟化列表
 2. **测量计数**：`LgpuCanvas.textWidth` 调用次数 / 命中率（现有 `textMeasureCount` 只在已废弃的 SDL 路径上递增）。
 3. **重绘原因**：DesktopApp 记录每帧触发源（input / state-gen / timer / requestFrame + 调用者标签），用来定位“谁让 UI 不空闲”。
 4. `perf_log.cj` 改为启动时一次性读取环境变量，并使用常驻 buffered writer（现在是每行开关一次文件）。
-5. 基准场景脚本化：复用 `packages/cangjie-gui/bench`（scenes/large_table/planner_scroll），新增 `client-next/bench/frame_bench.sh`，用 `--profile` + `--snapshot` 在 dummy 视频驱动下跑固定场景，输出 JSON，CI 只记录趋势，不设门槛。
+5. 基准场景脚本化：复用 `packages/cangjie-gui/bench`（scenes/large_table/planner_scroll），新增 `client-next/scripts/bench/frame_bench.sh`，用 `--profile` + `--snapshot` 在 dummy 视频驱动下跑固定场景，输出 JSON，CI 只记录趋势，不设门槛。
 
 ---
 

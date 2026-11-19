@@ -73,6 +73,40 @@ func imagePoolDoesNotBlockApiPool(): Unit {
 }
 
 @Test
+func bulkPoolDoesNotBlockInteractiveApi(): Unit {
+    // D2：批量池（慢搜索）占满时，交互请求仍应先到货 —— 这是"点进详情很久没反应"的根因。
+    let w = ApiWorker()
+    for (i in 0..2) {
+        @Expect(w.submitBulk("row:${i}", "zh", {=> sleep(Duration.millisecond * 500); i }), true)
+    }
+    @Expect(w.submit("meta:arc1", {=> 42 }), true)
+    var order = ArrayList<String>()
+    var tries = 0
+    while (order.size < 3 && tries < 200) {
+        for (r in w.drain()) {
+            order.add(r.name)
+        }
+        if (order.size < 3) {
+            sleep(Duration.millisecond * 20)
+        }
+        tries++
+    }
+    @Expect(order.size, 3)
+    @Expect(order[0], "meta:arc1") // 批量慢任务在途时交互请求先完成
+}
+
+@Test
+func bulkDeduplicatesInflightAgainstOtherPools(): Unit {
+    let w = ApiWorker()
+    @Expect(w.submitBulk("search", "zh", {=> sleep(Duration.millisecond * 300); 1 }), true)
+    // 与 submit/submitTagged 共享在途命名空间：同名同 tag 被拒
+    @Expect(w.submitBulk("search", "zh", {=> 2 }), false)
+    @Expect(w.submitTagged("search", "zh", {=> 3 }), false)
+    // 不同 tag 是不同任务
+    @Expect(w.submitBulk("search", "en", {=> 4 }), true)
+}
+
+@Test
 func submitImageDeduplicatesInflightName(): Unit {
     let w = ApiWorker()
     @Expect(w.submitImage("img:same", {=> sleep(Duration.millisecond * 300); 1 }), true)

@@ -265,32 +265,34 @@ public func detailView(model: AppModel): Unit {
 }
 
 private func detailLoadPanel(model: AppModel, state: String, message: String, retry: () -> Unit): Unit {
-    Panel {
-        VStack {
-            if (state == "error") {
-                VStack {
-                    Icon(IconName.Process, size: 28.vp).foregroundColor(Color.rgb(0xE0, 0x5D, 0x5D))
-                    Label(if (message.size > 0) {
-                        message
-                    } else {
-                        "加载失败"
-                    }).muted().wrap().maxWidth(320.vp)
-                    Button("重试", retry).role(ButtonRole.Primary)
-                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-            } else {
-                VStack {
-                    Spinner(22.0, if (model.isLight()) {
-                        LANLU_L_ACCENT
-                    } else {
-                        LANLU_ACCENT
-                    })
-                    Label(model.t("common.loading")).muted()
-                }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
-            }
-        // 撑满再居中：hug 状态下外层没有宽度约束，换行文本会按"无限宽"测量，
-        // 结果整块被挤到右边并被面板右边缘裁掉（真机截图可见）。
-        }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).fillWidth().padding(28.vp)
-    }
+    // 外层整宽 + 交叉轴居中：错误/加载卡片不能用 hug 的 Panel 直接挂在页面区上——
+    // 页面区是 VStack，hug 子项在交叉轴上会被摆到末端（真机表现为整块贴右边缘、文字被裁）。
+    VStack {
+        Panel {
+            VStack {
+                if (state == "error") {
+                    VStack {
+                        Icon(IconName.Process, size: 28.vp).foregroundColor(Color.rgb(0xE0, 0x5D, 0x5D))
+                        Label(if (message.size > 0) {
+                            message
+                        } else {
+                            "加载失败"
+                        }).muted().wrap().maxWidth(320.vp)
+                        Button("重试", retry).role(ButtonRole.Primary)
+                    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+                } else {
+                    VStack {
+                        Spinner(22.0, if (model.isLight()) {
+                            LANLU_L_ACCENT
+                        } else {
+                            LANLU_ACCENT
+                        })
+                        Label(model.t("common.loading")).muted()
+                    }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).hug()
+                }
+            }.spacing(12.vp).crossAxisAlignment(CrossAxisAlignment.Center).padding(28.vp)
+        }.flexible(false)
+    }.crossAxisAlignment(CrossAxisAlignment.Center).fillWidth().fillHeight()
 }
 
 private func archiveDetailBody(model: AppModel, m: ArchiveMeta): Unit {

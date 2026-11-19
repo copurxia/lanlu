@@ -226,7 +226,13 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Inst) -> VsOut {
 
   let p = vec2f(inst.dst.x + (cx * 0.5 + 0.5) * inst.dst.z,
                 inst.dst.y + (cy * 0.5 + 0.5) * inst.dst.w);
-  let world = p * screen.xform_scale + screen.xform_offset;
+  // params.y = 1：quad 已经落在**物理像素**整点上（文字路径按 px_size×scale 光栅化后
+  // 自行吸附），绕过全局变换。否则变换把逻辑字号的位图在 GPU 上拉伸 —— 高分屏上
+  // 每个字形一次双线性上采样，文字发糊。几何图元仍走变换（params.y = 0 不变）。
+  let bypass = vec2f(inst.params.y);
+  let xf_scale = mix(screen.xform_scale, vec2f(1.0, 1.0), bypass);
+  let xf_offset = mix(screen.xform_offset, vec2f(0.0, 0.0), bypass);
+  let world = p * xf_scale + xf_offset;
   let ndc = vec2f(world.x / screen.size.x * 2.0 - 1.0, 1.0 - world.y / screen.size.y * 2.0);
 
   var out: VsOut;
