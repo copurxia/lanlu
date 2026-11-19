@@ -152,7 +152,7 @@
 1. `python3 -m tools.xtask affected --base <sha>` 读取 `cjpm.toml`、`Cargo.toml`、`package.json`、lock 与 path 映射。
 2. 建包图，按依赖反向闭包。示例：`lbase` → `lgpu/lwindow/portcheck/client-next`；`lcodec` → `portcheck/client-next`；`lwp` → `lwindow`。
 3. 输出 `plan.json` / `matrix.json`，GitHub `fromJSON` 直接消费。
-4. 守卫：path 依赖目标不存在或未被 Git 跟踪，`xtask affected` 直接失败。
+4. 守卫：path 依赖目标不存在时，`build_graph` 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:268-274`），`--strict` 下才抛 `ConfigError`（exit 2）；目标目录存在但未被 Git 跟踪时，`doctor` 记 warning（`tools/xtask/doctor.py:144-147`），`--strict` 下提升为 error（`doctor.py:150-152`）。CI guards 不带 `--strict`，干净 checkout 不会因此变红。
 
 至少纳入以下曾被漏掉的依赖：`lbase`、`lcodec`、`lwindow`、`lwp`、`lgpu`、`portcheck`、`lplatform-ohos`、`lplatform-wayland`、`lpack-ohos`、`sdl_stub_ffi`。以后新增包只改 manifest，不改 workflow 清单；依赖图缓存到 job artifact，允许一键回退“全量模式”。
 
@@ -457,7 +457,7 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 
 Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 守卫三侧生效且实测无漂移（lock 保持 v0 亦可）；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
 
-**缺失 path 依赖策略**：path 依赖目标不存在时，xtask 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:268-275`，`:269` 判 `strict`、`:273` 记 warning），`doctor` 退出 0、`affected` 与 `test --package` 仍能产出计划；`--strict` 才把该 warning 提升为 error（exit 2）。CI guards 使用默认容错模式；`--strict` 保留给已 clone `packages/cangjie-gui` 的完整树校验（如 nightly）。回归测试 `tools/xtask/tests/test_missing_dep.py` 用临时 git 仓模拟干净 checkout。
+**缺失 path 依赖策略**：path 依赖目标不存在时，xtask 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:268-274`，`:269` 判 `strict`、`:273` 记 warning），`doctor` 退出 0、`affected` 与 `test --package` 仍能产出计划；`--strict` 才把该 warning 提升为 error（exit 2）。CI guards 使用默认容错模式；`--strict` 保留给已 clone `packages/cangjie-gui` 的完整树校验（如 nightly）。回归测试 `tools/xtask/tests/test_missing_dep.py` 用临时 git 仓模拟干净 checkout。
 
 ### 10.1.1 Phase 1 接线状态（截至 `0f1d812d`）
 
@@ -477,7 +477,7 @@ Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `
 
 | 问题 | 证据 | 影响 | 处置 |
 |---|---|---|---|
-| 授权头跨域泄漏 | `client/src/api/client.ts` 的 `buildAuthorizedImageSource`/`buildAuthorizedUri` 修复前用 `uri.startsWith(server.baseUrl)` 判同源，`https://lanlu.example.evil.com/x` 会命中 | Bearer token 可被发往攻击者域名 | **安全缺陷，本轮独立修复（`fix(mobile)`，以提交后的 origin 比较与对抗性用例为准）**，不并入后续排期 |
+| 授权头跨域泄漏 | `client/src/api/client.ts` 的 `buildAuthorizedImageSource`（`:129`）/`buildAuthorizedUri`（`:159`）修复前用 `uri.startsWith(server.baseUrl)` 判同源，`https://lanlu.example.evil.com/x` 会命中 | Bearer token 可被发往攻击者域名 | **已修复：`36803ef6`**——新增 `normalizedOrigin`（`:99`）/`isSameOrigin`（`:123`）做精确 origin 比较，`Authorization` 与 VLC `token` 字段同步收敛，本机 87 例（含 9 条同源对抗用例）全绿 |
 | 无自动重试/退避/上限 | `client/src/stores/offlineProgressQueue.ts:46-60` 的 `flushQueue` 失败条目仅留在队列，需外部再次调用 | 离线恢复依赖调用时机，弱网下可能长期不同步 | 待产品决策（重试策略、退避曲线、最大次数） |
 | `flushQueue` 无并发上限，不处理 flush 期间新入队 | `client/src/stores/offlineProgressQueue.ts:51` 一次性 `Promise.allSettled` 全部条目 | 队列积压时会瞬时打满服务端；flush 期间新条目延后一轮 | 待产品决策（并发上限、分批） |
 | 上传状态不持久化 | `client/src/stores/uploadStore.ts:82-85` 的 `partialize` 强制 `uploadFiles: []` | 重启后待上传列表丢失 | 若是为规避本地 URI 失效，需注释说明；否则待修复 |
