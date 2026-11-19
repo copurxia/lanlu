@@ -23,10 +23,20 @@ docker run --rm --entrypoint /bin/sh "$image" -c '
   # The app is started with this preload; make sure the soname resolves.
   LD_PRELOAD=libmimalloc.so.3 /bin/true
 
-  missing="$(ldd /app/main | grep "not found" || true)"
+  missing="$(ldd /app/main 2>&1 | grep ' => not found' || true)"
   if [ -n "$missing" ]; then
     echo "missing shared libraries:" >&2
     echo "$missing" >&2
+    echo "runtime RocksDB packages:" >&2
+    dpkg-query -W -f='${binary:Package}\t${Version}\n' 'librocksdb*' 2>/dev/null >&2 || true
+    find /usr/lib /lib -name 'librocksdb.so*' -print 2>/dev/null >&2 || true
+    case "$missing" in
+      *librocksdb*)
+        echo "The bundled main binary was linked against a different librocksdb ABI." >&2
+        echo "Build it in the same Ubuntu snapshot used by this runtime image; do not" >&2
+        echo "symlink across incompatible RocksDB sonames." >&2
+        ;;
+    esac
     exit 1
   fi
 
