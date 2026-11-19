@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .affected import affected, build_plan, collect_changed, git_head
+from .affected import affected, build_github_matrix, build_plan, collect_changed, git_head
 from .context import find_root
 from .doctor import run_doctor
 from .errors import ConfigError, XtaskError
@@ -35,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
     affected_parser.add_argument("--include-worktree", dest="include_worktree", action="store_true", default=True)
     affected_parser.add_argument("--no-include-worktree", dest="include_worktree", action="store_false")
     affected_parser.add_argument("--json", action="store_true")
+
+    plan_parser = subparsers.add_parser("plan")
+    plan_parser.add_argument("--github-matrix", action="store_true", required=True)
+    plan_parser.add_argument("--base", required=True)
+    plan_parser.add_argument("--include-worktree", dest="include_worktree", action="store_true", default=True)
+    plan_parser.add_argument("--no-include-worktree", dest="include_worktree", action="store_false")
 
     test = subparsers.add_parser("test")
     test.add_argument("--changed", action="store_true")
@@ -92,6 +98,16 @@ def _run(args: argparse.Namespace, root: Path) -> int:
         else:
             for target in plan["targets"]:
                 print(f"{target['id']}\t{target['ecosystem']}\t{target['status']}")
+        return 0
+
+    if args.command == "plan":
+        graph = build_graph(root)
+        changed = collect_changed(root, args.base, args.include_worktree)
+        selected = affected(graph, changed)
+        plan = build_plan(graph, selected, changed=changed, base=args.base, head=git_head(root))
+        for warning in plan["warnings"]:
+            print(f"WARN  {warning}", file=sys.stderr)
+        _json(build_github_matrix(plan))
         return 0
 
     if args.command == "test":

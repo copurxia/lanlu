@@ -144,3 +144,28 @@ def build_plan(
         "warnings": list(graph.warnings),
         "errors": [],
     }
+
+
+def build_github_matrix(plan: dict) -> dict[str, list[dict[str, str]]]:
+    cangjie: list[dict[str, str]] = []
+    clients: list[dict[str, str]] = []
+    for target in plan["targets"]:
+        if target["ecosystem"] == "cjpm":
+            cangjie.append(
+                {
+                    "pkg": target["id"],
+                    "root": target["root"],
+                    "status": target["status"],
+                }
+            )
+        if target["id"] in CLIENT_TARGET_IDS:
+            clients.append(
+                {
+                    "target": target["id"],
+                    "root": target["root"],
+                    "status": target["status"],
+                }
+            )
+    cangjie.sort(key=lambda item: item["pkg"])
+    clients.sort(key=lambda item: item["target"])
+    return {"cangjie": cangjie, "clients": clients}
