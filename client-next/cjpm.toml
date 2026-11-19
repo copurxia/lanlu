@@ -32,7 +32,7 @@ link-option = "-L ${LGUI_SDL_LIB_DIR} -L ../packages/libass_ffi/native -L ../pac
     path-option = [ "${CANGJIE_STDX_PATH}" ]
 
 [target.x86_64-w64-mingw32]
-# MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 MINGW64 的 import libraries。
+# MINGW_LIBRARY_PATH 由 Windows CI 指向 MSYS2 UCRT64 的 import libraries。
 # -lgcc_s：fontkit_native 以 x86_64-pc-windows-gnu 构建，Rust std/panic_unwind 需要 libgcc_s 提供 _Unwind_* / _GCC_specific_handler。
 # -lcrypt32：stdx.crypto.x509 通过 CryptoAPI 读取系统根证书（CertOpenSystemStoreA 等）。
 # --subsystem windows：GUI 子系统，双击启动时不再弹出黑色控制台窗口（mingw-w64 的 libmingw32 提供 WinMain→main 桩，console main 程序可正常链接）。

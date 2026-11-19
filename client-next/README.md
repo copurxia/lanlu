@@ -27,9 +27,9 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 | libvips | 图片解码/模糊（**运行时**由 lcodec `dlopen` 装载，不再链接；桌面需系统 libvips，OHOS 由 HAP 内同符号 shim 提供） |
 | libVLC 3+ | 应用内视频解码（`libvlc_ffi` 本地包依赖，Linux 包通常为 `libvlc-dev` + `vlc-plugin-base`） |
 | FFmpeg 开发库 | 内嵌字幕探测与抽取（`libavformat-dev libavcodec-dev libavutil-dev`；不调用 ffmpeg/ffprobe 命令） |
-| libass | ASS/SSA/SRT/WebVTT/mov_text 多轨字幕排版与透明 RGBA 渲染（Linux `libass-dev`，Windows MSYS2 `mingw-w64-x86_64-libass`） |
+| libass | ASS/SSA/SRT/WebVTT/mov_text 多轨字幕排版与透明 RGBA 渲染（Linux `libass-dev`，Windows MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-libass`） |
 | SDL3 动态库 | 位于 `../packages/cangjie-gui/sdl/.sdl3/`，运行时必须加入 `LD_LIBRARY_PATH` |
-| libRocksDB | 设置与离线缓存存储（`rocksdb_ffi` 本地包依赖；Linux 包为 `librocksdb-dev`，Windows 为 MSYS2 `mingw-w64-x86_64-rocksdb`） |
+| libRocksDB | 设置与离线缓存存储（`rocksdb_ffi` 本地包依赖；Linux 包为 `librocksdb-dev`，Windows 为 MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-rocksdb`） |
 | stdx | 以二进制依赖引入（`CANGJIE_STDX_PATH`，与根项目同款配置） |
 
 ## 构建

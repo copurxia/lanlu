@@ -490,26 +490,26 @@ jobs:
         id: msys2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
             git
             make
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-libvips
-            mingw-w64-x86_64-libheif
-            mingw-w64-x86_64-libjxl
-            mingw-w64-x86_64-imagemagick
-            mingw-w64-x86_64-graphviz
-            mingw-w64-x86_64-openslide
-            mingw-w64-x86_64-poppler
-            mingw-w64-x86_64-vlc
-            mingw-w64-x86_64-ffmpeg
-            mingw-w64-x86_64-libass
-            mingw-w64-x86_64-dlfcn
-            mingw-w64-x86_64-rocksdb
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-libvips
+            mingw-w64-ucrt-x86_64-libheif
+            mingw-w64-ucrt-x86_64-libjxl
+            mingw-w64-ucrt-x86_64-imagemagick
+            mingw-w64-ucrt-x86_64-graphviz
+            mingw-w64-ucrt-x86_64-openslide
+            mingw-w64-ucrt-x86_64-poppler
+            mingw-w64-ucrt-x86_64-vlc
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-libass
+            mingw-w64-ucrt-x86_64-dlfcn
+            mingw-w64-ucrt-x86_64-rocksdb
 
       - name: Cache Cangjie and Rust dependencies
         uses: actions/cache@v4
@@ -528,8 +528,8 @@ jobs:
           MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
         run: |
           $ErrorActionPreference = "Stop"
-          $mingwBin = Join-Path $env:MSYS2_LOCATION "mingw64/bin"
-          $mingwLib = Join-Path $env:MSYS2_LOCATION "mingw64/lib"
+          $mingwBin = Join-Path $env:MSYS2_LOCATION "ucrt64/bin"
+          $mingwLib = Join-Path $env:MSYS2_LOCATION "ucrt64/lib"
           $sdlLib = Join-Path $env:GITHUB_WORKSPACE "packages/cangjie-gui/sdl/.sdl3"
           @($mingwBin, $sdlLib) |
             ForEach-Object { Add-Content -LiteralPath $env:GITHUB_PATH -Value $_ }

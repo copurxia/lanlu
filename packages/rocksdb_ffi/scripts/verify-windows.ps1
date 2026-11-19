@@ -1,7 +1,7 @@
-# 在具备 MSYS2（mingw-w64-x86_64-rocksdb）的 Windows 环境执行 rocksdb_ffi 最小 FFI 测试。
+# 在具备 MSYS2（mingw-w64-ucrt-x86_64-rocksdb）的 Windows 环境执行 rocksdb_ffi 最小 FFI 测试。
 # 用途：完成 todo.md §4.6「Linux/Windows 均运行最小 FFI 测试」的 Windows 侧验证。
-# 前置：Cangjie 1.1.3（cjpm 在 PATH）；MSYS2 MINGW64 安装
-#       mingw-w64-x86_64-toolchain 与 mingw-w64-x86_64-rocksdb（mingw64/bin 与 mingw64/lib 在 PATH）。
+# 前置：Cangjie 1.1.3（cjpm 在 PATH）；MSYS2 UCRT64 安装
+#       mingw-w64-ucrt-x86_64-toolchain 与 mingw-w64-ucrt-x86_64-rocksdb（ucrt64/bin 与 ucrt64/lib 在 PATH）。
 # 用法：powershell -ExecutionPolicy Bypass -File packages/rocksdb_ffi/scripts/verify-windows.ps1
 # 期望输出末尾：PASS: rocksdb_ffi Windows FFI 测试全部通过
 $ErrorActionPreference = "Stop"
@@ -18,7 +18,7 @@ Write-Host "==> 2/3 编译版本探测 bridge（x86_64-w64-mingw32-g++，读 roc
 $bridgeDir = Join-Path $root "native"
 & x86_64-w64-mingw32-g++ -std=c++17 -Wall -Wextra -Werror -O2 -c `
     (Join-Path $bridgeDir "lanlu_rocksdb_bridge.c") -o (Join-Path $bridgeDir "lanlu_rocksdb_bridge.o")
-if ($LASTEXITCODE -ne 0) { throw "bridge 编译失败：需 MSYS2 的 mingw-w64-x86_64-toolchain（含 g++）" }
+if ($LASTEXITCODE -ne 0) { throw "bridge 编译失败：需 MSYS2 的 mingw-w64-ucrt-x86_64-toolchain（含 g++）" }
 & ar rcs (Join-Path $bridgeDir "liblanlu_rocksdb_bridge.a") (Join-Path $bridgeDir "lanlu_rocksdb_bridge.o")
 if ($LASTEXITCODE -ne 0) { throw "ar 打包失败" }
 
