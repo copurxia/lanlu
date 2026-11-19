@@ -261,8 +261,10 @@ func passwordFormPanel(model: AppModel, p: ServerProfile): Unit {
         Label(model.t("login.username")).fontSize(12.fp).muted().tight()
         TextField(user, key: "login-user-${p.id}", leadingIcon: IconName.User,
             onSubmit: {=> model.loginSelected(user.value.trimAscii(), pass.value)})
-            .width(320.vp)
+            // 先 autofocus（TextField 构建方法）再 width：width 是 Widget 接口方法，
+            // 返回 Widget，链在它后面的具体控件方法会解析失败。
             .autofocus()
+            .width(320.vp)
     }.spacing(6.vp)
     VStack {
         Label(model.t("login.password")).fontSize(12.fp).muted().tight()
@@ -288,8 +290,8 @@ func totpFormPanel(model: AppModel): Unit {
         Label(model.t("login.code")).fontSize(12.fp).muted().tight()
         TextField(code, key: "login-totp", leadingIcon: IconName.Lock,
             onSubmit: {=> model.verifyTotp(code.value.trimAscii(), recovery.value.trimAscii())})
-            .width(320.vp)
             .autofocus()
+            .width(320.vp)
     }.spacing(6.vp)
     VStack {
         Label(model.t("login.recovery")).fontSize(12.fp).muted().tight()
@@ -333,8 +335,8 @@ func serverEditModal(model: AppModel): Unit {
             Label(model.t("login.serverNameHint")).fontSize(12.fp).muted()
             TextField(name, key: "srv-name", leadingIcon: IconName.Pencil,
                 onSubmit: {=> model.saveServer(name.value.trimAscii(), url.value)})
-                .width(320.vp)
                 .autofocus()
+                .width(320.vp)
             Label(model.t("login.serverAddress")).fontSize(12.fp).muted()
             TextField(url, key: "srv-url", leadingIcon: IconName.Server,
                 onSubmit: {=> model.saveServer(name.value.trimAscii(), url.value)}).width(320.vp)

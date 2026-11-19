@@ -3294,9 +3294,14 @@ fn render_tex_to_texture(
 }
 
 // ---- 窗口：由 surfaceId 创建原生窗口（lwindow 用）---------------------------
+//
+// OHOS NDK 符号（libnative_window）只在 OHOS 目标上存在。宿主机（wayland 壳）不会
+// 走 surfaceId 路径，但 Cangjie 静态链接仍会引用这几个导出符号 —— 因此非 OHOS
+// 目标必须提供**恒失败桩**，否则 client-next 在 Linux 上链接报 undefined reference。
 
 /// OHOS 的 NDK 接口：从 XComponent 的 surfaceId 拿到 OHNativeWindow*。
 /// 返回的窗口由系统持有，调用方只借用；surface 存活期间必须保持有效。
+#[cfg(target_env = "ohos")]
 extern "C" {
     fn OH_NativeWindow_CreateNativeWindowFromSurfaceId(
         surface_id: u64,
@@ -3308,12 +3313,15 @@ extern "C" {
 }
 
 // OH_NativeWindow_NativeWindowHandleOpt 的命令码（native_window/external_window.h）
+#[cfg(target_env = "ohos")]
 const NATIVE_WINDOW_SET_BUFFER_GEOMETRY: i32 = 0;
+#[cfg(target_env = "ohos")]
 const NATIVE_WINDOW_SET_FORMAT: i32 = 3;
 
 /// 由 surfaceId 创建 OHNativeWindow*（失败返回 null）。
 /// lwindow 在**自己的线程**里用它建窗口，再把窗口交给 lgpu_surface_create，
 /// 全程不跨边界传指针（真机验证过：跨线程传窗口指针会 SIGSEGV）。
+#[cfg(target_env = "ohos")]
 #[no_mangle]
 pub extern "C" fn lgpu_native_window_from_surface_id(surface_id: u64) -> *mut c_void {
     let mut window: *mut c_void = std::ptr::null_mut();
@@ -3327,7 +3335,15 @@ pub extern "C" fn lgpu_native_window_from_surface_id(surface_id: u64) -> *mut c_
     window
 }
 
+#[cfg(not(target_env = "ohos"))]
+#[no_mangle]
+pub extern "C" fn lgpu_native_window_from_surface_id(_surface_id: u64) -> *mut c_void {
+    set_error("lgpu_native_window_from_surface_id: 仅 OHOS 支持".to_string());
+    std::ptr::null_mut()
+}
+
 /// 给 surfaceId 对应的 native window 显式设置缓冲几何与格式（RGBA_8888）。
+#[cfg(target_env = "ohos")]
 #[no_mangle]
 pub extern "C" fn lgpu_native_window_set_geometry(
     surface_id: u64,
@@ -3356,7 +3372,15 @@ pub extern "C" fn lgpu_native_window_set_geometry(
     rc_geo
 }
 
+#[cfg(not(target_env = "ohos"))]
+#[no_mangle]
+pub extern "C" fn lgpu_native_window_set_geometry(_surface_id: u64, _width: u32, _height: u32) -> i32 {
+    set_error("lgpu_native_window_set_geometry: 仅 OHOS 支持".to_string());
+    -1
+}
+
 /// 一步到位：surfaceId → wgpu surface 句柄。
+#[cfg(target_env = "ohos")]
 #[no_mangle]
 pub extern "C" fn lgpu_surface_create_from_id(surface_id: u64) -> *mut c_void {
     let window = lgpu_native_window_from_surface_id(surface_id);
@@ -3364,6 +3388,13 @@ pub extern "C" fn lgpu_surface_create_from_id(surface_id: u64) -> *mut c_void {
         return std::ptr::null_mut();
     }
     lgpu_surface_create(window)
+}
+
+#[cfg(not(target_env = "ohos"))]
+#[no_mangle]
+pub extern "C" fn lgpu_surface_create_from_id(_surface_id: u64) -> *mut c_void {
+    set_error("lgpu_surface_create_from_id: 仅 OHOS 支持".to_string());
+    std::ptr::null_mut()
 }
 
 /// 字体度量：out[0]=ascent, out[1]=descent, out[2]=line_gap, out[3]=units_per_em（均按 px_size 缩放）。

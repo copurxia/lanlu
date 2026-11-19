@@ -291,17 +291,18 @@ public func installLgpuBackendIfRequested(apply: (Canvas) -> Unit): Bool {
     // 这里最多等 5 秒让 CN_UI_BACKEND 就绪（onCreate 里设置，通常 <1 秒）。
     // 后端默认就是 lgpu：SDL 壳已删除，`CN_UI_BACKEND` 不再由任何一侧设置。
     // 保留读取只是为了兼容旧脚本显式指定；空值时不再空转等 5 秒。
-    var backend = getVariable("CN_UI_BACKEND") ?? ""
-    if (backend.size == 0) {
-        backend = "lgpu"
+    // 注意：变量名不能叫 backend —— 会遮蔽 lwindow.backend 包名（包级调用全挂）。
+    var backendName = getVariable("CN_UI_BACKEND") ?? ""
+    if (backendName.size == 0) {
+        backendName = "lgpu"
     }
     let envWait = 0
     // P6：对话框平台派发（lw_dialog 协议）。必须先于任何 return 注册：
     // 对话框不依赖渲染后端，LWP 未启用时派发器内部回落文件桥。
     dialogDispatcher = Some(dispatchDialog)
-    probeTrace("backend mode=" + backend + " waited=" + envWait.toString())
+    probeTrace("backend mode=" + backendName + " waited=" + envWait.toString())
     probeTrace("lwp trace env=" + (getVariable("LANLU_LWP_TRACE") ?? "<unset>"))
-    if (backend != "lgpu") {
+    if (backendName != "lgpu") {
         return false
     }
     // LANLU_LWP=1：surface 句柄与尺寸由协议下发（surface.available），
