@@ -7,7 +7,7 @@
 | 阶段 | 一句话目标 | 量化退出线 |
 |---|---|---|
 | Phase 0 | 先让构建和测试可复现 | 新 clone 可构建；工具链与 lock 唯一；无未跟踪必需依赖 |
-| Phase 1 | 统一入口，让已有测试真跑 | 服务端 12、桌面 261、移动 32、MCP 30、lcodec 17、Web 至少 4 个现有用例进入 CI |
+| Phase 1 | 统一入口，让已有测试真跑 | 服务端 12、桌面 261、移动 78（原 32 + Phase 2B 新增 46）、MCP 30、lcodec 17、Web 至少 4 个现有用例进入 CI |
 | Phase 2（2A+2B） | 补契约与四端 P0 空白 | 2A 契约 6–8 人日，2B 四端 14–20 人日；P0 模块逐项有确定性测试 |
 | Phase 3 | 分层门禁与 nightly | PR p50 ≤12 分钟；nightly ≤60 分钟；依赖闭包自动触发 |
 | Phase 4 | E2E、设备、性能与 ratchet | 关键路径 nightly 稳定；覆盖率和性能有基线门禁 |
@@ -24,7 +24,7 @@
 | 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | 根包 `cjpm test` 已由独立 `server-test` job 执行（`.github/workflows/build.yml:90`，待 CI 实测）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
 | 桌面端 | 29 个测试文件、261 个 `@Test`，集中在 `client-next/src/net/`、`app/`、`ui/`、`storage/`、`img/`、`i18n/` | Linux 执行 `cjpm test --parallel nCores --timeout-each 60s --report-format xml`（`.github/workflows/client-next.yml:372-377`）；Windows 只执行 `rocksdb_ffi`（`:554`） | `model.cj` 状态机、主 API 客户端、离线恢复、UI 关键路径与真实交互 E2E 缺失 |
 | Web | 3 个测试文件、19 个用例 | 已执行 frozen install + typecheck + test:ci（`.github/workflows/build.yml:323`、`:328`、`:333`），随后 build（`:338`） | 19 例已全部迁移到 Vitest 并接入 CI（`frontend/package.json:7` 起有 `typecheck`/`test`/`test:ci`）；仍无组件交互与 E2E 测试 |
-| 移动端 | 8 个测试文件、32 个用例，Jest | **执行 `npm test -- --runInBand --ci`**（`.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`） | 6 个 offline store、`api/lanlu.ts`、`api/admin.ts`、session/storage、25 个 screen 缺测试；无 Detox/Maestro E2E |
+| 移动端 | 11 个测试文件、78 个用例（原 8 文件/32 例 + Phase 2B 新增 3 文件/46 例，`a9fff46a`），Jest | **执行 `npm test -- --runInBand --ci`**（`.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`） | Phase 2B 已覆盖 6 个 offline store、进度队列重放与 `api/client.ts` 拦截器；`api/lanlu.ts`、`api/admin.ts`、session/storage、25 个 screen 仍缺测试；无 Detox/Maestro E2E |
 | extension | 0 | 只 build + typecheck（`.github/workflows/extension.yml:29`、`:34`） | 单测、浏览器 API fake、扩展 E2E 全缺 |
 | MCP | 6 个文件、30 个 Rust 用例 | **构建后执行 `cargo test --locked`**（`.github/workflows/cli.yml:35-41`，待 CI 实测；`.gitea` 的 `cli.yaml`、`build.yaml` mcp job 同步） | 测试已接线；无 stdio/tool 集成测试 |
 
@@ -118,8 +118,8 @@
 | Web layout hooks | `tsc`/eslint｜无 | 4 例 `node:test` 可跑；3 例 vitest 坏 | RTL 组件测试｜无 | — | Playwright｜无 | 性能｜无 | Ph1/Ph4 |
 | Web unified-menu | `tsc`/eslint｜无 | 12 例 vitest 坏 | RTL 交互｜无 | — | Playwright｜无 | — | Ph1/Ph2 |
 | Web 页面/API client | typecheck｜无 | 无 | MSW 网络 mock｜无 | OpenAPI fixture｜无 | 关键路径 Playwright｜无 | — | Ph2/Ph4 |
-| 移动 offline stores | eslint/tsc｜CI | 6 个 store｜无 | fake timers/队列重放｜无 | — | Detox｜无 | 电池/soak｜无 | Ph2 |
-| 移动 api/lanlu.ts/拦截器 | typecheck｜CI | 1186 行客户端｜无 | axios mock/MSW｜无 | fixture｜无 | Detox｜无 | — | Ph2 |
+| 移动 offline stores | eslint/tsc｜CI | 6 个 store｜CI 46 例（3 套件，`a9fff46a`） | fake timers/队列重放/持久化恢复｜已覆盖 | — | Detox｜无 | 电池/soak｜无 | Ph2 |
+| 移动 api/lanlu.ts/拦截器 | typecheck｜CI | 1186 行客户端｜无 | axios mock/MSW｜拦截器 11 例（`client/src/api/client.test.ts`）；`api/lanlu.ts` 业务端点仍无 | fixture｜无 | Detox｜无 | — | Ph2 |
 | 移动 screens | typecheck｜CI | 仅 4 个 reader helper｜CI | 渲染测试｜无 | — | Detox｜无 | — | Ph2/Ph4 |
 | extension | typecheck/build｜CI | 0 | 浏览器 API fake｜无 | — | 扩展 Playwright｜无 | — | Ph2/Ph4 |
 | MCP | `cargo fmt/clippy`｜无 | 30 例存在｜CI 跑（待实测） | stdio/tool 集成｜无 | tool schema｜无 | 客户端冒烟｜无 | — | Ph1/Ph2 |
@@ -143,7 +143,7 @@
 | Nightly | 每日定时 + 手动 | 全量 L0–L4、覆盖率、Windows 子集、Web E2E、Android debug、MCP | 45–60 分钟 | 失败通知，不阻塞 PR |
 | Release | tag/手动 | 全量、签名产物、OHOS 人工清单、性能/bench | 90–120 分钟 | release gate |
 
-**Gitea runner 约束（实测）**：Gitea（`git.copur.xyz/copur/lanlu`）只有 **`ubuntu-latest`** 在线，且标签精确匹配、不回落——`runs-on` 写 `windows`、`self-hosted`、`ubuntu-24.04` 等只会让任务停在 `waiting`。因此拓扑定为：**Gitea = ubuntu 快速门禁镜像；Windows 与平台专属验证（`windows-build`、OHOS、GPU、soak）只在 GitHub Actions**。`.gitea/workflows/**` 现有 8 个 job（`build.yaml` 4、`cli.yaml` 1、`client.yml` 2、`extension.yaml` 1）全部 `runs-on: ubuntu-latest`、无 `container`；原 `.gitea/workflows/windows-ffi.yaml` 已由 `13b54ae4` 删除，其“编译 bridge → `cjpm test` → 打 PASS”是 GitHub `windows-build` 的真子集，无覆盖缺口。取证：仓库级/站点级 runner API 无权限，改用任务历史——最近 500 条任务中 `build.yaml` 312、`extension.yaml` 146、`client.yml` 37、`cli.yaml` 5，`windows-ffi.yaml` 0 且 run `2411` 自 21:03 起停在 `waiting`。
+**Gitea runner 约束（实测）**：Gitea（`git.copur.xyz/copur/lanlu`）只有 **`ubuntu-latest`** 在线，且标签精确匹配、不回落——`runs-on` 写 `windows`、`self-hosted`、`ubuntu-24.04` 等只会让任务停在 `waiting`。因此拓扑定为：**Gitea = ubuntu 快速门禁镜像；Windows 与平台专属验证（`windows-build`、OHOS、GPU、soak）只在 GitHub Actions**。`.gitea/workflows/**` 现有 8 个 job（`build.yaml` 4、`cli.yaml` 1、`client.yml` 2、`extension.yaml` 1）全部 `runs-on: ubuntu-latest`、无 `container`；原 `.gitea/workflows/windows-ffi.yaml` 已由 `13b54ae4` 删除，其“编译 bridge → `cjpm test` → 打 PASS”是 GitHub `windows-build` 的真子集，无覆盖缺口。取证：仓库级/站点级 runner API 无权限，改用任务历史——最近 500 条任务中 `build.yaml` 312、`extension.yaml` 146、`client.yml` 37、`cli.yaml` 5，`windows-ffi.yaml` 0 且 run `2411` 自 21:03 起停在 `waiting`。另经只读核对，`.gitea/workflows/client.yml` 的 `android-release`（`:73`）**不是 tag 门控**：触发条件是 push/PR（`client/**`、工作流自身）、`workflow_dispatch` 与每日 20:30 UTC `schedule`（`:4-16`）；每次 push/PR 在 `quality` 通过后都会构建 release APK 并保留 14 天 artifact（`:139-144`），只有发布到 `nightly` release 才限定 schedule/dispatch（`:148`）。因此它不是死配置（任务历史中 `client.yml` 37 条：success 10 / skipped 18 / failure 8 / cancelled 1），但意味着 Gitea 的 client 链路含一次最长 60 分钟的 Android 构建，“纯快速门禁”只对 `quality` job（`:30`）成立。
 
 ### 5.2 affected 依赖闭包
 
@@ -465,18 +465,33 @@ Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `
 |---|---|---|
 | MCP 30 例 | **已接线（待 CI 实测）** | `.github/workflows/cli.yml:35-41`；`.gitea/workflows/cli.yaml:33-39`、`.gitea/workflows/build.yaml:327-331` 同步，发布链路不绕过门禁；本地 `cargo test --locked` 30/30 通过 |
 | lcodec 17 例 | **已接线（待 CI 实测）** | `.github/workflows/client-next.yml:362-363`，位于 lwp/lwindow 之后、client-next 之前；本机缺 stdx（`can not find path '/stdx'`）未能本地复跑，CI 的 `setup-cangjie` 带 `components: stdx` |
-| 移动端 Jest | **已接线（`--ci` 硬化）** | `.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`；本地 8 suites / 32 tests 通过 |
+| 移动端 Jest | **已接线（`--ci` 硬化）** | `.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`；本地 11 suites / 78 tests 通过（Phase 2B 新增 3 套件 / 46 例，`a9fff46a`） |
 | 桌面路径过滤闭包 | **已补齐（仅静态审阅）** | `.github/workflows/client-next.yml:5`、`:30` 各 23 条，无重复；触发行为待 CI 侧观察 |
 | affected matrix | **仍列 Phase 3** | xtask 已能按包图产出计划，尚未替换静态白名单 |
+
+### 10.1.2 移动端测试现状与已知问题（Phase 2B 测试审计）
+
+**现状**：`a9fff46a` 新增 3 个套件 / 46 例，移动端合计 **11 套件 / 78 例**（既有 32 + 新增 46），全部用 fake timers + mock axios/MMKV，不触真实网络：`client/src/stores/offlineStores.test.ts`（24 例，offline 仓库字段合并、条数淘汰、持久化恢复）、`client/src/stores/offlineProgressQueue.test.ts`（11 例，入队/重放/部分失败/按账号隔离）、`client/src/api/client.test.ts`（11 例，拦截器与 URL 工具）。
+
+**已知问题**（测试按现状或明确契约编写，未改生产代码；“待决策/后续”不等于已修复）：
+
+| 问题 | 证据 | 影响 | 处置 |
+|---|---|---|---|
+| 授权头跨域泄漏 | `client/src/api/client.ts` 的 `buildAuthorizedImageSource`/`buildAuthorizedUri` 修复前用 `uri.startsWith(server.baseUrl)` 判同源，`https://lanlu.example.evil.com/x` 会命中 | Bearer token 可被发往攻击者域名 | **安全缺陷，本轮独立修复（`fix(mobile)`，以提交后的 origin 比较与对抗性用例为准）**，不并入后续排期 |
+| 无自动重试/退避/上限 | `client/src/stores/offlineProgressQueue.ts:46-60` 的 `flushQueue` 失败条目仅留在队列，需外部再次调用 | 离线恢复依赖调用时机，弱网下可能长期不同步 | 待产品决策（重试策略、退避曲线、最大次数） |
+| `flushQueue` 无并发上限，不处理 flush 期间新入队 | `client/src/stores/offlineProgressQueue.ts:51` 一次性 `Promise.allSettled` 全部条目 | 队列积压时会瞬时打满服务端；flush 期间新条目延后一轮 | 待产品决策（并发上限、分批） |
+| 上传状态不持久化 | `client/src/stores/uploadStore.ts:82-85` 的 `partialize` 强制 `uploadFiles: []` | 重启后待上传列表丢失 | 若是为规避本地 URI 失效，需注释说明；否则待修复 |
+| `\|\|` 默认值吞掉 0 | `client/src/stores/offlineFeedStore.ts:55-56`：`total: feed.total \|\| feed.items.length`、`page: feed.page \|\| 1` | 显式 `total: 0` 被改写，`page: 0` 变 1 | 待修复（改 `??`），需契约确认 |
+| `clearGeneralCache` 不重置 `lastServerId` | `client/src/stores/offlineGeneralStore.ts:57-66` 只清 `favorites` | 清空后仍指向旧 serverId，切服可能读到过期上下文 | 待修复 |
 
 ### 10.2 五阶段路线图
 
 | 阶段 | 范围 | 角色 | 人日 | 退出标准 | 指标 | 回滚 |
 |---|---|---|---:|---|---|---|
 | Phase 0 可复现性前置 | 验证 b25f846 已跟踪完整性；处理嵌套仓；工具链单一事实源；lock 守卫三侧生效（不要求迁移 v1）；移除无效 submodule；desktop 1.2.0 验证构建 | 平台/构建 + 桌面 owner | 2–3 | 干净 clone 可构建；无嵌套 `.git`；lock 守卫生效且实测无漂移；doctor 通过；CI 不 clone 分支头；无效 submodule 移除 | 依赖完整性 100%；工具链版本唯一 | 每项独立 PR；工具链/lock 可单独 revert |
-| Phase 1 统一入口 + 已有测试真跑 | `justfile` + Python xtask；服务端根测试、MCP `cargo test`、Web test runner、移动维持 Jest、`packages/lcodec` 17 例、XML + summary | 平台 + 各端 owner | 3–5 | 服务端 12、桌面 261、移动 32、MCP 30、lcodec 17 执行；Web 至少 4 例；summary 上传。若 lcodec 原生依赖阻断，必须在 issue 与 summary 中记录原因并显式延后 | 新增执行用例数；XML 上传率 100% | 可临时回落旧 workflow，但 required 保持旧命令 |
+| Phase 1 统一入口 + 已有测试真跑 | `justfile` + Python xtask；服务端根测试、MCP `cargo test`、Web test runner、移动维持 Jest、`packages/lcodec` 17 例、XML + summary | 平台 + 各端 owner | 3–5 | 服务端 12、桌面 261、移动 78（原 32 + Phase 2B 新增 46）、MCP 30、lcodec 17 执行；Web 至少 4 例；summary 上传。若 lcodec 原生依赖阻断，必须在 issue 与 summary 中记录原因并显式延后 | 新增执行用例数；XML 上传率 100% | 可临时回落旧 workflow，但 required 保持旧命令 |
 | Phase 2A 契约 | OpenAPI 3.0 导出、P0 约 40 条路由元数据、关键 request/response fixture | 契约 owner + 服务端 owner | 6–8 | 契约导出可运行；P0 端点 fixture 入库；3.1 有独立 issue | 契约 diff 接入；P0 fixture 覆盖率 | 导出器 non-blocking；3.1 不反向阻塞 3.0 |
-| Phase 2B 其余四端 P0 | 服务端 HTTP/auth/migration/WASM/DTO；桌面 model/offline/net；移动 offline/api/拦截器；extension | 各端 owner | 14–20（并行） | 每个 P0 模块至少 1 个确定性测试；6 个 offline store 覆盖 | P0 空白清零；新增测试数 | 新测试先 non-blocking 一周 |
+| Phase 2B 其余四端 P0 | 服务端 HTTP/auth/migration/WASM/DTO；桌面 model/offline/net；移动 offline/api/拦截器；extension | 各端 owner | 14–20（并行） | 每个 P0 模块至少 1 个确定性测试；移动 offline/拦截器已覆盖（`a9fff46a`，3 套件 46 例），其余端未开始 | P0 空白清零；新增测试数 | 新测试先 non-blocking 一周 |
 | Phase 3 分层门禁 + nightly | affected 闭包；PR L0–L3；merge queue；nightly Windows 子集、覆盖率基线、桌面 headless | 平台 owner + CI reviewer | 5–8 | 10 个漏包可正确触发；PR p50 ≤12 分钟；nightly ≤60 分钟；单一 required | 误触发/漏触发；PR p50/p95 | plan 支持全量兜底；新 required 观察一周 |
 | Phase 4 E2E/设备/性能/ratchet | Web Playwright、桌面视觉/交互、移动 Detox、MCP stdio、bench、覆盖率阻断、OHOS 清单 | 各端 owner + QA | 10–15 | 关键路径 nightly 稳定；bench 有基线；核心包 ratchet；OHOS release 清单自动收集 | nightly 成功率、flaky 率、覆盖率增量 | E2E/ratchet 默认不阻塞 PR |
 
@@ -522,7 +537,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 - [ ] 新机器 `git clone` 后 `just setup && just build` 可构建，无需手工 clone 依赖。
 - [ ] `git status` 干净；`find` 找不到嵌套 `.git`；`.gitignore` 不再隐藏必需依赖。
 - [ ] CI 不使用分支头；`cjpm.lock` 守卫三侧生效且实测无漂移（保持 v0 亦可）；工具链由 `toolchain/` 单一事实源管理，Phase 0 例外有到期日。
-- [ ] 服务端根 `cjpm test`、MCP `cargo test`、Web 的现有可运行测试均进入 CI；mobile Jest 保持执行；`packages/lcodec` 17 例执行，若原生依赖阻断则显式记录并延后。
+- [ ] 服务端根 `cjpm test`、MCP `cargo test`、Web 的现有可运行测试均进入 CI；mobile Jest 执行（78 例，含 Phase 2B 新增 46 例）；`packages/lcodec` 17 例执行，若原生依赖阻断则显式记录并延后。
 - [ ] `xtask affected` 对 10 个曾漏包给出正确闭包；新增包只改 manifest。
 - [ ] PR required 只有 `ci-required` 聚合；L4/L5 不阻塞 PR。
 - [ ] `summary.json` 可被 CI、PR 评论和 AI 代理消费；XML 由自建适配器转换。
@@ -553,6 +568,8 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.gitea/workflows/**`（8 个 job） | 全部 `runs-on: ubuntu-latest`、无 `container`；`windows-ffi.yaml` 已由 `13b54ae4` 删除（Gitea 无 Windows runner） |
 | `.github/workflows/client.yml:60` | 移动端真实执行 Jest（`--runInBand --ci`） |
 | `.gitea/workflows/client.yml:61` | Gitea 移动端 Jest 同步加 `--ci` |
+| `.gitea/workflows/client.yml:4-16`、`:73`、`:148` | client 触发条件与 `android-release` 门控：普通 push/PR 也构建 APK，只有 nightly 发布限定 schedule/dispatch |
+| `client/src/stores/offlineStores.test.ts`、`client/src/stores/offlineProgressQueue.test.ts`、`client/src/api/client.test.ts` | Phase 2B 移动端新增 3 套件 / 46 例（`a9fff46a`）：offline 仓库、进度队列、axios 拦截器 |
 | `.github/workflows/extension.yml:19`、`:29`、`:34` | extension pnpm 版本与只 build/typecheck |
 | `.github/workflows/cli.yml:35-41` | MCP 构建后执行 `cargo test --locked`；`.gitea/workflows/cli.yaml:33-39`、`build.yaml:327-331` 同步 |
 | `.github/workflows/client-next.yml:362-363` | 桌面 build-test 执行 `packages/lcodec` 17 例 |
