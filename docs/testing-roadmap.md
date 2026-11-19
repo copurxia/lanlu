@@ -13,7 +13,7 @@
 | Phase 4 | E2E、设备、性能与 ratchet | 关键路径 nightly 稳定；覆盖率和性能有基线门禁 |
 三个立即行动项：① 先做 Phase 0，收敛工具链、lock、嵌套仓和分支头克隆；② 建 `justfile` + Python `tools/xtask`，让现有测试真跑；③ 固定 `summary.json` 与 XML 适配层，之后的 CI、AI 修复和覆盖率都复用它。
 
-**版本脚注**：本文引用的 cjpm/unittest 能力，除特别说明外，锚定 **cjpm 1.2.0 手册 / std 1.0.5 文档**。桌面 CI 当前实际安装 Cangjie 1.1.3（`.github/workflows/client-next.yml:134`），manifest 另写 1.1.0（`client-next/cjpm.toml:2`），服务端为 1.2.0（`.github/workflows/build.yml:42`）。因此 Phase 0 必须对 1.1.3 做一次实测，确认 `--include-tags`、`--parallel`、`--coverage` 与 `prop_test` 的行为与文档一致；确认前，不把新能力写成硬门禁。
+**版本脚注**：本文引用的 cjpm/unittest 能力，除特别说明外，锚定 **cjpm 1.2.0 手册 / std 1.0.5 文档**。桌面 CI 当前实际安装 Cangjie 1.1.3（`.github/workflows/client-next.yml:143`），manifest 另写 1.1.0（`client-next/cjpm.toml:2`），服务端为 1.2.0（`.github/workflows/build.yml:40`），版本事实源为 `toolchain/versions.toml`。因此 Phase 0 必须对 1.1.3 做一次实测，确认 `--include-tags`、`--parallel`、`--coverage` 与 `prop_test` 的行为与文档一致；确认前，不把新能力写成硬门禁。
 
 ## 1. 背景与问题
 
@@ -21,20 +21,20 @@
 
 | 端 | 现有测试资产 | CI 真实执行情况 | 主要缺口 |
 |---|---|---|---|
-| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | **未执行根包 `cjpm test`**；只执行 `packages/csorm` 与 `packages/postgresql-driver`（`.github/workflows/build.yml:84`、`:90`） | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
-| 桌面端 | 29 个测试文件、261 个 `@Test`，集中在 `client-next/src/net/`、`app/`、`ui/`、`storage/`、`img/`、`i18n/` | Linux 执行 `cjpm test --parallel nCores --timeout-each 60s --report-format xml`（`.github/workflows/client-next.yml:330`）；Windows 只执行 `rocksdb_ffi`（`:517`） | `model.cj` 状态机、主 API 客户端、离线恢复、UI 关键路径与真实交互 E2E 缺失 |
-| Web | 3 个测试文件、19 个用例 | **CI 只构建，不测试**（`.github/workflows/build.yml:203`） | 15 个 vitest/RTL 用例当前不可运行；`node:test` 4 例可运行但未接入；无 test 脚本（`frontend/package.json:7`） |
+| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | 根包 `cjpm test` 已由独立 `server-test` job 执行（`.github/workflows/build.yml:90`，待 CI 实测）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
+| 桌面端 | 29 个测试文件、261 个 `@Test`，集中在 `client-next/src/net/`、`app/`、`ui/`、`storage/`、`img/`、`i18n/` | Linux 执行 `cjpm test --parallel nCores --timeout-each 60s --report-format xml`（`.github/workflows/client-next.yml:342`）；Windows 只执行 `rocksdb_ffi`（`:529`） | `model.cj` 状态机、主 API 客户端、离线恢复、UI 关键路径与真实交互 E2E 缺失 |
+| Web | 3 个测试文件、19 个用例 | 已执行 frozen install + typecheck + test:ci（`.github/workflows/build.yml:323`、`:328`、`:333`），随后 build（`:338`） | 19 例已全部迁移到 Vitest 并接入 CI（`frontend/package.json:7` 起有 `typecheck`/`test`/`test:ci`）；仍无组件交互与 E2E 测试 |
 | 移动端 | 8 个测试文件、32 个用例，Jest | **执行 `npm test -- --runInBand`**（`.github/workflows/client.yml:60`） | 6 个 offline store、`api/lanlu.ts`、`api/admin.ts`、session/storage、25 个 screen 缺测试；无 Detox/Maestro E2E |
-| extension | 0 | 只 build + typecheck（`.github/workflows/extension.yml:26`） | 单测、浏览器 API fake、扩展 E2E 全缺 |
+| extension | 0 | 只 build + typecheck（`.github/workflows/extension.yml:29`、`:34`） | 单测、浏览器 API fake、扩展 E2E 全缺 |
 | MCP | 6 个文件、30 个 Rust 用例 | **只执行 `cargo build`**（`.github/workflows/cli.yml:35`） | 有测试但不运行；无 stdio/tool 集成测试 |
 
 服务端根 `cjpm.toml`、桌面 `client-next/cjpm.toml`、Web `frontend/package.json`、移动 `client/package.json` 是四端各自的构建事实源；目前没有统一的本地/CI 任务入口。
 
 ### 1.2 可复现性缺陷会污染测试结论
 
-- `packages/cangjie-gui` 是独立 Git 仓库且被 `.gitignore:26` 隐藏；CI 通过 `git clone --branch lanlu-client-next` 取分支头（`.github/workflows/client-next.yml:198`），不是固定提交，README 对“固定提交”的描述与实际不一致。
+- `packages/cangjie-gui` 是独立 Git 仓库且被 `.gitignore:26` 隐藏；CI 通过 `git clone --branch lanlu-client-next` 取分支头（`.github/workflows/client-next.yml:207`；Windows 侧 `:424`），不是固定提交，README 对“固定提交”的描述与实际不一致。
 - 本轮审计时 `packages/lbase`、`packages/lwindow/src/backend/`、`packages/lwindow/src/displays/` 曾为未跟踪路径；现已由 HEAD `b25f846` 跟踪（分别为 6、1、3 个文件），干净 checkout 不再缺少这些路径。Phase 0 仍需用干净 clone 验证完整性，而不是重新跟踪。
-- 根 `cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`client-next/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 执行 `cjpm update`（`.github/workflows/build.yml:176`），本轮起其后有 lock 漂移守卫，仍不是只读安装。
+- 根 `cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`client-next/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 执行 `cjpm update`（`.github/workflows/build.yml:176`，其后 `:177` 为 lock 漂移守卫），仍不是只读安装。实测（Codex 用 1.2.0 在全新 `HOME` 与空 `~/.cjpm` 的冷缓存下执行）：`cjpm update` 退出码 0，`cjpm.lock` SHA256 不变（`1594a8b6…d8f21417`），`version` 仍为 `0`，14 条 commitId 全部未漂移——1.2.0 既不自动升级 v0→v1，也不刷新已锁 commit。
 - 工具链三处不一致：服务端 1.2.0、桌面 CI 1.1.3、桌面 manifest 1.1.0。
 - 桌面路径白名单（`.github/workflows/client-next.yml:5`）至少漏掉 10 个实际被依赖的包或 FFI 包，修改 `lbase`、`lcodec`、`lwindow` 等不会触发桌面测试。
 - `cangjie-repo.toml` 只是中心仓 registry 配置，与工具链版本无关；它不应出现在工具链裁决或测试缓存 key 的核心语义里。
@@ -443,21 +443,25 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 | Phase 0 待办 | 状态 | 证据 | 剩余动作 |
 |---|---|---|---|
 | `packages/lbase`、`lwindow/src/backend/`、`lwindow/src/displays/` 缺失跟踪 | **已在 b25f846 解决** | HEAD 跟踪数分别为 6、1、3 | 用干净 clone 验证，不再重复跟踪 |
-| `packages/cangjie-gui` 嵌套独立仓 | **仍待办** | 目录内存在 `.git`；Git 跟踪文件数 0；被 `.gitignore:26` 隐藏 | 收编或移除；CI 同步停止克隆 |
-| lock 文件停留在 v0 旧格式 | **仍待办** | 根 `cjpm.lock:1` 为 `version = 0`，`[requires]` 锁 14 条 git commitId（8 直接 + 6 传递）；`client-next` 与其余 21 个包 lock 为空属正常态（纯 path 依赖不生成锁条目） | 用 1.2.0 工具链跑一次依赖解析自动升级 v1，审查 commitId 未漂移后单独提交；CI git-diff 守卫在迁移提交前必红 |
-| CI 克隆分支头而非固定提交 | **仍待办** | `.github/workflows/client-next.yml:198`、`:412` | 改固定提交/lock；同步修正 README |
-| 工具链三处不一致 | **仍待办** | 服务端 `.github/workflows/build.yml:42` 为 1.2.0；桌面 CI `.github/workflows/client-next.yml:134` 为 1.1.3；桌面 manifest `client-next/cjpm.toml:2` 为 1.1.0；根 manifest `cjpm.toml:2` 为 1.2.0 | 建 `toolchain/` 单一事实源；按 target 声明例外；验证 desktop 升 1.2.0 |
-| 无效 submodule 步骤 | **部分解决（工作树）** | `.github/workflows/build.yml:36`、`:103` 与 `.cnb.yml` 的 submodule 步骤已在工作树移除；`.gitea/workflows/build.yaml:34`、`:102` 仍有 `submodules: true`；仓库无 `.gitmodules` | `.gitea` 同步移除；新增嵌套仓守卫 |
-| 服务端 CI 执行 `cjpm update` | **部分解决（工作树）** | `build.yml:176` 保留 update（wasmedge 补丁依赖其先 clone），其后已加 `git diff --exit-code -- cjpm.lock` 守卫；`.cnb.yml:120` 尚未加守卫 | 迁移 v1 后守卫转绿；`.cnb.yml` 补同款守卫；若实测 update 刷新 commitId 再移除 update |
+| `packages/cangjie-gui` 嵌套独立仓 | **仍待办** | 目录内存在 `.git`；Git 跟踪文件数 0；被 `.gitignore:26` 隐藏 | 收编或移除；CI 同步停止克隆。注意：`client-next/cjpm.toml` 与 `packages/portcheck/cjpm.toml` 以 path 依赖指向它；缺失时 xtask 默认记 `missing_path_dep` warning 并跳过该边，`--strict` 才升级为 error |
+| lock 文件停留在 v0 旧格式 | **已定案（不迁移）** | 1.2.0 冷缓存实测：`cjpm update` 不升级 v0→v1、不刷新 commitId；lock SHA256 `1594a8b6…d8f21417` 不变 | 守卫定位改为“漂移探测器”而非“迁移门禁”：lock 保持 v0 可接受；若未来工具链改变行为，守卫会先红，届时按需显式解析并单独提交 |
+| CI 克隆分支头而非固定提交 | **仍待办** | `.github/workflows/client-next.yml:207`、`:424` | 改固定提交/lock；同步修正 README |
+| 工具链三处不一致 | **部分解决（工作树）** | 已建 `toolchain/versions.toml` 作为事实源；当前值：服务端 `build.yml:40` 1.2.0、桌面 CI `client-next.yml:143` 1.1.3、桌面 manifest `client-next/cjpm.toml:2` 1.1.0、根 manifest `cjpm.toml:2` 1.2.0 | 由 `doctor` 持续校验事实源与 workflow 一致；桌面升 1.2.0 仍待验证 |
+| 无效 submodule 步骤 | **已解决** | 三侧均无 `submodules: true`：`.github/workflows/build.yml`、`.gitea/workflows/build.yaml`、`.cnb.yml`；仓库无 `.gitmodules` | 保持；新增嵌套仓守卫（待办） |
+| 服务端 CI 执行 `cjpm update` | **已解决（守卫生效）** | 三侧 update 后均有 `git diff --exit-code -- cjpm.lock`：`build.yml:176`（守卫 `:177`，主构建 update `:296`/守卫 `:297`）、`.gitea/workflows/build.yaml:173`（守卫 `:174`）、`.cnb.yml:120`（守卫 `:121`）；冷缓存实测无漂移 | 保留 update（wasmedge 补丁依赖其先 clone）；若未来实测刷新 commitId，再把刷新作为显式提交 |
 | 桌面 1.1.3 能力一致性未实测 | **仍待办** | 本文版本脚注所列四项能力 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
+| xtask 接入 CI | **已接线（干净 checkout 实测通过）** | `.github/workflows/client-next.yml:53-61` 的 guards job 已加 `setup-python@v5`/3.12 与 `doctor --json`（`:58`）、`test --package xtask`（`:61`），均**不带 `--strict`** | 缺失 path 依赖默认 warning；`--strict` 留给 clone 出 `packages/cangjie-gui` 之后的完整树校验（如 nightly） |
+| 服务端根包测试 job | **已接线（待 CI 实测）** | `.github/workflows/build.yml:90` 起 `server-test`：PG service + `DB_STRING` + `cjpm test --show-all-output --report-path`，输出含 `[skip]` 即失败（`--show-all-output` 在 `:192`，守卫 `:197`）；产物 `if: always()` 上传 | 首次实跑核对 PG 连通、原生库与 WasmEdge 前置；确认无静默跳过 |
 
-Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 迁移至 v1 且 CI lock 守卫生效；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
+Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 守卫三侧生效且实测无漂移（lock 保持 v0 亦可）；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
+
+**缺失 path 依赖策略**：path 依赖目标不存在时，xtask 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:266-275`），`doctor` 退出 0、`affected` 与 `test --package` 仍能产出计划；`--strict` 才把该 warning 提升为 error（exit 2）。CI guards 使用默认容错模式；`--strict` 保留给已 clone `packages/cangjie-gui` 的完整树校验（如 nightly）。回归测试 `tools/xtask/tests/test_missing_dep.py` 用临时 git 仓模拟干净 checkout。
 
 ### 10.2 五阶段路线图
 
 | 阶段 | 范围 | 角色 | 人日 | 退出标准 | 指标 | 回滚 |
 |---|---|---|---:|---|---|---|
-| Phase 0 可复现性前置 | 验证 b25f846 已跟踪完整性；处理嵌套仓；工具链单一事实源；lock 迁移 v1 与 CI lock 守卫；移除无效 submodule；desktop 1.2.0 验证构建 | 平台/构建 + 桌面 owner | 2–3 | 干净 clone 可构建；无嵌套 `.git`；lock 迁移 v1 且守卫生效；doctor 通过；CI 不 clone 分支头；无效 submodule 移除 | 依赖完整性 100%；工具链版本唯一 | 每项独立 PR；工具链/lock 可单独 revert |
+| Phase 0 可复现性前置 | 验证 b25f846 已跟踪完整性；处理嵌套仓；工具链单一事实源；lock 守卫三侧生效（不要求迁移 v1）；移除无效 submodule；desktop 1.2.0 验证构建 | 平台/构建 + 桌面 owner | 2–3 | 干净 clone 可构建；无嵌套 `.git`；lock 守卫生效且实测无漂移；doctor 通过；CI 不 clone 分支头；无效 submodule 移除 | 依赖完整性 100%；工具链版本唯一 | 每项独立 PR；工具链/lock 可单独 revert |
 | Phase 1 统一入口 + 已有测试真跑 | `justfile` + Python xtask；服务端根测试、MCP `cargo test`、Web test runner、移动维持 Jest、`packages/lcodec` 17 例、XML + summary | 平台 + 各端 owner | 3–5 | 服务端 12、桌面 261、移动 32、MCP 30、lcodec 17 执行；Web 至少 4 例；summary 上传。若 lcodec 原生依赖阻断，必须在 issue 与 summary 中记录原因并显式延后 | 新增执行用例数；XML 上传率 100% | 可临时回落旧 workflow，但 required 保持旧命令 |
 | Phase 2A 契约 | OpenAPI 3.0 导出、P0 约 40 条路由元数据、关键 request/response fixture | 契约 owner + 服务端 owner | 6–8 | 契约导出可运行；P0 端点 fixture 入库；3.1 有独立 issue | 契约 diff 接入；P0 fixture 覆盖率 | 导出器 non-blocking；3.1 不反向阻塞 3.0 |
 | Phase 2B 其余四端 P0 | 服务端 HTTP/auth/migration/WASM/DTO；桌面 model/offline/net；移动 offline/api/拦截器；extension | 各端 owner | 14–20（并行） | 每个 P0 模块至少 1 个确定性测试；6 个 offline store 覆盖 | P0 空白清零；新增测试数 | 新测试先 non-blocking 一周 |
@@ -482,9 +486,12 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `cangjie-repo.toml` 误用 | 噪声缓存、错误版本源 | 从工具链事实源、缓存 key 语义和路径过滤中移除 |
 | Python 版本分叉 | 本地/CI 行为不同 | doctor 要求 ≥3.11；CI `setup-python` 固定 3.12 |
 | cjpm XML 非 JUnit | 报告解析错误 | 自建适配器；`summary.json` 是唯一消费接口 |
-| lock v0 自动升级且无 `--locked` | 迁移提交前 git-diff 守卫必红 | 先单独提交 v1 迁移 lock；守卫只报漂移不隐式更新（`--locked`/`--frozen` 文档未载） |
-| 服务端 5 例 DB 测试静默跳过 | CI 无 PG 仍全绿，通过数虚高 | PG service + xtask 解析 XML 统计 `[skip]` 用例并告警 |
+| lock 格式与工具链行为不一致 | 手册称解析时升级 v1；1.2.0 实测不升级，后人可能误以为可自动迁移 | 守卫三侧只报漂移不隐式更新；未来需升级时显式解析并单独提交（`--locked`/`--frozen` 文档未载） |
+| 服务端 5 例 DB 测试静默跳过 | CI 无 PG 仍全绿，通过数虚高 | `server-test` job 提供 PG service，并以 `--show-all-output` + `grep -Fq '[skip]'` 硬失败（`.github/workflows/build.yml:90-207`） |
+| `cjpm test` 默认吞测试 stdout | 通过的用例里 `println("[skip]")` 不进日志，skip 守卫会永远不触发 | 必须加 `--show-all-output`；Kimi 以 1.2.0 最小工程复现（默认 grep 计 0，加参数后计 1） |
+| `--report-path` 语义是目录 | 按文件名传入会生成同名目录，产物错位 | 传目录；XML 落在 `<dir>/tests/test-<pkg>.<case>.xml`；Kimi 以 1.2.0 最小工程复现 |
 | 1.1.3 能力未实测 | 新门禁可能幻觉 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
+| 本机有 `packages/cangjie-gui`、CI 干净 checkout 没有 | 本地 `doctor`/`affected` 全绿、CI 曾因缺失 path 依赖误报 error（exit 2），门禁假红 | 缺失默认降级为 warning、`--strict` 才报错；`tools/xtask/tests/test_missing_dep.py` 用临时仓模拟干净 checkout 防止复发；行号以 grep 实测为准 |
 
 ## 12. 验收清单
 
@@ -501,7 +508,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 
 - [ ] 新机器 `git clone` 后 `just setup && just build` 可构建，无需手工 clone 依赖。
 - [ ] `git status` 干净；`find` 找不到嵌套 `.git`；`.gitignore` 不再隐藏必需依赖。
-- [ ] CI 不使用分支头；`cjpm.lock` 已迁移 v1 且守卫生效；工具链由 `toolchain/` 单一事实源管理，Phase 0 例外有到期日。
+- [ ] CI 不使用分支头；`cjpm.lock` 守卫三侧生效且实测无漂移（保持 v0 亦可）；工具链由 `toolchain/` 单一事实源管理，Phase 0 例外有到期日。
 - [ ] 服务端根 `cjpm test`、MCP `cargo test`、Web 的现有可运行测试均进入 CI；mobile Jest 保持执行；`packages/lcodec` 17 例执行，若原生依赖阻断则显式记录并延后。
 - [ ] `xtask affected` 对 10 个曾漏包给出正确闭包；新增包只改 manifest。
 - [ ] PR required 只有 `ci-required` 聚合；L4/L5 不阻塞 PR。
@@ -517,17 +524,22 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 
 | 路径 | 用途 |
 |---|---|
-| `.github/workflows/build.yml:84`、`:90` | 服务端 CI 只执行两个子包测试 |
-| `.github/workflows/build.yml:176` | 服务端 CI 执行 `cjpm update`，其后有 lock 漂移守卫 |
-| `.github/workflows/build.yml:203`、`:208`、`:213` | Web CI frozen 安装后执行 typecheck 与 test:ci |
-| `.github/workflows/client-next.yml:134` | 桌面 CI 安装 Cangjie 1.1.3 |
-| `.github/workflows/client-next.yml:198` | 桌面 CI clone 分支头 |
-| `.github/workflows/client-next.yml:330` | 桌面测试命令与 XML 报告 |
-| `.github/workflows/client-next.yml:517` | Windows 只跑 `rocksdb_ffi` |
+| `.github/workflows/build.yml:78`、`:84` | 服务端 CI 执行 csorm 与 postgresql-driver 两个子包测试 |
+| `.github/workflows/build.yml:90-207` | 服务端根包 `server-test` job：PG service、`DB_STRING`、`--show-all-output`、`[skip]` 硬失败、产物上传 |
+| `.github/workflows/build.yml:176`、`:177` | 服务端 server-test 执行 `cjpm update`，其后为 lock 漂移守卫 |
+| `.github/workflows/build.yml:296`、`:297` | 主构建执行 `cjpm update`，其后为 lock 漂移守卫 |
+| `.github/workflows/build.yml:323`、`:328`、`:333`、`:338` | Web CI frozen 安装、typecheck、test:ci、build |
+| `.github/workflows/client-next.yml:53-61` | guards job 接入 `setup-python@v5`/3.12 与 xtask `doctor`、自测 |
+| `.gitea/workflows/build.yaml:173`、`:174` | 发布链路 `cjpm update` 与 lock 漂移守卫 |
+| `.cnb.yml:120`、`:121` | CNB 构建 `cjpm update` 与 lock 漂移守卫 |
+| `.github/workflows/client-next.yml:143` | 桌面 CI 安装 Cangjie 1.1.3 |
+| `.github/workflows/client-next.yml:207`、`:424` | 桌面 CI（Linux / Windows）clone 分支头 |
+| `.github/workflows/client-next.yml:342` | 桌面测试命令与 XML 报告 |
+| `.github/workflows/client-next.yml:529` | Windows 只跑 `rocksdb_ffi` |
 | `.github/workflows/client.yml:60` | 移动端真实执行 Jest |
-| `.github/workflows/extension.yml:19`、`:26` | extension pnpm 版本与只 build/typecheck |
+| `.github/workflows/extension.yml:19`、`:29`、`:34` | extension pnpm 版本与只 build/typecheck |
 | `.github/workflows/cli.yml:35` | MCP 只 build |
-| `frontend/package.json:7` | Web 在 b25f846 缺 test 脚本；工作树已加 vitest scripts |
+| `frontend/package.json:7` | Web 测试脚本：`typecheck:12`、`test:13`、`test:ci:15`，随 `da4c58e1` 入库 |
 | `client/package.json:11` | 移动端 `test` = jest |
 | `extension/package.json:6` | extension 声明 pnpm 10.33.0 |
 | `client-next/cjpm.toml:2` | 桌面 manifest 写 1.1.0 |
