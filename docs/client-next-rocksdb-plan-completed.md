@@ -468,7 +468,7 @@ RecordEnvelope
       版本探测 PE 实跑输出 `ROCKSDB_MAJOR=11 MINOR=1`（`evidence/windows-ffi-run.txt`）。
       注：完整套件在 **wine 兼容层**而非原生 Windows 内核上运行，二者共享同一 Windows 版二进制、
       工具链与 MSYS2 库；如后续有原生 Windows runner/CI，`verify-windows.ps1` 与
-      `.github/workflows` / `.gitea/workflows` 入口仍可直接复跑确认。
+      `.github/workflows` 的 `windows-build` 入口仍可直接复跑确认（Gitea 无 Windows runner，见下）。
       已就绪的接线（原生 Windows runner/CI 出现时直接执行）：
       - 编译期版本门槛已落地：`packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c` 读取
         `rocksdb/version.h` 的 `ROCKSDB_MAJOR`/`ROCKSDB_MINOR` 宏，`rocksDbCompiledVersion()` 运行时读回，
@@ -478,8 +478,11 @@ RecordEnvelope
       - Windows 验证入口已就绪：`.github/workflows/client-next.yml` 的 `windows-build` job 已含
         `Run rocksdb_ffi minimal FFI tests on Windows` 步骤（`packages/rocksdb_ffi && cjpm test`），
         runner 安装 `mingw-w64-x86_64-rocksdb`。
-      - Gitea 侧入口已就绪：`.gitea/workflows/windows-ffi.yaml`（`runs-on: windows`，自动编译 bridge →
-        `cjpm test` → 输出 PASS），需自托管 act_runner 注册 `windows` 标签且宿主预装 Cangjie+MSYS2。
+      - Gitea 侧无 Windows 入口：Gitea 只有 `ubuntu-latest` runner 在线且标签精确匹配，
+        `.gitea/workflows/` 不含任何 Windows job；原 `windows-ffi.yaml`（`runs-on: windows`）因无 runner
+        可匹配、任务永远停在 `waiting`，已删除（`13b54ae4`）。其内容（编译 bridge → `cjpm test` → 输出 PASS）
+        是 GitHub `windows-build` 的真子集，Windows 验证统一走 `.github/workflows/client-next.yml` 的
+        `windows-build`。
       **用户侧一键验证（原生 Windows/CI 入口下执行）**：
       `powershell -ExecutionPolicy Bypass -File packages/rocksdb_ffi/scripts/verify-windows.ps1`
       （自动编译版本探测 bridge → `cjpm test` → 输出 `PASS: rocksdb_ffi Windows FFI 测试全部通过`）。
