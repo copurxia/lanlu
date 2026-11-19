@@ -16,6 +16,7 @@ LWP_LIB="$REPO/packages/lwp/lib"
 
 echo "== 壳侧 LWP 发送端：协议模式"
 c++ -std=c++17 -Wall -Wextra -O1 -o "$OUT/test_lwp_client" \
+    -DLWP_HOST_SELFTEST=1 \
     "$HERE/test_lwp_client.cpp" \
     "$REPO/packages/lplatform-ohos/shell/native/lwp_client.cpp" \
     "$REPO/packages/lplatform-ohos/shell/native/lwp_window.cpp" \

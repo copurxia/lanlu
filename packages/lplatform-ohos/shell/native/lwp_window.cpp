@@ -35,12 +35,24 @@
 
 /* 原生输入法桥（text_input.cpp）与输入过滤器共享的窗口原点 */
 extern "C" {
+#ifdef LWP_HOST_SELFTEST
+void lanlu_ime_enable(int32_t window_id, uint32_t input_type, uint32_t enter_key, int show_soft) {
+    (void)window_id; (void)input_type; (void)enter_key; (void)show_soft;
+}
+void lanlu_ime_disable(void) {}
+void lanlu_ime_set_cursor_rect(int32_t x, int32_t y, int32_t w, int32_t h, double origin_x, double origin_y) {
+    (void)x; (void)y; (void)w; (void)h; (void)origin_x; (void)origin_y;
+}
+double lanlu_origin_x(void) { return 0.0; }
+double lanlu_origin_y(void) { return 0.0; }
+#else
 void lanlu_ime_enable(int32_t window_id, uint32_t input_type, uint32_t enter_key, int show_soft);
 void lanlu_ime_disable(void);
 void lanlu_ime_set_cursor_rect(int32_t x, int32_t y, int32_t w, int32_t h, double origin_x, double origin_y);
+double lanlu_origin_x(void);
+double lanlu_origin_y(void);
+#endif
 }
-extern "C" double lanlu_origin_x(void);
-extern "C" double lanlu_origin_y(void);
 /* 由 shell_napi.cpp 在窗口就绪时设置（ArkTS 的 window id 与是否弹软键盘） */
 static int32_t g_win_id_for_ime = -1;
 static int g_show_soft_keyboard = 0;
