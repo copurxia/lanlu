@@ -266,6 +266,9 @@ jobs:
           set -euo pipefail
           native_paths="${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
           printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+          # client-next 的 link-option 用 ${LGUI_SDL_LIB_DIR} 指向 SDL3/TTF（cui 的
+          # SDL 过渡债仍需要这两个库；静态依赖的 link-option 不向上传递）。
+          printf 'LGUI_SDL_LIB_DIR=%s\n' "${native_paths}" >> "${GITHUB_ENV}"
 
       - name: Verify native libraries
         run: |

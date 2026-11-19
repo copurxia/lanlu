@@ -53,8 +53,10 @@ func keyMapsByName(): Unit {
     // evdev 28 = Enter；按下 -> KeyDown
     let down = LWindowEvent(LWindowEventType.Key, 0.0f32, 0.0f32, 28, pressed: true)
     match (lwpEventToUi(down)) {
-        case UiEvent.KeyDown(k, _) => @Expect(k, Key.Enter)
-        case _ => @Expect("KeyDown", "other")
+        // Key 未实现 Equatable，@Expect 不能直接比枚举：用模式匹配落到布尔断言。
+        case UiEvent.KeyDown(Key.Enter, _) => @Expect(true)
+        case UiEvent.KeyDown(_, _) => @Fail("expected Key.Enter")
+        case _ => @Fail("expected KeyDown")
     }
     let up = LWindowEvent(LWindowEventType.Key, 0.0f32, 0.0f32, 28, pressed: false)
     @Expect(uiEventName(lwpEventToUi(up)), "keyup")
@@ -62,11 +64,12 @@ func keyMapsByName(): Unit {
 
 @Test
 func letterKeyMapsFromEvdev(): Unit {
-    // evdev 16..25 = Q..P
-    let ev = LWindowEvent(LWindowEventType.Key, 0.0f32, 0.0f32, 17, pressed: true)  // 'w'
+    // evdev 16..25 = Q..P；映射契约是**大写 ASCII**（Key.Letter(65+idx)，与 SDL 路径一致）。
+    let ev = LWindowEvent(LWindowEventType.Key, 0.0f32, 0.0f32, 17, pressed: true)  // 'w' 键
     match (lwpEventToUi(ev)) {
-        case UiEvent.KeyDown(k, _) => @Expect(k, Key.Letter(UInt8(119)))  // 'w'
-        case _ => @Expect("KeyDown", "other")
+        case UiEvent.KeyDown(Key.Letter(code), _) => @Expect(code, UInt8(87))  // 'W'
+        case UiEvent.KeyDown(_, _) => @Fail("expected Key.Letter('W')")
+        case _ => @Fail("expected KeyDown")
     }
 }
 

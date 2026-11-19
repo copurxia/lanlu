@@ -290,6 +290,19 @@ lpack-linux/
   - Wayland/Linux 桌面：`wl_[a-z]`、`xdg_[a-z]`、`zwp_`、`wp_[a-z]`、`xkb_`、`XDG_SESSION_TYPE`、`WAYLAND_DISPLAY`、`org.freedesktop`、`libdecor`；
   - SDL：`SDL_`、`TTF_`、`Sdl[A-Z]`（全仓禁止，SDL 删除后对平台包也生效）。
 
+#### 4.5.0 P6 吸收后的 cui 内部结构（2026-11-19 定）
+
+`lgui` 并入 `cui` 时，SDL 基元（`Key`/`UiEvent`/`Renderer`/`SdlWindow`/`Texture`/
+`SurfaceStyle` 等）落在**新子包 `cui.base`**，不能放在根包 `cui`：根包 `public import`
+所有子包，子包若再 import 根包（如 `import cui.{Key}`）会形成「cui → 子包 → cui」的
+**包级循环依赖**，cjpm 直接拒绝构建（P6 落地时实测 13 条循环）。
+
+- 子包间共享的基元只经 `cui.base`；子包**不得** import 根包 `cui`（吸收时已把
+  `src/{core,controls,media,system,dialogs,text,desktop,input,textkit}` 的根包 import
+  全部改写为 `cui.base.*`）。
+- 根包只做再导出（`public import cui.base.*` + 各子包），业务层继续 `import cui.*`。
+- 新增子包时同样遵守：需要基元就依赖 `cui.base`，别图省事 import 根包。
+
 ---
 
 ### 4.5.1 守卫的两类豁免（2026-11-10 定）

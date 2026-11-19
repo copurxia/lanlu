@@ -39,6 +39,9 @@ __pycache__/
 .agents/
 .clawbench/
 
+# 单测产生的临时目录
+tmpDir*/
+
 # LWP 共享库构建产物（packages/lwp/native/build.sh）
 packages/lwp/lib/
 packages/cangjie-gui-p0/
