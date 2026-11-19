@@ -34,6 +34,12 @@ jobs:
           CC_x86_64_unknown_linux_musl=musl-gcc \
             cargo build --release --target x86_64-unknown-linux-musl
 
+      - name: Test lanlu-mcp
+        run: |
+          . "$HOME/.cargo/env"
+          cd mcp
+          cargo test --locked
+
       - name: Package lanlu-mcp zip
         run: |
           set -eux

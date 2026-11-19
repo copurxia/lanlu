@@ -332,6 +332,10 @@ jobs:
           bash packages/lwp/native/build.sh
           (cd packages/lwindow && cjpm test --no-color)
 
+      # 17 例纯逻辑测试，无需 SDL/Vulkan；待 CI 实测后交给 Phase 3 的 affected matrix 自动选择
+      - name: Run lcodec tests
+        run: (cd packages/lcodec && cjpm test --no-color)
+
       - name: Run client-next tests
         working-directory: client-next
         env:

@@ -57,7 +57,7 @@ jobs:
         run: |
           set -eux
           cd client
-          npm test -- --runInBand
+          npm test -- --runInBand --ci
 
       # The client still carries a pre-existing lint baseline (unused symbols and
       # react-hooks/exhaustive-deps). Keep it visible but non-blocking until the
