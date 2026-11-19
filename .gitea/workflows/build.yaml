@@ -85,10 +85,12 @@ jobs:
           cjpm test
 
   build:
-    # The runner label set is instance-managed, so this stays on ubuntu-latest.
-    # The package job smoke test fails before pushing if the runner distro and
-    # the runtime image sonames (notably librocksdb) do not match.
+    # Keep the build container on the exact runtime-image snapshot. Linking on
+    # a bare runner gives the binary an Ubuntu 24.04 soname while Dockerfile
+    # provides Ubuntu 26.04 libraries, so package smoke fails at startup.
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
     env:
       # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
       XMAKE_ROOT: 'y'
@@ -104,27 +106,17 @@ jobs:
         run: |
           set -eux
 
-          if command -v sudo >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          else
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          fi
+          # Match the pinned tar in .ide/Dockerfile for the 26.04 snapshot.
+          apt-get update
+          apt-get install -y --no-install-recommends --allow-downgrades tar=1.35+dfsg-4
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git wget unzip zip xz-utils \
+            build-essential clang ninja-build cmake binutils \
+            xmake \
+            pkg-config \
+            libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+            libvips-dev libheif-dev librocksdb-dev \
+            libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
 
       - name: Verify xmake
         run: |
