@@ -96,14 +96,45 @@ export async function buildApiUrl(path: string): Promise<string> {
   return `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+function normalizedOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    const protocol = url.protocol.toLowerCase();
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      return null;
+    }
+    const hostname = url.hostname.toLowerCase();
+    if (!hostname) {
+      return null;
+    }
+    let port = url.port;
+    if (
+      (protocol === 'https:' && port === '443') ||
+      (protocol === 'http:' && port === '80')
+    ) {
+      port = '';
+    }
+    return `${protocol}//${hostname}${port ? `:${port}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
+function isSameOrigin(uri: string, baseUrl?: string | null): boolean {
+  const base = normalizedOrigin(baseUrl || '');
+  const target = normalizedOrigin(uri);
+  return Boolean(base && target && base === target);
+}
+
 export async function buildAuthorizedImageSource(path: string) {
   const {server, token} = await getSession();
-  const uri = /^https?:\/\//i.test(path)
+  const absolute = /^https?:\/\//i.test(path);
+  const uri = absolute
     ? path
     : server
       ? `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`
       : path;
-  const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
+  const shouldAttachAuth = server?.baseUrl ? isSameOrigin(uri, server.baseUrl) : !absolute;
   return token && shouldAttachAuth
     ? {uri, headers: {Authorization: `Bearer ${token}`}}
     : {uri};
@@ -127,15 +158,16 @@ export async function buildAuthorizedAssetImageSource(
 
 export async function buildAuthorizedUri(path: string) {
   const {server, token} = await getSession();
-  const uri = /^https?:\/\//i.test(path)
+  const absolute = /^https?:\/\//i.test(path);
+  const uri = absolute
     ? path
     : server
       ? `${server.baseUrl}${path.startsWith('/') ? path : `/${path}`}`
       : path;
-  const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
+  const shouldAttachAuth = server?.baseUrl ? isSameOrigin(uri, server.baseUrl) : !absolute;
   return {
     uri,
-    token: token || undefined,
+    token: token && shouldAttachAuth ? token : undefined,
     headers: token && shouldAttachAuth ? {Authorization: `Bearer ${token}`} : undefined,
   };
 }

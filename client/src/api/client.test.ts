@@ -283,7 +283,7 @@ describe('authorized url builders', () => {
     });
     await expect(buildAuthorizedUri('https://cdn.example/a.mp4')).resolves.toEqual({
       uri: 'https://cdn.example/a.mp4',
-      token: 'token-1',
+      token: undefined,
       headers: undefined,
     });
   });
@@ -295,5 +295,103 @@ describe('authorized url builders', () => {
       token: undefined,
       headers: undefined,
     });
+  });
+});
+
+describe('authorized header origin checks', () => {
+  beforeEach(() => {
+    mockedGetSession.mockReset();
+    mockedGetSession.mockResolvedValue({ server, token: 'token-1' });
+  });
+
+  async function expectRejected(url: string) {
+    const image = await buildAuthorizedImageSource(url);
+    expect(image).toEqual({ uri: url });
+
+    const video = await buildAuthorizedUri(url);
+    expect(video).toEqual({ uri: url, token: undefined, headers: undefined });
+  }
+
+  it('rejects a lookalike host suffix', async () => {
+    await expectRejected('https://lanlu.example.evil.com/api/assets/1');
+  });
+
+  it('rejects a different port on the same host', async () => {
+    await expectRejected('https://lanlu.example:8443/api/assets/1');
+  });
+
+  it('rejects a scheme downgrade', async () => {
+    await expectRejected('http://lanlu.example/api/assets/1');
+  });
+
+  it('rejects a userinfo host spoof', async () => {
+    await expectRejected('https://lanlu.example@evil.com/api/assets/1');
+  });
+
+  it('keeps query strings and fragments on the same origin authenticated', async () => {
+    const absolute = 'https://lanlu.example/api/assets/1?v=2#page';
+    await expect(buildAuthorizedImageSource(absolute)).resolves.toEqual({
+      uri: absolute,
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    await expect(buildAuthorizedUri(absolute)).resolves.toEqual({
+      uri: absolute,
+      token: 'token-1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+  });
+
+  it('treats an explicit default port as the same origin', async () => {
+    mockedGetSession.mockResolvedValue({
+      server: { id: 's1', baseUrl: 'https://lanlu.example:443' } as any,
+      token: 'token-1',
+    });
+
+    await expect(
+      buildAuthorizedImageSource('https://lanlu.example/api/assets/1'),
+    ).resolves.toEqual({
+      uri: 'https://lanlu.example/api/assets/1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+  });
+
+  it('handles a base url that includes a path prefix', async () => {
+    mockedGetSession.mockResolvedValue({
+      server: { id: 's1', baseUrl: 'https://lanlu.example/lanlu' } as any,
+      token: 'token-1',
+    });
+
+    await expect(buildAuthorizedImageSource('/api/assets/1')).resolves.toEqual({
+      uri: 'https://lanlu.example/lanlu/api/assets/1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    await expect(
+      buildAuthorizedImageSource('https://lanlu.example/other/cover.png'),
+    ).resolves.toEqual({
+      uri: 'https://lanlu.example/other/cover.png',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    await expect(
+      buildAuthorizedImageSource('https://lanlu.example.evil.com/cover.png'),
+    ).resolves.toEqual({ uri: 'https://lanlu.example.evil.com/cover.png' });
+  });
+
+  it('prefixes a leading at-sign so a relative path cannot become userinfo', async () => {
+    await expect(buildAuthorizedImageSource('@evil.com/cover.png')).resolves.toEqual({
+      uri: 'https://lanlu.example/@evil.com/cover.png',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+  });
+
+  it('keeps relative paths authenticated when no server is selected', async () => {
+    mockedGetSession.mockResolvedValue({ server: null, token: 'token-1' });
+
+    await expect(buildAuthorizedImageSource('/api/assets/1')).resolves.toEqual({
+      uri: '/api/assets/1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    await expect(
+      buildAuthorizedImageSource('https://lanlu.example/api/assets/1'),
+    ).resolves.toEqual({ uri: 'https://lanlu.example/api/assets/1' });
   });
 });

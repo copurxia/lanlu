@@ -49,8 +49,8 @@ describe('offline general cache', () => {
       .cacheFavorites('s1', { history: [item(3)] });
 
     const cached = useOfflineGeneralStore.getState().getCachedFavorites('s1');
-    expect(cached?.favorites.map(entry => entry.id)).toEqual([1]);
-    expect(cached?.history.map(entry => entry.id)).toEqual([3]);
+    expect(cached?.favorites.map((entry: any) => entry.id)).toEqual([1]);
+    expect(cached?.history.map((entry: any) => entry.id)).toEqual([3]);
     expect(cached?.timestamp).toBe(clock);
     expect(useOfflineGeneralStore.getState().lastServerId).toBe('s1');
   });
@@ -94,7 +94,7 @@ describe('offline general cache', () => {
     await useOfflineGeneralStore.persist.rehydrate();
 
     const cached = useOfflineGeneralStore.getState().getCachedFavorites('s1');
-    expect(cached?.favorites.map(entry => entry.id)).toEqual([7]);
+    expect(cached?.favorites.map((entry: any) => entry.id)).toEqual([7]);
     expect(useOfflineGeneralStore.getState().lastServerId).toBe('s1');
   });
 });
@@ -181,13 +181,16 @@ describe('offline feed cache', () => {
     useOfflineFeedStore.getState().cacheFeed('s1', 'ranking', { items: [item(3)] });
 
     expect(
-      useOfflineFeedStore.getState().getCachedFeed('s1', 'home')?.items[0].id,
+      (useOfflineFeedStore.getState().getCachedFeed('s1', 'home')?.items[0] as any)
+        ?.id,
     ).toBe(1);
     expect(
-      useOfflineFeedStore.getState().getCachedFeed('s2', 'home')?.items[0].id,
+      (useOfflineFeedStore.getState().getCachedFeed('s2', 'home')?.items[0] as any)
+        ?.id,
     ).toBe(2);
     expect(
-      useOfflineFeedStore.getState().getCachedFeed('s1', 'ranking')?.items[0].id,
+      (useOfflineFeedStore.getState().getCachedFeed('s1', 'ranking')?.items[0] as any)
+        ?.id,
     ).toBe(3);
   });
 
