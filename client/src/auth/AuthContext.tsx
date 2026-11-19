@@ -15,6 +15,7 @@ import {
   getActiveServerId,
   getServers,
   LanluServer,
+  requireSupportedServerUrl,
   setActiveServerId,
   touchServer,
   upsertServer,
@@ -317,6 +318,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       if (!activeServer) {
         throw new Error('Select a server before signing in.');
       }
+      requireSupportedServerUrl(activeServer.baseUrl);
       const response = await LanluApi.login({
         username: params.username,
         password: params.password,

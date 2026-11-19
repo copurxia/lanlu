@@ -18,6 +18,25 @@ export function normalizeServerUrl(input: string): string {
   return input.trim().replace(/\/+$/, '');
 }
 
+const SUPPORTED_SERVER_URL_PATTERN = /^https?:\/\/[^\s/?#]+/i;
+
+export function isSupportedServerUrl(input: string): boolean {
+  const value = normalizeServerUrl(input);
+  return SUPPORTED_SERVER_URL_PATTERN.test(value) && !/\s/.test(value);
+}
+
+/** Validates and normalizes a server URL, throwing a user-facing message. */
+export function requireSupportedServerUrl(input: string): string {
+  const value = normalizeServerUrl(input);
+  if (!value) {
+    throw new Error('Server URL is required.');
+  }
+  if (!isSupportedServerUrl(value)) {
+    throw new Error('Server URL must start with http:// or https://.');
+  }
+  return value;
+}
+
 function createServerId() {
   return `server-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -60,11 +79,12 @@ export async function upsertServer(input: {
   name: string;
   baseUrl: string;
 }): Promise<LanluServer> {
+  const baseUrl = requireSupportedServerUrl(input.baseUrl);
   const servers = await getServers();
   const next: LanluServer = normalizeServer({
     id: input.id || createServerId(),
     name: input.name,
-    baseUrl: input.baseUrl,
+    baseUrl,
     lastUsedAt: new Date().toISOString(),
   });
   const index = servers.findIndex(server => server.id === next.id);

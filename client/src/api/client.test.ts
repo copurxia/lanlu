@@ -10,6 +10,8 @@ import {
   buildAuthorizedUri,
   extractApiError,
   isNetworkError,
+  isSameOriginUrl,
+  parseHttpOrigin,
   setOfflineHandler,
   setOnlineHandler,
   setUnauthorizedHandler,
@@ -41,8 +43,8 @@ const responseError = (apiClient.interceptors.response as any).handlers[0]
 
 const server = { id: 's1', baseUrl: 'https://lanlu.example' } as any;
 
-function requestConfig() {
-  return { headers: new AxiosHeaders() } as any;
+function requestConfig(url?: string) {
+  return { url, headers: new AxiosHeaders() } as any;
 }
 
 function axiosError(options: {
@@ -100,6 +102,47 @@ describe('api client request interceptor', () => {
 
     expect(result.baseURL).toBeUndefined();
     expect(result.headers.Authorization).toBeUndefined();
+  });
+
+  it('leaves the request untouched without a server even when a token exists', async () => {
+    mockedGetSession.mockResolvedValue({ server: null, token: 'token-1' });
+    const config = requestConfig('/api/archives');
+
+    const result = await requestHandler(config);
+
+    expect(result.headers.Authorization).toBeUndefined();
+  });
+
+  it('attaches auth to same-origin absolute requests', async () => {
+    const config = await requestHandler(
+      requestConfig('https://lanlu.example/api/archives'),
+    );
+
+    expect(config.headers.Authorization).toBe('Bearer token-1');
+  });
+
+  it('does not attach auth to cross-origin absolute requests', async () => {
+    const config = await requestHandler(
+      requestConfig('https://lanlu.example.evil.com/api/archives'),
+    );
+
+    expect(config.headers.Authorization).toBeUndefined();
+  });
+
+  it('resolves protocol-relative request urls against the server scheme', async () => {
+    const same = await requestHandler(requestConfig('//lanlu.example/api/archives'));
+    expect(same.headers.Authorization).toBe('Bearer token-1');
+
+    const cross = await requestHandler(requestConfig('//evil.com/api/archives'));
+    expect(cross.headers.Authorization).toBeUndefined();
+  });
+
+  it('does not attach auth to non-http schemes', async () => {
+    const config = await requestHandler(
+      requestConfig('ftp://lanlu.example/api/archives'),
+    );
+
+    expect(config.headers.Authorization).toBeUndefined();
   });
 
   it('runs through the real axios pipeline without network access', async () => {
@@ -328,6 +371,44 @@ describe('authorized header origin checks', () => {
     await expectRejected('https://lanlu.example@evil.com/api/assets/1');
   });
 
+  it('rejects a different IPv6 host for both image and video sinks', async () => {
+    mockedGetSession.mockResolvedValue({
+      server: { id: 's1', baseUrl: 'https://[::1]:8443' } as any,
+      token: 'token-1',
+    });
+
+    await expect(
+      buildAuthorizedImageSource('https://[::2]:8443/api/assets/1'),
+    ).resolves.toEqual({ uri: 'https://[::2]:8443/api/assets/1' });
+    await expect(
+      buildAuthorizedUri('https://[::2]:8443/api/assets/1'),
+    ).resolves.toEqual({
+      uri: 'https://[::2]:8443/api/assets/1',
+      token: undefined,
+      headers: undefined,
+    });
+
+    await expect(
+      buildAuthorizedUri('https://[::1]:8443/api/assets/1'),
+    ).resolves.toEqual({
+      uri: 'https://[::1]:8443/api/assets/1',
+      token: 'token-1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+  });
+
+  it('treats a protocol-relative path as an absolute candidate', async () => {
+    const image = await buildAuthorizedImageSource('//evil.com/api/assets/1');
+    expect(image).toEqual({ uri: 'https://lanlu.example//evil.com/api/assets/1' });
+
+    const video = await buildAuthorizedUri('//evil.com/api/assets/1');
+    expect(video).toEqual({
+      uri: 'https://lanlu.example//evil.com/api/assets/1',
+      token: undefined,
+      headers: undefined,
+    });
+  });
+
   it('keeps query strings and fragments on the same origin authenticated', async () => {
     const absolute = 'https://lanlu.example/api/assets/1?v=2#page';
     await expect(buildAuthorizedImageSource(absolute)).resolves.toEqual({
@@ -383,15 +464,99 @@ describe('authorized header origin checks', () => {
     });
   });
 
-  it('keeps relative paths authenticated when no server is selected', async () => {
+  it('never attaches credentials when no server is selected', async () => {
     mockedGetSession.mockResolvedValue({ server: null, token: 'token-1' });
 
     await expect(buildAuthorizedImageSource('/api/assets/1')).resolves.toEqual({
       uri: '/api/assets/1',
-      headers: { Authorization: 'Bearer token-1' },
+    });
+    await expect(buildAuthorizedUri('/api/assets/1')).resolves.toEqual({
+      uri: '/api/assets/1',
+      token: undefined,
+      headers: undefined,
     });
     await expect(
       buildAuthorizedImageSource('https://lanlu.example/api/assets/1'),
     ).resolves.toEqual({ uri: 'https://lanlu.example/api/assets/1' });
+  });
+});
+
+describe('http origin parser', () => {
+  it('normalizes scheme, host case and default ports', () => {
+    expect(parseHttpOrigin('HTTPS://LANLU.EXAMPLE:443/x')).toBe(
+      'https://lanlu.example',
+    );
+    expect(parseHttpOrigin('http://Lanlu.Example:80')).toBe('http://lanlu.example');
+    expect(parseHttpOrigin('https://lanlu.example:8443/x?q=1#h')).toBe(
+      'https://lanlu.example:8443',
+    );
+    expect(parseHttpOrigin('https://lanlu.example:0443/x')).toBe(
+      'https://lanlu.example',
+    );
+  });
+
+  it('keeps IPv6 literals distinct instead of truncating at the first colon', () => {
+    expect(parseHttpOrigin('https://[::1]/x')).toBe('https://[::1]');
+    expect(parseHttpOrigin('https://[::1]:8443/x')).toBe('https://[::1]:8443');
+    expect(parseHttpOrigin('https://[::2]/x')).toBe('https://[::2]');
+    expect(parseHttpOrigin('https://[::1]:443/x')).toBe('https://[::1]');
+
+    expect(isSameOriginUrl('https://[::1]/x', 'https://[::1]')).toBe(true);
+    expect(isSameOriginUrl('https://[::1]:443/x', 'https://[::1]')).toBe(true);
+    expect(isSameOriginUrl('https://[::1]/x', 'https://[::2]')).toBe(false);
+    expect(isSameOriginUrl('https://[::1]:8443/x', 'https://[::1]')).toBe(false);
+    expect(isSameOriginUrl('https://[::2]:8443/x', 'https://[::1]:8443')).toBe(
+      false,
+    );
+  });
+
+  it('fails closed on malformed authorities and unsupported schemes', () => {
+    expect(parseHttpOrigin('https://[::1/x')).toBeNull();
+    expect(parseHttpOrigin('https://::1]/x')).toBeNull();
+    expect(parseHttpOrigin('https://[127.0.0.1]/x')).toBeNull();
+    expect(parseHttpOrigin('https://user@lanlu.example/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example@evil.com/x')).toBeNull();
+    expect(parseHttpOrigin('ftp://lanlu.example/x')).toBeNull();
+    expect(parseHttpOrigin('lanlu.example/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example%2eevil.com/x')).toBeNull();
+    expect(parseHttpOrigin('https://[fe80::1%25eth0]/x')).toBeNull();
+  });
+
+  it('rejects invalid ports', () => {
+    expect(parseHttpOrigin('https://lanlu.example:65536/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example:-1/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example:abc/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example:/x')).toBeNull();
+    expect(parseHttpOrigin('https://[::1]:/x')).toBeNull();
+    expect(parseHttpOrigin('https://lanlu.example:0/x')).toBe(
+      'https://lanlu.example:0',
+    );
+  });
+
+  it('resolves protocol-relative urls against the base scheme', () => {
+    expect(isSameOriginUrl('//lanlu.example/x', 'https://lanlu.example')).toBe(true);
+    expect(isSameOriginUrl('//lanlu.example:443/x', 'https://lanlu.example')).toBe(
+      true,
+    );
+    expect(isSameOriginUrl('//lanlu.example/x', 'http://lanlu.example')).toBe(true);
+    expect(isSameOriginUrl('//evil.com/x', 'https://lanlu.example')).toBe(false);
+    expect(isSameOriginUrl('//lanlu.example.evil.com/x', 'https://lanlu.example')).toBe(
+      false,
+    );
+  });
+
+  it('compares exact origins rather than host prefixes', () => {
+    expect(isSameOriginUrl('https://lanlu.example./x', 'https://lanlu.example')).toBe(
+      false,
+    );
+    expect(isSameOriginUrl('https://lanlu.example/x', 'https://LANLU.example/')).toBe(
+      true,
+    );
+    expect(isSameOriginUrl('http://lanlu.example/x', 'https://lanlu.example')).toBe(
+      false,
+    );
+    expect(isSameOriginUrl('https://lanlu.example:8443/x', 'https://lanlu.example')).toBe(
+      false,
+    );
   });
 });

@@ -23,6 +23,7 @@ import type {
 } from '../types/api';
 import axios from 'axios';
 import {appendDiagnosticLog} from '../storage/diagnostics';
+import {requireSupportedServerUrl} from '../storage/servers';
 
 let recommendationSessionKey: string | null = null;
 
@@ -418,7 +419,8 @@ export async function logout(): Promise<void> {
 }
 
 export async function testServer(baseUrl: string): Promise<void> {
-  await axios.get(`${baseUrl.replace(/\/+$/, '')}/api/info`, {timeout: 10000});
+  const normalized = requireSupportedServerUrl(baseUrl);
+  await axios.get(`${normalized}/api/info`, {timeout: 10000});
 }
 
 export type ServerInfo = {

@@ -11,7 +11,7 @@ import {useI18n} from '../i18n';
 import {spacing} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 import type {RootStackParamList} from '../navigation/types';
-import {normalizeServerUrl} from '../storage/servers';
+import {isSupportedServerUrl, normalizeServerUrl} from '../storage/servers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddServer'>;
 
@@ -27,12 +27,29 @@ export function AddServerScreen({route, navigation}: Props) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  function validatedUrl(): string | null {
+    const normalized = normalizeServerUrl(baseUrl);
+    if (!normalized) {
+      setError(t('server.urlRequired'));
+      return null;
+    }
+    if (!isSupportedServerUrl(normalized)) {
+      setError(t('server.urlInvalid'));
+      return null;
+    }
+    return normalized;
+  }
+
   async function test() {
+    const normalized = validatedUrl();
+    if (!normalized) {
+      return;
+    }
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      await testServer(normalizeServerUrl(baseUrl));
+      await testServer(normalized);
       setMessage(t('server.connectionSucceeded'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('server.connectionFailed'));
@@ -42,9 +59,8 @@ export function AddServerScreen({route, navigation}: Props) {
   }
 
   async function save() {
-    const normalized = normalizeServerUrl(baseUrl);
+    const normalized = validatedUrl();
     if (!normalized) {
-      setError(t('server.urlRequired'));
       return;
     }
     setBusy(true);
