@@ -178,7 +178,9 @@ def _cargo_target(root: Path, target_id: str, rel: str) -> Target | None:
     )
 
 
-def build_graph(root: Path, *, timeout_s: int = 600) -> PackageGraph:
+def build_graph(
+    root: Path, *, timeout_s: int = 600, strict: bool = False
+) -> PackageGraph:
     root = root.resolve()
     targets: dict[str, Target] = {}
     raw_dependencies: dict[str, list[str]] = {}
@@ -264,9 +266,12 @@ def build_graph(root: Path, *, timeout_s: int = 600) -> PackageGraph:
         for raw_path in raw_paths:
             dependency_root = (target_root / raw_path).resolve()
             if not dependency_root.exists():
-                raise ConfigError(
-                    f"path dependency missing: {target_id} -> {raw_path} ({dependency_root})"
-                )
+                if strict:
+                    raise ConfigError(
+                        f"path dependency missing: {target_id} -> {raw_path} ({dependency_root})"
+                    )
+                warnings.append(f"missing_path_dep: {target_id} -> {raw_path}")
+                continue
             dependency_id = roots.get(dependency_root)
             if dependency_id is None:
                 warnings.append(
