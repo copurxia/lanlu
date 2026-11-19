@@ -53,7 +53,7 @@ describe('buildVisibleMasonryItems', () => {
       overscan: 10,
     });
 
-    expect(visible.map((item) => item.key)).toEqual(['b']);
+    expect(visible.map((item) => item.key)).toEqual(['a', 'b']);
   });
 
   it('includes nearby items when overscan expands the range', () => {

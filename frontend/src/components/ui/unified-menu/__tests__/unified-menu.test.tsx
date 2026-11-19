@@ -5,8 +5,21 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { UnifiedMenu } from '../unified-menu'
 import type { MenuItem } from '../unified-menu.types'
+
+function openMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+}
+
+function expectLucideIcon(menuItem: HTMLElement) {
+  const icon = menuItem.querySelector('svg')
+  expect(icon).not.toBeNull()
+  expect(icon!.classList.contains('mr-2')).toBe(true)
+  expect(icon!.classList.contains('h-4')).toBe(true)
+  expect(icon!.classList.contains('w-4')).toBe(true)
+}
 
 // Mock useMediaQuery
 vi.mock('../hooks/use-media-query', () => ({
@@ -40,7 +53,7 @@ describe('UnifiedMenu', () => {
 
     // 点击打开菜单
     const triggerButton = screen.getByText('Open Menu')
-    fireEvent.click(triggerButton)
+    openMenu(triggerButton)
 
     // 等待菜单打开
     const editItem = await screen.findByText('Edit')
@@ -53,8 +66,8 @@ describe('UnifiedMenu', () => {
 
   it('should render menu items with icons', () => {
     const itemsWithIcons: MenuItem[] = [
-      { id: 'edit', label: 'Edit', icon: () => <span data-testid="edit-icon">✏️</span> },
-      { id: 'delete', label: 'Delete', icon: () => <span data-testid="delete-icon">🗑️</span> },
+      { id: 'edit', label: 'Edit', icon: Pencil },
+      { id: 'delete', label: 'Delete', icon: Trash2 },
     ]
 
     render(
@@ -64,10 +77,10 @@ describe('UnifiedMenu', () => {
     )
 
     const triggerButton = screen.getByText('Open Menu')
-    fireEvent.click(triggerButton)
+    openMenu(triggerButton)
 
-    expect(screen.getByTestId('edit-icon')).toBeInTheDocument()
-    expect(screen.getByTestId('delete-icon')).toBeInTheDocument()
+    expectLucideIcon(screen.getByRole('menuitem', { name: 'Edit' }))
+    expectLucideIcon(screen.getByRole('menuitem', { name: 'Delete' }))
   })
 
   it('should render disabled menu items', () => {
@@ -83,10 +96,10 @@ describe('UnifiedMenu', () => {
     )
 
     const triggerButton = screen.getByText('Open Menu')
-    fireEvent.click(triggerButton)
+    openMenu(triggerButton)
 
-    const editItem = screen.getByText('Edit')
-    expect(editItem).toHaveAttribute('data-disabled', 'true')
+    const editItem = screen.getByRole('menuitem', { name: 'Edit' })
+    expect(editItem).toHaveAttribute('data-disabled', '')
   })
 
   it('should render danger menu items with correct styles', () => {
@@ -97,9 +110,9 @@ describe('UnifiedMenu', () => {
     )
 
     const triggerButton = screen.getByText('Open Menu')
-    fireEvent.click(triggerButton)
+    openMenu(triggerButton)
 
-    const deleteItem = screen.getByText('Delete')
+    const deleteItem = screen.getByRole('menuitem', { name: 'Delete' })
     expect(deleteItem).toHaveClass('text-destructive')
   })
 
