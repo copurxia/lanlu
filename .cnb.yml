@@ -45,14 +45,6 @@ $:
               clang --version | head -n 1
             '
 
-        - name: Init submodules
-          script: |
-            bash -lc '
-              set -eux
-              unset GIT_DIR GIT_WORK_TREE
-              git submodule update --init --recursive
-            '
-
         - name: Download Cangjie SDK + stdx
           script: |
             bash -lc '
@@ -126,6 +118,11 @@ $:
                 packages/postgresql-driver/native/lanlu_pg_bridge.o
 
               cjpm update
+              if ! git diff --exit-code -- cjpm.lock; then
+                git diff -- cjpm.lock || true
+                echo "::error::cjpm.lock changed during dependency resolution; migrate and commit the lock before building"
+                exit 1
+              fi
               # cjpm may execute git-dependency build scripts with GIT_* set.
               # Patch wasmedge_ffi native build script to clear git env before nested git/cmake steps.
               for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
@@ -168,6 +165,8 @@ $:
               set -eux
               cd frontend
               pnpm install --frozen-lockfile
+              pnpm run typecheck
+              pnpm run test:ci
               pnpm run build
             '
 
