@@ -3,6 +3,7 @@ import {
   removeStoredValue,
   setStoredString,
 } from './mmkv';
+import {parseHttpOrigin} from '../utils/httpOrigin';
 
 export type LanluServer = {
   id: string;
@@ -18,11 +19,8 @@ export function normalizeServerUrl(input: string): string {
   return input.trim().replace(/\/+$/, '');
 }
 
-const SUPPORTED_SERVER_URL_PATTERN = /^https?:\/\/[^\s/?#]+/i;
-
 export function isSupportedServerUrl(input: string): boolean {
-  const value = normalizeServerUrl(input);
-  return SUPPORTED_SERVER_URL_PATTERN.test(value) && !/\s/.test(value);
+  return parseHttpOrigin(normalizeServerUrl(input)) !== null;
 }
 
 /** Validates and normalizes a server URL, throwing a user-facing message. */

@@ -14,7 +14,12 @@ import {useFocusEffect} from '@react-navigation/native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {buildAuthorizedAssetImageSource, extractApiError, isNetworkError} from '../api/client';
+import {
+  buildAuthorizedAssetImageSource,
+  buildAuthorizedImageSourceForSession,
+  extractApiError,
+  isNetworkError,
+} from '../api/client';
 import {getSession} from '../auth/session';
 import {
   archiveCoverAsset,
@@ -86,7 +91,6 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         // Resolve auth once; building one source per page should not hit
         // Keychain or the native proxy in a serial loop.
         const {server, token} = await getSession();
-        const headers = token ? {Authorization: `Bearer ${token}`} : undefined;
         const sbPages: SbPage[] = [];
         for (let idx = 0; idx < pages.length; idx++) {
           if (cancelled) return;
@@ -100,14 +104,8 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
             || (effectiveType === "image" ? (source?.url || `/api/archives/${encodeURIComponent(archiveId)}/page/${encodeURIComponent(page.id || String(idx+1))}`) : "");
           let thumbnailSource = null;
           if (thumbPath) {
-            const uri = /^https?:\/\//i.test(thumbPath)
-              ? thumbPath
-              : server
-                ? `${server.baseUrl}${thumbPath.startsWith('/') ? thumbPath : `/${thumbPath}`}`
-                : thumbPath;
             thumbnailSource = {
-              uri,
-              ...(headers ? {headers} : {}),
+              ...buildAuthorizedImageSourceForSession(thumbPath, server, token),
               cache: 'immutable',
             } as any;
           }

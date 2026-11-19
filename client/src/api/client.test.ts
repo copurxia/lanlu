@@ -7,6 +7,7 @@ import {
   buildApiUrl,
   buildAuthorizedAssetImageSource,
   buildAuthorizedImageSource,
+  buildAuthorizedImageSourceForSession,
   buildAuthorizedUri,
   extractApiError,
   isNetworkError,
@@ -558,5 +559,64 @@ describe('http origin parser', () => {
     expect(isSameOriginUrl('https://lanlu.example:8443/x', 'https://lanlu.example')).toBe(
       false,
     );
+  });
+});
+
+describe('session image builder for sidebar thumbnails', () => {
+  const sessionServer = { id: 's1', baseUrl: 'https://lanlu.example' } as any;
+
+  it('omits headers for cross-origin absolute thumbnails', () => {
+    expect(
+      buildAuthorizedImageSourceForSession(
+        'https://evil.example/thumb.png',
+        sessionServer,
+        'token-1',
+      ),
+    ).toEqual({ uri: 'https://evil.example/thumb.png' });
+    expect(
+      buildAuthorizedImageSourceForSession(
+        'https://lanlu.example.evil.com/thumb.png',
+        sessionServer,
+        'token-1',
+      ),
+    ).toEqual({ uri: 'https://lanlu.example.evil.com/thumb.png' });
+  });
+
+  it('omits headers for protocol-relative thumbnails', () => {
+    expect(
+      buildAuthorizedImageSourceForSession(
+        '//evil.example/thumb.png',
+        sessionServer,
+        'token-1',
+      ),
+    ).toEqual({ uri: 'https://lanlu.example//evil.example/thumb.png' });
+  });
+
+  it('keeps headers for same-origin and relative thumbnails', () => {
+    expect(
+      buildAuthorizedImageSourceForSession(
+        'https://lanlu.example/thumb.png',
+        sessionServer,
+        'token-1',
+      ),
+    ).toEqual({
+      uri: 'https://lanlu.example/thumb.png',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+    expect(
+      buildAuthorizedImageSourceForSession('/api/assets/1', sessionServer, 'token-1'),
+    ).toEqual({
+      uri: 'https://lanlu.example/api/assets/1',
+      headers: { Authorization: 'Bearer token-1' },
+    });
+  });
+
+  it('omits headers without a server or token', () => {
+    expect(
+      buildAuthorizedImageSourceForSession('/api/assets/1', null, 'token-1'),
+    ).toEqual({ uri: '/api/assets/1' });
+    expect(
+      buildAuthorizedImageSourceForSession('/api/assets/1', sessionServer, null),
+    ).toEqual({ uri: 'https://lanlu.example/api/assets/1' });
   });
 });

@@ -3,6 +3,7 @@ import type {ApiEnvelope, Category} from '../types/api';
 import {normalizeCategories} from './lanlu';
 import EventSource from 'react-native-sse';
 import {getSession} from '../auth/session';
+import {authHeadersForUrl} from '../utils/httpOrigin';
 
 // ─── Admin Types ───────────────────────────────────────────────────────────
 
@@ -322,8 +323,11 @@ export async function adminListTasks(params?: {
   if (params?.status) qs.set('status', params.status);
 
   let authToken: string | null = null;
+  let authBaseUrl: string | null = null;
   try {
-    authToken = (await getSession()).token;
+    const session = await getSession();
+    authToken = session.token;
+    authBaseUrl = session.server?.baseUrl || null;
   } catch {}
 
   const url = await buildApiUrl(`/api/admin/taskpool/tasks?${qs.toString()}`);
@@ -331,7 +335,7 @@ export async function adminListTasks(params?: {
   return new Promise((resolve, reject) => {
     const es = new EventSource<'snapshot' | 'tasks' | 'ping'>(url, {
       timeout: 15000,
-      headers: authToken ? {Authorization: `Bearer ${authToken}`} : undefined,
+      headers: authHeadersForUrl(url, authBaseUrl, authToken),
     });
     const timeoutId = setTimeout(() => {
       es.close();

@@ -33,6 +33,9 @@ describe('server url validation', () => {
     expect(isSupportedServerUrl('https://')).toBe(false);
     expect(isSupportedServerUrl('')).toBe(false);
     expect(isSupportedServerUrl('https://lanlu example')).toBe(false);
+    expect(isSupportedServerUrl('https://h:99999')).toBe(false);
+    expect(isSupportedServerUrl('https://u@h')).toBe(false);
+    expect(isSupportedServerUrl('https://[::1]:8443')).toBe(true);
   });
 
   it('throws user-facing errors from the requirement helper', () => {
@@ -48,6 +51,17 @@ describe('server url validation', () => {
   it('rejects saving a scheme-less server without writing it', async () => {
     await expect(
       upsertServer({name: 'Legacy', baseUrl: '192.168.1.5:8080'}),
+    ).rejects.toThrow(/must start with http:\/\/ or https:\/\//);
+
+    expect(getServers()).toEqual([]);
+  });
+
+  it('rejects invalid ports and userinfo without writing them', async () => {
+    await expect(
+      upsertServer({name: 'Bad port', baseUrl: 'https://h:99999'}),
+    ).rejects.toThrow(/must start with http:\/\/ or https:\/\//);
+    await expect(
+      upsertServer({name: 'Userinfo', baseUrl: 'https://u@h'}),
     ).rejects.toThrow(/must start with http:\/\/ or https:\/\//);
 
     expect(getServers()).toEqual([]);

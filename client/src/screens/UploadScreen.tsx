@@ -27,6 +27,7 @@ import {getSession} from '../auth/session';
 import {useUploadStore, type DownloadTask, type UploadFile} from '../stores/uploadStore';
 import type {Category} from '../types/api';
 import {uploadLocalFileChunk} from '../native/LanluMediaProxy';
+import {authHeadersForUrl} from '../utils/httpOrigin';
 
 type TabKey = 'upload' | 'download';
 
@@ -149,14 +150,15 @@ async function uploadArchiveChunk(
   end: number,
 ) {
   const path = `/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}`;
-  const {token} = await getSession();
+  const {server, token} = await getSession();
+  const uploadUrl = await buildApiUrl(path);
   const headers = {
-    ...(token ? {Authorization: `Bearer ${token}`} : {}),
+    ...authHeadersForUrl(uploadUrl, server?.baseUrl, token),
     'Content-Type': 'application/octet-stream',
   };
   const uploadedByNative = await uploadLocalFileChunk(
     file.uri,
-    await buildApiUrl(path),
+    uploadUrl,
     headers,
     start,
     end - start,
@@ -183,7 +185,7 @@ function subscribeTaskSSE(taskId: number, dlId: string, retryAttempt = 0) {
     const streamUrl = `${baseUrl}/api/admin/taskpool/${taskId}/stream`;
 
     const es = new EventSource(streamUrl, {
-      headers: tok ? {Authorization: `Bearer ${tok}`} : {},
+      headers: authHeadersForUrl(streamUrl, srv?.baseUrl, tok) || {},
     }) as EventSource & {addEventListener(type: string, listener: (e: any) => void): void};
 
     let closed = false;
