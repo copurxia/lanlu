@@ -24,7 +24,7 @@ qwest = { path = "../packages/qwest" }
 [target.x86_64-unknown-linux-gnu]
 # vips_ffi 需要 libvips；Linux 下如遇 PCRE2_10.47 链接错误，需要 pcre2 那一行。
 # rocksdb_ffi 需要 librocksdb（与服务端同款）。
-link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -L ../packages/lgpu/native/target/release -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -l:libass.so.9 -llgpu_native"
+link-option = "-L ../packages/libass_ffi/native -L ../packages/rocksdb_ffi/native -L ../packages/lgpu/native/target/release -L ../packages/lwp/lib -lvlc -lrocksdb -lstdc++ -lfontconfig -lfreetype -ldl -lpthread -lgcc_s -lavformat -lavcodec -lavutil -llanlu_ass_bridge -llanlu_rocksdb_bridge -l:libass.so.9 -llgpu_native -llwp_native"
 # 仅当出现 undefined reference to ...@PCRE2_10.47 时取消注释：
 # link-option = "/usr/lib/x86_64-linux-gnu/libpcre2-8.so"
   [target.x86_64-unknown-linux-gnu.bin-dependencies]

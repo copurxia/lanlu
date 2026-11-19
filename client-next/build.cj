@@ -154,12 +154,24 @@ private func buildWebviewNative(): Int64 {
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 
+@When[os != "Windows"]
+private func buildLwpNative(): Int64 {
+    // 引擎最终可执行文件引用 lwp_*（lwp_trace_open/replay 等由 C 侧提供）；
+    // liblwp_native.so 必须先于链接产出（CI 的测试步骤原本才构建它，顺序太晚）。
+    execute("bash", ["../packages/lwp/native/build.sh"],
+        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+}
+
 main(args: Array<String>): Int64 {
     if (args.size == 0) {
         return 0
     }
     match (args[0]) {
         case "pre-build" | "pre-test" | "pre-run" =>
+            let lwpExitCode = buildLwpNative()
+            if (lwpExitCode != 0) {
+                return lwpExitCode
+            }
             let exitCode = buildFontkitNative()
             if (exitCode != 0) {
                 return exitCode

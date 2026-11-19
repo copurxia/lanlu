@@ -36,9 +36,9 @@ echo "[cui] SDL 过渡债：cui 层引用=$cui_refs（含吸收自 lgui 的遗�
 # BASELINE_CUI 是 P6 吸收完成时 cui/src 的过渡债存量（**固定值**），M6 清 SDL 时归零。
 # 注意：不要用「当前存量」当默认值 —— 那样棘轮永远不响（$cui_refs > $cui_refs 恒假）；
 # 需要临时放宽时显式 export BASELINE_CUI。
-# 2026-11-19：421 → 425 —— 工作树被并行色彩管线改动触及 events/sdl_types_raw 等文件，
-# 新增 4 条属该批改动；提交前请核对确为预期（本脚本只认数字下降）。
-BASELINE_CUI=${BASELINE_CUI:-425}
+# 2026-11-19：421 → 425（并行色彩补丁触及 events/sdl_types_raw）；随后 P6 拆包
+# 重构 + 清理不可编译的 SDL 读回测试后降至 400，基线同步收紧。
+BASELINE_CUI=${BASELINE_CUI:-400}
 BASELINE_CN=${BASELINE_CN:-0}
 if [ "$cui_refs" -gt "$BASELINE_CUI" ]; then
   echo "[FAIL] cui 对 SDL 的引用增加了（$cui_refs > $BASELINE_CUI）"
