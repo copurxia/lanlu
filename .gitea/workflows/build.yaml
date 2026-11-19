@@ -40,14 +40,14 @@ jobs:
       - name: Export CANGJIE_STDX_PATH
         run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
 
-      - name: Install libpq headers
+      - name: Install PostgreSQL client and libpq headers
         run: |
           if command -v sudo >/dev/null 2>&1; then
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends libpq-dev
+            sudo apt-get install -y --no-install-recommends libpq-dev postgresql-client
           else
             apt-get update
-            apt-get install -y --no-install-recommends libpq-dev
+            apt-get install -y --no-install-recommends libpq-dev postgresql-client
           fi
 
       - name: Prepare test database
