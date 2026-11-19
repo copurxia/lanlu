@@ -30,9 +30,6 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-        with:
-          submodules: true
-
       - name: Setup Cangjie
         uses: Zxilly/setup-cangjie@v3
         with:
@@ -98,8 +95,6 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-        with:
-          submodules: true
       # - name: Setup Cangjie
       #   uses: Zxilly/setup-cangjie@v2
       #   with:
@@ -176,6 +171,11 @@ jobs:
           ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
             packages/postgresql-driver/native/lanlu_pg_bridge.o
           cjpm update
+          if ! git diff --exit-code -- cjpm.lock; then
+            git diff -- cjpm.lock || true
+            echo "::error::cjpm.lock changed during dependency resolution; migrate and commit the lock before building"
+            exit 1
+          fi
           for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
             grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
             # Newer runner GCC flags vendored wasm.hh strncpy as -Wstringop-truncation.
@@ -196,10 +196,21 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
           pnpm -v
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          pnpm install --frozen-lockfile
+      - name: Typecheck frontend
+        run: |
+          cd frontend
+          pnpm run typecheck
+      - name: Test frontend
+        run: |
+          cd frontend
+          pnpm run test:ci
       - name: Build frontend
         run: |
           cd frontend
-          pnpm install
           pnpm run build
       - name: Prepare release artifacts
         run: |

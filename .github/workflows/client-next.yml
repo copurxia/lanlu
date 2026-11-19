@@ -49,6 +49,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: xtask doctor
+        run: python3 -m tools.xtask doctor --json
+
+      - name: xtask self-tests
+        run: python3 -m tools.xtask test --package xtask
+
       # T0 静态门禁（计划 docs/lwindow-platform-separation-plan.md §4.5 / §16.2）
       # 违规集合记在 tools/quality-baseline.toml，只允许下降；新增即失败。
       - name: Dependency whitelist
