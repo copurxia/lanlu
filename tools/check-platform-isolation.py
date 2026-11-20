@@ -60,6 +60,7 @@ SKIP_REL_PREFIXES = (
     "packages/lpack-ohos/target/",
     "packages/cangjie-gui/examples/",
     ".github/",
+    ".gitea/",
 )
 
 
