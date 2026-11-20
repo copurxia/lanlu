@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -28,7 +29,8 @@ CURRENT_DOCS = {
     "lwp-known-limitations.md",
 }
 
-SOURCE_DIRS = ["packages", "client-next/src", "tools", "docs"]
+# apps/ 在迁移期间逐步填充；现在加入是为了 PR2–PR6 搬完后不静默失去校验能力。
+SOURCE_DIRS = ["packages", "apps", "client-next/src", "tools", "docs"]
 SKIP_PARTS = {"target", "build", "node_modules", ".git", ".research-ohos"}
 CODE_SUFFIXES = {".cj", ".rs", ".cpp", ".ets", ".c", ".h"}
 
@@ -48,12 +50,11 @@ def file_index() -> dict[str, Path]:
         base = ROOT / d
         if not base.exists():
             continue
-        for f in base.rglob("*"):
-            if not f.is_file() or f.suffix not in CODE_SUFFIXES:
-                continue
-            if SKIP_PARTS & set(f.parts):
-                continue
-            idx.setdefault(f.name, f)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [n for n in dirnames if n not in SKIP_PARTS]
+            for name in filenames:
+                if Path(name).suffix in CODE_SUFFIXES:
+                    idx.setdefault(name, Path(dirpath) / name)
     _INDEX = idx
     return idx
 

@@ -614,7 +614,9 @@ jobs:
 
   guards:
     # 静态门禁在 Gitea 侧始终运行：Gitea 是唯一实际验收通道，而 .github 的
-    # guards job 受镜像阻塞。命令与 .github/workflows/client-next.yml 的 guards 等价，
+    # guards job 受镜像阻塞。本 job 覆盖 .github/workflows/client-next.yml 的 guards
+    # 中**不需要仓颉工具链**的部分：静态扫描（deps/platform/layering/SDL/文件桥/docs）
+    # + LWP 生成物与 ABI + 壳侧 selftest + lwp/test.sh（仓颉侧自动跳过）+ 导出符号 ↔ liblwp.map 一致性。
     # 全部在仓库根执行（这些脚本依赖 CWD=根或自行 cd 到脚本上级）。
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -638,6 +640,37 @@ jobs:
 
       - name: Platform isolation
         run: python3 tools/check-platform-isolation.py
+
+      # LWP 生成物必须与 IDL 一致（生成物入库，CI 校验无 diff）
+      - name: LWP generated artifacts are up to date
+        run: python3 tools/lwp-gen.py --check
+
+      # 协议只允许追加：删字段/改类型必须 protocol_major + 1
+      - name: LWP ABI is backward compatible
+        run: python3 tools/lwp-gen.py --check-abi
+
+      # 壳侧 LWP 发送端的字节级契约（协议模式 + 回落模式），纯 host cc，无需仓颉
+      - name: Platform package selftest (shell LWP client)
+        run: bash packages/lplatform-ohos/selftest/run-tests.sh
+
+      # C 侧测试必跑；仓颉侧在没有 host 工具链时由脚本自行 [skip]，不会误报绿
+      - name: LWP tests (C side + generated artifacts)
+        run: bash packages/lwp/test.sh
+
+      # 壳/引擎都依赖 liblwp_native.so；实际导出必须与 liblwp.map 声明的公开 API 完全一致
+      # （计划 §5.2）。期望值直接取自 map 而不是再抄一份清单：抄的那份已经漂移过
+      # （GitHub client-next.yml 的白名单缺 lwp_stats_summary / lwp_trace_replay）。
+      - name: liblwp_native.so exports exactly the declared API
+        run: |
+          set -euo pipefail
+          bash packages/lwp/native/build.sh
+          got=$(nm -D --defined-only packages/lwp/lib/liblwp_native.so | awk '{print $3}' | sort | tr '\n' ' ')
+          want=$(sed -n '/global:/,/local:/p' packages/lwp/native/liblwp.map | grep -o 'lwp_[a-z_]*' | sort | tr '\n' ' ')
+          [ -n "$want" ] || { echo "liblwp.map 未解析出任何导出符号"; exit 1; }
+          if [ "$got" != "$want" ]; then
+            echo "导出符号与 liblwp.map 不符："; echo "  实际: $got"; echo "  声明: $want"; exit 1
+          fi
+          echo "[PASS] liblwp_native.so 导出符号与 liblwp.map 一致（$(echo "$want" | wc -w) 个）"
 
       - name: Layering / SDL / docs guards
         run: |
