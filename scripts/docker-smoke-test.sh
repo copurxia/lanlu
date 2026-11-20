@@ -5,7 +5,7 @@ set -euo pipefail
 
 image="${1:?usage: $0 <image>}"
 
-docker run --rm --entrypoint /bin/sh "$image" -c '
+docker run --rm -i --entrypoint /bin/sh "$image" -s <<'SMOKE'
   set -eu
   test -x /app/main
   test -f /app/frontend/out/index.html
@@ -28,8 +28,8 @@ docker run --rm --entrypoint /bin/sh "$image" -c '
     echo "missing shared libraries:" >&2
     echo "$missing" >&2
     echo "runtime RocksDB packages:" >&2
-    dpkg-query -W -f='${binary:Package}\t${Version}\n' 'librocksdb*' 2>/dev/null >&2 || true
-    find /usr/lib /lib -name 'librocksdb.so*' -print 2>/dev/null >&2 || true
+    dpkg-query -W -f='${binary:Package}\t${Version}\n' 'librocksdb*' >&2 2>/dev/null || true
+    find /usr/lib /lib -name 'librocksdb.so*' -print >&2 2>/dev/null || true
     case "$missing" in
       *librocksdb*)
         echo "The bundled main binary was linked against a different librocksdb ABI." >&2
@@ -41,4 +41,4 @@ docker run --rm --entrypoint /bin/sh "$image" -c '
   fi
 
   echo "image smoke test passed"
-'
+SMOKE
