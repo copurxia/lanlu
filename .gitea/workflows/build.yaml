@@ -95,6 +95,17 @@ jobs:
       # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
       XMAKE_ROOT: 'y'
     steps:
+      - name: Prepare container for Node actions
+        # actions/checkout executes its bundled Node script inside the job
+        # container. The pinned Ubuntu image has no Node runtime, so install
+        # the prerequisite before the first `uses:` step.
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git nodejs
+          node --version
+          git --version
+
       - name: Check out repository code
         uses: actions/checkout@v4
       # - name: Setup Cangjie

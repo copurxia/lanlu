@@ -126,6 +126,7 @@ jobs:
               fi
             fi
             mkdir -p "$ANDROID_HOME/cmdline-tools-tmp"
+            mkdir -p "$ANDROID_HOME/cmdline-tools/latest"
             curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 \
               --connect-timeout 20 \
               https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip \
