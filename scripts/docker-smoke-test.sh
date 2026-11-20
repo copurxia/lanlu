@@ -40,5 +40,7 @@ docker run --rm -i --entrypoint /bin/sh "$image" -s <<'SMOKE'
     exit 1
   fi
 
+  rocksdb_link="$(ldd /app/main 2>/dev/null | grep -i rocksdb || true)"
+  printf 'linked RocksDB library: %s\n' "${rocksdb_link:-not found}"
   echo "image smoke test passed"
 SMOKE
