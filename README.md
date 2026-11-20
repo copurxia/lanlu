@@ -51,9 +51,13 @@
 
 ## 项目结构（DDD）
 
+> 目录迁移进行中：`extension` 已迁至 `apps/extension`，其余各端（`src`、`client-next`、`frontend`、`client`、`mcp`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
+
 ```text
 lanlu/
-├── src/                              # 仓颉后端源码
+├── apps/
+│   └── extension/                    # 浏览器扩展（Plasmo + React）
+├── src/                              # 仓颉后端源码（待迁 apps/server）
 │   ├── main.cj                       # 应用入口
 │   ├── contexts/                     # 领域上下文（按业务边界拆分）
 │   │   ├── archive/
