@@ -611,3 +611,38 @@ jobs:
           name: client-next-test-results
           path: client-next/target/test-results/
           if-no-files-found: warn
+
+  guards:
+    # 静态门禁在 Gitea 侧始终运行：Gitea 是唯一实际验收通道，而 .github 的
+    # guards job 受镜像阻塞。命令与 .github/workflows/client-next.yml 的 guards 等价，
+    # 全部在仓库根执行（这些脚本依赖 CWD=根或自行 cd 到脚本上级）。
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: xtask doctor
+        run: python3 -m tools.xtask doctor --json
+
+      - name: xtask self-tests
+        run: python3 -m unittest discover -s tools/xtask/tests -t .
+
+      - name: Dependency whitelist
+        run: python3 tools/check-deps.py
+
+      - name: Platform isolation
+        run: python3 tools/check-platform-isolation.py
+
+      - name: Layering / SDL / docs guards
+        run: |
+          set -eux
+          bash tools/check-layering.sh
+          bash tools/check-no-sdl.sh
+          bash tools/check-no-file-bridge.sh
+          python3 tools/check-docs-consistency.py
