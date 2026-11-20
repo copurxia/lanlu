@@ -33,7 +33,58 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        env:
+          CLONE_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          CLONE_SHA: ${{ github.sha }}
+          CLONE_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # 不用 actions/checkout：该 action 每次运行都要从 github.com 拉取 action 本体，
+          # runner 出口网络抖动时会在 job 初始化阶段整体失败（run 1502 server-test：
+          # "could not fetch remote 'origin': Recv failure: Connection reset by peer"）。
+          # 这里改为直接向本实例 fetch。为了不引入语义变化，一次拉全部分支、tags 与
+          # PR head：比 actions/checkout 默认的 depth=1 更宽，affected/守卫的 git 依赖不受影响。
+          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+          cd "${GITHUB_WORKSPACE:-$PWD}"
+          # 复用工作目录时 .git 可能损坏（上一轮被中断），用 rev-parse 探测而不是只看目录存在。
+          if ! git rev-parse --git-dir >/dev/null 2>&1; then
+            rm -rf .git
+            git init -q
+          fi
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$CLONE_URL"
+          else
+            git remote add origin "$CLONE_URL"
+          fi
+          # 自托管 runner 复用工作目录时，上一轮的未跟踪文件会挡住 checkout。
+          git clean -ffdxq
+          # 认证用环境变量而不是 `git -c http.extraheader=...`：后者会把 token 写进
+          # 进程 argv，同机任意用户 `ps` 可见。GIT_CONFIG_* 只进进程 environ，作用域
+          # 限于本 step 的 shell（函数内前置赋值，不 export，不影响后续步骤）。
+          git_auth() {
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+            GIT_CONFIG_VALUE_0="Authorization: token ${CLONE_TOKEN}" git "$@"
+          }
+          if ! git_auth fetch -q --prune --force origin \
+              '+refs/heads/*:refs/remotes/origin/*' \
+              '+refs/tags/*:refs/tags/*' \
+              '+refs/pull/*/head:refs/remotes/pull/*'; then
+            echo "fetch 失败：$CLONE_URL（检查 github.token 是否对该仓库有读权限）" >&2
+            exit 1
+          fi
+          # actions/checkout 默认 depth=1，复用旧工作区时仓库可能是 shallow 的；
+          # 补齐历史，避免依赖 git 历史的步骤（affected、计数类守卫）静默失真。
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git_auth fetch -q --unshallow --tags origin || {
+              echo "解除 shallow 失败：$CLONE_URL" >&2; exit 1; }
+          fi
+          # pull_request 事件的 github.sha 可能是服务端生成的合并提交，不在 heads/tags/pull
+          # 任何一个 ref 上；此时按 SHA 直接取（Forgejo 支持按 SHA fetch，本机已实测）。
+          if ! git rev-parse --verify -q "${CLONE_SHA}^{commit}" >/dev/null; then
+            git_auth fetch -q --force origin "$CLONE_SHA"
+          fi
+          git checkout -q --force "$CLONE_SHA"
+          echo "checked out $(git rev-parse HEAD) ($(git rev-list --count HEAD) commits)"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -80,7 +131,58 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        env:
+          CLONE_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          CLONE_SHA: ${{ github.sha }}
+          CLONE_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          # 不用 actions/checkout：该 action 每次运行都要从 github.com 拉取 action 本体，
+          # runner 出口网络抖动时会在 job 初始化阶段整体失败（run 1502 server-test：
+          # "could not fetch remote 'origin': Recv failure: Connection reset by peer"）。
+          # 这里改为直接向本实例 fetch。为了不引入语义变化，一次拉全部分支、tags 与
+          # PR head：比 actions/checkout 默认的 depth=1 更宽，affected/守卫的 git 依赖不受影响。
+          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+          cd "${GITHUB_WORKSPACE:-$PWD}"
+          # 复用工作目录时 .git 可能损坏（上一轮被中断），用 rev-parse 探测而不是只看目录存在。
+          if ! git rev-parse --git-dir >/dev/null 2>&1; then
+            rm -rf .git
+            git init -q
+          fi
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$CLONE_URL"
+          else
+            git remote add origin "$CLONE_URL"
+          fi
+          # 自托管 runner 复用工作目录时，上一轮的未跟踪文件会挡住 checkout。
+          git clean -ffdxq
+          # 认证用环境变量而不是 `git -c http.extraheader=...`：后者会把 token 写进
+          # 进程 argv，同机任意用户 `ps` 可见。GIT_CONFIG_* 只进进程 environ，作用域
+          # 限于本 step 的 shell（函数内前置赋值，不 export，不影响后续步骤）。
+          git_auth() {
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader \
+            GIT_CONFIG_VALUE_0="Authorization: token ${CLONE_TOKEN}" git "$@"
+          }
+          if ! git_auth fetch -q --prune --force origin \
+              '+refs/heads/*:refs/remotes/origin/*' \
+              '+refs/tags/*:refs/tags/*' \
+              '+refs/pull/*/head:refs/remotes/pull/*'; then
+            echo "fetch 失败：$CLONE_URL（检查 github.token 是否对该仓库有读权限）" >&2
+            exit 1
+          fi
+          # actions/checkout 默认 depth=1，复用旧工作区时仓库可能是 shallow 的；
+          # 补齐历史，避免依赖 git 历史的步骤（affected、计数类守卫）静默失真。
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git_auth fetch -q --unshallow --tags origin || {
+              echo "解除 shallow 失败：$CLONE_URL" >&2; exit 1; }
+          fi
+          # pull_request 事件的 github.sha 可能是服务端生成的合并提交，不在 heads/tags/pull
+          # 任何一个 ref 上；此时按 SHA 直接取（Forgejo 支持按 SHA fetch，本机已实测）。
+          if ! git rev-parse --verify -q "${CLONE_SHA}^{commit}" >/dev/null; then
+            git_auth fetch -q --force origin "$CLONE_SHA"
+          fi
+          git checkout -q --force "$CLONE_SHA"
+          echo "checked out $(git rev-parse HEAD) ($(git rev-list --count HEAD) commits)"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
