@@ -105,6 +105,8 @@ jobs:
           --health-retries 10
     env:
       DB_STRING: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable&pool.max=5
+      # psql(libpq) 不认驱动特有的 pool.* 查询参数，建扩展时用无 pool 的 DSN。
+      PG_DSN: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable
       XMAKE_ROOT: "y"
       WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
     steps:
@@ -144,6 +146,16 @@ jobs:
               libvips-dev libheif-dev librocksdb-dev \
               libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
           fi
+
+      - name: Prepare test database extensions
+        # 根测试并行跑迁移时，X013UACC 可能因 V013 尚未落库而跳过；unaccent 缺失会让
+        # 搜索文档用例直接报 "function unaccent(text) does not exist"。与 orm-test 一致，
+        # 先把扩展建好，迁移只负责索引与包装函数。
+        run: |
+          set -eux
+          PSQL="psql $PG_DSN -v ON_ERROR_STOP=1"
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS unaccent'
 
       - name: Checkout WasmEdge source (public)
         run: |
