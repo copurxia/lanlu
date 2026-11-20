@@ -84,6 +84,127 @@ jobs:
           cd packages/postgresql-driver
           cjpm test
 
+  server-test:
+    # 根包 12 个用例。数据库用例连不上库时会静默打印 [skip] 并返回成功，
+    # 因此本 job 同时提供 PostgreSQL 服务并在测试后把 [skip] 视为失败。
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: pgtest
+          POSTGRES_DB: lanlutest
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pgtest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_STRING: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable&pool.max=5
+      XMAKE_ROOT: "y"
+      WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - name: Setup Cangjie
+        uses: Zxilly/setup-cangjie@v3
+        with:
+          channel: sts
+          version: "1.2.0"
+          components: stdx
+
+      - name: Export CANGJIE_STDX_PATH
+        run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
+
+      - name: Install build tools
+        run: |
+          set -eux
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build cmake binutils \
+              xmake \
+              pkg-config \
+              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build cmake binutils \
+              xmake \
+              pkg-config \
+              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+              libvips-dev libheif-dev librocksdb-dev \
+              libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
+          fi
+
+      - name: Checkout WasmEdge source (public)
+        run: |
+          set -eux
+          mkdir -p build-script-cache
+          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+
+      - name: Pre-generate C bridge static libs
+        run: |
+          set -eux
+          g++ -std=c++17 -O2 -fPIC \
+            -c packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c \
+            -o packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
+            packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          cc -O2 -fPIC \
+            -c packages/postgresql-driver/native/lanlu_pg_bridge.c \
+            -o packages/postgresql-driver/native/lanlu_pg_bridge.o \
+            -I/usr/include/postgresql
+          ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
+            packages/postgresql-driver/native/lanlu_pg_bridge.o
+
+      - name: Resolve dependencies and guard lock
+        run: |
+          set -eux
+          unset GIT_DIR GIT_WORK_TREE
+          cjpm update
+          if ! git diff --exit-code -- cjpm.lock; then
+            git diff -- cjpm.lock || true
+            echo "::error::cjpm.lock changed during dependency resolution; migrate and commit the lock before testing"
+            exit 1
+          fi
+          for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
+            grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+            grep -q -- "-Wno-error=stringop-truncation" "$f" || sed -i "s/-Wno-array-bounds/-Wno-array-bounds -Wno-error=stringop-truncation/" "$f"
+          done
+
+      - name: Run root package tests
+        run: |
+          set -euo pipefail
+          mkdir -p target/test-results
+          cjpm test \
+            --no-color \
+            --timeout-each 60s \
+            --show-all-output \
+            --report-path "$PWD/target/test-results/server" \
+            --report-format xml \
+            2>&1 | tee target/test-results/server-test.log
+          if grep -Fq '[skip]' target/test-results/server-test.log; then
+            echo "::error::Database tests printed [skip]; PostgreSQL prerequisites are not ready"
+            exit 1
+          fi
+
+      - name: Upload root test report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: server-test-results
+          path: target/test-results/
+          if-no-files-found: warn
+
   build:
     # Keep the build container on the exact runtime-image snapshot. Linking on
     # a bare runner gives the binary an Ubuntu 24.04 soname while Dockerfile
@@ -189,6 +310,17 @@ jobs:
           done
           cjc -v
           cjpm build -V
+
+      - name: Run lcodec tests
+        # lcodec 单测 17 例。图片后端运行时 dlopen libvips，build job 已安装。
+        run: |
+          set -eux
+          export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
+          unset GIT_DIR GIT_WORK_TREE
+          source cangjie/envsetup.sh
+          cd packages/lcodec
+          cjpm test --no-color --timeout-each 60s
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
