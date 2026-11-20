@@ -58,7 +58,7 @@ SKIP_REL_PREFIXES = (
     # 构建/联调脚本天生与平台绑定（它们跑在具体平台上），不属于"业务层混入平台代码"
     "tools/",
     "packages/lpack-ohos/target/",
-    "packages/cangjie-gui/lgui/examples/",
+    "packages/cangjie-gui/examples/",
     ".github/",
 )
 

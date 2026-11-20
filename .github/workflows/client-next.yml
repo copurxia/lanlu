@@ -227,18 +227,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Fetch CangjieGUI source
-        run: |
-          set -euo pipefail
-          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
-
       - name: Verify in-repository dependencies
         run: |
           set -euo pipefail
           required_files=(
             packages/cangjie-gui/cjpm.toml
-            packages/cangjie-gui/sdl/.sdl3/libSDL3.so.0.4.2
-            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so.0.2.2
             packages/vips_ffi/cjpm.toml
             packages/libvlc_ffi/cjpm.toml
             packages/libavformat_ffi/cjpm.toml
@@ -448,18 +441,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Fetch CangjieGUI source
-        run: |
-          $ErrorActionPreference = "Stop"
-          git clone --branch lanlu-client-next https://gitcode.com/copur/CangjieGUI.git packages/cangjie-gui
-
       - name: Verify in-repository dependencies
         run: |
           $ErrorActionPreference = "Stop"
           $requiredFiles = @(
             "packages/cangjie-gui/cjpm.toml",
-            "packages/cangjie-gui/sdl/.sdl3/libSDL3.dll",
-            "packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.dll",
             "packages/vips_ffi/cjpm.toml",
             "packages/libvlc_ffi/cjpm.toml",
             "packages/libavformat_ffi/cjpm.toml",

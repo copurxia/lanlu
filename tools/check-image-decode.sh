@@ -45,7 +45,7 @@ done < <(grep -rnE '\b(uploadTexturePng|loadTexturePngFromMemory|createTextureFr
   | grep -Ev "$EXCLUDE_RE" | strip_comments)
 
 # 2) 框架层不得自己打开图片解码库（只允许 lcodec 内部做）。
-for d in "$ROOT/packages/cangjie-gui/src" "$ROOT/packages/cangjie-gui/lgui/src" "$ROOT/packages/lgpu/src"; do
+for d in "$ROOT/packages/cangjie-gui/src" "$ROOT/packages/lgpu/src"; do
   [ -d "$d" ] || continue
   while IFS= read -r hit; do
     [ -z "$hit" ] || report "${hit#$ROOT/} —— 框架层不得直接解码图片（应经 lcodec）"
@@ -61,13 +61,7 @@ if [ -f "$CARGO" ]; then
   done < <(grep -nE '^(png|image|stb_image|jpeg-decoder|zune-inflate)[[:space:]]*=' "$CARGO" 2>/dev/null)
 fi
 
-# 4) lgui 不得再依赖 vips_ffi（解码只经 lcodec）。
-LGUI_MANIFEST="$ROOT/packages/cangjie-gui/lgui/cjpm.toml"
-if [ -f "$LGUI_MANIFEST" ] && grep -qE '^[[:space:]]*vips_ffi[[:space:]]*=' "$LGUI_MANIFEST"; then
-  report "${LGUI_MANIFEST#$ROOT/} —— lgui 不得依赖 vips_ffi（解码只经 lcodec）"
-fi
-
-# 5) 正向断言：唯一解码入口必须存在（避免"删干净了却没人解码"）。
+# 4) 正向断言：唯一解码入口必须存在（避免"删干净了却没人解码"）。
 DECODE="$ROOT/packages/lcodec/src/decode.cj"
 grep -q 'public func decodeFileToRgba' "$DECODE" 2>/dev/null ||
   report "${DECODE#$ROOT/} —— 缺少 decodeFileToRgba（文件解码入口）"

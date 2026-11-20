@@ -3,10 +3,8 @@
 基于 [SDL3](https://github.com/libsdl-org) 图形接口，使用仓颉编程语言实现了一个跨平台/自渲染/声明式的桌面 GUI 框架，提供声明式界面构建、
 状态管理、常用布局容器、常用控件、文本渲染、矢量绘制以及系统能力集成等。
 
-本项目由两个边界清晰的核心包组成：
-
-- `sdl`：SDL/SDL_ttf 的仓颉安全封装，可脱离 CUI 单独用于游戏和图形软件等。
-- `cui`：在 `sdl` 基础上实现的自渲染、声明式 GUI 框架。
+本项目为单一 `cui` 包（M6 起原 `lgui` 已并入 `cui`）：SDL3/SDL_ttf 的安全封装位于
+`src/base`、`src/dialogs`、`src/input`、`src/system` 等模块，其上实现自渲染、声明式 GUI 框架。
 
 <img src="./images/gallery.jpg" />
 
@@ -39,21 +37,16 @@ CangjieGUI/
 ├── src/                   # CUI 框架实现
 ├── examples/              # CUI 示例应用，端到端测试
 ├── bench/                 # CUI 性能测试
-├── docs/                  # CUI 使用指南、API 与架构文档
-└── sdl/                   # SDL 仓颉封装库，目前聚焦于图形接口
-    ├── cjpm.toml          
-    ├── .sdl3/             # SDL 与 SDL_ttf 运行库
-    ├── src/               # SDL 仓颉核心封装
-    └── docs/              # SDL 使用指南、API 与部署文档
+└── docs/                  # CUI 使用指南、API 与架构文档
 ```
 
-本项目依赖跨平台多媒体库 [SDL-3.4.12](https://github.com/libsdl-org/SDL/releases/tag/release-3.4.12) 及其字体增强库 [SDL_ttf-3.2.2](https://github.com/libsdl-org/SDL_ttf/releases/tag/release-3.2.2)，其中 `Windows x64` 版本动态库已经预置到 `sdl/.sdl3` 目录，在此平台本项目开箱即用。
+本项目依赖跨平台多媒体库 [SDL-3.4.12](https://github.com/libsdl-org/SDL/releases/tag/release-3.4.12) 及其字体增强库 [SDL_ttf-3.2.2](https://github.com/libsdl-org/SDL_ttf/releases/tag/release-3.2.2)。运行库由宿主机提供，仓库不再内置。
 
-对于 Linux、Mac、Android 等平台，请打开以上超链接，在 release 板块下载相关发布件，解压后将动态库文件放到 `sdl/.sdl3` 目录中。如果官方 release 中没有匹配平台规格的发布件，可以用系统包管理工具安装（如 Mac 上执行 `brew install sdl3 sdl3_ttf`），或直接从 SDL 项目源码构建。
+请打开以上超链接，在 release 板块下载对应平台的发布件并解压到宿主机目录，或用系统包管理工具安装（如 Mac 上执行 `brew install sdl3 sdl3_ttf`），或直接从 SDL 项目源码构建。
 
 依赖库配置后，可以先跑一遍单元测试，在项目目录下执行 `cjpm test`，确保所有测试用例通过。
 
-然后测试运行示例项目（对框架的端到端测试），`sdl/examples/` 下是基于 `sdl` 基础图形接口开发的小游戏，`examples/` 下则是基于 `cui` 桌面图形界面框架开发的小应用。选择您感兴趣的示例项目，在项目根目录执行 `cjpm run`，感受仓颉在桌面端的生动呈现。
+然后测试运行示例项目（对框架的端到端测试），`examples/` 下是基于 `cui` 桌面图形界面框架开发的小应用。选择您感兴趣的示例项目，在项目根目录执行 `cjpm run`，感受仓颉在桌面端的生动呈现。
 
 > [!IMPORTANT]
 >
@@ -112,7 +105,6 @@ cjpm run
 - [CUI 使用指南](docs/user-guide.md)
 - [CUI 组件文档](docs/components.md)
 - [CUI API 文档](docs/api-reference.md)
-- [SDL API 文档](sdl/docs/README.md)
 - [现代 GUI 核心范式洞察辨析：函数式/对象式，立即模式/保留模式](docs/modern-GUI-insights-and-analysis.md)
 
 ## 示例应用

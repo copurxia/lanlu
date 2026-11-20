@@ -5,8 +5,8 @@
 ## 简介
 
 lanlu-client-next 是 lanlu 服务器的原生桌面客户端，使用仓颉语言编写，UI 基于
-[CangjieGUI](https://gitcode.com/copur/CangjieGUI)（cui；本地开发使用 `../packages/cangjie-gui`，
-CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
+[CangjieGUI](https://gitcode.com/copur/CangjieGUI)（cui；源码随主仓提供于 `packages/cangjie-gui`）。
+覆盖 v1 范围：登录、书库浏览
 （搜索/排序/分类/过滤/分页）、档案详情、内置图片阅读器、设置页（概览 dashboard/账户安全/外观/缓存 + 管理板块：分类/标签/智能分类/用户/系统设置/任务/定时任务/插件/统计信息）。
 
 ## 功能特性
@@ -28,7 +28,7 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 | libVLC 3+ | 应用内视频解码（`libvlc_ffi` 本地包依赖，Linux 包通常为 `libvlc-dev` + `vlc-plugin-base`） |
 | FFmpeg 开发库 | 内嵌字幕探测与抽取（`libavformat-dev libavcodec-dev libavutil-dev`；不调用 ffmpeg/ffprobe 命令） |
 | libass | ASS/SSA/SRT/WebVTT/mov_text 多轨字幕排版与透明 RGBA 渲染（Linux `libass-dev`，Windows MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-libass`） |
-| SDL3 动态库 | 位于 `../packages/cangjie-gui/sdl/.sdl3/`，运行时必须加入 `LD_LIBRARY_PATH` |
+| SDL3 动态库 | 由宿主机提供（仓库不再内置 `sdl/.sdl3/`），运行时需把其目录加入 `LD_LIBRARY_PATH` |
 | libRocksDB | 设置与离线缓存存储（`rocksdb_ffi` 本地包依赖；Linux 包为 `librocksdb-dev`，Windows 为 MSYS2 UCRT64 `mingw-w64-ucrt-x86_64-rocksdb`） |
 | stdx | 以二进制依赖引入（`CANGJIE_STDX_PATH`，与根项目同款配置） |
 
@@ -36,14 +36,14 @@ CI 从 fork 拉取固定提交）。覆盖 v1 范围：登录、书库浏览
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH cjpm build
+LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH cjpm build
 ```
 
 ## 运行
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
+LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main
 ```
 
@@ -54,9 +54,9 @@ LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
 
 原生 Wayland 的启动崩溃（libglycin 初始化竞态，约 1/3~1/2 概率在
 `SDL_CreateWindowAndRenderer` 阶段 SIGSEGV）根因是 libdecor 的 **GTK 插件**
-在窗口创建时初始化 GTK3。`main.cj` 在 Wayland 会话下会把 `LIBDECOR_PLUGIN_DIR`
-指向随仓库发布的 **libdecor-cairo 插件**（`../packages/cangjie-gui/sdl/libdecor-plugins/`，
-无 GTK 依赖），GTK 插件不再加载，原生 Wayland 实测 20/20 启动 0 崩溃
+在窗口创建时初始化 GTK3。平台启动准备（Wayland 下把 `LIBDECOR_PLUGIN_DIR` 指向
+无 GTK 依赖的 **libdecor-cairo 插件**）由 `lwindow` 适配层负责，GTK 插件不再加载，
+原生 Wayland 实测 20/20 启动 0 崩溃
 （详见 `.superpowers/sdd/task-e2-report.md`）。渲染驱动优先级为
 **D3D/Metal > vulkan > opengl > software**：Windows/macOS 交给 SDL 自动选择
 （D3D11/12、Metal 本来就在内置顺序最前）；Linux 桌面会话（wayland/x11）默认
@@ -74,15 +74,14 @@ SDL_VIDEODRIVER=x11 ./target/release/bin/main
 LANLU_SOFTWARE_RENDER=1 ./target/release/bin/main
 ```
 
-另注：`../packages/cangjie-gui/sdl/.sdl3-nolibdecor/` 保留了一份无 libdecor 的
-自编译 SDL3 3.4.2（`-DSDL_WAYLAND_LIBDECOR=OFF`，同样 20/20 通过），作为
-cairo 插件方案失效时的兜底；注意该构建在 GNOME 下窗口无装饰。
+另注：仓库不再内置 SDL3 运行库。若环境里没有可用的 libdecor-cairo 插件，
+可退回 X11/XWayland（`SDL_VIDEODRIVER=x11`）或使用系统 libdecor 配置。
 
 ## 测试
 
 ```bash
 cd client-next
-LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH cjpm test
+LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH cjpm test
 ```
 
 ## 多语言开发
@@ -99,8 +98,8 @@ GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client
 
 运行前需在 GitHub 仓库的 **Settings → Secrets and variables → Actions → Variables** 中配置
 `STDX_URL` 和 `STDX_WINDOWS_URL`，分别指向 Linux 与 Windows x86_64 cjnative static stdx 压缩包。
-CI 会先将固定提交的 CangjieGUI 克隆到 `packages/cangjie-gui`；原生库依赖（vips、vlc、rocksdb 等）由
-apt（Linux）/ MSYS2（Windows）安装。这些步骤均不依赖开发机目录或其中的预编译文件。
+CangjieGUI 源码已随主仓提供于 `packages/cangjie-gui`，CI 不再单独克隆；原生库依赖（vips、vlc、
+rocksdb 等）由 apt（Linux）/ MSYS2（Windows）安装。这些步骤均不依赖开发机目录或其中的预编译文件。
 
 `cjlint` 报告和 `cjfmt` 差异会作为 artifact 保留 14 天。当前格式检查为建议项；完成现有代码格式化
 基线清理后，可移除工作流中该步骤的 `continue-on-error`，将其升级为合并门槛。
@@ -113,7 +112,7 @@ apt（Linux）/ MSYS2（Windows）安装。这些步骤均不依赖开发机目�
 ```bash
 cd client-next
 SDL_VIDEODRIVER=dummy \
-    LD_LIBRARY_PATH=../packages/cangjie-gui/sdl/.sdl3:$LD_LIBRARY_PATH \
+    LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main --snapshot /tmp/client-next.bmp
 ```
 
