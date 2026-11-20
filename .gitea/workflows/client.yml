@@ -72,11 +72,12 @@ jobs:
 
   android-release:
     name: Android release APK
-    # 普通 push/PR 也构建 release APK 并上传 artifact；只有 nightly 发布
-    # （android-nightly）保持 schedule/dispatch 门控。
+    # 单 runner 无法承受每次 push 都跑一次冷缓存 Gradle 构建：push/PR 只跑
+    # quality，APK 构建保留给 schedule 与 workflow_dispatch。
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     needs: quality
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -195,7 +196,7 @@ jobs:
           retention-days: 14
 
       - name: Publish to nightly release
-        # 仅定时/手动发布；push/PR 构建止步于 artifact，不占 nightly 资产。
+        # 仅定时/手动发布；push/PR 已不再构建 APK（android-release job 已门控）。
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         env:
           SERVER_URL: ${{ github.server_url }}
