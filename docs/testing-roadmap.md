@@ -78,7 +78,7 @@
 | D-08 | 契约复用 ignite，而不是另写一套描述 | 用 `app.interfaceSpecs()` + `SwaggerGenerator` 导出；先接受 OpenAPI 3.0.0，3.1 升级单独立项 |
 | D-09 | 服务端 L2 用同进程真实 HTTP + 真 Postgres | 抽出 `bootstrapForTest()`，调用 `handleForTest`。controller 当前直接依赖静态 DAO，不能假装已有 fake repository 缝隙 |
 | D-10 | 统一报告消费层 | `summary.json` 是 CI、PR 评论和 AI 自诊断的机器接口；cjpm XML 非 JUnit 同构，必须自建适配器 |
-| D-11 | pnpm 版本先统一到 10.33.0 | `frontend/package.json:6` 与 `extension/package.json:6` 已声明 10.33.0，`extension.yml:19` 已在工作树改为 10.33.0；workspace 迁移另开 PR |
+| D-11 | pnpm 版本先统一到 10.33.0 | `frontend/package.json:6` 与 `apps/extension/package.json:6` 已声明 10.33.0，`extension.yml:19` 已在工作树改为 10.33.0；workspace 迁移另开 PR |
 
 ## 4. 测试分层与矩阵
 
@@ -645,7 +645,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `tools/README.md:58`、`tools/check-audit-numbers.sh`（`bd9aeb27`） | 删除 `land-focus-interactions.sh`、`rehearse-merge.sh`；审计守卫改判 `$GUI/.git` |
 | `frontend/package.json:7` | Web 测试脚本：`typecheck:12`、`test:13`、`test:ci:15`，随 `da4c58e1` 入库 |
 | `client/package.json:11` | 移动端 `test` = jest |
-| `extension/package.json:6` | extension 声明 pnpm 10.33.0 |
+| `apps/extension/package.json:6` | extension 声明 pnpm 10.33.0 |
 | `client-next/cjpm.toml:2` | 桌面 manifest 写 1.1.0 |
 | `src/main.cj:230` | 服务端开启 Swagger |
 | `src/shared/views/api_response.cj:21` | 手写 `toJson` 的代表 |

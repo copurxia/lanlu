@@ -66,7 +66,7 @@ NAPI 导出共 30 个（`startFilter … setEnv`，见构建产物 `cpp/types/li
 
 这些渠道的共同问题：
 1. **无类型无版本**：文本行格式散落在 C++、ArkTS、仓颉三处各写一遍，改一处另两处不会报错。
-2. **无唤醒**：`SdlWindow.waitEventTimeout` 是 4ms 短轮询（[window.cj](../packages/cangjie-gui/lgui/src/window.cj#L126-L139)），每次轮询读 3 个文件；“空闲不耗 CPU”的设计在 OHOS 上失效。
+2. **无唤醒**：`SdlWindow.waitEventTimeout` 是 4ms 短轮询（[window.cj](../packages/cangjie-gui/src/base/window.cj#L156-L172)），每次轮询读 3 个文件；“空闲不耗 CPU”的设计在 OHOS 上失效。
 3. **无序号无背压**：文件“读完即清空”，写方与读方之间存在竞态（读到一半时写入的内容会被清掉）。
 4. **环境变量不可靠**：`shell_napi.cpp::lanlu_push_input` 注释记录“仓颉的 `setVariable` 只改自己的 env，native `getenv` 看不到”，因此壳端被迫硬编码 `/data/storage/el2/base/files`。
 
@@ -77,17 +77,17 @@ NAPI 导出共 30 个（`startFilter … setEnv`，见构建产物 `cpp/types/li
 | K1 | **物理键盘事件没有送进引擎**：窗口级键过滤器只处理 Ctrl+V 读剪贴板然后 `return false`，没有转发；ArkTS 也没有 `onKeyEvent` 转发。引擎只收得到 IME 回调映射出来的少数键（Backspace/Enter/方向键/复制粘贴） | `input_filter.cpp::LanluKeyFilter`；`Index.ets` 中 `onKeyEvent|sendKey` 出现 0 次 |
 | K2 | 按键用字符串名传递，`keyFromName` 只认 12 个名字，其余变 `Key.RawScancode(0)` | [lgpu_backend.cj](../client-next/src/ui/lgpu_backend.cj#L188-L209) |
 | K3 | 修饰键字段被当成 repeat：`KeyDown(key, tuple[2].size > 0)` | [lgpu_backend.cj](../client-next/src/ui/lgpu_backend.cj#L161) |
-| K4 | `Keyboard.modifiers()` 仍调 `SDL_GetModState`（SDL 在 OHOS 上未初始化），cui 8 处依赖它（Shift+Tab、Shift 选择、Ctrl 快捷键） | [keyboard.cj](../packages/cangjie-gui/lgui/src/input/keyboard.cj#L31-L35)；`text_field.cj`/`text_area.cj`/`modal.cj`/`desktop_app.cj` |
+| K4 | `Keyboard.modifiers()` 仍调 `SDL_GetModState`（SDL 在 OHOS 上未初始化），cui 8 处依赖它（Shift+Tab、Shift 选择、Ctrl 快捷键） | [keyboard.cj](../packages/cangjie-gui/src/input/keyboard.cj#L31-L35)；`text_field.cj`/`text_area.cj`/`modal.cj`/`desktop_app.cj` |
 | K5 | 业务层直接写 SDL scancode：`/` 聚焦搜索（`SCANCODE_SLASH = 56`）、PgUp/PgDn（75/78） | [titlebar.cj](../client-next/src/ui/titlebar.cj#L115-L116)、[reader_view.cj](../client-next/src/ui/reader_view.cj#L42-L49) |
 | M1 | **丢事件**：`readInputEvents` 读出全部行并清空文件，但 `headlessEventSource` 只返回 `events[0]`，其余丢弃（同一批里的按下+抬起会丢掉抬起） | [lgpu_backend.cj](../client-next/src/ui/lgpu_backend.cj#L164-L175) + [events.cj](../packages/lwindow/src/events.cj#L35-L75) |
 | M2 | 所有按下/抬起都映射成 `MouseButton.Left`；鼠标 `OH_Input_GetMouseEventButton` 的值只写在 key 字段里没用上 | 同上 |
 | M3 | 滚轮不可用，有两层原因：(1) 窗口鼠标过滤器根本收不到滚轮，它的 action 表只有 MOVE/DOWN/UP/CANCEL，AXIS 被丢弃；(2) 即使收到，壳端写 action 13，引擎端也解析为 `Unknown` | `oh_window_event_filter.cpp`（window_window_manager 源码）；`input_filter.cpp` 与 `events.cj` 的 action 表对照 |
 | M4 | 诊断用的 action 90/91/92 也写进同一事件流，变成 `UiEvent.Unknown` | `input_filter.cpp` |
 | M5 | 没有 enter/leave、悬停态、触摸多指、取消（CANCEL） | 事件模型只有 Down/Move/Up |
-| I1 | IME 只有“提交文本”，无预编辑（拼音组合串不显示在输入框里）、无光标区域（候选框不跟随）；`setTextInputArea` 是空实现；cui 文本编辑状态里没有任何组合/预编辑概念 | [window.cj](../packages/cangjie-gui/lgui/src/window.cj#L114-L116)；`text_edit_state.cj` 中 compos/preedit/marked 出现 0 次 |
-| C1 | 光标样式全部空实现（`cursorsEnabled = false`） | [cursor.cj](../packages/cangjie-gui/lgui/src/input/cursor.cj) |
+| I1 | IME 只有“提交文本”，无预编辑（拼音组合串不显示在输入框里）、无光标区域（候选框不跟随）；`setTextInputArea` 是空实现；cui 文本编辑状态里没有任何组合/预编辑概念 | [window.cj](../packages/cangjie-gui/src/base/window.cj#L136-L142)；`text_edit_state.cj` 中 compos/preedit/marked 出现 0 次 |
+| C1 | 光标样式全部空实现（`cursorsEnabled = false`） | [cursor.cj](../packages/cangjie-gui/src/input/cursor.cj) |
 | W1 | **窗口尺寸固定**：surface 尺寸只在启动时从环境变量读一次，全仓没有 `Surface.resize` 的调用方；`UiEvent.WindowResized` 只由已不运行的 SDL 解码路径产生 | `grep` 结果；[lgpu_backend.cj](../client-next/src/ui/lgpu_backend.cj#L74-L85) |
-| W2 | 标题栏拖动区 `setDragRegions` 是空实现，自绘标题栏无法拖动窗口 | [window_controls.cj](../packages/cangjie-gui/lgui/src/window_controls.cj#L85-L93) |
+| W2 | 标题栏拖动区 `setDragRegions` 是空实现，自绘标题栏无法拖动窗口 | [window_controls.cj](../packages/cangjie-gui/src/base/window_controls.cj#L85-L86) |
 | P1 | 剪贴板读取方式不合规：ArkTS 申请受限 ACL 权限 `READ_PASTEBOARD`，并每 2 秒轮询读取系统剪贴板。系统规则禁止后台/轮询读取，普通应用只能在 Ctrl+V 后 2 秒内读一次或通过 PasteButton 读 | `Index.ets::ensurePasteboardPermission/readPasteboardToFile`；`pasteboard_service.cpp::VerifyPermission` |
 
 ### 1.4 业务层/框架层的平台泄漏
