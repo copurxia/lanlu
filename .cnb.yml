@@ -244,7 +244,7 @@ $:
     - &extension_pipeline
       name: extension
       ifModify:
-        - extension/**
+        - apps/extension/**
       docker:
         build:
           dockerfile: .ide/Dockerfile
@@ -261,7 +261,7 @@ $:
           script: |
             bash -lc '
               set -eux
-              cd extension
+              cd apps/extension
               pnpm install --frozen-lockfile
               pnpm run typecheck
               pnpm run build
@@ -274,7 +274,7 @@ $:
               command -v zip >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*)
               mkdir -p dist
               rm -f "dist/extension-${CNB_COMMIT_SHORT:-latest}.zip"
-              (cd extension/build/chrome-mv3-prod && zip -qr "../../../dist/extension-${CNB_COMMIT_SHORT:-latest}.zip" .)
+              (cd apps/extension/build/chrome-mv3-prod && zip -qr "../../../../dist/extension-${CNB_COMMIT_SHORT:-latest}.zip" .)
               ls -lah dist
             '
 

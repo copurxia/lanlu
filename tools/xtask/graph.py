@@ -222,7 +222,7 @@ def build_graph(
     for target_id, rel in (
         ("web:frontend", "frontend"),
         ("mobile:client", "client"),
-        ("extension:extension", "extension"),
+        ("extension:extension", "apps/extension"),
     ):
         target = _node_target(root, target_id, rel)
         if target:

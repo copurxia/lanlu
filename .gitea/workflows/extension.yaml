@@ -19,22 +19,22 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd extension
+          cd apps/extension
           pnpm install --frozen-lockfile
 
       - name: Build extension
         run: |
-          cd extension
+          cd apps/extension
           pnpm run build
 
       - name: Typecheck extension
         run: |
-          cd extension
+          cd apps/extension
           pnpm run typecheck
 
       - name: Archive extension artifacts
         uses: actions/upload-artifact@v3
         with:
           name: extension-build
-          path: extension/build/chrome-mv3-prod
+          path: apps/extension/build/chrome-mv3-prod
           retention-days: 30
