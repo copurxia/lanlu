@@ -506,9 +506,11 @@ jobs:
     container:
       image: ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
     env:
-      # 桌面端工具链是 1.1.3（toolchain/versions.toml 的 desktop），与服务端 1.2.0 不同；
-      # 依赖包 manifest 的 cjc-version 是下限声明，若实测被拒则需单独评估桌面升 1.2.0。
+      # 桌面端工具链统一到 1.2.0（toolchain/versions.toml 的 desktop）：
+      # 9 个直接依赖声明 cjc-version = "1.2.0"，且 1.1.3 对 --show-all-output 的支持未验证。
       LGUI_SDL_LIB_DIR: /usr/lib/x86_64-linux-gnu
+      LWP_LIB_DIR: ${{ github.workspace }}/packages/lwp/lib
+      LD_LIBRARY_PATH: /usr/lib/x86_64-linux-gnu:${{ github.workspace }}/packages/lwp/lib
       SDL_VIDEODRIVER: dummy
     steps:
       - name: Prepare container for Node actions
@@ -544,11 +546,11 @@ jobs:
           ls -l /usr/lib/x86_64-linux-gnu/libSDL3.so.0.4.2 \
                 /usr/lib/x86_64-linux-gnu/libSDL3_ttf.so.0.2.2
 
-      - name: Set up Cangjie 1.1.3
+      - name: Set up Cangjie 1.2.0
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
-          version: 1.1.3
+          version: 1.2.0
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH
@@ -564,9 +566,10 @@ jobs:
           cargo build --release
           test -f target/release/liblgpu_native.a
 
-      - name: Pre-generate rocksdb FFI bridge
-        # rocksdb_ffi 的 [ffi.c] 在 cjpm update 阶段就校验静态库存在（产物被 gitignore），
-        # 与服务端 build job 同款预生成；build.cj 的 pre-build 不含这一步。
+      - name: Pre-generate FFI bridges
+        # 三个 [ffi.c] 包在依赖解析阶段就校验静态库存在（产物被 gitignore），
+        # 早于各包 build.cj 的 pre-build 钩子；fresh checkout 必须先按 build.cj 的
+        # 同款命令各生成一次。rocksdb 用 C++ 头，其余两个是 C11。
         run: |
           set -eux
           g++ -std=c++17 -O2 -fPIC \
@@ -574,6 +577,16 @@ jobs:
             -o packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
           ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
             packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC \
+            -c packages/libavformat_ffi/native/lanlu_avformat_bridge.c \
+            -o packages/libavformat_ffi/native/lanlu_avformat_bridge.o
+          ar rcs packages/libavformat_ffi/native/liblanlu_avformat_bridge.a \
+            packages/libavformat_ffi/native/lanlu_avformat_bridge.o
+          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC \
+            -c packages/libass_ffi/native/lanlu_ass_bridge.c \
+            -o packages/libass_ffi/native/lanlu_ass_bridge.o
+          ar rcs packages/libass_ffi/native/liblanlu_ass_bridge.a \
+            packages/libass_ffi/native/lanlu_ass_bridge.o
 
       - name: Build client-next
         run: |
