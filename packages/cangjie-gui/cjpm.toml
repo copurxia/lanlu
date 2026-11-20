@@ -1,0 +1,24 @@
+[package]
+cjc-version = "1.0.5"
+name = "cui"
+version = "0.2.0"
+output-type = "static"
+description = "Declarative desktop GUI framework for Cangjie on SDL3."
+# cjpm test 的链接期需要 SDL3/TTF 桩库：静态依赖包的 link-option 不会向上传递到本包的
+# 测试可执行文件，所以在这里显式声明。桩库本体由 tools/verify-cui-interactions.sh 生成
+# 并经 LIBRARY_PATH 注入，只用于宿主单测，不进 OHOS/桌面产物。
+# 图片解码不需要 -lvips：解码归 lcodec，其后端运行时 dlopen（2026-11-17）。
+link-option = "-lSDL3 -lSDL3_ttf"
+
+[dependencies]
+# P6 吸收：lgui 包已整体并入 cui（M6 目标态达成）。以下依赖来自原 lgui/cjpm.toml：
+#   lbase —— Canvas 接口与中性类型（cui.cj 再导出保持 cui.X 路径）；
+#   lcodec —— 图片解码唯一来源（texture.cj 经此解码，运行时 dlopen 无链接依赖）；
+#   sdl_stub_ffi —— cjpm test 链接期声明 -lSDL3/-lSDL3_ttf（桩库由 LIBRARY_PATH 注入）。
+lbase = { path = "../lbase" }
+lcodec = { path = "../lcodec" }
+sdl_stub_ffi = { path = "../sdl_stub_ffi" }
+
+[target.aarch64-linux-ohos]
+compile-option = "--sysroot=${OHOS_SYSROOT} -B${OHOS_SYSROOT}/usr/lib/aarch64-linux-ohos"
+link-option = "-L ${OHOS_SYSROOT}/usr/lib/aarch64-linux-ohos"

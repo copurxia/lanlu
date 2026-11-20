@@ -1,0 +1,10 @@
+[package]
+cjc-version = "1.0.5"
+name = "cui_process_manager"
+version = "0.1.0"
+output-type = "executable"
+description = "CUI process manager example."
+
+[dependencies]
+cui = { path = "../.." }
+

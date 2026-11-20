@@ -1,0 +1,9 @@
+[package]
+cjc-version = "1.0.5"
+name = "cui_data_board"
+version = "0.1.0"
+output-type = "executable"
+description = "CUI data board example."
+
+[dependencies]
+cui = { path = "../.." }

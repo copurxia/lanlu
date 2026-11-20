@@ -1,0 +1,9 @@
+[package]
+cjc-version = "1.0.5"
+name = "cui_command_palette"
+version = "0.1.0"
+output-type = "executable"
+description = "CUI command palette example."
+
+[dependencies]
+cui = { path = "../.." }

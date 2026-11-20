@@ -1,0 +1,12 @@
+[package]
+cjc-version = "1.0.5"
+name = "bench_micro"
+version = "0.1.0"
+output-type = "executable"
+# 与 cui/cjpm.toml 同款：静态依赖包 vips_ffi 的 link-option 不向上传递，链接期需显式带出。
+description = "Headless single-scenario micro-benchmarks for CUI."
+
+[dependencies]
+cui = { path = "../.." }
+bench_harness = { path = "../harness" }
+bench_scenes = { path = "../scenes" }

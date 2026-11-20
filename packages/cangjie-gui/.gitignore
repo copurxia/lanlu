@@ -1,0 +1,13 @@
+target/
+**/target/
+bench/results/
+*.gcda
+*.gcno
+*.cov
+.todo/
+.agents/
+.claude/
+.idea/
+.vscode/
+*.user
+cjpm.lock
