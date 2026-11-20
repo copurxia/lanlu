@@ -21,12 +21,12 @@
 
 | 端 | 现有测试资产 | CI 真实执行情况 | 主要缺口 |
 |---|---|---|---|
-| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | 根包 `cjpm test` 已由独立 `server-test` job 执行（`.github/workflows/build.yml:90`，待 CI 实测）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
+| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | 根包 `cjpm test` 已由独立 `orm-test` job 执行（Gitea `build.yaml` 实测通过，run 2468 #6182；GitHub `.github/workflows/build.yml:90` 待镜像修复）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
 | 桌面端 | 29 个测试文件、261 个 `@Test`，集中在 `client-next/src/net/`、`app/`、`ui/`、`storage/`、`img/`、`i18n/` | Linux 执行 `cjpm test --parallel nCores --timeout-each 60s --report-format xml`（`.github/workflows/client-next.yml:372-377`）；Windows 只执行 `rocksdb_ffi`（`:554`） | `model.cj` 状态机、主 API 客户端、离线恢复、UI 关键路径与真实交互 E2E 缺失 |
 | Web | 3 个测试文件、19 个用例 | 已执行 frozen install + typecheck + test:ci（`.github/workflows/build.yml:323`、`:328`、`:333`），随后 build（`:338`） | 19 例已全部迁移到 Vitest 并接入 CI（`frontend/package.json:7` 起有 `typecheck`/`test`/`test:ci`）；仍无组件交互与 E2E 测试 |
 | 移动端 | 13 个测试文件、114 个用例（原 8 文件/32 例 + 新增 5 文件/82 例：`a9fff46a` 46、`36803ef6` 9、`1eb69a58` 19、`19bdd372` 8），Jest | **执行 `npm test -- --runInBand --ci`**（`.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`） | Phase 2B 已覆盖 6 个 offline store、进度队列重放、`api/client.ts` 拦截器与服务器地址校验；IPv6/协议相对/无 server 场景已覆盖；`api/lanlu.ts`、`api/admin.ts`、session/storage、25 个 screen 仍缺测试；无 Detox/Maestro E2E |
 | extension | 0 | 只 build + typecheck（`.github/workflows/extension.yml:29`、`:34`） | 单测、浏览器 API fake、扩展 E2E 全缺 |
-| MCP | 6 个文件、30 个 Rust 用例 | **构建后执行 `cargo test --locked`**（`.github/workflows/cli.yml:35-41`，待 CI 实测；`.gitea` 的 `cli.yaml`、`build.yaml` mcp job 同步） | 测试已接线；无 stdio/tool 集成测试 |
+| MCP | 6 个文件、30 个 Rust 用例 | **构建后执行 `cargo test --locked`**（Gitea `mcp` job 实测通过，run 2468 #6184；GitHub `.github/workflows/cli.yml:35-41` 待镜像修复；`.gitea` 的 `cli.yaml`、`build.yaml` 同步） | 测试已接线；无 stdio/tool 集成测试 |
 
 服务端根 `cjpm.toml`、桌面 `client-next/cjpm.toml`、Web `frontend/package.json`、移动 `client/package.json` 是四端各自的构建事实源；目前没有统一的本地/CI 任务入口。
 
@@ -122,7 +122,7 @@
 | 移动 api/lanlu.ts/拦截器 | typecheck｜CI | 1186 行客户端｜无 | axios mock/MSW｜`client/src/api/client.test.ts` 40 例（同源解析器、拦截器、URL 工具）；`api/lanlu.ts` 业务端点仍无 | fixture｜无 | Detox｜无 | — | Ph2 |
 | 移动 screens | typecheck｜CI | 仅 4 个 reader helper｜CI | 渲染测试｜无 | — | Detox｜无 | — | Ph2/Ph4 |
 | extension | typecheck/build｜CI | 0 | 浏览器 API fake｜无 | — | 扩展 Playwright｜无 | — | Ph2/Ph4 |
-| MCP | `cargo fmt/clippy`｜无 | 30 例存在｜CI 跑（待实测） | stdio/tool 集成｜无 | tool schema｜无 | 客户端冒烟｜无 | — | Ph1/Ph2 |
+| MCP | `cargo fmt/clippy`｜无 | 30 例存在｜CI 跑（Gitea 实测通过，run 2468） | stdio/tool 集成｜无 | tool schema｜无 | 客户端冒烟｜无 | — | Ph1/Ph2 |
 
 ### 4.4 桌面三档
 
@@ -143,7 +143,18 @@
 | Nightly | 每日定时 + 手动 | 全量 L0–L4、覆盖率、Windows 子集、Web E2E、Android debug、MCP | 45–60 分钟 | 失败通知，不阻塞 PR |
 | Release | tag/手动 | 全量、签名产物、OHOS 人工清单、性能/bench | 90–120 分钟 | release gate |
 
-**Gitea runner 约束（实测）**：Gitea（`git.copur.xyz/copur/lanlu`）只有 **`ubuntu-latest`** 在线，且标签精确匹配、不回落——`runs-on` 写 `windows`、`self-hosted`、`ubuntu-24.04` 等只会让任务停在 `waiting`。因此拓扑定为：**Gitea = ubuntu 快速门禁镜像；Windows 与平台专属验证（`windows-build`、OHOS、GPU、soak）只在 GitHub Actions**。`.gitea/workflows/**` 现有 8 个 job（`build.yaml` 4、`cli.yaml` 1、`client.yml` 2、`extension.yaml` 1）全部 `runs-on: ubuntu-latest`、无 `container`；原 `.gitea/workflows/windows-ffi.yaml` 已由 `13b54ae4` 删除，其“编译 bridge → `cjpm test` → 打 PASS”是 GitHub `windows-build` 的真子集，无覆盖缺口。取证：仓库级/站点级 runner API 无权限，改用任务历史——最近 500 条任务中 `build.yaml` 312、`extension.yaml` 146、`client.yml` 37、`cli.yaml` 5，`windows-ffi.yaml` 0 且 run `2411` 自 21:03 起停在 `waiting`。另经只读核对，`.gitea/workflows/client.yml` 的 `android-release`（`:73`）**不是 tag 门控**：触发条件是 push/PR（`client/**`、工作流自身）、`workflow_dispatch` 与每日 20:30 UTC `schedule`（`:4-16`）；每次 push/PR 在 `quality` 通过后都会构建 release APK 并保留 14 天 artifact（`:139-144`），只有发布到 `nightly` release 才限定 schedule/dispatch（`:148`）。因此它不是死配置（任务历史中 `client.yml` 37 条：success 10 / skipped 18 / failure 8 / cancelled 1），但意味着 Gitea 的 client 链路含一次最长 60 分钟的 Android 构建，“纯快速门禁”只对 `quality` job（`:30`）成立。
+**Gitea runner 约束（实测）**：Gitea（`git.copur.xyz/copur/lanlu`）只有 **`ubuntu-latest`** 在线，且标签精确匹配、不回落——`runs-on` 写 `windows`、`self-hosted`、`ubuntu-24.04` 等只会让任务停在 `waiting`。因此拓扑定为：**Gitea = ubuntu 快速门禁镜像；Windows 与平台专属验证（`windows-build`、OHOS、GPU、soak）只在 GitHub Actions**。`.gitea/workflows/**` 现有 8 个 job（`build.yaml` 4、`cli.yaml` 1、`client.yml` 2、`extension.yaml` 1）全部 `runs-on: ubuntu-latest`；其中 `build.yaml` 的 `build` job 用 `container: ubuntu:26.04@sha256:6a0611…` 固定到运行镜像同一快照（用于验证链接 ABI），因镜像不自带 Node，首个 step 先装 `nodejs git ca-certificates` 再 `actions/checkout`（`:92-100`）；原 `.gitea/workflows/windows-ffi.yaml` 已由 `13b54ae4` 删除，其“编译 bridge → `cjpm test` → 打 PASS”是 GitHub `windows-build` 的真子集，无覆盖缺口。取证：仓库级/站点级 runner API 无权限，改用任务历史——最近 500 条任务中 `build.yaml` 312、`extension.yaml` 146、`client.yml` 37、`cli.yaml` 5，`windows-ffi.yaml` 0 且 run `2411` 自 21:03 起停在 `waiting`。另经只读核对并已修正：`.gitea/workflows/client.yml` 的 `android-release`（`:73`）在 `f9faad3e` 之前**不是 tag 门控**——push/PR（`client/**`、工作流自身）、`workflow_dispatch` 与每日 20:30 UTC `schedule`（`:4-16`）都会在 `quality` 通过后构建 release APK，job 级超时 60 分钟。`f9faad3e` 起该 job 加 `if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}`（`:77`）、`timeout-minutes: 30`（`:80`）；push/PR 只跑 `quality`（`:30`，`timeout-minutes: 20`），nightly release 发布仍限定 schedule/dispatch（`:200`）。实测 run 2472（`bf176a55`）：`quality` 1m5s success、`Android release APK` **skipped**，降频生效。
+
+### 5.1.1 CI 环境约束与已知问题（2026-11-20 实测）
+
+| 约束 | 实测表现 | 影响与处置 |
+|---|---|---|
+| 单 runner 串行 | Gitea 只有 `ubuntu-latest` 一个在线 runner，job 严格串行。run 2466 的 `Android release APK` 卡在 `configureCMakeRelWithDebInfo[arm64-v8a]` 46 分钟后失败（总 57m44s），期间 run 2468 的 `build.yaml` 一直排队 | 长 job 不得与快速门禁同队列；Android 已降频（`:77`）并收紧到 30 分钟（`:80`）；不要假设“提交了就会立即跑” |
+| 出口网络不稳定 | run 2471（`bf176a55`）三个 job 同时因网络红：`orm-test` 的 `archive.ubuntu.com`/`packagecloud.io` apt 超时（`postgresql-client-16 : Depends: postgresql-client-common (>= 182~) but it is not installable`）；`build` 在 `Set up job` 拉 `https://github.com/actions/checkout` 报 `TLS connect error: unexpected eof while reading`；`mcp` 报 `E: Unable to locate package musl-tools`。run 2466 另有 `repo.reactnative.dev` 读超时 46 分钟 | 此类红不作为代码回归信号；失败原样上报，不用自动重试掩盖；重活避免在断网窗口串行依赖外网 |
+| 无 cancel/rerun API（当前 token 无权限） | 实例 swagger 的 actions 命名空间只有 runs `get`、tasks `get`、runners/secrets/variables/dispatch，**无 cancel 路由**；`DELETE` 返回 405，web `POST /actions/runs/{n}/cancel` 返回 `Not found.`，job 页面 `canCancel:false`；`canRerun:false` | 僵死 job 只能等自身失败或硬超时；不设计依赖 cancel/rerun 的自动化，需要人工介入时交 owner |
+| 僵尸 run | `windows-ffi.yaml` 已由 `13b54ae4` 删除，但 `/actions/runs` 仍统计到 **13 条 `waiting`**（另有 9 条 `cancelled`），无 cancel 通道 | **需 owner 清理**；清理前这些 run 永久占位，会干扰“排队是否正常”的判断 |
+| GitHub 镜像阻塞 | `github.com/copurxia/lanlu` 的 `refs/heads/main` 自 2026-11-20 起停在 `cd914c29b514c2809e75ae0b1fcdb374f85920f1`，未追到 `ba90f32e`/`bf176a55`；`/repos/copur/lanlu/push_mirrors` 返回 403（需 owner 或 admin write），仓库元信息 `mirror:false`、`original_url:""` | `.github/workflows/**`（`build.yml` 的 `server-test`、`client-next.yml` 桌面/Windows 链路）**无法用当前代码验证**，需 owner 修复镜像后重跑；在此之前 GitHub 侧任何结论只对旧代码成立 |
+| smoke soname 可观测性 | `bf176a55` 在 smoke 成功路径加了 `linked RocksDB library:` 打印，但此后 `build.yaml`（run 2471）在 `build` 阶段断网失败、`package` skipped，该行**尚未在真实容器中出现过** | `.so.9.11` 仍属推断（构建容器装 `librocksdb-dev`、运行镜像装 `librocksdb9.11`），**待下一次 `package` 实跑确认** |
 
 ### 5.2 affected 依赖闭包
 
@@ -453,7 +464,7 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 | 服务端 CI 执行 `cjpm update` | **已解决（守卫生效）** | 三侧 update 后均有 `git diff --exit-code -- cjpm.lock`：`build.yml:176`（守卫 `:177`，主构建 update `:296`/守卫 `:297`）、`.gitea/workflows/build.yaml:173`（守卫 `:174`）、`.cnb.yml:120`（守卫 `:121`）；冷缓存实测无漂移 | 保留 update（wasmedge 补丁依赖其先 clone）；若未来实测刷新 commitId，再把刷新作为显式提交 |
 | 桌面 1.1.3 能力一致性未实测 | **仍待办** | 本文版本脚注所列四项能力 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
 | xtask 接入 CI | **已接线（干净 checkout 实测通过）** | `.github/workflows/client-next.yml:70-87` 的 guards job 已加 `setup-python@v5`/3.12（`:79`）与 `doctor --json`（`:84`）、`test --package xtask`（`:87`），均**不带 `--strict`** | 缺失 path 依赖默认 warning；`--strict` 留给 clone 出 `packages/cangjie-gui` 之后的完整树校验（如 nightly） |
-| 服务端根包测试 job | **已接线（待 CI 实测）** | `.github/workflows/build.yml:90` 起 `server-test`：PG service + `DB_STRING` + `cjpm test --show-all-output --report-path`，输出含 `[skip]` 即失败（`--show-all-output` 在 `build.yml:193`，守卫 `:197-198`）；产物 `if: always()` 上传 | 首次实跑核对 PG 连通、原生库与 WasmEdge 前置；确认无静默跳过 |
+| 服务端根包测试 job | **Gitea 侧已实测通过** | Gitea `build.yaml` 的 `orm-test`：PG service + `DB_STRING` + `cjpm test --show-all-output --report-path`，输出含 `[skip]` 即失败。实测 run 2468（`57582eee`）`orm-test` #6182 success 1m18s；run 2471 的失败是 apt 断网导致装不上 `postgresql-client-16`，非用例问题。GitHub 侧 `.github/workflows/build.yml:90` 的 `server-test` 仍因镜像停在 `cd914c29` 未验证 | Gitea 侧确认无静默跳过；GitHub 侧待镜像修复后首次实跑 |
 
 Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 守卫三侧生效且实测无漂移（lock 保持 v0 亦可）；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
 
@@ -463,10 +474,10 @@ Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `
 
 | 项 | 状态 | 证据与验证 |
 |---|---|---|
-| MCP 30 例 | **已接线（待 CI 实测）** | `.github/workflows/cli.yml:35-41`；`.gitea/workflows/cli.yaml:33-39`、`.gitea/workflows/build.yaml:327-331` 同步，发布链路不绕过门禁；本地 `cargo test --locked` 30/30 通过 |
+| MCP 30 例 | **Gitea 侧已实测通过** | Gitea `build.yaml` 的 `mcp` job：`cargo test --locked` 30/30。实测 run 2468（`57582eee`）`mcp` #6184 success；`.gitea/workflows/cli.yaml:33-39`、`build.yaml:327-331` 同步，发布链路不绕过门禁。GitHub `cli.yml` 仍因镜像阻塞未验证，待修复后复核 |
 | lcodec 17 例 | **已接线（待 CI 实测）** | `.github/workflows/client-next.yml:362-363`，位于 lwp/lwindow 之后、client-next 之前；本机缺 stdx（`can not find path '/stdx'`）未能本地复跑，CI 的 `setup-cangjie` 带 `components: stdx` |
 | 移动端 Jest | **已接线（`--ci` 硬化）** | `.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`；本地 13 suites / 114 tests 通过（Phase 2B 起新增 5 套件 / 82 例：`a9fff46a` 46、`36803ef6` 9、`1eb69a58` 19、`19bdd372` 8） |
-| 桌面路径过滤闭包 | **已补齐（仅静态审阅）** | `.github/workflows/client-next.yml:5`、`:30` 各 23 条，无重复；触发行为待 CI 侧观察 |
+| 桌面路径过滤闭包 | **Gitea 侧已实测生效** | `.github/workflows/client-next.yml:5`、`:30` 各 23 条，无重复；Gitea `client.yml` 实测：run 2472 的改动只涉及 `scripts/` 与 `.gitea/workflows/client.yml`，`quality` 仍触发（工作流自身在过滤内），`android-release` 被 `if` 跳过。GitHub 侧触发行为待镜像修复后观察 |
 | affected matrix | **仍列 Phase 3** | xtask 已能按包图产出计划，尚未替换静态白名单 |
 
 ### 10.1.2 移动端测试现状与已知问题（Phase 2B 测试审计）
@@ -485,6 +496,31 @@ Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `
 | `clearGeneralCache` 不重置 `lastServerId` | `client/src/stores/offlineGeneralStore.ts:57-66` 只清 `favorites` | 清空后仍指向旧 serverId，切服可能读到过期上下文 | 待修复 |
 
 **经验（安全评审）**：RN 运行时用自建 `URL` polyfill 覆盖全局（`client/node_modules/react-native/Libraries/Core/setUpXHR.js:35`），其 `hostname` getter 用 `([^:/?#]+)` 截取（`client/node_modules/react-native/Libraries/Blob/URL.js:142-144`），遇到 IPv6 字面量的 `[` 后即在第一个 `:` 处截断，`https://[::1]/` 与 `https://[::2]/` 都归一成 `https://[`。Jest 跑在 Node 的 WHATWG `URL` 上，所以 Node 侧全绿不能证明设备侧同源安全；鉴权类判定必须用不依赖运行时 `URL` 的显式 authority 解析器，并用纯解析器驱动的对抗用例回归。
+
+### 10.1.3 Gitea 侧实测结果（2026-11-20，commit `57582eee`）
+
+run 2468（`build.yaml`）+ run 2469（`extension.yaml`）**5/5 全绿**，作为 Phase 0/1 的 Gitea 侧基线：
+
+| job | 结论 | 耗时 | 说明 |
+|---|---|---|---|
+| `orm-test` #6182 | success | 1m18s | psql 修复生效；此前红是 `postgresql-client` 装不上/连通问题 |
+| `build` #6183 | success | 10m03s | 26.04 容器内构建：先在容器里 `apt-get install nodejs git ca-certificates` 再 `actions/checkout`，Node 22.22.1 满足 checkout 要求；链接链路（含 RocksDB）通过 |
+| `mcp` #6184 | success | 1m48s | `cargo test --locked` 30/30 |
+| `package` #6188 | success | 7m38s | 镜像构建后 smoke 输出 `image smoke test passed`；`binary: unbound variable` 引号缺陷已由 `57582eee` 修复。**该次 smoke 未打印 soname**，故这是“无未解析库”的证据，不是 `.so.9.11` 的直接证据 |
+| `build-extension` #6185 | success | 29s | — |
+
+补充：run 2465/2466（`ba90f32e`）`build.yaml` 的 `orm-test`/`build`/`mcp` 已绿，`package` 死于 smoke 引号缺陷（`binary: unbound variable`），正是 `57582eee` 修掉的那处；`client.yml` 的 `quality` success（≈1m26s），`android-release` 跑完 SDK 三段（下载→许可→安装，共 49s）后卡在 Gradle 达 57m44s。run 2472（`bf176a55`）`quality` 1m5s success、`android-release` skipped。
+
+### 10.1.4 Android APK 产出待办（独立项，不被降频掩盖）
+
+| 项 | 事实 | 待办 |
+|---|---|---|
+| 历史成功率 | Gitea 上 `Android release APK` 累计 20 次 job **0 次成功**；失败原因含 `repo.reactnative.dev` 的 `react-android-0.88.1-release.aar` 读超时、`services.gradle.org` 超时、`dl.google.com` ECONNRESET、`Gradle build daemon disappeared`（疑似 OOM） | 需要一次完整成功的构建作为基线 |
+| 当前配置的边界 | `f9faad3e` 起仅在 `schedule`/`workflow_dispatch` 构建，`timeout-minutes: 30`（`:80`）；而 run 2466 冷缓存跑到 57m44s 仍停在 `configureCMakeRelWithDebInfo[arm64-v8a]` | 30 分钟可能不足以完成冷缓存 `assembleRelease`；下次 schedule 触发先测时，必要时对 schedule 单独放宽到 45–60 分钟 |
+| 未验证链路 | `upload-artifact` 的 APK 产物、nightly release 发布（`:200`）**从未被真实执行成功过** | 一次成功构建后核对 artifact 内容与 release 附件 |
+| 网络依赖 | Gradle 依赖来自 `repo.reactnative.dev`、`dl.google.com`、`services.gradle.org`，与 Gitea 出口网络冲突 | 评估 Gradle 镜像源与 `GRADLE_USER_HOME` 缓存预热；或改由 GitHub 承担 APK 验证（受 §5.1.1 镜像阻塞） |
+
+降频只降低对单 runner 队列的伤害，**不构成对 APK 产出能力的验证**。
 
 ### 10.2 五阶段路线图
 
@@ -510,6 +546,9 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | cjcov 合并未证实 | 覆盖率数字不可信 | v1 串行分包；“行并集”标为社区实践，Phase 2 实测后再定 |
 | Windows/OHOS 不可全自动 | 承诺无法兑现 | 按 D-07 分档；OHOS release 前置检查 `ability_delegator`（SA 65866，仅单例社区报告）；不写入 PR required |
 | Gitea runner 只有 `ubuntu-latest`、标签精确匹配 | 非 ubuntu job（`windows`、`self-hosted`、`ubuntu-24.04`）永不执行，形成“看起来有门禁”的死配置 | `.gitea/workflows/**` 只保留 `ubuntu-latest` job；`windows-ffi.yaml` 已删（`13b54ae4`）；Windows/平台验证只在 GitHub（`.github/workflows/client-next.yml:436` 起 `windows-build`） |
+| Gitea 单 runner + 出口网络不稳定 | 长 job 堵住队列（run 2466 的 Android 卡 57m44s，run 2468 排队）；apt/github/maven 超时造成假红（run 2471 三个 job 同时红，与代码无关） | Android 降频 + `timeout-minutes: 30`（`f9faad3e`）；失败原样上报不自动重试；断网窗口内的红不当作回归。详见 §5.1.1 |
+| 无 cancel/rerun API（当前 token 无权限） | 僵死 job 只能等自身失败或硬超时，期间占住唯一 runner | 收紧 job 超时；不设计依赖 cancel/rerun 的自动化；需要时交 owner |
+| GitHub 镜像停在 `cd914c29` | `.github` 侧全部门禁（`server-test`、桌面、Windows）无法验证当前代码，结论只对旧代码成立 | owner 检查 push mirror 配置/凭据/周期（`push_mirrors` API 403）；修复前不在 GitHub 侧下结论 |
 | flaky 与 agent 绕过 | 门禁失效 | 限制自动复跑；quarantine 有 owner/到期；CODEOWNERS 保护关键文件；AI 必须交 summary |
 | 服务端静态 DAO | 当前无法 fake repository | 先 `handleForTest` + 真 PG；repository 接口化列为 §4/§10 的前置改造 |
 | OpenAPI 3.0 与 3.1 | Alice 原方案过强 | 先接受 3.0.0；3.1 单独立项 |
@@ -567,10 +606,15 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.github/workflows/client-next.yml:372-377` | 桌面测试命令与 XML 报告 |
 | `.github/workflows/client-next.yml:554` | Windows 只跑 `rocksdb_ffi` |
 | `.github/workflows/client-next.yml:436`、`:438`、`:512` | `windows-build`（`windows-latest`）：装 MSYS2 `mingw-w64-x86_64-rocksdb` 并构建，承担全部 Windows 验证 |
-| `.gitea/workflows/**`（8 个 job） | 全部 `runs-on: ubuntu-latest`、无 `container`；`windows-ffi.yaml` 已由 `13b54ae4` 删除（Gitea 无 Windows runner） |
+| `.gitea/workflows/**`（8 个 job） | 全部 `runs-on: ubuntu-latest`；`build.yaml:92` 的 `build` job 用 `container: ubuntu:26.04@sha256:6a0611…`，`:98-100` 预装 Node 供 `actions/checkout`；`windows-ffi.yaml` 已由 `13b54ae4` 删除（Gitea 无 Windows runner） |
+| Gitea run 2468 / 2469（`57582eee`） | `build.yaml` 4 job + `extension.yaml` 1 job 全绿：`orm-test` #6182 1m18s、`build` #6183（26.04 容器）10m03s、`mcp` #6184、`package` #6188 7m38s（smoke 输出 `image smoke test passed`）、`build-extension` #6185 |
+| Gitea run 2472 / 2473（`bf176a55`） | `client.yml` `quality` 1m5s success、`Android release APK` skipped（降频生效）；`extension.yaml` success |
+| Gitea run 2471（`bf176a55`） | `build.yaml` 断网失败：`orm-test` apt 超时（`postgresql-client-16 ... not installable`）、`build` 在 `Set up job` 拉 `actions/checkout` 报 TLS `unexpected eof`、`mcp` 报 `E: Unable to locate package musl-tools`、`package` skipped |
+| `/repos/copur/lanlu/actions/runs` | `windows-ffi.yaml` 仍有 13 条 `waiting`（另有 9 条 `cancelled`）；无 cancel 通道，待 owner 清理 |
+| `github.com/copurxia/lanlu` 的 `refs/heads/main` | 停在 `cd914c29b514c2809e75ae0b1fcdb374f85920f1`；`/repos/copur/lanlu/push_mirrors` 403、仓库 `mirror:false` |
 | `.github/workflows/client.yml:60` | 移动端真实执行 Jest（`--runInBand --ci`） |
 | `.gitea/workflows/client.yml:61` | Gitea 移动端 Jest 同步加 `--ci` |
-| `.gitea/workflows/client.yml:4-16`、`:73`、`:148` | client 触发条件与 `android-release` 门控：普通 push/PR 也构建 APK，只有 nightly 发布限定 schedule/dispatch |
+| `.gitea/workflows/client.yml:4-16`、`:77`、`:80`、`:200` | client 触发条件与 `android-release` 门控：`f9faad3e` 起 job 级 `if` 仅 schedule/dispatch（`:77`）、超时 30 分钟（`:80`）；push/PR 只跑 `quality`（`:33`，20 分钟）；nightly 发布限定 schedule/dispatch（`:200`） |
 | `client/src/stores/offlineStores.test.ts`、`client/src/stores/offlineProgressQueue.test.ts`、`client/src/api/client.test.ts`、`client/src/storage/servers.test.ts`、`client/src/utils/httpOrigin.test.ts` | Phase 2B 起移动端新增 5 套件 / 82 例（`a9fff46a` 46、`36803ef6` 9、`1eb69a58` 19、`19bdd372` 8）：offline 仓库、进度队列、同源解析器/axios 拦截器、服务器地址校验、凭据门禁 |
 | `.github/workflows/extension.yml:19`、`:29`、`:34` | extension pnpm 版本与只 build/typecheck |
 | `.github/workflows/cli.yml:35-41` | MCP 构建后执行 `cargo test --locked`；`.gitea/workflows/cli.yaml:33-39`、`build.yaml:327-331` 同步 |
