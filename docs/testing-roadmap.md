@@ -32,7 +32,7 @@
 
 ### 1.2 可复现性缺陷会污染测试结论
 
-- `packages/cangjie-gui` 是独立 Git 仓库且被 `.gitignore:26` 隐藏；CI 通过 `git clone --branch lanlu-client-next` 取分支头（`.github/workflows/client-next.yml:233`；Windows 侧 `:454`），不是固定提交，README 对“固定提交”的描述与实际不一致。
+- **（已解决）** `packages/cangjie-gui` 曾是独立 Git 仓库且被 `.gitignore:26` 隐藏，CI 通过 `git clone --branch lanlu-client-next` 取分支头而非固定提交。`87a3887c` 把源码按工作树状态收编进主仓（468 文件），`912fe24c` 删除 `.gitignore:26` 与 `.github/workflows/client-next.yml` 的 Linux/Windows 两处 clone（grep `git clone` 计数 0）；上游 46 个提交历史未进主仓，见 §10.1.5。
 - 本轮审计时 `packages/lbase`、`packages/lwindow/src/backend/`、`packages/lwindow/src/displays/` 曾为未跟踪路径；现已由 HEAD `b25f846` 跟踪（分别为 6、1、3 个文件），干净 checkout 不再缺少这些路径。Phase 0 仍需用干净 clone 验证完整性，而不是重新跟踪。
 - 根 `cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`client-next/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 执行 `cjpm update`（`.github/workflows/build.yml:176`，其后 `:177` 为 lock 漂移守卫），仍不是只读安装。实测（Codex 用 1.2.0 在全新 `HOME` 与空 `~/.cjpm` 的冷缓存下执行）：`cjpm update` 退出码 0，`cjpm.lock` SHA256 不变（`1594a8b6…d8f21417`），`version` 仍为 `0`，14 条 commitId 全部未漂移——1.2.0 既不自动升级 v0→v1，也不刷新已锁 commit。
 - 工具链三处不一致：服务端 1.2.0、桌面 CI 1.1.3、桌面 manifest 1.1.0。
@@ -456,19 +456,19 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 | Phase 0 待办 | 状态 | 证据 | 剩余动作 |
 |---|---|---|---|
 | `packages/lbase`、`lwindow/src/backend/`、`lwindow/src/displays/` 缺失跟踪 | **已在 b25f846 解决** | HEAD 跟踪数分别为 6、1、3 | 用干净 clone 验证，不再重复跟踪 |
-| `packages/cangjie-gui` 嵌套独立仓 | **仍待办** | 目录内存在 `.git`；Git 跟踪文件数 0；被 `.gitignore:26` 隐藏 | 收编或移除；CI 同步停止克隆。注意：`client-next/cjpm.toml` 与 `packages/portcheck/cjpm.toml` 以 path 依赖指向它；缺失时 xtask 默认记 `missing_path_dep` warning 并跳过该边，`--strict` 才升级为 error |
+| `packages/cangjie-gui` 嵌套独立仓 | **已收编（`87a3887c`）** | 468 文件 / 56,998 行按工作树状态入库，`target/`、`cjpm.lock`、`.so/.dll/.hap`、`lgui/` 均零命中（最大文件 `images/gallery.jpg` 1.3MB）；嵌套 `.git` 已删，备份 `cangjie-gui-git-backup-20261120-124332.tar`（19M，`sha256=8a6f55fc…9a46b`）；顺带修正包内唯一失效依赖 `bench/harness` 的 `lgui → cui`。路径依赖（`client-next/cjpm.toml:12`、`packages/portcheck/cjpm.toml:17`）现指向被跟踪目录 | 备份在 `/tmp` 下，**非持久，建议转存到仓库外持久位置**；需要历史时从该 tar 用 `git filter-repo` 重放。`packages/cangjie-gui-p0` 的 worktree 指针已删（`bd9aeb27`），目录降级为普通未跟踪目录，仍由 `.gitignore:46` 挡住 |
 | lock 文件停留在 v0 旧格式 | **已定案（不迁移）** | 1.2.0 冷缓存实测：`cjpm update` 不升级 v0→v1、不刷新 commitId；lock SHA256 `1594a8b6…d8f21417` 不变 | 守卫定位改为“漂移探测器”而非“迁移门禁”：lock 保持 v0 可接受；若未来工具链改变行为，守卫会先红，届时按需显式解析并单独提交 |
-| CI 克隆分支头而非固定提交 | **仍待办** | `.github/workflows/client-next.yml:233`、`:454` | 改固定提交/lock；同步修正 README |
+| 桌面 CI 克隆分支头而非固定提交 | **已消除（`912fe24c`）** | 收编后 `.github/workflows/client-next.yml` 已无 `git clone`（计数 0），源码随 checkout 直接可用；`client-next/README.md:8`、`:101` 已改为“源码随主仓提供，CI 不再单独克隆” | 无需再改固定提交；嵌套仓守卫由 `doctor` 的 nested-git 检查承担 |
 | 工具链三处不一致 | **部分解决（工作树）** | 已建 `toolchain/versions.toml` 作为事实源；当前值：服务端 `build.yml:225` 1.2.0、桌面 CI `client-next.yml:169` 1.1.3、桌面 manifest `client-next/cjpm.toml:2` 1.1.0、根 manifest `cjpm.toml:2` 1.2.0 | 由 `doctor` 持续校验事实源与 workflow 一致；桌面升 1.2.0 仍待验证 |
 | 无效 submodule 步骤 | **已解决** | 三侧均无 `submodules: true`：`.github/workflows/build.yml`、`.gitea/workflows/build.yaml`、`.cnb.yml`；仓库无 `.gitmodules` | 保持；新增嵌套仓守卫（待办） |
 | 服务端 CI 执行 `cjpm update` | **已解决（守卫生效）** | 三侧 update 后均有 `git diff --exit-code -- cjpm.lock`：`build.yml:176`（守卫 `:177`，主构建 update `:296`/守卫 `:297`）、`.gitea/workflows/build.yaml:173`（守卫 `:174`）、`.cnb.yml:120`（守卫 `:121`）；冷缓存实测无漂移 | 保留 update（wasmedge 补丁依赖其先 clone）；若未来实测刷新 commitId，再把刷新作为显式提交 |
 | 桌面 1.1.3 能力一致性未实测 | **仍待办** | 本文版本脚注所列四项能力 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
-| xtask 接入 CI | **已接线（干净 checkout 实测通过）** | `.github/workflows/client-next.yml:70-87` 的 guards job 已加 `setup-python@v5`/3.12（`:79`）与 `doctor --json`（`:84`）、`test --package xtask`（`:87`），均**不带 `--strict`** | 缺失 path 依赖默认 warning；`--strict` 留给 clone 出 `packages/cangjie-gui` 之后的完整树校验（如 nightly） |
+| xtask 接入 CI | **已接线（干净 checkout 实测通过）** | `.github/workflows/client-next.yml:70-87` 的 guards job 已加 `setup-python@v5`/3.12（`:79`）与 `doctor --json`（`:84`）、`test --package xtask`（`:87`），均**不带 `--strict`** | 收编后完整树在干净 checkout 里即存在（实测 `missing_path_dep` 为零）；`--strict` 仍留给 nightly 全量校验 |
 | 服务端根包测试 job | **Gitea 侧已实测通过** | Gitea `build.yaml` 的 `orm-test`：PG service + `DB_STRING` + `cjpm test --show-all-output --report-path`，输出含 `[skip]` 即失败。实测 run 2468（`57582eee`）`orm-test` #6182 success 1m18s；run 2471 的失败是 apt 断网导致装不上 `postgresql-client-16`，非用例问题。GitHub 侧 `.github/workflows/build.yml:90` 的 `server-test` 仍因镜像停在 `cd914c29` 未验证 | Gitea 侧确认无静默跳过；GitHub 侧待镜像修复后首次实跑 |
 
 Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 守卫三侧生效且实测无漂移（lock 保持 v0 亦可）；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
 
-**缺失 path 依赖策略**：path 依赖目标不存在时，xtask 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:268-274`，`:269` 判 `strict`、`:273` 记 warning），`doctor` 退出 0、`affected` 与 `test --package` 仍能产出计划；`--strict` 才把该 warning 提升为 error（exit 2）。CI guards 使用默认容错模式；`--strict` 保留给已 clone `packages/cangjie-gui` 的完整树校验（如 nightly）。回归测试 `tools/xtask/tests/test_missing_dep.py` 用临时 git 仓模拟干净 checkout。
+**缺失 path 依赖策略**：path 依赖目标不存在时，xtask 默认记 `missing_path_dep: <pkg> -> <path>` warning 并跳过该边（`tools/xtask/graph.py:268-274`，`:269` 判 `strict`、`:273` 记 warning），`doctor` 退出 0、`affected` 与 `test --package` 仍能产出计划；`--strict` 才把该 warning 提升为 error（exit 2）。收编后 `packages/cangjie-gui` 在干净 checkout 中即存在（`git archive HEAD` 导出的副本实测 `missing_path_dep` 为零、`doctor` errors 0），该容错仍保留给未来新增 path 依赖；`--strict` 留给 nightly 全量校验。回归测试 `tools/xtask/tests/test_missing_dep.py` 用临时 git 仓模拟干净 checkout。
 
 ### 10.1.1 Phase 1 接线状态（截至 `0f1d812d`）
 
@@ -522,6 +522,17 @@ run 2468（`build.yaml`）+ run 2469（`extension.yaml`）**5/5 全绿**，作�
 
 降频只降低对单 runner 队列的伤害，**不构成对 APK 产出能力的验证**。
 
+### 10.1.5 `cangjie-gui` 收编结果与带出的待办（2026-11-20）
+
+**收编方式**：按工作树状态入库（`87a3887c`，468 文件 / 56,998 行），目录名保持 `packages/cangjie-gui` 以免改所有 manifest 路径；上游 `lanlu-client-next` 领先的 **46 个提交历史未进主仓**，只有最终状态。验证：`git archive HEAD` 导出的干净副本（2089 个跟踪文件）`doctor --json` errors 0、无 `missing_path_dep`，`check-no-sdl`/`check-layering`/`check-deps`/`check-platform-isolation` 全绿；`check-image-decode` 仍报既有的 2 处注释误报（`packages/lgpu/src/lgpu.cj:337`、`packages/cangjie-gui/src/base/texture.cj:260`），收编前即存在且未接入 CI。
+
+**连带清理**：`.gitignore` 第 26 行（隐藏收编目录）删除，worktree 条目（现 `.gitignore:46`）保留；`tools/land-focus-interactions.sh`、`tools/rehearse-merge.sh` 随嵌套仓消失而删除（`bd9aeb27`，`tools/README.md:58` 留说明）；`tools/check-audit-numbers.sh` 的守卫改为 `[ -d "$GUI/.git" ]`，无嵌套仓时跳过并 exit 0。
+
+| 新待办 | 事实 | 待办 |
+|---|---|---|
+| SDL3 供给方案未定 | 主树内现在**没有任何 SDL3 运行库**；`.github/workflows/client-next.yml` 仍保留 8 处 `packages/cangjie-gui/sdl/.sdl3` 路径（`:251`、`:295`、`:305`、`:306`、`:349`、`:519`、`:584`、`:588`）。这是**故意保留**（方案 A）：让缺口显性失败，而不是静默跳过 | 二选一：①由系统包/发行版提供 SDL3（需实测版本是否满足 cui 的 API）；②CI 下载预编译 SDL3 到固定目录并缓存。定案前，桌面 GUI 在干净 checkout 的 Linux 构建必然缺库 |
+| 平台隔离基线 13→64 | `tools/quality-baseline.toml` 的 `[platform] keys` 由 13 涨到 64，其中 **51 条来自 `packages/cangjie-gui/src/`**（cui 的 SDL 实现本体，如 `src/base/sdl_*.cj`）；同次修正了 `tools/check-platform-isolation.py:61` 的失效前缀 `lgui/examples/ → examples/` | 逐文件烧债对框架本体成本过高，且会把“框架本来就该用 SDL”当成债务；评估改为**目录级豁免**（如 `packages/cangjie-gui/src/base/*` 整体放行、只对新增文件计债），再决定是否保留逐文件基线 |
+
 ### 10.2 五阶段路线图
 
 | 阶段 | 范围 | 角色 | 人日 | 退出标准 | 指标 | 回滚 |
@@ -560,7 +571,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `cjpm test` 默认吞测试 stdout | 通过的用例里 `println("[skip]")` 不进日志，skip 守卫会永远不触发 | 必须加 `--show-all-output`；Kimi 以 1.2.0 最小工程复现（默认 grep 计 0，加参数后计 1） |
 | `--report-path` 语义是目录 | 按文件名传入会生成同名目录，产物错位 | 传目录；XML 落在 `<dir>/tests/test-<pkg>.<case>.xml`；Kimi 以 1.2.0 最小工程复现 |
 | 1.1.3 能力未实测 | 新门禁可能幻觉 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
-| 本机有 `packages/cangjie-gui`、CI 干净 checkout 没有 | 本地 `doctor`/`affected` 全绿、CI 曾因缺失 path 依赖误报 error（exit 2），门禁假红 | 缺失默认降级为 warning、`--strict` 才报错；`tools/xtask/tests/test_missing_dep.py` 用临时仓模拟干净 checkout 防止复发；行号以 grep 实测为准 |
+| 本机有 `packages/cangjie-gui`、CI 干净 checkout 没有（`87a3887c` 已消除） | 收编前本地 `doctor`/`affected` 全绿、CI 干净 checkout 因缺失 path 依赖误报 error（exit 2），门禁假红 | 收编后两侧同构；缺失默认降级为 warning、`--strict` 才报错的机制保留给新依赖；`tools/xtask/tests/test_missing_dep.py` 用临时仓模拟干净 checkout 防复发 |
 
 ## 12. 验收清单
 
@@ -602,7 +613,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.gitea/workflows/build.yaml:173`、`:174` | 发布链路 `cjpm update` 与 lock 漂移守卫 |
 | `.cnb.yml:120`、`:121` | CNB 构建 `cjpm update` 与 lock 漂移守卫 |
 | `.github/workflows/client-next.yml:169`、`:482` | 桌面 CI（Linux / Windows）安装 Cangjie 1.1.3 |
-| `.github/workflows/client-next.yml:233`、`:454` | 桌面 CI（Linux / Windows）clone 分支头 |
+| `.github/workflows/client-next.yml`（`912fe24c`） | 桌面 CI（Linux / Windows）clone 分支头的两处步骤**已删除**；`git clone` 计数 0，`sdl/.sdl3` 仍 8 处（方案 A，见 §10.1.5） |
 | `.github/workflows/client-next.yml:372-377` | 桌面测试命令与 XML 报告 |
 | `.github/workflows/client-next.yml:554` | Windows 只跑 `rocksdb_ffi` |
 | `.github/workflows/client-next.yml:436`、`:438`、`:512` | `windows-build`（`windows-latest`）：装 MSYS2 `mingw-w64-x86_64-rocksdb` 并构建，承担全部 Windows 验证 |
@@ -620,6 +631,9 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.github/workflows/cli.yml:35-41` | MCP 构建后执行 `cargo test --locked`；`.gitea/workflows/cli.yaml:33-39`、`build.yaml:327-331` 同步 |
 | `.github/workflows/client-next.yml:362-363` | 桌面 build-test 执行 `packages/lcodec` 17 例 |
 | `.github/workflows/client-next.yml:5`、`:30` | 桌面 `push`/`pull_request` 路径闭包，各 23 条 |
+| `packages/cangjie-gui/**`（`87a3887c`） | 收编进主仓的 468 文件（examples 228、src 197、bench 29、docs 7、根 6、images 1）；含 `bench/harness` 的 `lgui → cui` 修正 |
+| `.gitignore`、`tools/quality-baseline.toml`、`tools/check-platform-isolation.py:61`（`912fe24c`） | `.gitignore` 删第 26 行；平台隔离基线 13→64（cangjie-gui 51 条）；`examples/` 跳过前缀修正 |
+| `tools/README.md:58`、`tools/check-audit-numbers.sh`（`bd9aeb27`） | 删除 `land-focus-interactions.sh`、`rehearse-merge.sh`；审计守卫改判 `$GUI/.git` |
 | `frontend/package.json:7` | Web 测试脚本：`typecheck:12`、`test:13`、`test:ci:15`，随 `da4c58e1` 入库 |
 | `client/package.json:11` | 移动端 `test` = jest |
 | `extension/package.json:6` | extension 声明 pnpm 10.33.0 |
