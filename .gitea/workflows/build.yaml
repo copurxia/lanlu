@@ -328,6 +328,8 @@ jobs:
         run: |
           set -eux
           export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
+          # envsetup.sh 第 48 行直接展开 $LD_LIBRARY_PATH，set -u 下会 unbound variable。
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
           unset GIT_DIR GIT_WORK_TREE
           source cangjie/envsetup.sh
           cd packages/lcodec
