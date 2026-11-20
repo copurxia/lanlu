@@ -5,6 +5,10 @@
 > 交互修复 + media 五项防御 + 示例 30/30 与 bench 6/6 可编译），
 > 合并被唯一外部条件阻塞：`packages/cangjie-gui` 里另一任务方的 13 个未提交文件。
 
+> [!NOTE]
+> 2026-11-20：`packages/cangjie-gui` 已收编进主仓（采用工作树状态入库，嵌套仓历史未进主仓），
+> 嵌套仓与 `land-focus-interactions.sh`、`rehearse-merge.sh` 已删除。本文档保留为历史记录。
+
 ## 按角色进入
 
 | 你是… | 先看 |

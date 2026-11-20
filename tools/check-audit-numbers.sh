@@ -7,7 +7,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUI="$ROOT/packages/cangjie-gui-p0"
-[ -d "$GUI" ] || { echo "跳过：找不到 $GUI"; exit 0; }
+[ -d "$GUI/.git" ] || { echo "跳过：$GUI 已不是 git 工作树（cangjie-gui 已收编）"; exit 0; }
 
 COMMITS=$(git -C "$GUI" rev-list --count c39458f..HEAD)
 PATCHES=$(ls "$ROOT/docs/interaction-audit/patches"/*.patch 2>/dev/null | wc -l)
