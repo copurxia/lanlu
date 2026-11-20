@@ -9,7 +9,7 @@ from .errors import ConfigError
 
 
 DEFAULT_TOOLCHAIN: dict[str, dict[str, str]] = {
-    "cangjie": {"server": "1.2.0", "desktop": "1.1.3"},
+    "cangjie": {"server": "1.2.0", "desktop": "1.2.0"},
     "node": {"min": "22.11.0"},
     "pnpm": {"version": "10.33.0"},
     "python": {"min": "3.11"},
