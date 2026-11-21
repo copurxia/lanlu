@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # "去 SDL"进度尺：统计各层对 SDL 的引用数，并检查**上层不许出现 SDL**。
 #
-# 目标形态：cui / client-next 只依赖 L 层接口，SDL 只可能出现在过渡期的 backend 里。
+# 目标形态：cui / apps/desktop 只依赖 L 层接口，SDL 只可能出现在过渡期的 backend 里。
 # 阶段说明：
-#   P0 基线           : sdl 包存在，cui/client-next 允许少量 SDL_ 引用（待 P4 清除）
+#   P0 基线           : sdl 包存在，cui/apps-desktop 允许少量 SDL_ 引用（待 P4 清除）
 #   P5 完成后         : SDL 渲染壳删除，lgui 仅存 SDL 绑定过渡层
 #   P6 吸收完成（当前）: lgui 包已整体并入 cui —— SDL 过渡债随之进入 cui/src
 #                       （renderer/texture/dialogs 等遗留路径），以本脚本计数、只允许下降；
@@ -28,9 +28,9 @@ if [ -d "packages/cangjie-gui/lgui" ]; then
 fi
 
 cui_refs=$(count_refs packages/cangjie-gui/src 2>/dev/null)
-cn_refs=$(count_refs client-next/src 2>/dev/null)
+cn_refs=$(count_refs apps/desktop/src 2>/dev/null)
 
-echo "[cui] SDL 过渡债：cui 层引用=$cui_refs（含吸收自 lgui 的遗留路径）  client-next 层引用=$cn_refs"
+echo "[cui] SDL 过渡债：cui 层引用=$cui_refs（含吸收自 lgui 的遗留路径）  apps/desktop 层引用=$cn_refs"
 
 # 基线阈值：只允许下降，不允许上升（防止新增 SDL 依赖）。
 # BASELINE_CUI 是 P6 吸收完成时 cui/src 的过渡债存量（**固定值**），M6 清 SDL 时归零。
@@ -45,7 +45,7 @@ if [ "$cui_refs" -gt "$BASELINE_CUI" ]; then
   fail=1
 fi
 if [ "$cn_refs" -gt "$BASELINE_CN" ]; then
-  echo "[FAIL] client-next 对 SDL 的引用增加了（$cn_refs > $BASELINE_CN）"
+  echo "[FAIL] apps/desktop 对 SDL 的引用增加了（$cn_refs > $BASELINE_CN）"
   fail=1
 fi
 

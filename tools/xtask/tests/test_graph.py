@@ -26,10 +26,10 @@ class GraphAffectedTests(unittest.TestCase):
         self._write("lib/leaf/cjpm.toml", "[package]\nname = \"leaf\"\n")
         self._write("lib/leaf/src/leaf_test.cj", "@Test\nfunc testLeaf() {}\n")
         self._write(
-            "client-next/cjpm.toml",
-            "[package]\nname = \"lanlu_client_next\"\n\n[dependencies]\nleaf = { path = \"../lib/leaf\" }\n",
+            "apps/desktop/cjpm.toml",
+            "[package]\nname = \"lanlu_client_next\"\n\n[dependencies]\nleaf = { path = \"../../lib/leaf\" }\n",
         )
-        self._write("client-next/src/client_test.cj", "@Test\nfunc testClient() {}\n")
+        self._write("apps/desktop/src/client_test.cj", "@Test\nfunc testClient() {}\n")
         self._write("apps/web/package.json", json.dumps({"name": "lanlu-frontend"}))
         self._write("apps/mobile/package.json", json.dumps({"name": "LanluClient"}))
         self._write("apps/extension/package.json", json.dumps({"name": "extension"}))
@@ -69,7 +69,7 @@ class GraphAffectedTests(unittest.TestCase):
         self.assertEqual(set(), self._ids(["notes.unknown"]))
 
     def test_07_client_change_does_not_pull_dependencies(self) -> None:
-        self.assertEqual({"lanlu_client_next"}, self._ids(["client-next/src/main.cj"]))
+        self.assertEqual({"lanlu_client_next"}, self._ids(["apps/desktop/src/main.cj"]))
 
     def test_08_plan_shape_and_matrix(self) -> None:
         targets = affected(self.graph, ["toolchain/versions.toml"])

@@ -26,7 +26,7 @@ trap 'rm -f "$HITS"' EXIT
 
 # 扫描范围：引擎 + 平台包（third_party 与构建产物排除）
 grep -rInE "$NAMES" \
-    "$ROOT/client-next/src" \
+    "$ROOT/apps/desktop/src" \
     "$ROOT/packages/lwindow/src" \
     "$ROOT/packages/lplatform-ohos/shell" \
     "$ROOT/packages/lplatform-wayland" \

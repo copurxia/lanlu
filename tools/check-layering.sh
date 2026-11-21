@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 分层守卫（Chromium layering check 风格）：
-#   业务层 client-next/src、UI 框架 cangjie-gui/src、SDL 绑定 sdl/src
+#   业务层 apps/desktop/src、UI 框架 cangjie-gui/src、SDL 绑定 sdl/src
 #   **不得**出现平台专有标识（OS 判断、平台路径、平台专有符号）。
 # 平台差异必须落在 packages/lwindow（平台适配层）或 packages/ohos（ArkTS/C++ 壳）内。
 #
@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERBOSE="${1:-}"
 
 DIRS=(
-  "$ROOT/client-next/src"
+  "$ROOT/apps/desktop/src"
   "$ROOT/packages/cangjie-gui/src"
 )
 

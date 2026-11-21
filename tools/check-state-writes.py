@@ -10,7 +10,7 @@
 """
 import re, sys, pathlib
 
-ROOTS = ["client-next/src", "packages/cangjie-gui/src"]
+ROOTS = ["apps/desktop/src", "packages/cangjie-gui/src"]
 WRITE = re.compile(r"\.value\s*=")
 FRAME = re.compile(r"UiEvent\.Frame")
 

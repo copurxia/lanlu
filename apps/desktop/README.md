@@ -35,14 +35,14 @@ lanlu-client-next 是 lanlu 服务器的原生桌面客户端，使用仓颉语�
 ## 构建
 
 ```bash
-cd client-next
+cd apps/desktop
 LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH cjpm build
 ```
 
 ## 运行
 
 ```bash
-cd client-next
+cd apps/desktop
 LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main
 ```
@@ -80,7 +80,7 @@ LANLU_SOFTWARE_RENDER=1 ./target/release/bin/main
 ## 测试
 
 ```bash
-cd client-next
+cd apps/desktop
 LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH cjpm test
 ```
 
@@ -92,7 +92,7 @@ LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH cjpm test
 
 ## GitHub CI
 
-GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `client-next` 或其仓库内依赖变更时运行，
+GitHub Actions 工作流位于 `.github/workflows/client-next.yml`，在 `apps/desktop` 或其仓库内依赖变更时运行，
 也支持手动触发。CI 固定使用仓颉 STS 1.1.3：Linux 执行生产构建、全量测试和
 `SDL_VIDEODRIVER=dummy` 无头快照冒烟测试；Windows 执行生产构建并检查 `main.exe`，暂不运行测试。
 
@@ -110,7 +110,7 @@ rocksdb 等）由 apt（Linux）/ MSYS2（Windows）安装。这些步骤均不�
 配合 `SDL_VIDEODRIVER=dummy` 可在无显示环境验证界面：
 
 ```bash
-cd client-next
+cd apps/desktop
 SDL_VIDEODRIVER=dummy \
     LD_LIBRARY_PATH=/path/to/sdl3:$LD_LIBRARY_PATH \
     ./target/release/bin/main --snapshot /tmp/client-next.bmp
@@ -140,7 +140,7 @@ SDL_VIDEODRIVER=dummy \
 ## 项目结构
 
 ```text
-client-next/
+apps/desktop/
 ├── src/
 │   ├── main.cj            # 入口 + 根路由（按 model.page 切页）
 │   ├── theme.cj           # 主题

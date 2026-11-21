@@ -921,7 +921,7 @@ jobs:
         run: |
           set -eux
           unset GIT_DIR GIT_WORK_TREE
-          cd client-next
+          cd apps/desktop
           cjpm build -V
 
       - name: Diagnose test environment
@@ -941,7 +941,7 @@ jobs:
         run: |
           set -eux
           unset GIT_DIR GIT_WORK_TREE
-          cd client-next
+          cd apps/desktop
           timeout 1800 cjpm test --no-run -V --no-color --parallel 1
 
       - name: Run client-next tests
@@ -951,7 +951,7 @@ jobs:
         run: |
           set -eux
           unset GIT_DIR GIT_WORK_TREE
-          cd client-next
+          cd apps/desktop
           mkdir -p target/test-results
           set +e
           timeout 900 cjpm test --skip-build --parallel 1 --no-color --no-capture-output \
@@ -969,7 +969,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: client-next-test-results
-          path: client-next/target/test-results/
+          path: apps/desktop/target/test-results/
           if-no-files-found: warn
 
   guards:

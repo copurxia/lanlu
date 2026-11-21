@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 从 client-next 本体构建 OHOS HAP（src 在构建时复制到本包 target/<app>/，非 fork）。
+# 从 apps/desktop（原 client-next）本体构建 OHOS HAP（src 在构建时复制到本包 target/<app>/，非 fork）。
 # 依赖：
 #   - cjv 工具链 sts-1.2.0-linux-x64-ohos + stdx 组件（cjv component add stdx --toolchain sts-1.2.0-linux-x64-ohos）
 #   - packages/lplatform-ohos/deps/* 的 OHOS shim 与 ohos-stubs 预编译库
@@ -25,7 +25,8 @@ LPACK=$(cd "$HERE/.." && pwd)                # packages/lpack-ohos
 APP=${LPACK_APP:-lanlu}                      # 应用名
 PROFILE=$LPACK/app-profiles/$APP             # 本应用的构建材料
 PKG=$(cd "$LPACK/../.." && pwd)              # 仓库根
-CN=$PKG/client-next                          # 引擎
+CN=$PKG/apps/desktop                         # 引擎（相对 packages/ 多一级，见 docs/repo-layout-migration.md §3.5）
+PKGS=$(cd "$CN/../../packages" && pwd)       # packages/ 绝对路径（原 $CN/../packages）
 LPLAT=$PKG/packages/lplatform-ohos
 . "$LPLAT/deps/common-ohos.sh"                 # 解析 OHOS_CLT / OHOS_SYSROOT / OHOS_RUST 等
 NATIVE=$OHOS_NATIVE_SDK
@@ -82,7 +83,7 @@ bash "$DEPS/lcodec/build-ohos.sh"
 "$DEPS/fontkit/build-ohos.sh" "$PKG/packages/fontkit_ffi/native/target/release/libfontkit_native.so"
 
 # 1.5) webview(Blitz) 交叉静态库（需 rust;已构建则就位）
-WV="$CN/../packages/webview/native"
+WV="$PKGS/webview/native"
 if [ -f "$WV/target/aarch64-unknown-linux-ohos/release/libwebview_native.a" ]; then
   cp -f "$WV/target/aarch64-unknown-linux-ohos/release/libwebview_native.a" "$WV/target/release/libwebview_native.a"
   echo "webview .a staged"
@@ -121,11 +122,11 @@ fi
 # 2.6) 可选调试种子 KV（CN_OHOS_SEED_FILE=lanlu_kv.bin → src/ohos_seed.cj）
 if [ -n "${CN_OHOS_SEED_FILE:-}" ] && [ -f "${CN_OHOS_SEED_FILE}" ]; then
   # 种子属于平台层：lwindow 首次启动时投放，生成到包内而非业务 src
-  python3 "$PROFILE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$CN/../packages/lwindow/src/ohos_seed.cj"
+  python3 "$PROFILE/gen_seed_cj.py" "${CN_OHOS_SEED_FILE}" "$PKGS/lwindow/src/ohos_seed.cj"
 fi
 
 # 2.9) 分层守卫：业务/UI/绑定层不得出现平台专有代码（平台差异归 lwindow/ohos 包）
-bash "$CN/../tools/check-layering.sh" || { echo "分层检查未通过，终止构建"; exit 1; }
+bash "$PKG/tools/check-layering.sh" || { echo "分层检查未通过，终止构建"; exit 1; }
 
 # 3) 交叉编译引擎（dynamic, @C cj_app_main）
 export CANGJIE_HOME=$OH
@@ -162,13 +163,13 @@ export OHOS_UI=sdl3
 export OHOS_APP_PROFILE=${OHOS_APP_PROFILE:-$LPACK/app-profiles/lanlu/app.toml}
 # prefix-nov：同一份 libSDL3，但 SONAME 被改短为 "libSDL3.so"，让壳(libmain)与引擎/ttf
 # 依赖同一个名字，进程里只加载一份 SDL3（双实例会导致钩子/事件队列错位、push 恒失败）。
-export OHOS_LGPU_LIB=$CN/../packages/lgpu/native/target/release/liblgpu_native.a
+export OHOS_LGPU_LIB=$PKGS/lgpu/native/target/release/liblgpu_native.a
 # 壳侧 lwp_client.c 需要生成的协议头（计划 §5.1）
 export OHOS_LWP_INCLUDE=$PKG/packages/lwp/include
 export OHOS_SDL3_PREFIX=$RES/sdl3-ohos/prefix-nov
 ST=$RES/ohos-stubs
 PFX=$RES/sdl3-ohos/prefix-single/lib
-PK=$CN/../packages
+PK=$PKGS
 ENG=$BUILD/target/aarch64-linux-ohos/release/lanlu_client_next
 export OHOS_STRIP=$NATIVE/llvm/bin/llvm-strip
 export OHOS_EXTRA_LIBS="$ST:$ST/ffmpeg:$PFX:$PK/webview/native/target/release:$PK/rocksdb_ffi/native:$PK/libavformat_ffi/native:$PK/libass_ffi/native:$PK/fontkit_ffi/native/target/release:$PK/lcodec/native/target/ohos:$ENG:$LWP_OHOS_LIB"
@@ -198,5 +199,5 @@ if [ "${CN_OHOS_SKIP_VERIFY:-0}" != "1" ]; then
   # hapgen 阶段通常产出 unsigned（签名在 tools/sign-reuse 那步），两者任选其一
   GATE_HAP="$HAP_OUT"
   [ -f "$GATE_HAP" ] || GATE_HAP="$BUILD/target/ohos/hap/entry/build/default/outputs/default/entry-default-unsigned.hap"
-  CN="$CN" bash "$CN/../packages/lpack-ohos/tools/verify-ohos.sh" "$GATE_HAP" || { echo "[FAIL] 静态验证未通过"; exit 1; }
+  CN="$CN" bash "$PKGS/lpack-ohos/tools/verify-ohos.sh" "$GATE_HAP" || { echo "[FAIL] 静态验证未通过"; exit 1; }
 fi

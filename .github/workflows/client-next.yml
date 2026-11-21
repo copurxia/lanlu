@@ -3,7 +3,7 @@ name: Client Next CI
 on:
   push:
     paths:
-      - "client-next/**"
+      - "apps/desktop/**"
       - "packages/lbase/**"
       - "packages/lcodec/**"
       - "packages/lgpu/**"
@@ -28,7 +28,7 @@ on:
       - ".github/workflows/client-next.yml"
   pull_request:
     paths:
-      - "client-next/**"
+      - "apps/desktop/**"
       - "packages/lbase/**"
       - "packages/lcodec/**"
       - "packages/lgpu/**"
@@ -182,16 +182,16 @@ jobs:
         run: |
           set -euo pipefail
           format_root="${RUNNER_TEMP}/client-next-format"
-          report="client-next/reports/cjfmt.diff"
-          mkdir -p "${format_root}/src" client-next/reports
-          cp -a client-next/src/. "${format_root}/src/"
-          cp -a client-next/build.cj "${format_root}/build.cj"
+          report="apps/desktop/reports/cjfmt.diff"
+          mkdir -p "${format_root}/src" apps/desktop/reports
+          cp -a apps/desktop/src/. "${format_root}/src/"
+          cp -a apps/desktop/build.cj "${format_root}/build.cj"
 
-          cjfmt -d "${format_root}" -c client-next/cangjie-format.toml
+          cjfmt -d "${format_root}" -c apps/desktop/cangjie-format.toml
 
           format_clean=true
-          diff -ru client-next/src "${format_root}/src" > "${report}" || format_clean=false
-          diff -u client-next/build.cj "${format_root}/build.cj" >> "${report}" || format_clean=false
+          diff -ru apps/desktop/src "${format_root}/src" > "${report}" || format_clean=false
+          diff -u apps/desktop/build.cj "${format_root}/build.cj" >> "${report}" || format_clean=false
           if [ "${format_clean}" != true ]; then
             echo "::warning::client-next contains files that cjfmt would change; see the quality report artifact."
             exit 1
@@ -200,10 +200,10 @@ jobs:
       - name: Run cjlint
         run: |
           set -euo pipefail
-          mkdir -p client-next/reports
-          cjlint -f client-next/src -r json -o client-next/reports/cjlint
-          test -s client-next/reports/cjlint.json
-          issue_count="$(jq 'length' client-next/reports/cjlint.json)"
+          mkdir -p apps/desktop/reports
+          cjlint -f apps/desktop/src -r json -o apps/desktop/reports/cjlint
+          test -s apps/desktop/reports/cjlint.json
+          issue_count="$(jq 'length' apps/desktop/reports/cjlint.json)"
           {
             echo "### client-next cjlint"
             echo
@@ -215,7 +215,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: client-next-quality-${{ github.sha }}
-          path: client-next/reports/
+          path: apps/desktop/reports/
           if-no-files-found: warn
           retention-days: 14
 
@@ -287,7 +287,7 @@ jobs:
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
             packages/webview/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Configure native library path
         run: |
@@ -333,7 +333,7 @@ jobs:
         run: cargo test --lib --test tex_transform_render -- --nocapture
 
       - name: Build client-next
-        working-directory: client-next
+        working-directory: apps/desktop
         run: cjpm build -V
 
       - name: Run lwp protocol tests
@@ -356,7 +356,7 @@ jobs:
         run: (cd packages/lcodec && cjpm test --no-color)
 
       - name: Run client-next tests
-        working-directory: client-next
+        working-directory: apps/desktop
         env:
           SDL_VIDEODRIVER: dummy
         run: |
@@ -376,7 +376,7 @@ jobs:
         run: bash run.sh
 
       - name: Run headless snapshot smoke test
-        working-directory: client-next
+        working-directory: apps/desktop
         env:
           # cangjie-gui 建窗硬带 SDL_WINDOW_VULKAN flag，X11 下 SDL 需 dlopen libvulkan.so.1
           # （apt 已装 libvulkan1 loader，无 ICD 也只需 loader 符号）；窗口建成后渲染器
@@ -398,11 +398,11 @@ jobs:
           bash tools/smoke-weston.sh --require
 
       - name: Package Linux deb
-        working-directory: client-next
+        working-directory: apps/desktop
         run: |
           set -euo pipefail
           # 打包逻辑在 packages/lpack-linux（计划 §4.4）：CI 只负责调用
-          bash ../packages/lpack-linux/tools/build-deb.sh \
+          bash ../../packages/lpack-linux/tools/build-deb.sh \
             --binary target/release/bin/main \
             --icon assets/lanlu_logo_gold.png \
             --out dist
@@ -411,7 +411,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: client-next-linux-deb-${{ github.sha }}
-          path: client-next/dist/*.deb
+          path: apps/desktop/dist/*.deb
           if-no-files-found: error
           retention-days: 14
 
@@ -421,8 +421,8 @@ jobs:
         with:
           name: client-next-test-evidence-${{ github.sha }}
           path: |
-            client-next/test-results/
-            client-next/client-next.bmp
+            apps/desktop/test-results/
+            apps/desktop/client-next.bmp
           if-no-files-found: ignore
           retention-days: 14
 
@@ -507,7 +507,7 @@ jobs:
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
             packages/webview/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('client-next/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Configure Windows native paths
         env:
@@ -534,7 +534,7 @@ jobs:
         run: rustup target add x86_64-pc-windows-gnu
 
       - name: Build client-next on Windows
-        working-directory: client-next
+        working-directory: apps/desktop
         run: cjpm build -V
 
       - name: Run rocksdb_ffi minimal FFI tests on Windows
@@ -546,7 +546,7 @@ jobs:
 
       - name: Verify Windows executable
         run: |
-          $executable = "client-next/target/release/bin/main.exe"
+          $executable = "apps/desktop/target/release/bin/main.exe"
           if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
             throw "Windows executable was not produced: $executable"
           }
@@ -560,9 +560,9 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          stage="client-next/dist/windows/lanlu-client-next"
+          stage="apps/desktop/dist/windows/lanlu-client-next"
           mkdir -p "${stage}"
-          cp client-next/target/release/bin/main.exe "${stage}/"
+          cp apps/desktop/target/release/bin/main.exe "${stage}/"
 
           # 仓颉 runtime 目录：setup-cangjie 导出 CANGJIE_HOME（SDK 根目录），
           # runtime 库位于 ${CANGJIE_HOME}/runtime/lib/windows_<arch>_<backend>/。
@@ -580,7 +580,7 @@ jobs:
           fi
 
           search_dirs=(
-            "$PWD/client-next/target/release/bin"
+            "$PWD/apps/desktop/target/release/bin"
             "$PWD/packages/cangjie-gui/sdl/.sdl3"
             "${mingw_prefix}/bin"
             "${runtime_dir}"
@@ -799,14 +799,14 @@ jobs:
       - name: Package Windows zip
         run: |
           $ErrorActionPreference = "Stop"
-          Compress-Archive -Path "client-next/dist/windows/lanlu-client-next" `
-            -DestinationPath "client-next/dist/lanlu-client-next-windows-x86_64.zip" -Force
+          Compress-Archive -Path "apps/desktop/dist/windows/lanlu-client-next" `
+            -DestinationPath "apps/desktop/dist/lanlu-client-next-windows-x86_64.zip" -Force
 
       - name: Upload Windows zip
         uses: actions/upload-artifact@v4
         with:
           name: client-next-windows-zip-${{ github.sha }}
-          path: client-next/dist/lanlu-client-next-windows-x86_64.zip
+          path: apps/desktop/dist/lanlu-client-next-windows-x86_64.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -815,7 +815,7 @@ jobs:
         with:
           name: client-next-windows-${{ github.sha }}
           path: |
-            client-next/target/release/bin/main.exe
+            apps/desktop/target/release/bin/main.exe
           if-no-files-found: error
           retention-days: 14
 

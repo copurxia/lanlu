@@ -92,7 +92,7 @@ else
 fi
 
 # 5) 应用自绘面量测：标题栏右侧应为系统三键留出空白（业务层不再画三键）
-#    探针写的是逐帧文件 cap_f{N}.rgba（client-next/src/main.cj frameProbeHook），
+#    探针写的是逐帧文件 cap_f{N}.rgba（apps/desktop/src/main.cj frameProbeHook），
 #    这里取设备上最新的一张；本地先删目标文件 —— hc 的退出码恒 0（管道尾是 tr），
 #    只有 recv 后本地文件非空才算抓帧成功，否则会量到上次残留的旧帧。
 CAP=/workspace/lanlu/tmp/cap_latest.rgba

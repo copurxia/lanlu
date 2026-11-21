@@ -14,7 +14,7 @@ from tools.xtask.errors import ConfigError
 from tools.xtask.graph import build_graph
 
 
-WARNING = "missing_path_dep: lanlu_client_next -> ../packages/cangjie-gui"
+WARNING = "missing_path_dep: lanlu_client_next -> ../../packages/cangjie-gui"
 
 
 class MissingPathDependencyTests(unittest.TestCase):
@@ -22,11 +22,11 @@ class MissingPathDependencyTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
         self._write(
-            "client-next/cjpm.toml",
+            "apps/desktop/cjpm.toml",
             '[package]\nname = "lanlu_client_next"\n\n'
-            '[dependencies]\ncui = { path = "../packages/cangjie-gui" }\n',
+            '[dependencies]\ncui = { path = "../../packages/cangjie-gui" }\n',
         )
-        self._write("client-next/src/client_test.cj", "@Test\nfunc testClient() {}\n")
+        self._write("apps/desktop/src/client_test.cj", "@Test\nfunc testClient() {}\n")
         self._write("tools/xtask/cli.py", "# xtask target marker\n")
         self._git("init", "-q")
         self._git("add", "-A")
@@ -81,7 +81,7 @@ class MissingPathDependencyTests(unittest.TestCase):
 
     def test_05_affected_survives_missing_dependency(self) -> None:
         graph = build_graph(self.root)
-        selected = affected(graph, ["client-next/src/client_test.cj"])
+        selected = affected(graph, ["apps/desktop/src/client_test.cj"])
         self.assertIn("lanlu_client_next", {target.id for target in selected})
 
     def test_06_test_package_dry_run_exits_zero(self) -> None:

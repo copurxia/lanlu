@@ -11,7 +11,7 @@
 [meta]
 # 计划：docs/lwindow-platform-separation-plan.md
 # 目标态（M6 之后）的包划分见 §4.1：
-#   client-next  -> cui, lwindow, portcheck, 业务 FFI 包
+#   apps/desktop -> cui, lwindow, portcheck, 业务 FFI 包
 #   cui          -> lbase, lwindow
 #   lwindow      -> lbase, lwp, lgpu(仅 backend.lwp)
 #   lgpu         -> lbase
@@ -29,7 +29,7 @@ allowed_deps = []
 note = "FFI 绑定包，只允许依赖标准库；如需依赖请在本文件显式登记"
 
 [package.lanlu_client_next]
-path = "client-next"
+path = "apps/desktop"
 allowed_deps = [
   "cui",           # → M6 之后仍需
   "lwindow",       # → 平台抽象

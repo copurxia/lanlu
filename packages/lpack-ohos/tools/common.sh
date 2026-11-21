@@ -5,7 +5,7 @@
 # 脚本里不写死机器路径。工具链位置由 lplatform-ohos/deps/common-ohos.sh 统一解析。
 #
 # 提供：
-#   REPO_ROOT   仓库根（含 client-next/ 与 packages/）
+#   REPO_ROOT   仓库根（含 apps/desktop/ 与 packages/）
 #   LPACK_DIR   本包根（packages/lpack-ohos）
 #   HAP_OUT     HAP 输出目录
 #   CN_BUILD    引擎构建目录（packages/lpack-ohos/target/<app>）

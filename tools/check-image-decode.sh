@@ -41,7 +41,7 @@ report() {
 while IFS= read -r hit; do
   [ -z "$hit" ] || report "${hit#$ROOT/} —— 后端不再提供 PNG 字节解码（解码归 lcodec）"
 done < <(grep -rnE '\b(uploadTexturePng|loadTexturePngFromMemory|createTextureFromPng|lgpu_texture_create_from_png|texturePngSink)\b' \
-  "$ROOT/packages" "$ROOT/client-next" --include='*.cj' --include='*.rs' 2>/dev/null \
+  "$ROOT/packages" "$ROOT/apps/desktop" --include='*.cj' --include='*.rs' 2>/dev/null \
   | grep -Ev "$EXCLUDE_RE" | strip_comments)
 
 # 2) 框架层不得自己打开图片解码库（只允许 lcodec 内部做）。

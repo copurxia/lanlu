@@ -50,13 +50,13 @@ private func hexByte(b: UInt8): String {
 private func buildFontkitNative(): Int64 {
     let exitCode = execute("cargo",
         ["build", "--release", "--target", "x86_64-pc-windows-gnu", "--manifest-path",
-            "../packages/fontkit_ffi/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit,
+            "../../packages/fontkit_ffi/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (exitCode != 0) {
         return exitCode
     }
-    let built = Path("../packages/fontkit_ffi/native/target/x86_64-pc-windows-gnu/release/libfontkit_native.a")
-    let stagedDir = Path("../packages/fontkit_ffi/native/target/release")
+    let built = Path("../../packages/fontkit_ffi/native/target/x86_64-pc-windows-gnu/release/libfontkit_native.a")
+    let stagedDir = Path("../../packages/fontkit_ffi/native/target/release")
     if (!exists(stagedDir)) {
         Directory.create(stagedDir, recursive: true)
     }
@@ -66,7 +66,7 @@ private func buildFontkitNative(): Int64 {
 
 @When[os != "Windows"]
 private func buildFontkitNative(): Int64 {
-    execute("cargo", ["build", "--release", "--manifest-path", "../packages/fontkit_ffi/native/Cargo.toml"],
+    execute("cargo", ["build", "--release", "--manifest-path", "../../packages/fontkit_ffi/native/Cargo.toml"],
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 
@@ -76,12 +76,12 @@ private func buildFontkitNative(): Int64 {
 private func buildWebviewNative(): Int64 {
     let exitCode = execute("cargo",
         ["build", "--release", "--target", "x86_64-pc-windows-gnu", "--manifest-path",
-            "../packages/webview/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+            "../../packages/webview/native/Cargo.toml"], stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
     if (exitCode != 0) {
         return exitCode
     }
-    let built = Path("../packages/webview/native/target/x86_64-pc-windows-gnu/release/libwebview_native.a")
-    let stagedDir = Path("../packages/webview/native/target/release")
+    let built = Path("../../packages/webview/native/target/x86_64-pc-windows-gnu/release/libwebview_native.a")
+    let stagedDir = Path("../../packages/webview/native/target/release")
     if (!exists(stagedDir)) {
         Directory.create(stagedDir, recursive: true)
     }
@@ -115,29 +115,29 @@ private func freetypeCflags(): Array<String> {
 private func buildSubtitleNative(): Int64 {
     let avStatus = execute("x86_64-w64-mingw32-gcc",
         ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-c",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (avStatus != 0) {
         return avStatus
     }
     let avArchive = execute("ar",
-        ["rcs", "../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        ["rcs", "../../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (avArchive != 0) {
         return avArchive
     }
     let assStatus = execute("x86_64-w64-mingw32-gcc",
-        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-c", "../packages/libass_ffi/native/lanlu_ass_bridge.c",
-            "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-c", "../../packages/libass_ffi/native/lanlu_ass_bridge.c",
+            "-o", "../../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (assStatus != 0) {
         return assStatus
     }
     execute("ar",
-        ["rcs", "../packages/libass_ffi/native/liblanlu_ass_bridge.a",
-            "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        ["rcs", "../../packages/libass_ffi/native/liblanlu_ass_bridge.a",
+            "../../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
 }
 
@@ -145,37 +145,37 @@ private func buildSubtitleNative(): Int64 {
 private func buildSubtitleNative(): Int64 {
     let avStatus = execute("cc",
         ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC", "-c",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.c", "-o",
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (avStatus != 0) {
         return avStatus
     }
     let avArchive = execute("ar",
-        ["rcs", "../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
-            "../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        ["rcs", "../../packages/libavformat_ffi/native/liblanlu_avformat_bridge.a",
+            "../../packages/libavformat_ffi/native/lanlu_avformat_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (avArchive != 0) {
         return avArchive
     }
     let assArgs = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC"]
         .concat(freetypeCflags())
-        .concat(["-c", "../packages/libass_ffi/native/lanlu_ass_bridge.c",
-            "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"])
+        .concat(["-c", "../../packages/libass_ffi/native/lanlu_ass_bridge.c",
+            "-o", "../../packages/libass_ffi/native/lanlu_ass_bridge.o"])
     let assStatus = execute("cc", assArgs, stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
     if (assStatus != 0) {
         return assStatus
     }
     execute("ar",
-        ["rcs", "../packages/libass_ffi/native/liblanlu_ass_bridge.a",
-            "../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
+        ["rcs", "../../packages/libass_ffi/native/liblanlu_ass_bridge.a",
+            "../../packages/libass_ffi/native/lanlu_ass_bridge.o"], stdOut: ProcessRedirect.Inherit,
         stdErr: ProcessRedirect.Inherit)
 }
 
 @When[os != "Windows"]
 private func buildWebviewNative(): Int64 {
-    execute("cargo", ["build", "--release", "--manifest-path", "../packages/webview/native/Cargo.toml"],
+    execute("cargo", ["build", "--release", "--manifest-path", "../../packages/webview/native/Cargo.toml"],
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 
@@ -183,7 +183,7 @@ private func buildWebviewNative(): Int64 {
 private func buildLwpNative(): Int64 {
     // 引擎最终可执行文件引用 lwp_*（lwp_trace_open/replay 等由 C 侧提供）；
     // liblwp_native.so 必须先于链接产出（CI 的测试步骤原本才构建它，顺序太晚）。
-    execute("bash", ["../packages/lwp/native/build.sh"],
+    execute("bash", ["../../packages/lwp/native/build.sh"],
         stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
 }
 

@@ -44,11 +44,11 @@ class GitHubMatrixPlanTests(unittest.TestCase):
             '[dependencies]\ncui = { path = "../cangjie-gui" }\n',
         )
         self._write(
-            "client-next/cjpm.toml",
+            "apps/desktop/cjpm.toml",
             '[package]\nname = "lanlu_client_next"\n\n'
-            '[dependencies]\nlwindow = { path = "../packages/lwindow" }\n',
+            '[dependencies]\nlwindow = { path = "../../packages/lwindow" }\n',
         )
-        self._write("client-next/src/client_test.cj", "@Test\nfunc testClient() {}\n")
+        self._write("apps/desktop/src/client_test.cj", "@Test\nfunc testClient() {}\n")
         self._write("apps/web/package.json", json.dumps({"name": "lanlu-frontend"}))
         self._write("apps/mobile/package.json", json.dumps({"name": "LanluClient"}))
         self._write("apps/extension/package.json", json.dumps({"name": "extension"}))

@@ -30,7 +30,7 @@ CURRENT_DOCS = {
 }
 
 # apps/ 在迁移期间逐步填充；现在加入是为了 PR2–PR6 搬完后不静默失去校验能力。
-SOURCE_DIRS = ["packages", "apps", "client-next/src", "tools", "docs"]
+SOURCE_DIRS = ["packages", "apps", "tools", "docs"]
 SKIP_PARTS = {"target", "build", "node_modules", ".git", ".research-ohos"}
 CODE_SUFFIXES = {".cj", ".rs", ".cpp", ".ets", ".c", ".h"}
 

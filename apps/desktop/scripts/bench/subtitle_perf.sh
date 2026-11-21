@@ -8,7 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-REPO_DIR="$(cd "${CLIENT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${CLIENT_DIR}/../.." && pwd)"
 
 # 不覆盖 SDL 视频/渲染驱动：性能结果必须来自正常桌面后端，不允许默认降级到
 # dummy/software。无桌面会话时直接失败，由 CI 的 smoke 测试覆盖 headless 场景。

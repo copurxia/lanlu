@@ -6,11 +6,11 @@ keys = []
 
 [platform]
 keys = [
-  "client-next/src/main.cj|sdl",
-  "client-next/src/ui/lgpu_backend.cj|sdl",
-  "client-next/src/ui/reader_bar.cj|sdl",
-  "client-next/src/ui/titlebar.cj|sdl",
-  "client-next/src/ui/upload_drawer.cj|sdl",
+  "apps/desktop/src/main.cj|sdl",
+  "apps/desktop/src/ui/lgpu_backend.cj|sdl",
+  "apps/desktop/src/ui/reader_bar.cj|sdl",
+  "apps/desktop/src/ui/titlebar.cj|sdl",
+  "apps/desktop/src/ui/upload_drawer.cj|sdl",
   "packages/cangjie-gui/src/base/events.cj|sdl",
   "packages/cangjie-gui/src/base/events_test.cj|sdl",
   "packages/cangjie-gui/src/base/font_test.cj|sdl",
