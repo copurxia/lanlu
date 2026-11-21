@@ -3,8 +3,10 @@
 # 计划 §5.2、§10 M1。不需要仓颉工具链。
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# 容器 /tmp 常以 noexec 挂载；默认落到仓库同级 tmp/
-OUT=${OUT:-$(mktemp -d "${TMPDIR:-/workspace/lanlu/tmp}/lwp-test.XXXXXX")}
+# 容器 /tmp 常以 noexec 挂载；默认落到仓库同级 tmp/（不再写死 Gitea 的绝对路径）
+REPO=$(cd "$HERE/../.." && pwd)
+mkdir -p "${TMPDIR:-$REPO/../tmp}"
+OUT=${OUT:-$(mktemp -d "${TMPDIR:-$REPO/../tmp}/lwp-test.XXXXXX")}
 mkdir -p "$OUT"
 CC=${CC:-cc}
 CFLAGS="-std=c11 -Wall -Wextra -Werror -O2 -pthread"

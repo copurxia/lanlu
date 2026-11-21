@@ -90,7 +90,9 @@ jobs:
   server-test:
     # 根包 12 个用例。数据库用例连不上库时会静默打印 [skip] 并返回成功，
     # 因此本 job 同时提供 PostgreSQL 服务并在测试后把 [skip] 视为失败。
-    runs-on: ubuntu-26.04
+    # 与 Gitea 的 server-test 同为 ubuntu-latest：这个 job 不做运行时 ABI 匹配
+    #（那是 build/package 的事），用固定标签反而多一个会漂移的变量。
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:17-alpine
@@ -107,6 +109,8 @@ jobs:
           --health-retries 10
     env:
       DB_STRING: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable&pool.max=5
+      # psql(libpq) CLI 不认驱动特有的 pool.* 查询参数，建扩展时用无 pool 的 DSN。
+      PG_DSN: postgres://pgtest@127.0.0.1:5432/lanlutest?sslmode=disable
       XMAKE_ROOT: "y"
       WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
     steps:
@@ -135,7 +139,7 @@ jobs:
               pkg-config \
               libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
               libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
+              libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
           else
             apt-get update
             apt-get install -y --no-install-recommends \
@@ -145,14 +149,33 @@ jobs:
               pkg-config \
               libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
               libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
+              libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
           fi
+
+      - name: Prepare test database extensions
+        # 根测试并行跑迁移时 X013UACC 可能因 V013 尚未落库而跳过；unaccent 缺失会让
+        # 搜索文档用例直接报 "function unaccent(text) does not exist"。与 orm-test 一致，
+        # 先把扩展建好，迁移只负责索引与包装函数。缺扩展时用例打印 [skip]，
+        # 而本 job 末尾把 [skip] 视为失败——这正是 run 44873527458 step 10 的失败原因。
+        run: |
+          set -eux
+          PSQL="psql $PG_DSN -v ON_ERROR_STOP=1"
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          $PSQL -c 'CREATE EXTENSION IF NOT EXISTS unaccent'
 
       - name: Checkout WasmEdge source (public)
         run: |
           set -eux
           mkdir -p build-script-cache
-          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          # 上行网络抖动时 clone 会静默挂住；加 300s 看门狗 + 单次重试（Gitea 已采用）。
+          clone_wasmedge() {
+            timeout 300 git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          }
+          if ! clone_wasmedge; then
+            echo "::warning::WasmEdge clone 首次失败或超时，清理残留后重试一次"
+            rm -rf build-script-cache/WasmEdge
+            clone_wasmedge
+          fi
 
       - name: Pre-generate C bridge static libs
         run: |
@@ -184,6 +207,10 @@ jobs:
           fi
           for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
             grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+            # 新 GCC 把 vendored wasm.hh 的 strncpy 判为 -Wstringop-truncation，而
+            # WasmEdge 会把 -Werror 追加在 CMAKE_CXX_FLAGS 之后；只有 warning 级
+            # 的 -Wno-error=... 能存活（Gitea 实测）。
+            grep -q -- "-Wno-error=stringop-truncation" "$f" || sed -i "s/-Wno-array-bounds/-Wno-array-bounds -Wno-error=stringop-truncation/" "$f"
           done
 
       - name: Run root package tests
@@ -193,7 +220,7 @@ jobs:
           mkdir -p target/test-results
           cjpm test \
             --no-color \
-            --timeout-each 120s \
+            --timeout-each 60s \
             --show-all-output \
             --report-path "$PWD/target/test-results/server" \
             --report-format xml \
@@ -212,17 +239,49 @@ jobs:
           if-no-files-found: warn
 
   build:
-    # The runtime image is Ubuntu 26.04; build the binary on the same distro so
-    # dynamically linked sonames (notably librocksdb) match at runtime.
-    runs-on: ubuntu-26.04
+    # 与 Gitea `build` job 同一份配方：在**运行镜像的同一快照**里链接。
+    # 旧版跑在裸 ubuntu-26.04 runner 上，链接到的 librocksdb 是 runner 自己的版本，
+    # 与 26.04 运行镜像里的 9.11 不一致；且裸 runner 缺 WasmEdge 构建所需的补丁，
+    # 导致 run 44873527458 step 8 `Build backend` 连红 7 次。
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
     env:
       # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
       XMAKE_ROOT: "y"
     steps:
+      - name: Prepare container for Node actions
+        # 该镜像不自带 git/node：git 供 checkout 使用，node 供仍以 `uses:` 运行的 action。
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git nodejs curl
+          # 容器以 root 运行，工作区可能由 runner 用户持有：git 的所有权检查会拒绝操作。
+          git config --global --add safe.directory "*"
+          node --version
+          git --version
+
       - name: Check out repository code
         uses: actions/checkout@v4
 
+      - name: Install build tools
+        # 容器内已是 root，无需 sudo。GitHub runner 的内核支持 openat2，故不搬
+        # Gitea/CNB 的 `tar=1.35+dfsg-4` 降级 pin（那是 5.4 内核宿主专用 workaround）。
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git wget unzip zip xz-utils \
+            build-essential clang ninja-build cmake binutils \
+            xmake \
+            pkg-config \
+            libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
+            libvips-dev libheif-dev librocksdb-dev \
+            libpq-dev postgresql-client libsqlite3-dev libmysqlclient-dev
+
       - name: Setup Cangjie
+        # 放在依赖安装之后：setup-cangjie 解包需要 tar/xz-utils，与 Gitea 的 step 顺序一致。
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
@@ -232,32 +291,6 @@ jobs:
       - name: Export CANGJIE_STDX_PATH
         # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
         run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
-
-      - name: Install build tools
-        run: |
-          set -eux
-
-          if command -v sudo >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          else
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip zip xz-utils \
-              build-essential clang ninja-build cmake binutils \
-              xmake \
-              pkg-config \
-              libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
-              libvips-dev libheif-dev librocksdb-dev \
-              libpq-dev libsqlite3-dev libmysqlclient-dev
-          fi
 
       - name: Verify xmake
         run: |
@@ -272,7 +305,15 @@ jobs:
         run: |
           set -eux
           mkdir -p build-script-cache
-          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          # 上行网络抖动时 clone 会静默挂住；加 300s 看门狗 + 单次重试（Gitea 已采用）。
+          clone_wasmedge() {
+            timeout 300 git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          }
+          if ! clone_wasmedge; then
+            echo "::warning::WasmEdge clone 首次失败或超时，清理残留后重试一次"
+            rm -rf build-script-cache/WasmEdge
+            clone_wasmedge
+          fi
 
       - name: Build backend
         env:
@@ -307,9 +348,24 @@ jobs:
           fi
           for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
             grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+            # 新 GCC 把 vendored wasm.hh 的 strncpy 判为 -Wstringop-truncation，而
+            # WasmEdge 会把 -Werror 追加在 CMAKE_CXX_FLAGS 之后；只有 warning 级
+            # 的 -Wno-error=... 能存活（Gitea 实测，run 44873527458 step 8 缺它）。
+            grep -q -- "-Wno-error=stringop-truncation" "$f" || sed -i "s/-Wno-array-bounds/-Wno-array-bounds -Wno-error=stringop-truncation/" "$f"
           done
           cjc -v
           cjpm build -V
+
+      - name: Run lcodec tests
+        # lcodec 单测 17 例。图片后端运行时 dlopen libvips，build job 已安装。
+        # Gitea 的 build job 一直有这一步；GitHub 侧缺失，等于 17 例从未在 GitHub 跑过。
+        run: |
+          set -eux
+          # envsetup.sh 第 48 行直接展开 $LD_LIBRARY_PATH，set -u 下会 unbound variable。
+          export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+          unset GIT_DIR GIT_WORK_TREE
+          cd packages/lcodec
+          cjpm test --no-color --timeout-each 60s
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

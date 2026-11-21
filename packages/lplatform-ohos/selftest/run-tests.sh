@@ -6,7 +6,10 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
-OUT=${OUT:-$(mktemp -d "${TMPDIR:-/workspace/lanlu/tmp}/lplat-test.XXXXXX")}
+# 容器 /tmp 常以 noexec 挂载，默认落到仓库同级的 tmp/（GitHub runner 的 workspace
+# 同样可执行，因此不再依赖 Gitea 专用的绝对路径）。
+mkdir -p "${TMPDIR:-$REPO/../tmp}"
+OUT=${OUT:-$(mktemp -d "${TMPDIR:-$REPO/../tmp}/lplat-test.XXXXXX")}
 mkdir -p "$OUT"
 fail=0
 

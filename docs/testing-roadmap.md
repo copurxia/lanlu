@@ -532,14 +532,14 @@ run 2468（`build.yaml`）+ run 2469（`extension.yaml`）**5/5 全绿**，作�
 
 | 新待办 | 事实 | 待办 |
 |---|---|---|
-| SDL3 供给方案未定 | 主树内现在**没有任何 SDL3 运行库**；`.github/workflows/client-next.yml` 仍保留 8 处 `packages/cangjie-gui/sdl/.sdl3` 路径（`:251`、`:295`、`:305`、`:306`、`:349`、`:519`、`:584`、`:588`）。这是**故意保留**（方案 A）：让缺口显性失败，而不是静默跳过 | 按固定顺序推进：**① SDL3 供给 → ② 桌面 quality/测试接 Gitea → ③ `apps/desktop` 纯路径迁移**；三件事不得混入同一个 PR。定案前，桌面 GUI 在干净 checkout 的 Linux 构建必然缺库 |
+| SDL3 供给已定案（2026-11-21） | 主树内**没有任何 SDL3 运行库**，且不再需要：Linux 用 26.04 apt 的 `libsdl3-dev`/`libsdl3-ttf-dev`（3.4.2 / 3.2.2，soname `libSDL3.so.0.4.2`、`libSDL3_ttf.so.0.2.2` 与原期望一致），Windows 用 MSYS2 `mingw-w64-ucrt-x86_64-sdl3{,-ttf}`；`.github/workflows/client-next.yml` 的 8 处 `packages/cangjie-gui/sdl/.sdl3` 已全部删除（`grep` 计数 0） | Gitea run 1511 已用该方案跑出 **261/261 PASSED**；GitHub 侧为同一配方，待 push 后验证 |
 | 平台隔离基线 13→64 | `tools/quality-baseline.toml` 的 `[platform] keys` 由 13 涨到 64，其中 **51 条来自 `packages/cangjie-gui/src/`**（cui 的 SDL 实现本体，如 `src/base/sdl_*.cj`）；同次修正了 `tools/check-platform-isolation.py:61` 的失效前缀 `lgui/examples/ → examples/` | 逐文件烧债对框架本体成本过高，且会把“框架本来就该用 SDL”当成债务；评估改为**目录级豁免**（如 `packages/cangjie-gui/src/base/*` 整体放行、只对新增文件计债），再决定是否保留逐文件基线 |
 
 ### 10.1.6 `client-next` 结构决策与桌面 CI 前置顺序（2026-11-20）
 
 **决策**：`client-next` 继续作为根目录桌面应用，不收进 `packages/`。它是 `output-type = "executable"` 的端应用（`client-next/cjpm.toml:6`），依赖 11 个可复用包（`client-next/cjpm.toml:11-22`）；全仓没有 manifest 以 path 依赖反向引用它，根服务端 `cjpm.toml:14-34` 也不依赖它。`xtask` 递归发现所有 `cjpm.toml`（`tools/xtask/graph.py:83-93`），目录位置不影响包图与 affected 闭包。若未来统一应用目录，目标是 `apps/desktop/`（纯路径迁移 PR，0.5–1 人日）；`packages/client-next/` 方案否决，因为它会把应用错位成可复用库，且应用内 `../packages/*` 依赖与链接路径都要改写。
 
-**桌面 CI 前置顺序**：① 先定案并落地 SDL3 供给（否则 `.github/workflows/client-next.yml:251-255` 期望的 `packages/cangjie-gui/sdl/.sdl3` 在当前树缺失，桌面构建必然失败）；② 在现路径把桌面 quality 与测试迁到 Gitea，避免迁移目录与 CI 变更互相污染诊断；③ 最后执行 `apps/desktop` 纯路径迁移。三件事分 PR、分验证窗口。
+**桌面 CI 前置顺序（已全部完成）**：① SDL3 供给已定案（系统包，见 §10.1.5）；② 桌面测试已接 Gitea，run 1511 得 261/261；③ 目录已迁到 `apps/desktop`。三件事分 PR 完成，未合并。
 
 ### 10.1.7 桌面 261 例绿基线（2026-11-21，`ba1747e9`）
 
@@ -641,7 +641,7 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.gitea/workflows/build.yaml:173`、`:174` | 发布链路 `cjpm update` 与 lock 漂移守卫 |
 | `.cnb.yml:120`、`:121` | CNB 构建 `cjpm update` 与 lock 漂移守卫 |
 | `.github/workflows/client-next.yml:169`、`:482` | 桌面 CI（Linux / Windows）安装 Cangjie 1.1.3 |
-| `.github/workflows/client-next.yml`（`912fe24c`） | 桌面 CI（Linux / Windows）clone 分支头的两处步骤**已删除**；`git clone` 计数 0，`sdl/.sdl3` 仍 8 处（方案 A，见 §10.1.5） |
+| `.github/workflows/client-next.yml`（`912fe24c`，`2026-11-21` 更新） | 桌面 CI（Linux / Windows）clone 分支头的两处步骤已删除；`git clone` 计数 0。`sdl/.sdl3` 的 8 处已于本轮删除，改由系统/MSYS2 提供 SDL3（见 §10.1.5） |
 | `.github/workflows/client-next.yml:372-377` | 桌面测试命令与 XML 报告 |
 | `.github/workflows/client-next.yml:554` | Windows 只跑 `rocksdb_ffi` |
 | `.github/workflows/client-next.yml:436`、`:438`、`:512` | `windows-build`（`windows-latest`）：装 MSYS2 `mingw-w64-x86_64-rocksdb` 并构建，承担全部 Windows 验证 |

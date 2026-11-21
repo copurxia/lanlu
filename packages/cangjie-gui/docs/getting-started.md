@@ -6,7 +6,7 @@
 - Windows x86_64，或具备兼容 SDL3/SDL3_ttf 动态库的目标平台。
 - Windows 运行时需要 `SDL3.dll` 和 `SDL3_ttf.dll`。
 
-仓库中的 `sdl/.sdl3/` 已包含 Windows 链接所需的 cjpm 名称与运行库名称。
+仓库内**不再内置** SDL3 运行库（`sdl/.sdl3/` 已删除）：Linux CI 用 apt 的 `libsdl3-dev`/`libsdl3-ttf-dev`，Windows CI 用 MSYS2 的 `mingw-w64-ucrt-x86_64-sdl3{,-ttf}`；本机请自行提供这两个库并把目录加进 `LGUI_SDL_LIB_DIR`。
 
 ## 创建应用
 

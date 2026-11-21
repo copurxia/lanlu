@@ -76,7 +76,7 @@ xtask 按 manifest 递归发现 Cangjie 包，多数端迁移后能自然发现�
 
 ### 3.4 PR4 带出的本地开发副作用（已知，不影响 CI）
 
-服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`src/infrastructure/middleware/frontend_fallback.cj:10`，`src/contexts/system/interfaces/http/frontend_controller.cj:31/145/338/426` 的默认参数同此）。PR4 后构建产物在 `apps/web/out`：
+服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`apps/server/src/infrastructure/middleware/frontend_fallback.cj:10`，`apps/server/src/contexts/system/interfaces/http/frontend_controller.cj:31/145/338/426` 的默认参数同此）。PR4 后构建产物在 `apps/web/out`：
 
 - **Docker/CI 不受影响**：镜像内仍是 `/app/frontend/out`，`build.yaml` 用 `cp -r apps/web/out app/frontend/out` 组装，`scripts/docker-smoke-test.sh:11` 的断言也指向该路径。
 - **本地直跑受影响**：`./target/release/bin/main` 找不到页面；README 已注明用 `mkdir -p frontend && ln -sfn ../apps/web/out frontend/out` 兜底。
@@ -110,6 +110,22 @@ Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁�
 | PR4 | `frontend/` → `apps/web/` | 0.5–1 | **代码已完成，待 CI 验证**：`build` job 中 frontend typecheck/test/build 绿；`package` Docker 构建与 smoke 绿。本地已验：`apps/web` 下 typecheck 0、`test:ci` 19/19、`build` 成功；镜像内 `app/frontend/out` 与 `FrontendController` 的 `frontend/out` 默认值均不受源码目录迁移影响 |
 | PR5 | `client-next/` → `apps/desktop/` | 1 | **代码已完成，待 CI 验证**：Gitea `client-next-test` 绿（261 例）；本地 layering/no-SDL/state-write/image-decode 守卫需在 push 后跑。已同步：`cjpm.toml` 与 `build.cj` 的 `../packages` → `../../packages`（17+25 处）、`cjpm.lock` 无路径、守卫脚本与基线、`deps-rules.toml`、Gitea/GitHub workflow、xtask fixture |
 | PR6 | 根 `src/` + manifest → `apps/server/` | 1–2 | **代码已完成，待 CI 验证**：`orm-test`、`server-test` 12/12 0 skip、`build` + lcodec、`package` Docker/smoke/`.so.9.11`、`mcp`、`extension` 全绿；doctor 和守卫绿。已同步：`cjpm.toml` 的 12 处 `path` → `../../packages/…`；三平台 CI 进 `apps/server` 后建/测，二进制改 `apps/server/target/release/bin/main`；`check-deps.py` 扩到 `apps/*/cjpm.toml` 并在 `deps-rules.toml` 登记 `[package.lanlu]`；xtask 去掉根包特判（根 manifest 只告警并归到 `apps/server`）；fixtures 改为 `apps/server`。**未动**：`frontend/out` 运行时默认值、`scripts/docker-smoke-test.sh` 的 `/app/frontend/out`、`cp -r apps/web/out app/frontend/out` |
+
+### 4.1 GitHub CI 与 Gitea 的对齐（2026-11-21）
+
+PR6 完成时 GitHub 镜像已追上 `ba1747e9`，但 `.github` 侧配方长期未与 Gitea 对齐，该提交在 GitHub 上有 4 个 job 失败（`build.yml` 更是连续 7 次全红）。本轮按“同一件事、同一种做法”移植，不引入新方案：
+
+| 失败点 | 根因（基于源码与仓库树，非日志直读） | 处置 |
+|---|---|---|
+| `client-next.yml` build-test step 3 | 工作流对 `packages/cangjie-gui/sdl/.sdl3/` 建软链并设为 `LGUI_SDL_LIB_DIR`，而该目录在树里 **0 个文件**（`git ls-tree` 计数 0） | 改用 26.04 容器 + apt `libsdl3-dev`/`libsdl3-ttf-dev`，`LGUI_SDL_LIB_DIR=/usr/lib/x86_64-linux-gnu`，并加 `pkg-config` 3.4.2 / 3.2.2 守门 |
+| `client-next.yml` guards step 10 | 自测脚本需要 `c++`（壳侧 LWP 客户端）与 `cc`（`lwp/native/build.sh`），`ubuntu-24.04` runner 未显式安装 | 显式装 `build-essential binutils`；同时把两个脚本的 `mktemp` 默认目录从写死的 `/workspace/lanlu/tmp` 改为 `${TMPDIR:-/tmp}` |
+| `client-next.yml` windows step 12 | 期望仓库内 SDL3 目录（同样不存在） | `msys2/setup-msys2` 补 `mingw-w64-ucrt-x86_64-sdl3` / `-sdl3-ttf`（包名已按 packages.msys2.org 核实），`LGUI_SDL_LIB_DIR` 指向 `ucrt64/lib` |
+| `build.yml` build step 8 | 裸 `ubuntu-26.04` runner 上链接，与 26.04 运行镜像的 `librocksdb` ABI 不匹配；且缺 WasmEdge 的 `-Wno-error=stringop-truncation` 补丁与 clone 看门狗 | 改 26.04 固定容器、补 WasmEdge 补丁与 300s 重试、保留 `cd apps/server` 与 lock 守卫 |
+| `build.yml` server-test step 10 | 未预建 `pg_trgm`/`unaccent`，用例打印 `[skip]` 而 job 把 `[skip]` 当失败 | 增加扩展预建与 `postgresql-client`，`--timeout-each` 对齐 60s |
+
+另补 `build` job 缺失的 lcodec 17 例（Gitea 一直有，GitHub 侧从未跑过）。**未搬**的两项：`tar=1.35+dfsg-4` 降级 pin（只为 CNB 的 5.4 内核，GitHub runner 支持 `openat2`）与 Gitea 的本地 clone 步骤（GitHub 侧 `actions/checkout` 无此网络问题）。
+
+仍只能由 push 后的 CI 验证：容器内 `uploads`/`uses:` action 的可用性、26.04 apt 包版本、MSYS2 包解析、真实编译与 261/12/17 例执行结果。
 
 总估算为 4–6 人日，不含 CI 排队和首波路径遗漏调试。
 

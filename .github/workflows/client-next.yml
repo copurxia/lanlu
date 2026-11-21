@@ -71,6 +71,10 @@ jobs:
     name: Layering guards (deps + platform isolation)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # 两个自测脚本的 mktemp 默认已改为“仓库同级 tmp/”，不再写死 Gitea 自托管 runner
+      # 的 /workspace/lanlu/tmp；这里再显式给一次，避免继承到不可写目录。
+      TMPDIR: ${{ runner.temp }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -79,6 +83,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install host build tools
+        # Platform package selftest 用 c++ 编壳侧 LWP 客户端，lwp/native/build.sh 用 cc；
+        # liblwp 导出比对用 nm（binutils）。Gitea 的 guards 跑在完整镜像上因而自带这些，
+        # GitHub 的 ubuntu-24.04 runner 没有 c++ 驱动（run 44873527549 step 10 失败）。
+        # 依赖是按脚本核对的：run-tests.sh 只需 c++，lwp/test.sh 需 cc + python3。
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential binutils pkg-config ca-certificates
+          cc --version
+          c++ --version
 
       - name: xtask doctor
         run: python3 -m tools.xtask doctor --json
@@ -115,11 +131,14 @@ jobs:
           set -euo pipefail
           bash packages/lwp/native/build.sh
           got=$(nm -D --defined-only packages/lwp/lib/liblwp_native.so | awk '{print $3}' | sort | tr '\n' ' ')
-          want="lwp_blob_get lwp_blob_put lwp_blob_release lwp_checker_enable lwp_close lwp_get_stats lwp_now_ns lwp_open lwp_recv lwp_recv_parts lwp_send lwp_send_parts lwp_trace_close lwp_trace_open lwp_wait lwp_wake "
+          # 期望值从 liblwp.map 解析，不再抄一份清单：手抄的那份已经漂移过
+          # （缺 lwp_stats_summary / lwp_trace_replay，Gitea guards 已改为此写法）。
+          want=$(sed -n '/global:/,/local:/p' packages/lwp/native/liblwp.map | grep -o 'lwp_[a-z_]*' | sort | tr '\n' ' ')
+          [ -n "$want" ] || { echo "liblwp.map 未解析出任何导出符号"; exit 1; }
           if [ "$got" != "$want" ]; then
             echo "导出符号不符："; echo "  实际: $got"; echo "  期望: $want"; exit 1
           fi
-          echo "[PASS] liblwp_native.so 导出符号符合白名单"
+          echo "[PASS] liblwp_native.so 导出符号与 liblwp.map 一致（$(echo "$want" | wc -w) 个）"
 
       - name: Legacy layering / SDL guards
         run: |
@@ -162,11 +181,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Cangjie 1.1.3
+      - name: Install quality tooling
+        # cjlint 的 JSON 结果用 jq 统计；ubuntu-24.04 镜像自带 jq，这里显式装上以消除隐式依赖。
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Set up Cangjie 1.2.0
+        # 与 build-test / windows-build 及 toolchain/versions.toml 的 desktop 版本统一；
+        # 本 job 只跑 advisory 的 cjfmt/cjlint，升级不改变门禁强度。
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
-          version: 1.1.3
+          version: 1.2.0
 
       - name: Show tool versions
         run: |
@@ -221,9 +249,31 @@ jobs:
 
   build-test:
     name: Build, test and headless smoke test
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    # 与 Gitea `client-next-test`（run 1511：261/261 PASSED，13m03s）同一份已验证配方。
+    # 旧版把 SDL3 期待为仓库内 packages/cangjie-gui/sdl/.sdl3，但该路径在树里一个文件
+    # 都没有（git ls-tree 计数 0），run 44873527549 因此死在第 3 步；26.04 才有
+    # libsdl3-dev / libsdl3-ttf-dev，soname 3.4.2 / 3.2.2 与原先期望一致。
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
+    env:
+      LGUI_SDL_LIB_DIR: /usr/lib/x86_64-linux-gnu
+      LWP_LIB_DIR: ${{ github.workspace }}/packages/lwp/lib
+      LD_LIBRARY_PATH: /usr/lib/x86_64-linux-gnu:${{ github.workspace }}/packages/lwp/lib
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
     steps:
+      - name: Prepare container for Node actions
+        # 该镜像不自带 git/node：git 供 checkout 使用，node 供仍以 `uses:` 运行的 action。
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git nodejs curl
+          # 容器以 root 运行，工作区可能由 runner 用户持有：git 的所有权检查会拒绝操作。
+          git config --global --add safe.directory "*"
+          node --version
+
       - name: Check out repository
         uses: actions/checkout@v4
 
@@ -248,34 +298,44 @@ jobs:
             fi
           done
 
-          sdl_dir="packages/cangjie-gui/sdl/.sdl3"
-          ln -sfn libSDL3.so.0.4.2 "${sdl_dir}/libSDL3.so.0"
-          ln -sfn libSDL3.so.0 "${sdl_dir}/libSDL3.so"
-          ln -sfn libSDL3_ttf.so.0.2.2 "${sdl_dir}/libSDL3_ttf.so.0"
-          ln -sfn libSDL3_ttf.so.0 "${sdl_dir}/libSDL3_ttf.so"
+      - name: Install desktop native dependencies
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential pkg-config wget unzip tar xz-utils zstd ca-certificates curl git \
+            xvfb mesa-vulkan-drivers weston \
+            libsdl3-dev libsdl3-ttf-dev \
+            libfontconfig1-dev libfreetype-dev libharfbuzz-dev \
+            libvips-dev libvlc-dev librocksdb-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libass-dev \
+            libvulkan1 libdecor-0-0 libdrm2 libgbm1 libfribidi0 \
+            libasound2t64 libpulse0 libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+            libxkbcommon0 libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 \
+            libxss1 libxtst6
 
-      - name: Set up Cangjie 1.1.3
+      - name: Verify SDL3 versions
+        # 守门值与 Gitea 同一组：apt 的 sdl3 提供 libSDL3.so.0.4.2，sdl3-ttf 提供
+        # libSDL3_ttf.so.0.2.2；版本漂移时在这里显式失败而不是等到链接期。
+        run: |
+          set -eux
+          test "$(pkg-config --modversion sdl3)" = "3.4.2"
+          test "$(pkg-config --modversion sdl3-ttf)" = "3.2.2"
+          ls -l /usr/lib/x86_64-linux-gnu/libSDL3.so.0.4.2 \
+                /usr/lib/x86_64-linux-gnu/libSDL3_ttf.so.0.2.2
+          pkg-config --modversion libavformat libavcodec libavutil libass
+
+      - name: Set up Cangjie 1.2.0
+        # 按 Gitea 的 step 顺序放在依赖安装之后：setup-cangjie 解包需要 tar/xz-utils/unzip。
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
-          version: 1.1.3
+          version: 1.2.0
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH
         # CANGJIE_STDX_PATH_STATIC 指向 <CJV_HOME>/stdx/<tc>/static，其下还有 stdx 子目录
         run: echo "CANGJIE_STDX_PATH=${CANGJIE_STDX_PATH_STATIC}/stdx" >> "${GITHUB_ENV}"
-
-      - name: Install native build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git pkg-config unzip zlib1g-dev xvfb libvulkan1 \
-            libfontconfig1-dev libfreetype-dev libvips-dev libvlc-dev librocksdb-dev \
-            libavformat-dev libavcodec-dev libavutil-dev libass-dev \
-            libasound2t64 libdecor-0-0 libdrm2 libfribidi0 libgbm1 libharfbuzz0b libpulse0 \
-            libwayland-client0 libwayland-cursor0 libwayland-egl1 libxkbcommon0 \
-            libx11-6 libxcursor1 libxext6 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6
 
       - name: Cache Cangjie and Rust dependencies
         uses: actions/cache@v4
@@ -287,73 +347,95 @@ jobs:
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
             packages/webview/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
-
-      - name: Configure native library path
-        run: |
-          set -euo pipefail
-          native_paths="${GITHUB_WORKSPACE}/packages/cangjie-gui/sdl/.sdl3"
-          printf 'LD_LIBRARY_PATH=%s\n' "${native_paths}:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
-          # client-next 的 link-option 用 ${LGUI_SDL_LIB_DIR} 指向 SDL3/TTF（cui 的
-          # SDL 过渡债仍需要这两个库；静态依赖的 link-option 不向上传递）。
-          printf 'LGUI_SDL_LIB_DIR=%s\n' "${native_paths}" >> "${GITHUB_ENV}"
-
-      - name: Verify native libraries
-        run: |
-          set -euo pipefail
-          libraries=(
-            packages/cangjie-gui/sdl/.sdl3/libSDL3.so
-            packages/cangjie-gui/sdl/.sdl3/libSDL3_ttf.so
-          )
-          for library in "${libraries[@]}"; do
-            echo "Checking ${library}"
-            if ldd "${library}" | tee /dev/stderr | grep -q 'not found'; then
-              echo "::error file=${library}::A native runtime dependency is missing."
-              exit 1
-            fi
-          done
-          pkg-config --modversion libavformat libavcodec libavutil libass
+          key: client-next-${{ runner.os }}-cangjie-1.2.0-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Show compiler version
         run: cjc -v
 
-      - name: Build lgpu native (render backend)
-        working-directory: packages/lgpu/native
+      - name: Install Rust and build lgpu native (render backend)
+        # 精简的 26.04 容器不带 Rust；lgpu 的渲染后端与 fontkit/webview 的
+        # pre-build 都需要 cargo。
         run: |
+          set -eux
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          . "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
+          cd packages/lgpu/native
           cargo build --release
           test -f target/release/liblgpu_native.a
 
-      # 显式装软件 Vulkan 实现（lavapipe），否则下面的离屏回归会因无适配器而静默 skip
-      - name: Install Vulkan software rasterizer (lavapipe)
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
-
-      # 真实 GPU 离屏渲染回归：文字 quad 的变换旁路语义（有 lavapipe 即真实执行）
+      # 真实 GPU 离屏渲染回归：文字 quad 的变换旁路语义（lavapipe 已随 apt 装好，
+      # 无适配器时会静默 skip，所以直接断言测试真的跑起来）
       - name: lgpu native tests (offscreen render)
         working-directory: packages/lgpu/native
         run: cargo test --lib --test tex_transform_render -- --nocapture
 
+      - name: Pre-generate FFI bridges
+        # 三个 [ffi.c] 包在依赖解析阶段就校验静态库存在（产物被 gitignore），
+        # 早于各包 build.cj 的 pre-build 钩子；fresh checkout 必须先按 build.cj 的
+        # 同款命令各生成一次。rocksdb 用 C++ 头，其余两个是 C11（Gitea run 1506 的
+        # 首跑正是死在这里：缺 ft2build.h 的 include 路径）。
+        run: |
+          set -eux
+          g++ -std=c++17 -O2 -fPIC \
+            -c packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.c \
+            -o packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          ar rcs packages/rocksdb_ffi/native/liblanlu_rocksdb_bridge.a \
+            packages/rocksdb_ffi/native/lanlu_rocksdb_bridge.o
+          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC \
+            -c packages/libavformat_ffi/native/lanlu_avformat_bridge.c \
+            -o packages/libavformat_ffi/native/lanlu_avformat_bridge.o
+          ar rcs packages/libavformat_ffi/native/liblanlu_avformat_bridge.a \
+            packages/libavformat_ffi/native/lanlu_avformat_bridge.o
+          # 桥里 #include <ft2build.h>，Ubuntu 把它放在 /usr/include/freetype2；
+          # 路径随发行版/pkg-config 前缀变化，取 pkg-config 的 cflags 而不是硬编码。
+          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC $(pkg-config --cflags freetype2) \
+            -c packages/libass_ffi/native/lanlu_ass_bridge.c \
+            -o packages/libass_ffi/native/lanlu_ass_bridge.o
+          ar rcs packages/libass_ffi/native/liblanlu_ass_bridge.a \
+            packages/libass_ffi/native/lanlu_ass_bridge.o
+
       - name: Build client-next
         working-directory: apps/desktop
-        run: cjpm build -V
+        run: |
+          set -eux
+          unset GIT_DIR GIT_WORK_TREE
+          cjpm build -V
 
       - name: Run lwp protocol tests
         run: |
+          set -eux
           export LWP_LIB_DIR="$PWD/packages/lwp/lib"
+          unset GIT_DIR GIT_WORK_TREE
           bash packages/lwp/native/build.sh
           (cd packages/lwp && cjpm test --no-color)
 
       # 引擎侧走协议的第一条路径：假壳 -> liblwp -> 漏斗 -> LWindowEvent
       - name: Run lwindow backend.lwp tests
         run: |
+          set -eux
           export LWP_LIB_DIR="$PWD/packages/lwp/lib"
-          export LGUI_SDL_LIB_DIR="$PWD/packages/cangjie-gui/sdl/.sdl3"
           export LGPU_LIB_DIR="$PWD/packages/lgpu/native/target/release"
+          unset GIT_DIR GIT_WORK_TREE
           bash packages/lwp/native/build.sh
           (cd packages/lwindow && cjpm test --no-color)
 
-      # 17 例纯逻辑测试，无需 SDL/Vulkan；待 CI 实测后交给 Phase 3 的 affected matrix 自动选择
+      # 17 例纯逻辑测试，无需 SDL/Vulkan
       - name: Run lcodec tests
-        run: (cd packages/lcodec && cjpm test --no-color)
+        run: |
+          set -eux
+          unset GIT_DIR GIT_WORK_TREE
+          cd packages/lcodec
+          cjpm test --no-color --timeout-each 60s
+
+      # 编译与执行拆步：若挂起，日志会停在最后一条编译命令上，而不是整段空白。
+      # --parallel 1 是 Gitea 侧的定案（串行仅 18 秒，恢复并行收益接近零）。
+      - name: Compile client-next tests
+        working-directory: apps/desktop
+        run: |
+          set -eux
+          unset GIT_DIR GIT_WORK_TREE
+          timeout 1800 cjpm test --no-run -V --no-color --parallel 1
 
       - name: Run client-next tests
         working-directory: apps/desktop
@@ -361,13 +443,17 @@ jobs:
           SDL_VIDEODRIVER: dummy
         run: |
           set -euo pipefail
-          mkdir -p test-results
-          cjpm test \
-            --no-color \
-            --parallel nCores \
-            --timeout-each 60s \
-            --report-path test-results \
-            --report-format xml
+          mkdir -p target/test-results
+          set +e
+          timeout 900 cjpm test --skip-build --parallel 1 --no-color --no-capture-output \
+            --timeout-each 60s --show-all-output \
+            --report-path target/test-results --report-format xml
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::cjpm test 被 900s 看门狗终止（单个用例 60s 超时未生效）"
+          fi
+          exit "$rc"
 
       # M0-4 的结论做成持续回归：引擎（仓颉 dylib）调壳（C）导出符号必须在以下
       # 顺序下成功：壳 RTLD_GLOBAL 且先于引擎加载。探针同时覆盖 4 种错误顺序。
@@ -392,8 +478,6 @@ jobs:
         working-directory: packages/lplatform-wayland
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends weston
           cargo build --release
           bash tools/smoke-weston.sh --require
 
@@ -421,10 +505,11 @@ jobs:
         with:
           name: client-next-test-evidence-${{ github.sha }}
           path: |
-            apps/desktop/test-results/
+            apps/desktop/target/test-results/
             apps/desktop/client-next.bmp
           if-no-files-found: ignore
           retention-days: 14
+
 
   windows-build:
     name: Build on Windows
@@ -461,11 +546,12 @@ jobs:
             }
           }
 
-      - name: Set up Cangjie 1.1.3
+      - name: Set up Cangjie 1.2.0
+        # 与 Linux 桌面 job 同一版本：fontkit_ffi 等直接依赖声明 cjc-version = "1.2.0"。
         uses: Zxilly/setup-cangjie@v3
         with:
           channel: sts
-          version: 1.1.3
+          version: 1.2.0
           components: stdx
 
       - name: Export CANGJIE_STDX_PATH
@@ -496,6 +582,11 @@ jobs:
             mingw-w64-ucrt-x86_64-libass
             mingw-w64-ucrt-x86_64-dlfcn
             mingw-w64-ucrt-x86_64-rocksdb
+            # SDL3/TTF 由 UCRT64 提供（包名已按 packages.msys2.org 核实：
+            # mingw-w64-sdl3 3.4.20、mingw-w64-sdl3-ttf 3.2.2，与 Linux 侧同源）。
+            # 旧工作流期望仓库内 packages/cangjie-gui/sdl/.sdl3，该目录在树里为空。
+            mingw-w64-ucrt-x86_64-sdl3
+            mingw-w64-ucrt-x86_64-sdl3-ttf
 
       - name: Cache Cangjie and Rust dependencies
         uses: actions/cache@v4
@@ -507,7 +598,7 @@ jobs:
             ~/.cargo/registry
             packages/fontkit_ffi/native/target
             packages/webview/native/target
-          key: client-next-${{ runner.os }}-cangjie-1.1.3-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
+          key: client-next-${{ runner.os }}-cangjie-1.2.0-native-${{ hashFiles('apps/desktop/cjpm.lock', 'packages/fontkit_ffi/native/Cargo.lock', 'packages/webview/native/Cargo.lock') }}
 
       - name: Configure Windows native paths
         env:
@@ -516,11 +607,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           $mingwBin = Join-Path $env:MSYS2_LOCATION "ucrt64/bin"
           $mingwLib = Join-Path $env:MSYS2_LOCATION "ucrt64/lib"
-          $sdlLib = Join-Path $env:GITHUB_WORKSPACE "packages/cangjie-gui/sdl/.sdl3"
-          @($mingwBin, $sdlLib) |
-            ForEach-Object { Add-Content -LiteralPath $env:GITHUB_PATH -Value $_ }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $mingwBin
           $mingwLibraryPath = $mingwLib.Replace("\", "/")
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "MINGW_LIBRARY_PATH=$mingwLibraryPath"
+          # Windows 的 link-option 只用 MINGW_LIBRARY_PATH；SDL3/SDL3_ttf 由 UCRT64
+          # 提供（ucrt64/lib 与 ucrt64/bin 就是上面两个变量指向的目录），不另设
+          # LGUI_SDL_LIB_DIR——那是 Linux target 段专用的变量。
 
       - name: Show tool versions
         run: |
@@ -581,11 +673,9 @@ jobs:
 
           search_dirs=(
             "$PWD/apps/desktop/target/release/bin"
-            "$PWD/packages/cangjie-gui/sdl/.sdl3"
             "${mingw_prefix}/bin"
             "${runtime_dir}"
           )
-          echo "sdl dir listing:"; ls "$PWD/packages/cangjie-gui/sdl/.sdl3" || true
 
           # PE 的 import 表记录的名字可能与磁盘文件名不一致（SDL3 同时存在
           # libSDL3.dll / SDL3.dll 两种形态）；精确名找不到时尝试变体，命中后
