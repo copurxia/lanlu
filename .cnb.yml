@@ -292,7 +292,7 @@ $:
     - &mcp_pipeline
       name: mcp
       ifModify:
-        - mcp/**
+        - apps/mcp/**
       runner:
         tags: cnb:arch:amd64
       docker:
@@ -315,7 +315,7 @@ $:
           script: |
             bash -lc '
               set -eux
-              cd mcp
+              cd apps/mcp
               CC_x86_64_unknown_linux_musl=musl-gcc \
                 cargo build --release --target x86_64-unknown-linux-musl
             '
@@ -326,8 +326,8 @@ $:
               set -eux
               rm -rf dist
               mkdir -p dist/lanlu-mcp
-              cp mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
-              cp mcp/README.md dist/lanlu-mcp/
+              cp apps/mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
+              cp apps/mcp/README.md dist/lanlu-mcp/
               chmod +x dist/lanlu-mcp/lanlu-mcp
               cd dist
               zip -qr "lanlu-mcp-${CNB_COMMIT_SHORT:-latest}.zip" lanlu-mcp

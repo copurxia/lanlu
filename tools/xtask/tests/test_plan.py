@@ -52,7 +52,7 @@ class GitHubMatrixPlanTests(unittest.TestCase):
         self._write("frontend/package.json", json.dumps({"name": "lanlu-frontend"}))
         self._write("client/package.json", json.dumps({"name": "LanluClient"}))
         self._write("apps/extension/package.json", json.dumps({"name": "extension"}))
-        self._write("mcp/Cargo.toml", '[package]\nname = "lanlu-mcp"\nversion = "0.1.0"\n')
+        self._write("apps/mcp/Cargo.toml", '[package]\nname = "lanlu-mcp"\nversion = "0.1.0"\n')
         self._write("tools/xtask/cli.py", "# xtask target marker\n")
         self._git("init", "-q")
         self._git("add", "-A")

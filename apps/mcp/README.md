@@ -8,7 +8,7 @@ Lanlu 的 [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) 服�
 
 ```bash
 rustup target add x86_64-unknown-linux-musl
-cd mcp
+cd apps/mcp
 CC_x86_64_unknown_linux_musl=musl-gcc \
   cargo build --release --target x86_64-unknown-linux-musl
 ```

@@ -4,10 +4,10 @@ run-name: ${{ github.actor }} is building lanlu-mcp (Rust musl)
 on:
   push:
     paths:
-      - "mcp/**"
+      - "apps/mcp/**"
   pull_request:
     paths:
-      - "mcp/**"
+      - "apps/mcp/**"
 
 jobs:
   build-mcp:
@@ -30,14 +30,14 @@ jobs:
         run: |
           # PATH 不跨 step 持久，cargo 前必须再 source 一次
           . "$HOME/.cargo/env"
-          cd mcp
+          cd apps/mcp
           CC_x86_64_unknown_linux_musl=musl-gcc \
             cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Test lanlu-mcp
         run: |
           . "$HOME/.cargo/env"
-          cd mcp
+          cd apps/mcp
           cargo test --locked
 
       - name: Package lanlu-mcp zip
@@ -45,8 +45,8 @@ jobs:
           set -eux
           rm -rf dist
           mkdir -p dist/lanlu-mcp
-          cp mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
-          cp mcp/README.md dist/lanlu-mcp/
+          cp apps/mcp/target/x86_64-unknown-linux-musl/release/lanlu-mcp dist/lanlu-mcp/
+          cp apps/mcp/README.md dist/lanlu-mcp/
           chmod +x dist/lanlu-mcp/lanlu-mcp
           cd dist
           zip -qr "lanlu-mcp-${{ github.sha }}.zip" lanlu-mcp

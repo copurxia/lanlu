@@ -228,7 +228,7 @@ def build_graph(
         if target:
             targets[target_id] = target
 
-    cargo = _cargo_target(root, "mcp", "mcp")
+    cargo = _cargo_target(root, "mcp", "apps/mcp")
     if cargo:
         targets["mcp"] = cargo
 
