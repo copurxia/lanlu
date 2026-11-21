@@ -60,15 +60,15 @@ lanlu/
 │   ├── mcp/                          # MCP 服务器（Rust, stdio）
 │   ├── mobile/                       # React Native 移动端
 │   ├── desktop/                      # 仓颉原生桌面客户端（CangjieGUI + SDL3）
-│   └── web/                          # Next.js 前端
-│       ├── src/
-│       │   ├── app/
-│       │   ├── components/
-│       │   ├── contexts/
-│       │   ├── hooks/
-│       │   ├── lib/
-│       │   └── types/
-│       └── messages/
+│   ├── web/                          # Next.js 前端
+│   │   ├── src/
+│   │   │   ├── app/
+│   │   │   ├── components/
+│   │   │   ├── contexts/
+│   │   │   ├── hooks/
+│   │   │   ├── lib/
+│   │   │   └── types/
+│   │   └── messages/
 │   └── server/                       # 仓颉后端（可部署程序）
 │       ├── cjpm.toml                 # 服务端构建事实源
 │       ├── cjpm.lock

@@ -277,9 +277,9 @@ jobs:
 
 ### 6.1 现有基础与结论
 
-服务端已经使用 ignite，并在 `src/main.cj:230` 开启 `enableSwagger: true`。ignite 提供 `app.interfaceSpecs()`（`~/.cjpm/git/ignite/887723.../src/app.cj:314`）和 `SwaggerGenerator.generate()`（`~/.cjpm/git/ignite/887723.../src/swagger.cj:269`），`RouteOption` 支持 summary、tags、parameters、requestBody、responses、security（`swagger.cj:6`）。
+服务端已经使用 ignite，并在 `apps/server/src/main.cj:230` 开启 `enableSwagger: true`。ignite 提供 `app.interfaceSpecs()`（`~/.cjpm/git/ignite/887723.../src/app.cj:314`）和 `SwaggerGenerator.generate()`（`~/.cjpm/git/ignite/887723.../src/swagger.cj:269`），`RouteOption` 支持 summary、tags、parameters、requestBody、responses、security（`swagger.cj:6`）。
 
-但当前契约是空壳：137 个路由没有任何 `RouteOption`/`withResponse`/`withRequestBody`；响应大量使用 `ctx.json`/`JsonRaw`；生成器在无 responses 时写死 `200 OK`（`swagger.cj:433`），并写死 `"openapi": "3.0.0"`（`swagger.cj:272`）。全仓共有 39 个 `<: JsonSerializable` 响应 DTO 和 23 个 `<: JsonDeserializable` 请求 DTO；响应 DTO 均手写 `toJson`，例如 `src/shared/views/api_response.cj:21`。
+但当前契约是空壳：137 个路由没有任何 `RouteOption`/`withResponse`/`withRequestBody`；响应大量使用 `ctx.json`/`JsonRaw`；生成器在无 responses 时写死 `200 OK`（`swagger.cj:433`），并写死 `"openapi": "3.0.0"`（`swagger.cj:272`）。全仓共有 39 个 `<: JsonSerializable` 响应 DTO 和 23 个 `<: JsonDeserializable` 请求 DTO；响应 DTO 均手写 `toJson`，例如 `apps/server/src/shared/views/api_response.cj:21`。
 
 **决策**：契约单一事实源复用 ignite 的路由元数据和生成器，不在仓库里另维护一份 controller 描述；先接受 OpenAPI 3.0.0，3.1 单独立项。
 
@@ -666,8 +666,8 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `client/package.json:11` | 移动端 `test` = jest |
 | `apps/extension/package.json:6` | extension 声明 pnpm 10.33.0 |
 | `client-next/cjpm.toml:2` | 桌面 manifest 写 1.1.0 |
-| `src/main.cj:230` | 服务端开启 Swagger |
-| `src/shared/views/api_response.cj:21` | 手写 `toJson` 的代表 |
+| `apps/server/src/main.cj:230` | 服务端开启 Swagger |
+| `apps/server/src/shared/views/api_response.cj:21` | 手写 `toJson` 的代表 |
 | `~/.cjpm/git/ignite/887723.../src/app.cj:314` | `interfaceSpecs()` |
 | `~/.cjpm/git/ignite/887723.../src/app.cj:495` | `handleForTest` |
 | `~/.cjpm/git/ignite/887723.../src/swagger.cj:269` | `SwaggerGenerator.generate()` |

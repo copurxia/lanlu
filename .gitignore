@@ -14,6 +14,7 @@ data
 .devbrain
 CLAUDE.md
 build-script-cache
+frontend/out
 *.macrocall
 .codex
 .codeartsdoer
