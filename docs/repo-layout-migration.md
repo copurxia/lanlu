@@ -1,6 +1,6 @@
 # 仓库布局迁移方案：apps/packages
 
-状态：方案已裁决；**PR0、PR1（`extension`）已落地并经 CI 验证；PR2（`mcp`）代码已完成、待 CI 验证**；PR3–PR6 待执行。
+状态：方案已裁决；**PR1（`extension`）已落地并经 CI 验证；PR2（`mcp`）、PR3（`client`）、PR4（`frontend`）代码已完成、待统一 push 后由 CI 验证**；PR5–PR6 未开始。
 
 盘点基线：`b3afc9e7`，2026-11-21。
 硬前置（**已达成**）：桌面端 261 个用例在**当前路径**跑出绿基线——run 1511（`ba1747e9`）`client-next-test` success，13m03s，261/261 PASSED，详见 `docs/testing-roadmap.md` §10.1.7。该结果即为 PR1 的开工闸门；PR2 在其后串行执行。
@@ -85,8 +85,8 @@ Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁�
 | PR0 | 新增本迁移方案文档 | 0.25 | 文档-only diff；`git diff --check` 通过；不改生产文件 |
 | PR1 | `extension/` → `apps/extension/` | 0.25 | **已完成（`abdaf76e` 移动目录、`fa3066c3` 更新引用）**；CI 已验证：run 1503/1504 `build-extension` **success**，1512 在 04:33 断线窗口内 7 个 job 全挂（基础设施失败，不是本迁移回归） |
 | PR2 | `mcp/` → `apps/mcp/` | 0.25–0.5 | **代码已完成，待 CI 验证**：`cli` job 与 `build.yaml:mcp` 绿；affected 能命中 mcp |
-| PR3 | `client/` → `apps/mobile/` | 0.5 | `client.yml quality` 绿；用 `workflow_dispatch` 验证 Android release；affected 能命中 mobile |
-| PR4 | `frontend/` → `apps/web/` | 0.5–1 | `build` job 中 frontend typecheck/test/build 绿；`package` Docker 构建与 smoke 绿 |
+| PR3 | `client/` → `apps/mobile/` | 0.5 | **代码已完成，待 CI 验证**：`client.yml quality` 绿；用 `workflow_dispatch` 验证 Android release；affected 能命中 mobile。本地已验：`apps/mobile` 下 `tsc --noEmit` 0、jest 13 suites / 114 例全过；`android/` 与 `package-lock` 随目录移动，Jest/Metro 配置为相对路径无需改 |
+| PR4 | `frontend/` → `apps/web/` | 0.5–1 | **代码已完成，待 CI 验证**：`build` job 中 frontend typecheck/test/build 绿；`package` Docker 构建与 smoke 绿。本地已验：`apps/web` 下 typecheck 0、`test:ci` 19/19、`build` 成功；镜像内 `app/frontend/out` 与 `FrontendController` 的 `frontend/out` 默认值均不受源码目录迁移影响 |
 | PR5 | `client-next/` → `apps/desktop/` | 1 | Gitea `client-next-test` 绿；本地 layering/no-SDL/state-write/image-decode 守卫绿 |
 | PR6 | 根 `src/` + manifest → `apps/server/` | 1–2 | `orm-test`、`server-test` 12/12 0 skip、`build` + lcodec、`package` Docker/smoke/`.so.9.11`、`mcp`、`extension` 全绿；doctor 和守卫绿 |
 
