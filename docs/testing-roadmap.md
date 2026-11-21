@@ -155,6 +155,8 @@
 | 僵尸 run | `windows-ffi.yaml` 已由 `13b54ae4` 删除，但 `/actions/runs` 仍统计到 **13 条 `waiting`**（另有 9 条 `cancelled`），无 cancel 通道 | **需 owner 清理**；清理前这些 run 永久占位，会干扰“排队是否正常”的判断 |
 | GitHub 镜像阻塞 | `github.com/copurxia/lanlu` 的 `refs/heads/main` 自 2026-11-20 起停在 `cd914c29b514c2809e75ae0b1fcdb374f85920f1`，未追到 `ba90f32e`/`bf176a55`；`/repos/copur/lanlu/push_mirrors` 返回 403（需 owner 或 admin write），仓库元信息 `mirror:false`、`original_url:""` | `.github/workflows/**`（`client-next.yml` 桌面/Windows 链路）**无法用当前代码验证**，需 owner 修复镜像后重跑；在此之前 GitHub 侧任何结论只对旧代码成立。服务端根测试与 lcodec 已迁到 Gitea（`294bb31c`、`129b470b`），不再依赖 GitHub 验证 |
 | smoke soname 可观测性 | `bf176a55` 在 smoke 成功路径加了 `linked RocksDB library:` 打印，但此后 `build.yaml`（run 2471）在 `build` 阶段断网失败、`package` skipped，该行**尚未在真实容器中出现过** | `.so.9.11` 仍属推断（构建容器装 `librocksdb-dev`、运行镜像装 `librocksdb9.11`），**待下一次 `package` 实跑确认** |
+| 残留 `uses:` 仍单点依赖 github.com | `bfe7b753` 已把 11 处 `actions/checkout` 换成本地 clone（`github.server_url` + token），run 1506/1511 实证 `checked out … (1091 commits)` 且不再访问 github.com。但 `.gitea/workflows/**` 仍有 **23 处**活跃 `uses:`（`build.yaml` 14、`client.yml` 6、`extension.yaml` 2、`cli.yaml` 1），按 action 拆：`upload-artifact` 7、`setup-node` 4、`setup-cangjie` 3、`build-push-action` 2、`cache` 2，`setup-buildx`/`login`/`setup-python`/`setup-java`/`download-artifact` 各 1 | 任一 action 取不到，job 在 `Set up job` 阶段即失败：run 1511 的 `guards`(3s) 与 `package`(1s) 就是 04:33 runner→github 代理断线（`192.168.0.202` 连不上，日志停在 `git fetch 'https://github.com/actions/setup-python'` 与 `actions/download-artifact`），同一窗口 extension run 1512 的 7 个 job 全挂，而 run 1509 的 `guards` 为 success——**瞬时断线，不是配置回归**。缓解：后续改动不新引 `uses:`；action 缓存/镜像属 owner 配置 |
+| 外部 git 依赖无重试、无 pin | 构建期直接 clone 两个外部仓库：`cjpm.toml:15` 的 `ignite`（`gitcode.com/copur/ignite-cangjie.git`，`branch = "stdx"`）与 `.gitea/workflows/build.yaml:270`、`:448` 的 WasmEdge（`github.com/WasmEdge/WasmEdge`）。run 1511 的 `server-test` 因 gitcode 瞬时 reset 失败（同 run 的 `build` 用同一套依赖成功）；WasmEdge 在 run 1490/1506 各静默挂起一次（后者 22 分钟，占死单 runner） | WasmEdge 侧已由 `ba1747e9` 加 `timeout 300` + 单次重试，run 1511 实测 clone 10–13s、**重试未触发**；gitcode 侧仍无看门狗。两者都跟分支头而非固定提交。推荐方案：vendored tarball + sha256 校验（独立 PR，代价是仓库体积与升级流程）；次选 runner 侧镜像缓存（需 owner）。在此之前，此类失败按基础设施失败归类 |
 
 ### 5.2 affected 依赖闭包
 
@@ -538,6 +540,23 @@ run 2468（`build.yaml`）+ run 2469（`extension.yaml`）**5/5 全绿**，作�
 **决策**：`client-next` 继续作为根目录桌面应用，不收进 `packages/`。它是 `output-type = "executable"` 的端应用（`client-next/cjpm.toml:6`），依赖 11 个可复用包（`client-next/cjpm.toml:11-22`）；全仓没有 manifest 以 path 依赖反向引用它，根服务端 `cjpm.toml:14-34` 也不依赖它。`xtask` 递归发现所有 `cjpm.toml`（`tools/xtask/graph.py:83-93`），目录位置不影响包图与 affected 闭包。若未来统一应用目录，目标是 `apps/desktop/`（纯路径迁移 PR，0.5–1 人日）；`packages/client-next/` 方案否决，因为它会把应用错位成可复用库，且应用内 `../packages/*` 依赖与链接路径都要改写。
 
 **桌面 CI 前置顺序**：① 先定案并落地 SDL3 供给（否则 `.github/workflows/client-next.yml:251-255` 期望的 `packages/cangjie-gui/sdl/.sdl3` 在当前树缺失，桌面构建必然失败）；② 在现路径把桌面 quality 与测试迁到 Gitea，避免迁移目录与 CI 变更互相污染诊断；③ 最后执行 `apps/desktop` 纯路径迁移。三件事分 PR、分验证窗口。
+
+### 10.1.7 桌面 261 例绿基线（2026-11-21，`ba1747e9`）
+
+run **1511**（`build.yaml`）的 `client-next-test` **success，13m03s，261/261 PASSED（SKIPPED 0 / ERROR 0）**。这是桌面测试第一次真正执行完——run 1506 首跑止步于 `Pre-generate FFI bridges` 的 `ft2build.h` 缺失，261 例一个都没跑。
+
+| step | 位置 | 耗时 | 命令与要点 |
+|---|---|---:|---|
+| `Compile client-next tests` | `.gitea/workflows/build.yaml:938` | **1m29s** | `timeout 1800 cjpm test --no-run -V --no-color --parallel 1`；`--no-run` 把编译与执行拆开，`-V` 让每条 `cjc` 命令落到日志，挂起时能直接停到最后一条 |
+| `Run client-next tests` | `.gitea/workflows/build.yaml:947` | **18s** | `timeout 900 cjpm test --skip-build --parallel 1 --no-color --no-capture-output --timeout-each 60s --show-all-output --report-path target/test-results --report-format xml`；用例本体 16.87s |
+
+分包：net 114（15.27s）、app 91（0.60s）、storage 29（0.69s）、ui 15（4.6ms）、img 10（0.22s）、i18n 2（1.5ms）。
+
+**`--parallel 1` 定案（暂不恢复 `nCores`）**：诊断 step（`:927`）实测 `nproc=16`、内存 31837MB（可用 19056）、swap 0，资源不是瓶颈；串行全量只需 18 秒，恢复 16 路并行的收益趋近于零，却要重新承担 run 1509 那次 48 分钟零输出暴露的未定论竞争面——代码里确有共享工作目录的写者：`client-next/src/net/perf_bench_test.cj:64` 写固定路径 `/tmp/lanlu-bench-${n}.txt`，另有 14 处 `Directory.createTemp(Path("."))` 落在仓库工作目录（`img/image_cache_test.cj` 9 处、`img/vips_decode_test.cj` 5 处）。run 1509 的具体挂起点仍未取到（日志被 runner 以 `context deadline exceeded` 截断），因此**并行是否是唯一原因尚未证实**。**要恢复并行，先消除上述共享状态，作为独立变更并附串行/并行对比数据。**
+
+配套前提均在本 run 中实证：SDL3 供给、Cangjie 1.2.0 工具链、三个 C 桥预生成（libass 桥自 `bfe7b753` 起注入 `pkg-config --cflags freetype2`，见 `build.yaml:914`）、LWP 环境、job 级 `SDL_AUDIODRIVER: dummy`（`:790`）与 `timeout-minutes: 90`（`:780`）。
+
+**同 run 其余 job**：`orm-test` success 1m43s、`build` success 11m01s、`mcp` success 2m39s、`server-test` failure（gitcode reset）、`package` 1s 与 `guards` 3s failure（04:33 断线窗口，见 §5.1.1）。
 
 ### 10.2 五阶段路线图
 
