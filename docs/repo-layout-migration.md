@@ -1,6 +1,6 @@
 # 仓库布局迁移方案：apps/packages
 
-状态：方案已裁决；**PR1（`extension`）已落地并经 CI 验证；PR2（`mcp`）、PR3（`client`）、PR4（`frontend`）代码已完成、待统一 push 后由 CI 验证**；PR5–PR6 未开始。
+状态：方案已裁决；**PR1（`extension`）已落地并经 CI 验证；PR2（`mcp`）、PR3（`client`）、PR4（`frontend`）、PR5（`client-next`）代码已完成、待统一 push 后由 CI 验证**；PR6（`src`）未开始。
 
 盘点基线：`b3afc9e7`，2026-11-21。
 硬前置（**已达成**）：桌面端 261 个用例在**当前路径**跑出绿基线——run 1511（`ba1747e9`）`client-next-test` success，13m03s，261/261 PASSED，详见 `docs/testing-roadmap.md` §10.1.7。该结果即为 PR1 的开工闸门；PR2 在其后串行执行。
@@ -82,7 +82,20 @@ xtask 按 manifest 递归发现 Cangjie 包，多数端迁移后能自然发现�
 - **本地直跑受影响**：`./target/release/bin/main` 找不到页面；README 已注明用 `mkdir -p frontend && ln -sfn ../apps/web/out frontend/out` 兜底。
 - **根治方式（独立 PR，不属于纯路径迁移）**：把默认值改为可被环境变量覆盖，或统一改成 `apps/web/out` 并同步 bundle 组装。
 
-### 3.5 单 runner 串行
+### 3.5 PR5 的额外改动面（相对深度）
+
+`client-next/` 在根下一层，`apps/desktop/` 深了一层，所以凡是从该目录**相对**指向 `packages/` 的路径都要多一级：
+
+- `apps/desktop/cjpm.toml`：11 处 `path =` 依赖、2 处 `link-option` 的 `-L`（Linux/Windows 各一条）；
+- `apps/desktop/build.cj`：fontkit/webview 的 cargo manifest 与产物目录、三座 C 桥的 `.c`/`.o`/`.a`、lwp 的 `build.sh`；
+- `.github/workflows/client-next.yml` 的 deb 打包：`working-directory: apps/desktop` 后脚本引用变为 `../../packages/lpack-linux/tools/build-deb.sh`。
+
+守卫与基线必须**同批**更新，否则会静默扫不到文件（不报错、只是不再检查）：
+`tools/check-no-sdl.sh`、`check-layering.sh`、`check-no-file-bridge.sh`、`check-image-decode.sh`、`check-state-writes.py`、`check-docs-consistency.py`、`tools/deps-rules.toml`（`[package.lanlu_client_next] path`）、`tools/quality-baseline.toml`（5 条 `apps/desktop/src/...` 键）。
+
+**不要跟着改的**：`~/.config/lanlu-client-next/` 与 `~/.cache/lanlu-client-next/` 是用户磁盘上的运行时缓存目录，`cjpm` 包名 `lanlu_client_next`、artifact 名与 workflow 文件名同理——改它们会造成用户数据迁移与发布产物改名，超出纯路径迁移范围。
+
+### 3.6 单 runner 串行
 
 Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁移 PR 会进入完整主链。因此禁止一次混迁多个端；每个 PR 都要单独等待对应 job 出结论后再开下一批。
 
@@ -95,7 +108,7 @@ Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁�
 | PR2 | `mcp/` → `apps/mcp/` | 0.25–0.5 | **代码已完成，待 CI 验证**：`cli` job 与 `build.yaml:mcp` 绿；affected 能命中 mcp |
 | PR3 | `client/` → `apps/mobile/` | 0.5 | **代码已完成，待 CI 验证**：`client.yml quality` 绿；用 `workflow_dispatch` 验证 Android release；affected 能命中 mobile。本地已验：`apps/mobile` 下 `tsc --noEmit` 0、jest 13 suites / 114 例全过；`android/` 与 `package-lock` 随目录移动，Jest/Metro 配置为相对路径无需改 |
 | PR4 | `frontend/` → `apps/web/` | 0.5–1 | **代码已完成，待 CI 验证**：`build` job 中 frontend typecheck/test/build 绿；`package` Docker 构建与 smoke 绿。本地已验：`apps/web` 下 typecheck 0、`test:ci` 19/19、`build` 成功；镜像内 `app/frontend/out` 与 `FrontendController` 的 `frontend/out` 默认值均不受源码目录迁移影响 |
-| PR5 | `client-next/` → `apps/desktop/` | 1 | Gitea `client-next-test` 绿；本地 layering/no-SDL/state-write/image-decode 守卫绿 |
+| PR5 | `client-next/` → `apps/desktop/` | 1 | **代码已完成，待 CI 验证**：Gitea `client-next-test` 绿（261 例）；本地 layering/no-SDL/state-write/image-decode 守卫需在 push 后跑。已同步：`cjpm.toml` 与 `build.cj` 的 `../packages` → `../../packages`（17+25 处）、`cjpm.lock` 无路径、守卫脚本与基线、`deps-rules.toml`、Gitea/GitHub workflow、xtask fixture |
 | PR6 | 根 `src/` + manifest → `apps/server/` | 1–2 | `orm-test`、`server-test` 12/12 0 skip、`build` + lcodec、`package` Docker/smoke/`.so.9.11`、`mcp`、`extension` 全绿；doctor 和守卫绿 |
 
 总估算为 4–6 人日，不含 CI 排队和首波路径遗漏调试。

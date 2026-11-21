@@ -14,7 +14,7 @@ lgui         ─┘             └─ 桌面：系统 libvips（dlopen，发行
 
 | 层 | 位置 | 图片解码 |
 |---|---|---|
-| 业务/UI | `client-next/src`、`packages/cangjie-gui`（cui） | 只能调用 lcodec |
+| 业务/UI | `apps/desktop/src`、`packages/cangjie-gui`（cui） | 只能调用 lcodec |
 | UI 底层 | `packages/cangjie-gui/lgui` | 只能调用 lcodec（`Renderer.loadTexture` 是薄封装） |
 | 渲染器 | `packages/lgpu` | **不负责解码**：只接收 RGBA 像素（`uploadTexture`） |
 | **解码统合** | `packages/lcodec` | 纯仓颉 API + FFI 绑定，运行时选后端 |
@@ -23,7 +23,7 @@ lgui         ─┘             └─ 桌面：系统 libvips（dlopen，发行
 `vips_ffi`、也没有 `-lvips`；后端由 `src/vips_bind.cj` / `src/ohos_image.cj` 在运行时
 `dlopen` 后经 `dlsym` 取函数指针。因此：
 
-- `client-next/cjpm.toml`、OHOS profile 里都 **没有** `-lvips`；引擎二进制 `NEEDED` 里也没有 libvips；
+- `apps/desktop/cjpm.toml`、OHOS profile 里都 **没有** `-lvips`；引擎二进制 `NEEDED` 里也没有 libvips；
 - 宿主缺 libvips 时是运行时错误（`VipsApi.unavailableReason()` 给出明确原因），而不是链接失败；
 - **OHOS 完全不涉及 vips**：系统 ImageSource 直连，HAP 不打包任何 vips 库
   （`lpack-ohos/tools/build-ohos.sh` 会清掉残留）。历史上的 `lplatform-ohos/deps/vips`
@@ -72,7 +72,7 @@ ImageView(path 或注册的 key)
 ```
 
 cover / 阅读页（业务层）走的是另一条**同样终点**的链路：
-`client-next/src/img/vips_decode.cj` → `lcodec.decodeFileToRgba`（可带 maxDimension）→
+`apps/desktop/src/img/vips_decode.cj` → `lcodec.decodeFileToRgba`（可带 maxDimension）→
 `cui` 的 pixel 纹理暂存 → `uploadTexture`。两条链路都不自带解码器。
 
 ## API
@@ -107,7 +107,7 @@ vips 解码失败(format=avif): ...
 | 宿主单测 17/17 | `cd packages/lcodec && cjpm test`（文件/字节两条入口、shrink-on-load、backdrop、嗅探、坏字节诊断、blurRgba 几何/边界、后端可装载性）；临时目录已迁出包目录，`Directory not empty` 误报消除 |
 | OHOS 交叉编译 | `cjpm build --target aarch64-linux-ohos` → `liblcodec.a`（aarch64） |
 | 打包进 HAP | `liblanlu_client_next.img.so` 内含 `lcodec` 符号 94 个（`nm -D`） |
-| **无链接依赖** | 引擎与 img 模块 `readelf -d` 的 NEEDED 里 **没有 libvips**；两者都不再需要 `-lvips`，`client-next/cjpm.toml` 与 OHOS profile 的 link-option 已删除该组 |
+| **无链接依赖** | 引擎与 img 模块 `readelf -d` 的 NEEDED 里 **没有 libvips**；两者都不再需要 `-lvips`，`apps/desktop/cjpm.toml` 与 OHOS profile 的 link-option 已删除该组 |
 | 设备后端 | 系统 `libimage_source.so` + `libpixelmap.so`（随系统，不打包）；缺失时 `SystemImageDecoder.unavailableReason()` 明确报因 |
 | 分层守卫 | check-deps / platform-isolation / layering / no-sdl / **image-decode** 全 PASS |
 

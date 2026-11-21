@@ -51,7 +51,7 @@
 
 ## 项目结构（DDD）
 
-> 目录迁移进行中：`extension`→`apps/extension`、`mcp`→`apps/mcp`、`client`→`apps/mobile`、`frontend`→`apps/web` 已落地；`src`（待迁 `apps/server`）与 `client-next`（待迁 `apps/desktop`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
+> 目录迁移进行中：`extension`→`apps/extension`、`mcp`→`apps/mcp`、`client`→`apps/mobile`、`frontend`→`apps/web`、`client-next`→`apps/desktop` 已落地；`src`（待迁 `apps/server`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
 
 ```text
 lanlu/
@@ -59,6 +59,7 @@ lanlu/
 │   ├── extension/                    # 浏览器扩展（Plasmo + React）
 │   ├── mcp/                          # MCP 服务器（Rust, stdio）
 │   ├── mobile/                       # React Native 移动端
+│   ├── desktop/                      # 仓颉原生桌面客户端（CangjieGUI + SDL3）
 │   └── web/                          # Next.js 前端
 │       ├── src/
 │       │   ├── app/
