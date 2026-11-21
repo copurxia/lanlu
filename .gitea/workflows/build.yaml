@@ -263,7 +263,17 @@ jobs:
         run: |
           set -eux
           mkdir -p build-script-cache
-          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          # 上行动网抖动时 clone 会静默挂住（run 1490/1506 各出现一次，其中一次挂 22 分钟
+          # 占死单 runner）。加 300s 看门狗 + 单次重试：第一次的失败输出已由 set -x 留在
+          # 日志里，第二次仍失败则显式退出，不掩盖真实错误。
+          clone_wasmedge() {
+            timeout 300 git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          }
+          if ! clone_wasmedge; then
+            echo "::warning::WasmEdge clone 首次失败或超时，清理残留后重试一次"
+            rm -rf build-script-cache/WasmEdge
+            clone_wasmedge
+          fi
 
       - name: Pre-generate C bridge static libs
         run: |
@@ -431,7 +441,17 @@ jobs:
         run: |
           set -eux
           mkdir -p build-script-cache
-          git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          # 上行动网抖动时 clone 会静默挂住（run 1490/1506 各出现一次，其中一次挂 22 分钟
+          # 占死单 runner）。加 300s 看门狗 + 单次重试：第一次的失败输出已由 set -x 留在
+          # 日志里，第二次仍失败则显式退出，不掩盖真实错误。
+          clone_wasmedge() {
+            timeout 300 git clone https://github.com/WasmEdge/WasmEdge build-script-cache/WasmEdge
+          }
+          if ! clone_wasmedge; then
+            echo "::warning::WasmEdge clone 首次失败或超时，清理残留后重试一次"
+            rm -rf build-script-cache/WasmEdge
+            clone_wasmedge
+          fi
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
@@ -756,7 +776,8 @@ jobs:
     # 复用 build job 的 26.04 容器：SDL3 走 Ubuntu 26.04 的 apt（3.4.2 / ttf 3.2.2），
     # soname 与仓库原先期望的 libSDL3.so.0.4.2 / libSDL3_ttf.so.0.2.2 一致。
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 编译与执行拆步后最坏耗时 = 30(编译看门狗) + 15(执行看门狗) + 约 20(准备阶段)。
+    timeout-minutes: 90
     container:
       image: ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
     env:
@@ -766,6 +787,7 @@ jobs:
       LWP_LIB_DIR: ${{ github.workspace }}/packages/lwp/lib
       LD_LIBRARY_PATH: /usr/lib/x86_64-linux-gnu:${{ github.workspace }}/packages/lwp/lib
       SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
     steps:
       - name: Prepare container for Node actions
         run: |
@@ -902,14 +924,45 @@ jobs:
           cd client-next
           cjpm build -V
 
+      - name: Diagnose test environment
+        # run 1509 的 `cjpm test` 48 分钟零输出后被 job 超时强杀。两种可能：进程在
+        # 启动前挂住，或只是编译阶段没有进度输出（不带 -V 时 cjpm 编译完全静默）。
+        # 这里把环境事实打进日志，便于事后区分。
+        run: |
+          set -ux
+          nproc || true
+          free -m || true
+          ulimit -a || true
+          df -h /tmp || true
+
+      - name: Compile client-next tests
+        # 编译与执行拆成两步：`--no-run` 只编译并带 -V 打出每条 cjc 命令。
+        # 若挂起，日志会停在最后一条编译命令上，而不是整段空白。
+        run: |
+          set -eux
+          unset GIT_DIR GIT_WORK_TREE
+          cd client-next
+          timeout 1800 cjpm test --no-run -V --no-color --parallel 1
+
       - name: Run client-next tests
+        # --skip-build 复用上一步产物；--no-capture-output 让用例输出立即落日志，
+        # 不再缓冲到结束（这是 run 1509 无法定位的直接原因）；--parallel 1 先排除
+        # 并发因素，定位后再恢复 nCores。
         run: |
           set -eux
           unset GIT_DIR GIT_WORK_TREE
           cd client-next
           mkdir -p target/test-results
-          cjpm test --parallel nCores --timeout-each 60s --show-all-output \
+          set +e
+          timeout 900 cjpm test --skip-build --parallel 1 --no-color --no-capture-output \
+            --timeout-each 60s --show-all-output \
             --report-path target/test-results --report-format xml
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::cjpm test 被 900s 看门狗终止（单个用例 60s 超时未生效，说明卡在建用例之外）"
+          fi
+          exit "$rc"
 
       - name: Upload client-next test results
         if: always()
