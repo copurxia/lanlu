@@ -69,7 +69,10 @@ env: {}
 jobs:
   guards:
     name: Layering guards (deps + platform isolation)
-    runs-on: ubuntu-24.04
+    # 宿主 job 不钉死 runner 版本：guards/quality 只依赖通用工具，nightly-release
+    # 只调用 gh CLI；让它们随 ubuntu-latest 自动升级。桌面/服务端构建已改用
+    # 固定 26.04 digest 的容器，不受 runner 镜像升级影响。
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       # 两个自测脚本的 mktemp 默认已改为“仓库同级 tmp/”，不再写死 Gitea 自托管 runner
@@ -87,7 +90,7 @@ jobs:
       - name: Install host build tools
         # Platform package selftest 用 c++ 编壳侧 LWP 客户端，lwp/native/build.sh 用 cc；
         # liblwp 导出比对用 nm（binutils）。Gitea 的 guards 跑在完整镜像上因而自带这些，
-        # GitHub 的 ubuntu-24.04 runner 没有 c++ 驱动（run 44873527549 step 10 失败）。
+        # GitHub runner 不保证预装 c++ 驱动（run 44873527549 step 10 失败）。
         # 依赖是按脚本核对的：run-tests.sh 只需 c++，lwp/test.sh 需 cc + python3。
         run: |
           set -eux
@@ -175,14 +178,14 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
   quality:
     name: Quality report
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Install quality tooling
-        # cjlint 的 JSON 结果用 jq 统计；ubuntu-24.04 镜像自带 jq，这里显式装上以消除隐式依赖。
+        # cjlint 的 JSON 结果用 jq 统计；runner 镜像自带情况会随升级变化，显式安装以消除隐式依赖。
         run: |
           set -eux
           sudo apt-get update
@@ -916,7 +919,7 @@ jobs:
     needs: [build-test, windows-build]
     # push/手动触发时发布；PR 没有写权限，只构建不发布。
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
