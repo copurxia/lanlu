@@ -13,7 +13,7 @@
 | Phase 4 | E2E、设备、性能与 ratchet | 关键路径 nightly 稳定；覆盖率和性能有基线门禁 |
 三个立即行动项：① 先做 Phase 0，收敛工具链、lock、嵌套仓和分支头克隆；② 建 `justfile` + Python `tools/xtask`，让现有测试真跑；③ 固定 `summary.json` 与 XML 适配层，之后的 CI、AI 修复和覆盖率都复用它。
 
-**版本脚注**：本文引用的 cjpm/unittest 能力，除特别说明外，锚定 **cjpm 1.2.0 手册 / std 1.0.5 文档**。桌面 CI 当前实际安装 Cangjie 1.1.3（`.github/workflows/client-next.yml:169`，Windows 侧 `:482`），manifest 另写 1.1.0（`client-next/cjpm.toml:2`），服务端为 1.2.0（主构建 `.github/workflows/build.yml:225`，`server-test` 为 `:120`），版本事实源为 `toolchain/versions.toml`。因此 Phase 0 必须对 1.1.3 做一次实测，确认 `--include-tags`、`--parallel`、`--coverage` 与 `prop_test` 的行为与文档一致；确认前，不把新能力写成硬门禁。
+**版本脚注**：本文引用的 cjpm/unittest 能力，除特别说明外，锚定 **cjpm 1.2.0 手册 / std 1.0.5 文档**。桌面 CI 与桌面 manifest 均已升到 Cangjie 1.2.0（`client-next.yml` 的 Linux / Windows 两处 `setup-cangjie`；`apps/desktop/cjpm.toml:2` 仍写 1.1.0，属最低版本而非 CI 安装版本），服务端为 1.2.0（主构建 `.github/workflows/build.yml:225`，`server-test` 为 `:120`），版本事实源为 `toolchain/versions.toml`。因此 Phase 0 应对 1.2.0 做一次实测，确认 `--include-tags`、`--parallel`、`--coverage` 与 `prop_test` 的行为与文档一致；确认前，不把新能力写成硬门禁。
 
 ## 1. 背景与问题
 
@@ -35,7 +35,7 @@
 - **（已解决）** `packages/cangjie-gui` 曾是独立 Git 仓库且被 `.gitignore:26` 隐藏，CI 通过 `git clone --branch lanlu-client-next` 取分支头而非固定提交。`87a3887c` 把源码按工作树状态收编进主仓（468 文件），`912fe24c` 删除 `.gitignore:26` 与 `.github/workflows/client-next.yml` 的 Linux/Windows 两处 clone（grep `git clone` 计数 0）；上游 46 个提交历史未进主仓，见 §10.1.5。
 - 本轮审计时 `packages/lbase`、`packages/lwindow/src/backend/`、`packages/lwindow/src/displays/` 曾为未跟踪路径；现已由 HEAD `b25f846` 跟踪（分别为 6、1、3 个文件），干净 checkout 不再缺少这些路径。Phase 0 仍需用干净 clone 验证完整性，而不是重新跟踪。
 - `apps/server/cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`apps/desktop/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 在 `apps/server` 内执行 `cjpm update` 并守卫该 lock（三平台同款），仍不是只读安装。实测（Codex 用 1.2.0 在全新 `HOME` 与空 `~/.cjpm` 的冷缓存下执行）：`cjpm update` 退出码 0，`cjpm.lock` SHA256 不变（`1594a8b6…d8f21417`），`version` 仍为 `0`，14 条 commitId 全部未漂移——1.2.0 既不自动升级 v0→v1，也不刷新已锁 commit。
-- 工具链三处不一致：服务端 1.2.0、桌面 CI 1.1.3、桌面 manifest 1.1.0。
+- 工具链已统一：服务端与桌面 CI（Linux/Windows）都是 1.2.0（`toolchain/versions.toml`）；`apps/desktop/cjpm.toml:2` 的 `cjc-version = "1.1.0"` 是最低要求，不是 CI 安装版本。
 - 桌面路径白名单（`.github/workflows/client-next.yml:5`、`:30`）已补齐依赖闭包：`push` 与 `pull_request` 两处各 23 条，原漏掉的 10 个包及 `tools/`、`toolchain/`、`justfile` 均已纳入，无重复条目；完整的 affected matrix 仍列 Phase 3。
 - `cangjie-repo.toml` 只是中心仓 registry 配置，与工具链版本无关；它不应出现在工具链裁决或测试缓存 key 的核心语义里。
 
@@ -461,7 +461,7 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 | `packages/cangjie-gui` 嵌套独立仓 | **已收编（`87a3887c`）** | 468 文件 / 56,998 行按工作树状态入库，`target/`、`cjpm.lock`、`.so/.dll/.hap`、`lgui/` 均零命中（最大文件 `images/gallery.jpg` 1.3MB）；嵌套 `.git` 已删，备份 `cangjie-gui-git-backup-20261120-124332.tar`（19M，`sha256=8a6f55fc…9a46b`）；顺带修正包内唯一失效依赖 `bench/harness` 的 `lgui → cui`。路径依赖（`client-next/cjpm.toml:12`、`packages/portcheck/cjpm.toml:17`）现指向被跟踪目录 | 备份在 `/tmp` 下，**非持久，建议转存到仓库外持久位置**；需要历史时从该 tar 用 `git filter-repo` 重放。`packages/cangjie-gui-p0` 的 worktree 指针已删（`bd9aeb27`），目录降级为普通未跟踪目录，仍由 `.gitignore:46` 挡住 |
 | lock 文件停留在 v0 旧格式 | **已定案（不迁移）** | 1.2.0 冷缓存实测：`cjpm update` 不升级 v0→v1、不刷新 commitId；lock SHA256 `1594a8b6…d8f21417` 不变 | 守卫定位改为“漂移探测器”而非“迁移门禁”：lock 保持 v0 可接受；若未来工具链改变行为，守卫会先红，届时按需显式解析并单独提交 |
 | 桌面 CI 克隆分支头而非固定提交 | **已消除（`912fe24c`）** | 收编后 `.github/workflows/client-next.yml` 已无 `git clone`（计数 0），源码随 checkout 直接可用；`client-next/README.md:8`、`:101` 已改为“源码随主仓提供，CI 不再单独克隆” | 无需再改固定提交；嵌套仓守卫由 `doctor` 的 nested-git 检查承担 |
-| 工具链三处不一致 | **部分解决（工作树）** | 已建 `toolchain/versions.toml` 作为事实源；当前值：服务端 `build.yml:225` 1.2.0、桌面 CI `client-next.yml:169` 1.1.3、桌面 manifest `client-next/cjpm.toml:2` 1.1.0、根 manifest `cjpm.toml:2` 1.2.0 | 由 `doctor` 持续校验事实源与 workflow 一致；桌面升 1.2.0 仍待验证 |
+| 工具链三处不一致 | **部分解决（工作树）** | 已建 `toolchain/versions.toml` 作为事实源；当前值：服务端 `build.yml:225` 1.2.0、桌面 CI（Linux/Windows）1.2.0、桌面 manifest `apps/desktop/cjpm.toml:2` 最低 1.1.0、服务端 manifest `apps/server/cjpm.toml:2` 1.2.0 | 由 `doctor` 持续校验事实源与 workflow 一致；桌面已升 1.2.0，待 push 后 CI 实测 |
 | 无效 submodule 步骤 | **已解决** | 三侧均无 `submodules: true`：`.github/workflows/build.yml`、`.gitea/workflows/build.yaml`、`.cnb.yml`；仓库无 `.gitmodules` | 保持；新增嵌套仓守卫（待办） |
 | 服务端 CI 执行 `cjpm update` | **已解决（守卫生效）** | 三侧 update 后均有 `git diff --exit-code -- cjpm.lock`：`build.yml:176`（守卫 `:177`，主构建 update `:296`/守卫 `:297`）、`.gitea/workflows/build.yaml:173`（守卫 `:174`）、`.cnb.yml:120`（守卫 `:121`）；冷缓存实测无漂移 | 保留 update（wasmedge 补丁依赖其先 clone）；若未来实测刷新 commitId，再把刷新作为显式提交 |
 | 桌面 1.1.3 能力一致性未实测 | **仍待办** | 本文版本脚注所列四项能力 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
@@ -532,7 +532,7 @@ run 2468（`build.yaml`）+ run 2469（`extension.yaml`）**5/5 全绿**，作�
 
 | 新待办 | 事实 | 待办 |
 |---|---|---|
-| SDL3 供给已定案（2026-11-21） | 主树内**没有任何 SDL3 运行库**，且不再需要：Linux 用 26.04 apt 的 `libsdl3-dev`/`libsdl3-ttf-dev`（3.4.2 / 3.2.2，soname `libSDL3.so.0.4.2`、`libSDL3_ttf.so.0.2.2` 与原期望一致），Windows 用 MSYS2 `mingw-w64-ucrt-x86_64-sdl3{,-ttf}`；`.github/workflows/client-next.yml` 的 8 处 `packages/cangjie-gui/sdl/.sdl3` 已全部删除（`grep` 计数 0） | Gitea run 1511 已用该方案跑出 **261/261 PASSED**；GitHub 侧为同一配方，待 push 后验证 |
+| SDL3 供给已定案（2026-11-21） | 主树内**没有任何 SDL3 运行库**，且不再需要：Linux 用 26.04 apt 的 `libsdl3-dev`/`libsdl3-ttf-dev`（3.4.2 / 3.2.2，soname `libSDL3.so.0.4.2`、`libSDL3_ttf.so.0.2.2` 与原期望一致），Windows 用 MSYS2 `mingw-w64-ucrt-x86_64-sdl3{,-ttf}`；`.github/workflows/client-next.yml` 的 8 处 `packages/cangjie-gui/sdl/.sdl3` 已全部删除（非注释引用 0；仅剩 2 处解释性注释） | Gitea run 1511 已用该方案跑出 **261/261 PASSED**；GitHub 侧为同一配方，待 push 后验证 |
 | 平台隔离基线 13→64 | `tools/quality-baseline.toml` 的 `[platform] keys` 由 13 涨到 64，其中 **51 条来自 `packages/cangjie-gui/src/`**（cui 的 SDL 实现本体，如 `src/base/sdl_*.cj`）；同次修正了 `tools/check-platform-isolation.py:61` 的失效前缀 `lgui/examples/ → examples/` | 逐文件烧债对框架本体成本过高，且会把“框架本来就该用 SDL”当成债务；评估改为**目录级豁免**（如 `packages/cangjie-gui/src/base/*` 整体放行、只对新增文件计债），再决定是否保留逐文件基线 |
 
 ### 10.1.6 `client-next` 结构决策与桌面 CI 前置顺序（2026-11-20）
@@ -640,8 +640,8 @@ Phase 2 合计 **20–28 人日**（2A 6–8 + 2B 14–20）。
 | `.github/workflows/client-next.yml:70-87` | guards job 接入 `setup-python@v5`/3.12（`:79`）与 xtask `doctor`（`:84`）、自测（`:87`） |
 | `.gitea/workflows/build.yaml:173`、`:174` | 发布链路 `cjpm update` 与 lock 漂移守卫 |
 | `.cnb.yml:120`、`:121` | CNB 构建 `cjpm update` 与 lock 漂移守卫 |
-| `.github/workflows/client-next.yml:169`、`:482` | 桌面 CI（Linux / Windows）安装 Cangjie 1.1.3 |
-| `.github/workflows/client-next.yml`（`912fe24c`，`2026-11-21` 更新） | 桌面 CI（Linux / Windows）clone 分支头的两处步骤已删除；`git clone` 计数 0。`sdl/.sdl3` 的 8 处已于本轮删除，改由系统/MSYS2 提供 SDL3（见 §10.1.5） |
+| `.github/workflows/client-next.yml`（行号随本轮改版漂移，仅列文件） | 桌面 CI（Linux / Windows）安装 Cangjie 1.2.0 |
+| `.github/workflows/client-next.yml`（`912fe24c`，`2026-11-21` 更新） | 桌面 CI（Linux / Windows）clone 分支头的两处步骤已删除；`git clone` 计数 0。`sdl/.sdl3` 的 8 处已删除，改由系统/MSYS2 提供 SDL3（见 §10.1.5） |
 | `.github/workflows/client-next.yml:372-377` | 桌面测试命令与 XML 报告 |
 | `.github/workflows/client-next.yml:554` | Windows 只跑 `rocksdb_ffi` |
 | `.github/workflows/client-next.yml:436`、`:438`、`:512` | `windows-build`（`windows-latest`）：装 MSYS2 `mingw-w64-x86_64-rocksdb` 并构建，承担全部 Windows 验证 |
