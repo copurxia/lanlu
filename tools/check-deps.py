@@ -154,7 +154,13 @@ def collect(rules: dict) -> tuple[dict[str, set[str]], dict[str, dict]]:
                                      capture_output=True, text=True, check=False).stdout.splitlines())
     except OSError:
         tracked = None
-    for manifest in sorted(ROOT.glob("packages/*/cjpm.toml")):
+    # packages/ 是可复用库；apps/server 是 PR6 从仓库根迁入的可部署端，由
+    # [package.lanlu] 登记（进 covered_dirs 后这里会跳过）。仍显式列出它，是兜底：
+    # 万一规则条目被删，服务端会退回 default 规则并**报违规**，而不是静默不扫。
+    # apps/desktop 同理由 [package.lanlu_client_next] 登记，无需重复枚举。
+    for manifest in sorted(
+        list(ROOT.glob("packages/*/cjpm.toml")) + [ROOT / "apps" / "server" / "cjpm.toml"]
+    ):
         if tracked is not None and manifest.relative_to(ROOT).as_posix() not in tracked:
             continue
         pkg_dir = manifest.parent

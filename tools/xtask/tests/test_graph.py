@@ -14,10 +14,10 @@ class GraphAffectedTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self._write(
-            "cjpm.toml",
-            "[package]\nname = \"lanlu\"\n\n[dependencies]\nlib = { path = \"lib\" }\nleaf = { path = \"lib/leaf\" }\n",
+            "apps/server/cjpm.toml",
+            "[package]\nname = \"lanlu\"\n\n[dependencies]\nlib = { path = \"../../lib\" }\nleaf = { path = \"../../lib/leaf\" }\n",
         )
-        self._write("src/main_test.cj", "@Test\nfunc testMain() {}\n")
+        self._write("apps/server/src/main_test.cj", "@Test\nfunc testMain() {}\n")
         self._write(
             "lib/cjpm.toml",
             "[package]\nname = \"lib\"\n\n[dependencies]\nleaf = { path = \"leaf\" }\n",
@@ -48,8 +48,8 @@ class GraphAffectedTests(unittest.TestCase):
     def _ids(self, changed: list[str]) -> set[str]:
         return {target.id for target in affected(self.graph, changed)}
 
-    def test_01_root_change_selects_server(self) -> None:
-        self.assertIn("lanlu", self._ids(["src/main.cj"]))
+    def test_01_server_change_selects_server(self) -> None:
+        self.assertIn("lanlu", self._ids(["apps/server/src/main.cj"]))
 
     def test_02_dependency_change_uses_reverse_closure(self) -> None:
         ids = self._ids(["lib/leaf/src/leaf_test.cj"])
@@ -70,6 +70,11 @@ class GraphAffectedTests(unittest.TestCase):
 
     def test_07_client_change_does_not_pull_dependencies(self) -> None:
         self.assertEqual({"lanlu_client_next"}, self._ids(["apps/desktop/src/main.cj"]))
+
+    def test_07b_server_prefix_does_not_swallow_other_targets(self) -> None:
+        # PR6 之前根 manifest 用 ("src", "cjpm.toml", "cjpm.lock")；迁移后
+        # apps/server 必须只认领自己的前缀，不能把 apps/desktop 等一并吸进来。
+        self.assertEqual({"lanlu"}, self._ids(["apps/server/src/contexts/task/x.cj"]))
 
     def test_08_plan_shape_and_matrix(self) -> None:
         targets = affected(self.graph, ["toolchain/versions.toml"])

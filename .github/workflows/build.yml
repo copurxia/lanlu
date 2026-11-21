@@ -173,6 +173,9 @@ jobs:
         run: |
           set -eux
           unset GIT_DIR GIT_WORK_TREE
+          # PR6：服务端 manifest 已迁到 apps/server；target/ 与 build-script-cache/
+          # 跟随 CWD，git 的 pathspec 也相对 CWD，故 cjpm.lock 即 apps/server/cjpm.lock。
+          cd apps/server
           cjpm update
           if ! git diff --exit-code -- cjpm.lock; then
             git diff -- cjpm.lock || true
@@ -186,6 +189,7 @@ jobs:
       - name: Run root package tests
         run: |
           set -euo pipefail
+          cd apps/server
           mkdir -p target/test-results
           cjpm test \
             --no-color \
@@ -204,7 +208,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-test-results
-          path: target/test-results/
+          path: apps/server/target/test-results/
           if-no-files-found: warn
 
   build:
@@ -293,6 +297,8 @@ jobs:
             -I/usr/include/postgresql
           ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
             packages/postgresql-driver/native/lanlu_pg_bridge.o
+          # PR6：C 桥仍从仓库根预生成，cjpm 进 apps/server 后 target/ 落在包内。
+          cd apps/server
           cjpm update
           if ! git diff --exit-code -- cjpm.lock; then
             git diff -- cjpm.lock || true
@@ -341,7 +347,7 @@ jobs:
         run: |
           mkdir -p app
           mkdir -p app/frontend
-          cp target/release/bin/main app/
+          cp apps/server/target/release/bin/main app/
           cp -r apps/web/out app/frontend/out
 
       - name: Archive production artifacts

@@ -16,11 +16,11 @@ class GitHubMatrixPlanTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
         self._write(
-            "cjpm.toml",
+            "apps/server/cjpm.toml",
             '[package]\nname = "lanlu"\n\n'
-            '[dependencies]\nlbase = { path = "packages/lbase" }\n',
+            '[dependencies]\nlbase = { path = "../../packages/lbase" }\n',
         )
-        self._write("src/main_test.cj", "@Test\nfunc testMain() {}\n")
+        self._write("apps/server/src/main_test.cj", "@Test\nfunc testMain() {}\n")
         self._write(
             "packages/lbase/cjpm.toml", '[package]\nname = "lbase"\n'
         )

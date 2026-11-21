@@ -117,6 +117,15 @@ $:
               ar rcs packages/postgresql-driver/native/liblanlu_pg_bridge.a \
                 packages/postgresql-driver/native/lanlu_pg_bridge.o
 
+              # PR6：服务端 manifest 在 apps/server；cjpm 的 target/、
+              # build-script-cache/ 与 .cj-version 哨兵都相对 CWD，必须先进包目录。
+              # C 桥仍从仓库根预生成（上面的路径不变）。
+              cd apps/server
+              # 缓存卷挂在仓库根（`.cnb.yml` 的 volumes: ./build-script-cache）。
+              # 进包目录后 cjpm 会写 apps/server/build-script-cache，跨构建就复用不到
+              # 已编译的 build-script（wasmedge 原生脚本重编很慢），因此把它链回挂载点。
+              rm -rf build-script-cache
+              ln -sfn ../../build-script-cache build-script-cache
               cjpm update
               if ! git diff --exit-code -- cjpm.lock; then
                 git diff -- cjpm.lock || true
@@ -177,7 +186,7 @@ $:
               rm -rf app
               mkdir -p app/frontend
 
-              cp target/release/bin/main app/
+              cp apps/server/target/release/bin/main app/
               cp -r apps/web/out app/frontend/out
             '
 

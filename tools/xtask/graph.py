@@ -20,6 +20,7 @@ IGNORED_DIRS = {
     ".next",
     "__pycache__",
     "build",
+    "build-script-cache",
     "coverage",
     "dist",
     "node_modules",
@@ -28,6 +29,8 @@ IGNORED_DIRS = {
 }
 
 CLIENT_TARGET_IDS = ("web:frontend", "mobile:client", "extension:extension", "mcp")
+# Cangjie 服务端可部署包的位置（原仓库根 src/ + cjpm.toml，PR6 迁入 apps/server）。
+SERVER_ROOT = "apps/server"
 
 
 @dataclass(frozen=True)
@@ -198,7 +201,14 @@ def build_graph(
                 f"duplicate target id {target_id!r} at {rel}; keeping existing target"
             )
             continue
-        prefixes = ("src", "cjpm.toml", "cjpm.lock") if rel == "." else (rel,)
+        # 服务端根包已迁到 apps/server；不再有 rel == "." 的 Cangjie 包。
+        # 真出现根 manifest 时显式告警，并继续按服务端前缀归属，避免 ('.',) 被
+        # _under() 当作"匹配全仓"而把整个仓库吸进一个 target。
+        if rel == ".":
+            warnings.append("root cjpm.toml found; server package is expected at apps/server")
+            prefixes = (SERVER_ROOT,)
+        else:
+            prefixes = (rel,)
         dependencies: list[str] = []
         for section in ("dependencies", "test-dependencies"):
             values = payload.get(section, {})

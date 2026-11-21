@@ -42,6 +42,18 @@ allowed_deps = [
 forbidden = ["lgui", "lgpu", "lwp"]
 note = "违规项应在 M1/M6 迁入 lwindow.backend.lwp 后消失"
 
+# 服务端根包（PR6 从仓库根迁入 apps/server）。依赖面与迁移前完全一致，
+# 不做清理：这里登记的是**现状白名单**，新增依赖仍会被拦下。
+[package.lanlu]
+path = "apps/server"
+allowed_deps = [
+  "ahash", "archive_ffi", "argon2_ffi", "avif_ffi", "brotli_middleware",
+  "cjcron", "cjdotenv", "cjpminfo", "csorm", "csorm_macros", "epub",
+  "ignite", "postgresql_driver", "rawdir_ffi", "rocksdb_ffi", "semver",
+  "totp_cj", "vips_ffi", "wasmedge_ffi", "webauthn_cj",
+]
+note = "可部署服务端：HTTP/路由/持久化/插件宿主；依赖面为迁移前现状，新增须显式登记"
+
 [package.lbase]
 path = "packages/lbase"
 allowed_deps = []
