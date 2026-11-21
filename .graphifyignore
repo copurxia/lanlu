@@ -6,7 +6,7 @@ data/logs/
 dist/
 .next/
 out/
-client/node_modules/
+apps/mobile/node_modules/
 client-next/target/
 apps/mcp/target/
 build-script-cache/

@@ -51,7 +51,7 @@
 
 ## 项目结构（DDD）
 
-> 目录迁移进行中：`extension` 已迁至 `apps/extension`，其余各端（`src`、`client-next`、`frontend`、`client`、`mcp`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
+> 目录迁移进行中：`extension`→`apps/extension`、`mcp`→`apps/mcp`、`client`→`apps/mobile` 已落地；`src`（待迁 `apps/server`）、`client-next`（待迁 `apps/desktop`）与 `frontend`（待迁 `apps/web`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
 
 ```text
 lanlu/

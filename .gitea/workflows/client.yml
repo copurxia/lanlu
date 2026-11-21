@@ -4,11 +4,11 @@ run-name: ${{ github.actor }} is checking the React Native client
 on:
   push:
     paths:
-      - "client/**"
+      - "apps/mobile/**"
       - ".gitea/workflows/client.yml"
   pull_request:
     paths:
-      - "client/**"
+      - "apps/mobile/**"
       - ".gitea/workflows/client.yml"
   workflow_dispatch:
   schedule:
@@ -91,24 +91,24 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: |
           set -eux
-          cd client
+          cd apps/mobile
           npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: |
           set -eux
-          cd client
+          cd apps/mobile
           npx tsc --noEmit
 
       - name: Unit tests
         run: |
           set -eux
-          cd client
+          cd apps/mobile
           npm test -- --runInBand --ci
 
       # The client still carries a pre-existing lint baseline (unused symbols and
@@ -118,7 +118,7 @@ jobs:
         continue-on-error: true
         run: |
           set -eux
-          cd client
+          cd apps/mobile
           npm run lint
 
   android-release:
@@ -189,12 +189,12 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: client/package-lock.json
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: |
           set -eux
-          cd client
+          cd apps/mobile
           npm ci --no-audit --no-fund
 
       - name: Set up JDK
@@ -270,7 +270,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('client/android/**/*.gradle*', 'client/android/gradle/wrapper/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
@@ -280,7 +280,7 @@ jobs:
           GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
         run: |
           set -eux
-          cd client/android
+          cd apps/mobile/android
           chmod +x gradlew
           # 与 nightly 相同的 versionCode 递进策略（yymmddnn），保证可覆盖安装。
           code="$(( $(date -u +%y%m%d) * 100 + 3 ))"
@@ -294,7 +294,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: client-android-release
-          path: client/android/app/build/outputs/apk/release/app-release.apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
 
       - name: Publish to nightly release
@@ -306,7 +306,7 @@ jobs:
           password: ${{ secrets.TOKEN }}
         run: |
           set -eux
-          apk="client/android/app/build/outputs/apk/release/app-release.apk"
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
           test -f "$apk"
           api="${SERVER_URL%/}/api/v1/repos/${REPOSITORY}"
           auth="Authorization: token $password"
