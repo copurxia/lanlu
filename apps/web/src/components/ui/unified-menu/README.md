@@ -240,7 +240,7 @@ import { UserMenu } from '@/components/user/UserMenuUnified'
 ## 文件结构
 
 ```
-frontend/src/components/ui/unified-menu/
+apps/web/src/components/ui/unified-menu/
 ├── index.ts                          # 导出入口
 ├── unified-menu.tsx                  # 主组件
 ├── unified-menu.types.ts             # 类型定义
@@ -260,5 +260,5 @@ frontend/src/components/ui/unified-menu/
 
 查看以下文件了解实际使用：
 
-- `frontend/src/components/ui/media-card-actions-unified.tsx` - BaseMediaCard 右键菜单
-- `frontend/src/components/user/UserMenuUnified.tsx` - UserMenu 头像菜单
+- `apps/web/src/components/ui/media-card-actions-unified.tsx` - BaseMediaCard 右键菜单
+- `apps/web/src/components/user/UserMenuUnified.tsx` - UserMenu 头像菜单

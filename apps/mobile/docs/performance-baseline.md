@@ -11,7 +11,7 @@ Use the release APK and keep the device unplugged from the debugger.
 For the cold-start part, with a device connected over adb:
 
 ```bash
-./client/scripts/collect-perf-baseline.sh /workspace/lanlu/lanlu-client-1.0-release.apk
+./apps/mobile/scripts/collect-perf-baseline.sh /workspace/lanlu/lanlu-client-1.0-release.apk
 ```
 
 The script performs three `am force-stop` + `am start -W` runs, one swipe, and
