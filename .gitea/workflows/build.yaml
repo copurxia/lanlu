@@ -519,26 +519,26 @@ jobs:
           pnpm -v
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           pnpm install --frozen-lockfile
       - name: Typecheck frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run typecheck
       - name: Test frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run test:ci
       - name: Build frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run build
       - name: Prepare release artifacts
         run: |
           mkdir -p app
           mkdir -p app/frontend
           cp target/release/bin/main app/
-          cp -r frontend/out app/frontend/out
+          cp -r apps/web/out app/frontend/out
       - name: Archive production artifacts
         # v4 的 @actions/artifact 2.x 走 GitHub Artifact v2 协议，Forgejo 未实现，
         # 报 GHESNotSupportedError（run #1264）；v3 旧协议 Forgejo 兼容。

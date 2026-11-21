@@ -220,7 +220,7 @@ def build_graph(
         raw_dependencies[target_id] = dependencies
 
     for target_id, rel in (
-        ("web:frontend", "frontend"),
+        ("web:frontend", "apps/web"),
         ("mobile:client", "apps/mobile"),
         ("extension:extension", "apps/extension"),
     ):

@@ -10,8 +10,8 @@ apps/mobile/node_modules/
 client-next/target/
 apps/mcp/target/
 build-script-cache/
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
 ref/
 lanlup/

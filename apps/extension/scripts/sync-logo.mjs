@@ -5,7 +5,7 @@ import { Resvg } from "@resvg/resvg-js"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const extensionDir = resolve(__dirname, "..")
-const sourceSvg = resolve(extensionDir, "../../frontend/public/logo.svg")
+const sourceSvg = resolve(extensionDir, "../../apps/web/public/logo.svg")
 const outputPng = resolve(extensionDir, "assets/icon.png")
 
 const rawSvg = readFileSync(sourceSvg, "utf-8")

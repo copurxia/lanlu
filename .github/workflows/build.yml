@@ -319,22 +319,22 @@ jobs:
 
       - name: Install frontend dependencies
         run: |
-          cd frontend
+          cd apps/web
           pnpm install --frozen-lockfile
 
       - name: Typecheck frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run typecheck
 
       - name: Test frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run test:ci
 
       - name: Build frontend
         run: |
-          cd frontend
+          cd apps/web
           pnpm run build
 
       - name: Prepare release artifacts
@@ -342,7 +342,7 @@ jobs:
           mkdir -p app
           mkdir -p app/frontend
           cp target/release/bin/main app/
-          cp -r frontend/out app/frontend/out
+          cp -r apps/web/out app/frontend/out
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v4

@@ -163,7 +163,7 @@ $:
           script: |
             bash -lc '
               set -eux
-              cd frontend
+              cd apps/web
               pnpm install --frozen-lockfile
               pnpm run typecheck
               pnpm run test:ci
@@ -178,7 +178,7 @@ $:
               mkdir -p app/frontend
 
               cp target/release/bin/main app/
-              cp -r frontend/out app/frontend/out
+              cp -r apps/web/out app/frontend/out
             '
 
         - name: Package runtime bundle (zip)
