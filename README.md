@@ -143,11 +143,19 @@ cjpm build -V
 ### 构建前端
 
 ```bash
-cd frontend
+cd apps/web
 corepack enable
 pnpm install --frozen-lockfile
 pnpm run build
 ```
+
+> 注意：服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`src/infrastructure/middleware/frontend_fallback.cj:10`），构建产物现在生成在 `apps/web/out`。本地直接跑 `./target/release/bin/main` 时，需要把产物放到该路径，否则页面 404：
+>
+> ```bash
+> mkdir -p frontend && ln -sfn ../apps/web/out frontend/out
+> ```
+>
+> Docker 部署不受影响：镜像内仍是 `/app/frontend/out`。让该默认值可配置是待办项，不在本次纯路径迁移范围内。
 
 ### 运行
 

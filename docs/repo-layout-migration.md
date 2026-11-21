@@ -74,7 +74,15 @@ xtask 按 manifest 递归发现 Cangjie 包，多数端迁移后能自然发现�
 
 `client/` 是 React Native 工程，Android Gradle、patch 脚本和依赖均基于目录内部相对路径。使用 `git mv` 整目录移动可保留结构；CI 必须同步 npm cache key、`cd` 路径和 artifact 路径。迁移后应通过 `workflow_dispatch` 验证一次 Android release，而不仅跑 quality job。
 
-### 3.4 单 runner 串行
+### 3.4 PR4 带出的本地开发副作用（已知，不影响 CI）
+
+服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`src/infrastructure/middleware/frontend_fallback.cj:10`，`src/contexts/system/interfaces/http/frontend_controller.cj:31/145/338/426` 的默认参数同此）。PR4 后构建产物在 `apps/web/out`：
+
+- **Docker/CI 不受影响**：镜像内仍是 `/app/frontend/out`，`build.yaml` 用 `cp -r apps/web/out app/frontend/out` 组装，`scripts/docker-smoke-test.sh:11` 的断言也指向该路径。
+- **本地直跑受影响**：`./target/release/bin/main` 找不到页面；README 已注明用 `mkdir -p frontend && ln -sfn ../apps/web/out frontend/out` 兜底。
+- **根治方式（独立 PR，不属于纯路径迁移）**：把默认值改为可被环境变量覆盖，或统一改成 `apps/web/out` 并同步 bundle 组装。
+
+### 3.5 单 runner 串行
 
 Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁移 PR 会进入完整主链。因此禁止一次混迁多个端；每个 PR 都要单独等待对应 job 出结论后再开下一批。
 
