@@ -559,6 +559,11 @@ jobs:
         run: Add-Content -LiteralPath $env:GITHUB_ENV -Value "CANGJIE_STDX_PATH=${env:CANGJIE_STDX_PATH_STATIC}\stdx"
 
       - name: Set up MSYS2 native dependencies
+        # SDL3/TTF 由 UCRT64 提供（包名已按 packages.msys2.org 核实：
+        # mingw-w64-sdl3 3.4.20、mingw-w64-sdl3-ttf 3.2.2，与 Linux 侧同源）。
+        # 旧工作流期望仓库内 packages/cangjie-gui/sdl/.sdl3，该目录在树里为空。
+        # 注意：注释必须写在 install: 之外——>- 折叠标量里的 # 不是注释，
+        # 会被当作包名传给 pacman。
         id: msys2
         uses: msys2/setup-msys2@v2
         with:
@@ -582,9 +587,6 @@ jobs:
             mingw-w64-ucrt-x86_64-libass
             mingw-w64-ucrt-x86_64-dlfcn
             mingw-w64-ucrt-x86_64-rocksdb
-            # SDL3/TTF 由 UCRT64 提供（包名已按 packages.msys2.org 核实：
-            # mingw-w64-sdl3 3.4.20、mingw-w64-sdl3-ttf 3.2.2，与 Linux 侧同源）。
-            # 旧工作流期望仓库内 packages/cangjie-gui/sdl/.sdl3，该目录在树里为空。
             mingw-w64-ucrt-x86_64-sdl3
             mingw-w64-ucrt-x86_64-sdl3-ttf
 
