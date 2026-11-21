@@ -1,5 +1,6 @@
 import std.fs.{copy, Directory, exists, File, Path}
-import std.process.{execute, ProcessRedirect}
+import std.collection.ArrayList
+import std.process.{execute, executeWithOutput, ProcessRedirect}
 
 private let LOGO_SOURCE = Path("assets/lanlu_logo_gold.png")
 private let EMBEDDED_LOGO_OUTPUT = Path("src/ui/embedded_logo.cj")
@@ -88,6 +89,28 @@ private func buildWebviewNative(): Int64 {
     0
 }
 
+// Ubuntu 把 freetype 头文件放在 /usr/include/freetype2，桥里的 `#include <ft2build.h>`
+// 需要额外的 -I；路径随发行版与 pkg-config 前缀而变，不能硬编码。取不到时返回空
+// 数组，让编译以原始的 "ft2build.h: No such file" 失败，而不是掩盖成别的问题。
+@When[os != "Windows"]
+private func freetypeCflags(): Array<String> {
+    try {
+        let (code, out, _) = executeWithOutput("pkg-config", ["--cflags", "freetype2"])
+        if (code != 0) {
+            return Array<String>()
+        }
+        let flags = ArrayList<String>()
+        for (part in String.fromUtf8(out).trimAscii().split(" ")) {
+            if (part.size > 0) {
+                flags.add(part)
+            }
+        }
+        return flags.toArray()
+    } catch (e: Exception) {
+        return Array<String>()
+    }
+}
+
 @When[os == "Windows"]
 private func buildSubtitleNative(): Int64 {
     let avStatus = execute("x86_64-w64-mingw32-gcc",
@@ -135,10 +158,12 @@ private func buildSubtitleNative(): Int64 {
     if (avArchive != 0) {
         return avArchive
     }
-    let assStatus = execute("cc",
-        ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC", "-c",
-            "../packages/libass_ffi/native/lanlu_ass_bridge.c", "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"],
-        stdOut: ProcessRedirect.Inherit, stdErr: ProcessRedirect.Inherit)
+    let assArgs = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-fPIC"]
+        .concat(freetypeCflags())
+        .concat(["-c", "../packages/libass_ffi/native/lanlu_ass_bridge.c",
+            "-o", "../packages/libass_ffi/native/lanlu_ass_bridge.o"])
+    let assStatus = execute("cc", assArgs, stdOut: ProcessRedirect.Inherit,
+        stdErr: ProcessRedirect.Inherit)
     if (assStatus != 0) {
         return assStatus
     }

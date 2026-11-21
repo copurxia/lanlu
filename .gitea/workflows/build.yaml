@@ -887,7 +887,9 @@ jobs:
             -o packages/libavformat_ffi/native/lanlu_avformat_bridge.o
           ar rcs packages/libavformat_ffi/native/liblanlu_avformat_bridge.a \
             packages/libavformat_ffi/native/lanlu_avformat_bridge.o
-          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC \
+          # 桥里 #include <ft2build.h>，Ubuntu 把它放在 /usr/include/freetype2；
+          # 路径随发行版/pkg-config 前缀变化，取 pkg-config 的 cflags 而不是硬编码。
+          cc -std=c11 -Wall -Wextra -Werror -O2 -fPIC $(pkg-config --cflags freetype2) \
             -c packages/libass_ffi/native/lanlu_ass_bridge.c \
             -o packages/libass_ffi/native/lanlu_ass_bridge.o
           ar rcs packages/libass_ffi/native/liblanlu_ass_bridge.a \
