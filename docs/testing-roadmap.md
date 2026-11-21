@@ -21,20 +21,20 @@
 
 | 端 | 现有测试资产 | CI 真实执行情况 | 主要缺口 |
 |---|---|---|---|
-| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `src/contexts/archive/domain/`、`src/infrastructure/kv/`、`src/shared/config/` | 根包 `cjpm test` 已由独立 `orm-test` job 执行（Gitea `build.yaml` 实测通过，run 2468 #6182；GitHub `.github/workflows/build.yml:90` 待镜像修复）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
+| 服务端 | 5 个测试文件、12 个 `@Test`，位于 `apps/server/src/contexts/archive/domain/`、`apps/server/src/infrastructure/kv/`、`apps/server/src/shared/config/` | 根包 `cjpm test` 已由独立 `server-test` job 执行（Gitea `build.yaml` 实测通过，run 1482 `PASSED: 12, SKIPPED: 0`）；子包 csorm / pg-driver 为 `:78`、`:84` | routes/controller/auth/migration/WASM host/DTO 基本零测试；无 HTTP 集成与 E2E |
 | 桌面端 | 29 个测试文件、261 个 `@Test`，集中在 `client-next/src/net/`、`app/`、`ui/`、`storage/`、`img/`、`i18n/` | Linux 执行 `cjpm test --parallel nCores --timeout-each 60s --report-format xml`（`.github/workflows/client-next.yml:372-377`）；Windows 只执行 `rocksdb_ffi`（`:554`） | `model.cj` 状态机、主 API 客户端、离线恢复、UI 关键路径与真实交互 E2E 缺失 |
 | Web | 3 个测试文件、19 个用例 | 已执行 frozen install + typecheck + test:ci（`.github/workflows/build.yml:323`、`:328`、`:333`），随后 build（`:338`） | 19 例已全部迁移到 Vitest 并接入 CI（`frontend/package.json:7` 起有 `typecheck`/`test`/`test:ci`）；仍无组件交互与 E2E 测试 |
 | 移动端 | 13 个测试文件、114 个用例（原 8 文件/32 例 + 新增 5 文件/82 例：`a9fff46a` 46、`36803ef6` 9、`1eb69a58` 19、`19bdd372` 8），Jest | **执行 `npm test -- --runInBand --ci`**（`.github/workflows/client.yml:60`、`.gitea/workflows/client.yml:61`） | Phase 2B 已覆盖 6 个 offline store、进度队列重放、`api/client.ts` 拦截器与服务器地址校验；IPv6/协议相对/无 server 场景已覆盖；`api/lanlu.ts`、`api/admin.ts`、session/storage、25 个 screen 仍缺测试；无 Detox/Maestro E2E |
 | extension | 0 | 只 build + typecheck（`.github/workflows/extension.yml:29`、`:34`） | 单测、浏览器 API fake、扩展 E2E 全缺 |
 | MCP | 6 个文件、30 个 Rust 用例 | **构建后执行 `cargo test --locked`**（Gitea `mcp` job 实测通过，run 2468 #6184；GitHub `.github/workflows/cli.yml:35-41` 待镜像修复；`.gitea` 的 `cli.yaml`、`build.yaml` 同步） | 测试已接线；无 stdio/tool 集成测试 |
 
-服务端根 `cjpm.toml`、桌面 `client-next/cjpm.toml`、Web `frontend/package.json`、移动 `client/package.json` 是四端各自的构建事实源；目前没有统一的本地/CI 任务入口。
+服务端 `apps/server/cjpm.toml`、桌面 `apps/desktop/cjpm.toml`、Web `apps/web/package.json`、移动 `apps/mobile/package.json` 是四端各自的构建事实源；目前没有统一的本地/CI 任务入口。
 
 ### 1.2 可复现性缺陷会污染测试结论
 
 - **（已解决）** `packages/cangjie-gui` 曾是独立 Git 仓库且被 `.gitignore:26` 隐藏，CI 通过 `git clone --branch lanlu-client-next` 取分支头而非固定提交。`87a3887c` 把源码按工作树状态收编进主仓（468 文件），`912fe24c` 删除 `.gitignore:26` 与 `.github/workflows/client-next.yml` 的 Linux/Windows 两处 clone（grep `git clone` 计数 0）；上游 46 个提交历史未进主仓，见 §10.1.5。
 - 本轮审计时 `packages/lbase`、`packages/lwindow/src/backend/`、`packages/lwindow/src/displays/` 曾为未跟踪路径；现已由 HEAD `b25f846` 跟踪（分别为 6、1、3 个文件），干净 checkout 不再缺少这些路径。Phase 0 仍需用干净 clone 验证完整性，而不是重新跟踪。
-- 根 `cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`client-next/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 执行 `cjpm update`（`.github/workflows/build.yml:176`，其后 `:177` 为 lock 漂移守卫），仍不是只读安装。实测（Codex 用 1.2.0 在全新 `HOME` 与空 `~/.cjpm` 的冷缓存下执行）：`cjpm update` 退出码 0，`cjpm.lock` SHA256 不变（`1594a8b6…d8f21417`），`version` 仍为 `0`，14 条 commitId 全部未漂移——1.2.0 既不自动升级 v0→v1，也不刷新已锁 commit。
+- `apps/server/cjpm.lock` 不是空文件：`[requires]` 锁了 14 条 git 依赖的 commitId（8 直接 + 6 传递），但整体是 v0 旧格式（`version = 0`）；`apps/desktop/cjpm.lock` 及其余 21 个包 lock 为空属正常态——纯 path 依赖不生成锁条目。服务端 CI 在 `apps/server` 内执行 `cjpm update` 并守卫该 lock（三平台同款），仍不是只读安装。实测（Codex 用 1.2.0 在全新 `HOME` 与空 `~/.cjpm` 的冷缓存下执行）：`cjpm update` 退出码 0，`cjpm.lock` SHA256 不变（`1594a8b6…d8f21417`），`version` 仍为 `0`，14 条 commitId 全部未漂移——1.2.0 既不自动升级 v0→v1，也不刷新已锁 commit。
 - 工具链三处不一致：服务端 1.2.0、桌面 CI 1.1.3、桌面 manifest 1.1.0。
 - 桌面路径白名单（`.github/workflows/client-next.yml:5`、`:30`）已补齐依赖闭包：`push` 与 `pull_request` 两处各 23 条，原漏掉的 10 个包及 `tools/`、`toolchain/`、`justfile` 均已纳入，无重复条目；完整的 affected matrix 仍列 Phase 3。
 - `cangjie-repo.toml` 只是中心仓 registry 配置，与工具链版本无关；它不应出现在工具链裁决或测试缓存 key 的核心语义里。
@@ -318,7 +318,7 @@ P0 端点（auth/archive/search/tankoubon/asset，约 40 条）先做：**6–8 
 
 ### 7.1 覆盖率先基线后门禁
 
-当前覆盖率基线不可信：服务端根 `cjpm test` 未在 CI 执行，Web 15 个用例不可运行。顺序必须是：
+当前覆盖率基线不可信：服务端根 `cjpm test` 虽已在 CI 执行（12 例），但覆盖面极低；Web 15 个用例不可运行。顺序必须是：
 
 1. Phase 1 让所有现有可运行测试进入 CI。
 2. 首次采集按包 baseline，只报告，不阻断。
@@ -466,7 +466,7 @@ xtask 子命令至少包括：`doctor`、`setup`、`affected`、`build <target>`
 | 服务端 CI 执行 `cjpm update` | **已解决（守卫生效）** | 三侧 update 后均有 `git diff --exit-code -- cjpm.lock`：`build.yml:176`（守卫 `:177`，主构建 update `:296`/守卫 `:297`）、`.gitea/workflows/build.yaml:173`（守卫 `:174`）、`.cnb.yml:120`（守卫 `:121`）；冷缓存实测无漂移 | 保留 update（wasmedge 补丁依赖其先 clone）；若未来实测刷新 commitId，再把刷新作为显式提交 |
 | 桌面 1.1.3 能力一致性未实测 | **仍待办** | 本文版本脚注所列四项能力 | Phase 0 实测 `--include-tags`、`--parallel`、`--coverage`、`prop_test` |
 | xtask 接入 CI | **已接线（干净 checkout 实测通过）** | `.github/workflows/client-next.yml:70-87` 的 guards job 已加 `setup-python@v5`/3.12（`:79`）与 `doctor --json`（`:84`）、`test --package xtask`（`:87`），均**不带 `--strict`** | 收编后完整树在干净 checkout 里即存在（实测 `missing_path_dep` 为零）；`--strict` 仍留给 nightly 全量校验 |
-| 服务端根包测试 job | **Gitea 侧已实测通过（12/12，0 skip）** | `294bb31c` 在 Gitea `build.yaml:87` 新增 `server-test` job：与 `orm-test` 同款 PG service、`DB_STRING`/`PG_DSN`，并在跑测前预建 `pg_trgm`/`unaccent`（缺扩展会让搜索用例报 `function unaccent(text) does not exist`）；命令为 `cjpm test --timeout-each 60s --show-all-output --report-path target/test-results/server --report-format xml`，`[skip]` 硬失败，`if: always()` 上传 `server-test-results`。`129b470b` 修掉 `set -u` 下 `envsetup.sh` 展开 `$LD_LIBRARY_PATH` 的 unbound variable。实测 run 1482（`129b470b`）`server-test` #6297：`PASSED: 12, SKIPPED: 0, ERROR: 0`，`[skip]` 出现 0 次 | Gitea 侧已闭环；GitHub `build.yml:90` 的同名 job 仍受镜像阻塞，仅作冗余 |
+| 服务端根包测试 job | **Gitea 侧已实测通过（12/12，0 skip）** | `294bb31c` 在 Gitea `build.yaml` 新增 `server-test` job：与 `orm-test` 同款 PG service、`DB_STRING`/`PG_DSN`，并在跑测前预建 `pg_trgm`/`unaccent`（缺扩展会让搜索用例报 `function unaccent(text) does not exist`）；命令为在 `apps/server` 内执行 `cjpm test --timeout-each 60s --show-all-output --report-path target/test-results/server --report-format xml`（PR6 迁移后），`[skip]` 硬失败，`if: always()` 上传 `server-test-results`。`129b470b` 修掉 `set -u` 下 `envsetup.sh` 展开 `$LD_LIBRARY_PATH` 的 unbound variable。实测 run 1482（`129b470b`）`server-test` #6297：`PASSED: 12, SKIPPED: 0, ERROR: 0`，`[skip]` 出现 0 次 | Gitea 侧已闭环；GitHub `build.yml:90` 的同名 job 仍受镜像阻塞，仅作冗余 |
 
 Phase 0 退出标准只保留仍待办项：干净 clone 可构建；无嵌套 `.git`；`cjpm.lock` 守卫三侧生效且实测无漂移（lock 保持 v0 亦可）；`doctor` 通过且 CI 不 clone 分支头；无效 submodule 步骤移除；desktop 1.2.0 验证完成，或 target 例外有明确到期日。
 

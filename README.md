@@ -51,7 +51,7 @@
 
 ## 项目结构（DDD）
 
-> 目录迁移进行中：`extension`→`apps/extension`、`mcp`→`apps/mcp`、`client`→`apps/mobile`、`frontend`→`apps/web`、`client-next`→`apps/desktop` 已落地；`src`（待迁 `apps/server`）仍按原路径运行。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
+> 目录迁移已完成：`extension`→`apps/extension`、`mcp`→`apps/mcp`、`client`→`apps/mobile`、`frontend`→`apps/web`、`client-next`→`apps/desktop`、`src`+`cjpm.toml`→`apps/server`。目标结构为 `apps/`（可部署端）+ `packages/`（可复用库），详见 [docs/repo-layout-migration.md](docs/repo-layout-migration.md)。
 
 ```text
 lanlu/
@@ -69,44 +69,47 @@ lanlu/
 │       │   ├── lib/
 │       │   └── types/
 │       └── messages/
-├── src/                              # 仓颉后端源码（待迁 apps/server）
-│   ├── main.cj                       # 应用入口
-│   ├── contexts/                     # 领域上下文（按业务边界拆分）
-│   │   ├── archive/
-│   │   │   ├── domain/               # 领域模型与领域规则
-│   │   │   ├── infrastructure/       # 持久化与外部实现
-│   │   │   │   └── persistence/
-│   │   │   └── interfaces/           # 对外接口层
-│   │   │       └── http/
-│   │   ├── task/
-│   │   │   ├── domain/
-│   │   │   ├── application/          # 应用服务与用例编排
-│   │   │   │   └── runners/          # 各类任务执行器
-│   │   │   ├── infrastructure/
-│   │   │   │   └── persistence/
-│   │   │   └── interfaces/
-│   │   │       └── http/
-│   │   ├── plugin/
-│   │   │   ├── domain/
-│   │   │   ├── application/
-│   │   │   │   └── runners/
-│   │   │   ├── infrastructure/
-│   │   │   │   └── persistence/
-│   │   │   └── interfaces/
-│   │   │       └── http/
-│   │   └── asset / category / search / smart_filter / system / tag / tankoubon / user
-│   ├── routes/
-│   │   └── api/                      # API 路由注册
-│   ├── infrastructure/               # 跨上下文基础设施
-│   │   ├── archivehandler/
-│   │   ├── kv/
-│   │   ├── middleware/
-│   │   └── migrations/
-│   │       └── versions/
-│   └── shared/                       # 通用配置/工具/响应视图
-│       ├── config/
-│       ├── utils/
-│       └── views/
+│   └── server/                       # 仓颉后端（可部署程序）
+│       ├── cjpm.toml                 # 服务端构建事实源
+│       ├── cjpm.lock
+│       └── src/
+│           ├── main.cj               # 应用入口
+│           ├── contexts/             # 领域上下文（按业务边界拆分）
+│           │   ├── archive/
+│           │   │   ├── domain/       # 领域模型与领域规则
+│           │   │   ├── infrastructure/   # 持久化与外部实现
+│           │   │   │   └── persistence/
+│           │   │   └── interfaces/   # 对外接口层
+│           │   │       └── http/
+│           │   ├── task/
+│           │   │   ├── domain/
+│           │   │   ├── application/  # 应用服务与用例编排
+│           │   │   │   └── runners/  # 各类任务执行器
+│           │   │   ├── infrastructure/
+│           │   │   │   └── persistence/
+│           │   │   └── interfaces/
+│           │   │       └── http/
+│           │   ├── plugin/
+│           │   │   ├── domain/
+│           │   │   ├── application/
+│           │   │   │   └── runners/
+│           │   │   ├── infrastructure/
+│           │   │   │   └── persistence/
+│           │   │   └── interfaces/
+│           │   │       └── http/
+│           │   └── asset / category / search / smart_filter / system / tag / tankoubon / user
+│           ├── routes/
+│           │   └── api/              # API 路由注册
+│           ├── infrastructure/       # 跨上下文基础设施
+│           │   ├── archivehandler/
+│           │   ├── kv/
+│           │   ├── middleware/
+│           │   └── migrations/
+│           │       └── versions/
+│           └── shared/               # 通用配置/工具/响应视图
+│               ├── config/
+│               ├── utils/
+│               └── views/
 ├── data/                             # 运行时数据目录
 │   ├── archive/
 │   ├── thumb/
@@ -115,7 +118,7 @@ lanlu/
 │   └── logs/
 ├── docker-compose.yml
 ├── Dockerfile
-├── cjpm.toml
+├── cangjie-repo.toml                 # 中心仓 registry 配置
 └── .env.example
 ```
 
@@ -137,7 +140,8 @@ lanlu/
 # 设置仓颉环境
 source cangjie/envsetup.sh
 
-# 构建
+# 服务端 manifest 在 apps/server，进入该目录构建
+cd apps/server
 cjpm build -V
 ```
 
@@ -150,7 +154,7 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
-> 注意：服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`src/infrastructure/middleware/frontend_fallback.cj:10`），构建产物现在生成在 `apps/web/out`。本地直接跑 `./target/release/bin/main` 时，需要把产物放到该路径，否则页面 404：
+> 注意：服务端静态目录的默认值是相对 CWD 的 `frontend/out`（`apps/server/src/infrastructure/middleware/frontend_fallback.cj:10`），构建产物现在生成在 `apps/web/out`。**请在仓库根启动**，否则 `frontend/out`、`data/` 都会跟着 CWD 漂移。在仓库根跑时，需要把产物放到该路径，否则页面 404：
 >
 > ```bash
 > mkdir -p frontend && ln -sfn ../apps/web/out frontend/out
@@ -161,7 +165,7 @@ pnpm run build
 ### 运行
 
 ```bash
-./target/release/bin/main
+./apps/server/target/release/bin/main
 ```
 
 访问 `http://localhost:8082`

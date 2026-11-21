@@ -1,6 +1,6 @@
 # 仓库布局迁移方案：apps/packages
 
-状态：方案已裁决；**PR1（`extension`）已落地并经 CI 验证；PR2（`mcp`）、PR3（`client`）、PR4（`frontend`）、PR5（`client-next`）代码已完成、待统一 push 后由 CI 验证**；PR6（`src`）未开始。
+状态：方案已裁决并**全部落地**：PR1（`extension`）已推送并经 CI 验证；PR2–PR6 代码已完成、本地复核通过，**待统一 push 后由 CI 一次性验证**。当前唯一的阻塞是本地没有任何推送凭据（SSH/credential helper/`tea`/token 环境变量全空），需要人工执行一次 `git push origin main`。
 
 盘点基线：`b3afc9e7`，2026-11-21。
 硬前置（**已达成**）：桌面端 261 个用例在**当前路径**跑出绿基线——run 1511（`ba1747e9`）`client-next-test` success，13m03s，261/261 PASSED，详见 `docs/testing-roadmap.md` §10.1.7。该结果即为 PR1 的开工闸门；PR2 在其后串行执行。
@@ -109,7 +109,7 @@ Gitea 当前单 runner 串行，`build.yaml` 没有细粒度 path filter，迁�
 | PR3 | `client/` → `apps/mobile/` | 0.5 | **代码已完成，待 CI 验证**：`client.yml quality` 绿；用 `workflow_dispatch` 验证 Android release；affected 能命中 mobile。本地已验：`apps/mobile` 下 `tsc --noEmit` 0、jest 13 suites / 114 例全过；`android/` 与 `package-lock` 随目录移动，Jest/Metro 配置为相对路径无需改 |
 | PR4 | `frontend/` → `apps/web/` | 0.5–1 | **代码已完成，待 CI 验证**：`build` job 中 frontend typecheck/test/build 绿；`package` Docker 构建与 smoke 绿。本地已验：`apps/web` 下 typecheck 0、`test:ci` 19/19、`build` 成功；镜像内 `app/frontend/out` 与 `FrontendController` 的 `frontend/out` 默认值均不受源码目录迁移影响 |
 | PR5 | `client-next/` → `apps/desktop/` | 1 | **代码已完成，待 CI 验证**：Gitea `client-next-test` 绿（261 例）；本地 layering/no-SDL/state-write/image-decode 守卫需在 push 后跑。已同步：`cjpm.toml` 与 `build.cj` 的 `../packages` → `../../packages`（17+25 处）、`cjpm.lock` 无路径、守卫脚本与基线、`deps-rules.toml`、Gitea/GitHub workflow、xtask fixture |
-| PR6 | 根 `src/` + manifest → `apps/server/` | 1–2 | `orm-test`、`server-test` 12/12 0 skip、`build` + lcodec、`package` Docker/smoke/`.so.9.11`、`mcp`、`extension` 全绿；doctor 和守卫绿 |
+| PR6 | 根 `src/` + manifest → `apps/server/` | 1–2 | **代码已完成，待 CI 验证**：`orm-test`、`server-test` 12/12 0 skip、`build` + lcodec、`package` Docker/smoke/`.so.9.11`、`mcp`、`extension` 全绿；doctor 和守卫绿。已同步：`cjpm.toml` 的 12 处 `path` → `../../packages/…`；三平台 CI 进 `apps/server` 后建/测，二进制改 `apps/server/target/release/bin/main`；`check-deps.py` 扩到 `apps/*/cjpm.toml` 并在 `deps-rules.toml` 登记 `[package.lanlu]`；xtask 去掉根包特判（根 manifest 只告警并归到 `apps/server`）；fixtures 改为 `apps/server`。**未动**：`frontend/out` 运行时默认值、`scripts/docker-smoke-test.sh` 的 `/app/frontend/out`、`cp -r apps/web/out app/frontend/out` |
 
 总估算为 4–6 人日，不含 CI 排队和首波路径遗漏调试。
 
