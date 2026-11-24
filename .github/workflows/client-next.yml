@@ -74,10 +74,6 @@ jobs:
     # 固定 26.04 digest 的容器，不受 runner 镜像升级影响。
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # 两个自测脚本的 mktemp 默认已改为“仓库同级 tmp/”，不再写死 Gitea 自托管 runner
-      # 的 /workspace/lanlu/tmp；这里再显式给一次，避免继承到不可写目录。
-      TMPDIR: ${{ runner.temp }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -123,9 +119,15 @@ jobs:
 
       # 平台包自测：壳侧 LWP 发送端的字节级契约（协议模式 + 回落模式）
       - name: Platform package selftest (shell LWP client)
+        # runner 上下文在 step 级 env 可用；job 级 env 不允许引用 runner，否则 workflow
+        # 在解析期就失败（Unrecognized named-value: 'runner'）。
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: bash packages/lplatform-ohos/selftest/run-tests.sh
 
       - name: LWP tests (C side + generated artifacts)
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: bash packages/lwp/test.sh
 
       # 壳/引擎都依赖 liblwp.so；导出符号必须恰好是公开 API（计划 §5.2 符号门禁）
