@@ -158,6 +158,17 @@
 | 残留 `uses:` 仍单点依赖 github.com | `bfe7b753` 已把 11 处 `actions/checkout` 换成本地 clone（`github.server_url` + token），run 1506/1511 实证 `checked out … (1091 commits)` 且不再访问 github.com。但 `.gitea/workflows/**` 仍有 **23 处**活跃 `uses:`（`build.yaml` 14、`client.yml` 6、`extension.yaml` 2、`cli.yaml` 1），按 action 拆：`upload-artifact` 7、`setup-node` 4、`setup-cangjie` 3、`build-push-action` 2、`cache` 2，`setup-buildx`/`login`/`setup-python`/`setup-java`/`download-artifact` 各 1 | 任一 action 取不到，job 在 `Set up job` 阶段即失败：run 1511 的 `guards`(3s) 与 `package`(1s) 就是 04:33 runner→github 代理断线（`192.168.0.202` 连不上，日志停在 `git fetch 'https://github.com/actions/setup-python'` 与 `actions/download-artifact`），同一窗口 extension run 1512 的 7 个 job 全挂，而 run 1509 的 `guards` 为 success——**瞬时断线，不是配置回归**。缓解：后续改动不新引 `uses:`；action 缓存/镜像属 owner 配置 |
 | 外部 git 依赖无重试、无 pin | 构建期直接 clone 两个外部仓库：`cjpm.toml:15` 的 `ignite`（`gitcode.com/copur/ignite-cangjie.git`，`branch = "stdx"`）与 `.gitea/workflows/build.yaml:270`、`:448` 的 WasmEdge（`github.com/WasmEdge/WasmEdge`）。run 1511 的 `server-test` 因 gitcode 瞬时 reset 失败（同 run 的 `build` 用同一套依赖成功）；WasmEdge 在 run 1490/1506 各静默挂起一次（后者 22 分钟，占死单 runner） | WasmEdge 侧已由 `ba1747e9` 加 `timeout 300` + 单次重试，run 1511 实测 clone 10–13s、**重试未触发**；gitcode 侧仍无看门狗。两者都跟分支头而非固定提交。推荐方案：vendored tarball + sha256 校验（独立 PR，代价是仓库体积与升级流程）；次选 runner 侧镜像缓存（需 owner）。在此之前，此类失败按基础设施失败归类 |
 
+### 5.1.2 nightly 分支策略
+
+Issue 自动化流水线创建的 PR，默认将其 head 分支自动合并到 `nightly` 以触发整条 CI：
+
+1. **先同步 `main`**：每次合并 issue 分支前，先把最新 `main` 合入 `nightly`，避免 nightly 长期偏离主线。
+2. **再合并 PR**：调用 `POST /repos/copur/lanlu/merges`（`base=nightly`，`head` 为对应 `issue-<编号>` 分支）；`nightly` 不存在时先从最新 `main` 创建。
+3. **冲突即跳过**：合并冲突或 API 失败时不强行覆盖，跳过该次自动合并，并在 issue 与 PR 注明原因。
+4. **只写 nightly**：该流程只更新 `nightly`，**绝不 force push 或直接改写 `master`/`main`**。
+
+GitHub 镜像 `copurxia/lanlu` 当前没有 `nightly` 分支，因此 GitHub Actions 不会随 nightly 更新自动触发。需 owner 配置镜像分支，或另行触发 GitHub 侧验证；在此之前 nightly 结果只以 Gitea 为准。
+
 ### 5.2 affected 依赖闭包
 
 测试 workflow 不再手写 `paths` 白名单。每个 PR 先跑轻量 `plan` job：
