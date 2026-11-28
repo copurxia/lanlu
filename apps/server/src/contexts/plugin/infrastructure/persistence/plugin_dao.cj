@@ -55,6 +55,13 @@ public class PluginDao {
 
     private static let PLUGIN_SELECT = "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins"
 
+    /**
+     * plugins 插入 SQL。列顺序必须与 create() 的 params 及表结构一致：
+     * has_schema 是 BOOLEAN（无 cast），parameters 是 JSONB（$18::jsonb）。
+     * V030 将 parameters 转为 jsonb；$17 若误加 ::jsonb 会命中 boolean 列并报错。
+     */
+    public static let INSERT_SQL = "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17, $18::jsonb, $19)"
+
     private static func readPluginFromRow(row: Row): PluginData {
         let plugin = PluginData()
         plugin.id = row.getOrNullInt32(0) ?? 0
@@ -174,7 +181,7 @@ public class PluginDao {
             vjson(plugin.parameters),
             vtext(plugin.update_url)
         ]
-        let sql = "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, source_id_regex, pre_hooks, after_hooks, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16, $17::jsonb, $18, $19)"
+        let sql = INSERT_SQL
         match (DatabaseConfig.getDatabase()) {
             case Some(db) =>
                 try {
