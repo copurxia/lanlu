@@ -36,6 +36,11 @@ import {
 } from '@/lib/services/source-plugin-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
+import {
+  getSelectFilterItems,
+  toSelectFilterValue,
+  toSourceFilterValue,
+} from '@/lib/source-filter-options';
 
 function SourceMediaCard({
   item,
@@ -762,23 +767,22 @@ export default function SourcePage() {
                 );
               }
               if (filter.type === 'select') {
+                const selectedValue = toSelectFilterValue(val);
+                const selectItems = getSelectFilterItems(filter);
                 return (
                   <Select
                     key={filter.key}
-                    value={val === '' || val == null ? '_all' : String(val)}
-                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: v === '_all' ? '' : v })}
+                    value={selectedValue}
+                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: toSourceFilterValue(v) })}
                   >
                     <SelectTrigger className="w-auto min-w-[120px]">
                       <SelectValue placeholder={filter.label} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="_all">全部</SelectItem>
-                      {filter.options?.map((opt) => (
-                        opt.value !== '' && (
+                      {selectItems.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
                         </SelectItem>
-                        )
                       ))}
                     </SelectContent>
                   </Select>
