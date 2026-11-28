@@ -62,6 +62,17 @@ cd apps/server && cjpm test --parallel nCores --timeout-each 600s
 - PR 描述含变更、测试证据、风险、回滚；issue 评论含根因、修复、PR 链接、验证结果。
 - 不合并 master、不部署、不手动 dispatch、不 push master。
 
+## CI 触发事实（2026-11-28）
+
+- `build.yaml` / `extension.yaml` / `build.yml` / `extension.yml` 均为 `on: [push]`，**没有** `pull_request` 触发器。
+  推送分支即产生 build + extension 两个 run；开 PR 不会再触发它们。
+- `cli.yaml`（`apps/mcp/**`）与 `client.yml`（`apps/mobile/**`）有路径过滤的 `pull_request` 触发。
+- `client-next.yml` 为 `apps/desktop/**` 等路径的 push（及可能的 PR）触发。
+- 因此「开 PR 只触发一次 PR run」的假设在本仓库对 build 主流程不成立；推送即跑。
+  为控制 run 数，docs-only 的 skill/脚手架 lane 建议等主修复合并后再推，避免额外 run。
+- 当前 CI 的 `Setup Cangjie` / `Set up job` 阶段存在基础设施性失败（main 同样失败），
+  不能据此判定代码回归；需区分「环境失败」与「测试失败」。
+
 ## 失败处理
 
 | 现象 | 处理 |
