@@ -29,7 +29,6 @@ import { SettingsNav } from '@/components/settings/SettingsNav';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import {
-  buildSmartFilterHref,
   getSmartFilterName,
   type SmartFilter,
   SmartFilterService,
@@ -38,6 +37,11 @@ import {
   SourcePluginService,
   type SourcePluginSummary,
 } from '@/lib/services/source-plugin-service';
+import {
+  buildCategoryHref,
+  getSmartFilterSidebarState,
+  isCategoryActive,
+} from '@/lib/sidebar-navigation';
 import { cn } from '@/lib/utils/utils';
 import { logger } from '@/lib/utils/logger';
 
@@ -53,31 +57,6 @@ const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
 
 const itemClassName =
   'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors';
-
-function normalizeParams(params: URLSearchParams): string {
-  const normalized = new URLSearchParams(params.toString());
-  normalized.delete('page');
-  const entries = Array.from(normalized.entries()).sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
-  return new URLSearchParams(entries).toString();
-}
-
-function buildCategoryHref(categoryId: string, searchParams: { toString(): string } | null): string {
-  const params = new URLSearchParams(searchParams?.toString() || '');
-  params.delete('q');
-  params.delete('page');
-  if (params.get('sortby') === 'relevance') params.delete('sortby');
-
-  if (categoryId === 'all') {
-    params.delete('category_id');
-  } else {
-    params.set('category_id', categoryId);
-  }
-
-  const queryString = params.toString();
-  return queryString ? `/?${queryString}` : '/';
-}
 
 function getSmartFilterIcon(iconName: string) {
   const Icon = ICON_MAP[iconName] || Filter;
@@ -271,12 +250,7 @@ function AppSidebarNavContent({
     [enabledCategories]
   );
 
-  const currentHomeKey = useMemo(() => {
-    if (pathname !== '/') return '';
-    return normalizeParams(new URLSearchParams(searchParams?.toString() || ''));
-  }, [pathname, searchParams]);
-
-  const hasSearchQuery = Boolean(searchParams?.get('q'));
+  const searchQuery = searchParams?.get('q') || '';
 
   return (
     <div className={cn('h-full overflow-y-auto bg-background', className)}>
@@ -289,7 +263,13 @@ function AppSidebarNavContent({
                 onClick={onNavigate}
                 className={cn(
                   itemClassName,
-                  pathname === '/' && !hasSearchQuery && activeCategoryId === 'all'
+                  isCategoryActive({
+                    pathname,
+                    searchQuery,
+                    activeCategoryId,
+                    categoryId: 'all',
+                    searchParams,
+                  })
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
@@ -309,7 +289,13 @@ function AppSidebarNavContent({
                     onClick={onNavigate}
                     className={cn(
                       itemClassName,
-                      pathname === '/' && !hasSearchQuery && activeCategoryId === category.catid
+                      isCategoryActive({
+                        pathname,
+                        searchQuery,
+                        activeCategoryId,
+                        categoryId: category.catid,
+                        searchParams,
+                      })
                         ? 'bg-primary text-primary-foreground'
                         : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                     )}
@@ -399,10 +385,11 @@ function AppSidebarNavContent({
                 <SidebarSkeleton lines={3} />
               ) : smartFilters.length > 0 ? (
                 smartFilters.map((filter) => {
-                  const href = buildSmartFilterHref(filter);
-                  const isActive =
-                    pathname === '/' &&
-                    normalizeParams(new URLSearchParams(href.split('?')[1] || '')) === currentHomeKey;
+                  const { href, isActive } = getSmartFilterSidebarState(
+                    filter,
+                    searchParams,
+                    pathname
+                  );
 
                   return (
                     <Link
