@@ -32,6 +32,19 @@ errors: none
 - `cjpm test` / `cjpm build`：环境无 Cangjie 工具链（`cjc`/`cjpm` 不在 PATH），无法运行。
   不伪造通过结论；需在有 SDK 的 CI 重跑。
 - 未启动 PostgreSQL 做端到端上传验证；同一根因可由上述静态映射 + 回归测试覆盖。
+- 本地尝试启动 `/workspace/lanlu/pg18src/bin/postgres` 失败（缺 libicu76 且 `--version` 栈溢出），
+  放弃 DB 级验证。
+
+## CI 观察（推送后）
+
+- 推送 `issue-13` 触发 build.yaml run 1526 与 extension.yaml run 1527。
+- 失败点在环境初始化，不在代码：`Setup Cangjie` 在 13 分钟后失败，`build`/`guards`/`client-next-test`
+  在 `Set up job` 阶段即失败（1 分钟内）。同样的 job 在 `main` 的最新 run（1513/2664）上
+  以相同方式失败，说明是 runner/工具链基础设施问题，非本变更引入。
+- `server-test`（真正执行 `cjpm test` 的 job）未跑到测试步骤。
+- 另：按仓库工作流配置，推送分支即触发 `on: [push]` 的 build/extension 两个 run；PR 打开后
+  这些 workflow 未配置 `pull_request` 触发器（`client.yml`/`cli.yml` 才有路径过滤的 PR 触发），
+  因此不会再追加 run。
 
 ## 结论
 
