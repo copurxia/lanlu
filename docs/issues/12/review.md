@@ -4,6 +4,8 @@
 
 - `apps/web/src/lib/source-filter-options.ts` (new pure helper module)
 - `apps/web/src/lib/source-filter-options.spec.ts` (new tests)
+- `apps/web/src/components/source/SourceSelectFilter.tsx`
+- `apps/web/src/components/source/SourceSelectFilter.test.tsx`
 - `apps/web/src/app/(header)/source/page.tsx` (select branch only)
 - `docs/issues/12/*`
 
@@ -24,10 +26,13 @@ types were changed.
   are untouched.
 - Security/performance: pure string mapping, no new network calls, storage or
   user-controlled HTML.
+- The source page now renders `SourceSelectFilter`; its Radix rendering test
+  checks the collapsed plugin empty-option label and maps menu selection back to
+  `""`.
 
 ## Verification
 
-- Full Vitest suite: 4 files, 23 tests passed.
+- Full Vitest suite: 5 files, 24 tests passed.
 - `tsc --noEmit`: passed.
 - `next build` + brotli generation: passed.
 - New files pass eslint.

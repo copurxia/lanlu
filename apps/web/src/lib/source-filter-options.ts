@@ -1,5 +1,7 @@
 import type { SourceFilter, SourceFilterOption } from './services/source-plugin-service';
 
+// Internal display sentinel for "no filter". A plugin option whose real value is
+// also "_all" would collide with it; keep this out of plugin schema contracts.
 export const SOURCE_FILTER_ALL_VALUE = '_all';
 
 function nonEmptyLabel(label: string | undefined): string | undefined {

@@ -34,13 +34,9 @@ import {
   type SourceBrowseResult,
   type SourceFilter,
 } from '@/lib/services/source-plugin-service';
+import { SourceSelectFilter } from '@/components/source/SourceSelectFilter';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
-import {
-  getSelectFilterItems,
-  toSelectFilterValue,
-  toSourceFilterValue,
-} from '@/lib/source-filter-options';
 
 function SourceMediaCard({
   item,
@@ -767,25 +763,13 @@ export default function SourcePage() {
                 );
               }
               if (filter.type === 'select') {
-                const selectedValue = toSelectFilterValue(val);
-                const selectItems = getSelectFilterItems(filter);
                 return (
-                  <Select
+                  <SourceSelectFilter
                     key={filter.key}
-                    value={selectedValue}
-                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: toSourceFilterValue(v) })}
-                  >
-                    <SelectTrigger className="w-auto min-w-[120px]">
-                      <SelectValue placeholder={filter.label} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectItems.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    filter={filter}
+                    value={val}
+                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: v })}
+                  />
                 );
               }
               if (filter.type === 'multi-select') {

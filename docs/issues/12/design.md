@@ -40,6 +40,8 @@ default request value (`""`) but its label is no longer discarded.
 
 - `apps/web/src/lib/source-filter-options.ts` (new)
 - `apps/web/src/lib/source-filter-options.spec.ts` (new)
+- `apps/web/src/components/source/SourceSelectFilter.tsx`
+- `apps/web/src/components/source/SourceSelectFilter.test.tsx`
 - `apps/web/src/app/(header)/source/page.tsx`
 - `docs/issues/12/{requirements,design,tests,review}.md`
 
