@@ -34,6 +34,7 @@ import {
   type SourceBrowseResult,
   type SourceFilter,
 } from '@/lib/services/source-plugin-service';
+import { SourceSelectFilter } from '@/components/source/SourceSelectFilter';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 
@@ -763,25 +764,12 @@ export default function SourcePage() {
               }
               if (filter.type === 'select') {
                 return (
-                  <Select
+                  <SourceSelectFilter
                     key={filter.key}
-                    value={val === '' || val == null ? '_all' : String(val)}
-                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: v === '_all' ? '' : v })}
-                  >
-                    <SelectTrigger className="w-auto min-w-[120px]">
-                      <SelectValue placeholder={filter.label} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_all">全部</SelectItem>
-                      {filter.options?.map((opt) => (
-                        opt.value !== '' && (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                        )
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    filter={filter}
+                    value={val}
+                    onValueChange={(v) => applyFilter({ ...filterValues, [filter.key]: v })}
+                  />
                 );
               }
               if (filter.type === 'multi-select') {
